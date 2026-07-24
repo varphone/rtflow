@@ -148,18 +148,18 @@ impl Packetizer {
         Ok(out)
     }
     fn aac(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
-        let size_bits = f
-            .data
-            .len()
-            .checked_mul(8)
-            .filter(|size| *size <= 0x1fff)
-            .ok_or_else(|| Error::Media("AAC AU exceeds the 13-bit AU-size field".into()))?;
+        let size_bytes = f.data.len();
+        if size_bytes > 0x1fff {
+            return Err(Error::Media(
+                "AAC AU exceeds the 13-bit AU-size field".into(),
+            ));
+        }
         if f.data.len() + 4 > self.mtu - 12 {
             return Err(Error::Media(
                 "AAC AU exceeds MTU; fragmentation is unsupported".into(),
             ));
         }
-        let au_header = (size_bits as u16) << 3;
+        let au_header = (size_bytes as u16) << 3;
         let mut v = BytesMut::with_capacity(f.data.len() + 4);
         v.extend_from_slice(&16u16.to_be_bytes());
         v.extend_from_slice(&au_header.to_be_bytes());
@@ -295,8 +295,7 @@ impl Depacketizer {
                     ));
                 }
                 let au_header = u16::from_be_bytes([p.payload[2], p.payload[3]]);
-                let size_bits = (au_header >> 3) as usize;
-                let size_bytes = size_bits.div_ceil(8);
+                let size_bytes = (au_header >> 3) as usize;
                 if p.payload.len() - 4 != size_bytes {
                     return Err(Error::Media("AAC AU-size does not match payload".into()));
                 }
@@ -544,7 +543,7 @@ mod tests {
             let mut depacketizer = Depacketizer::new(codec, 0);
             let packet = packetizer.packetize(&f).unwrap().remove(0);
             if codec == Codec::Aac {
-                assert_eq!(&packet.payload[..4], &[0, 16, 1, 0]);
+                assert_eq!(&packet.payload[..4], &[0, 16, 0, 32]);
             }
             assert_eq!(depacketizer.push(packet).unwrap().unwrap().data, f.data);
         }

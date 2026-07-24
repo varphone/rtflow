@@ -41,7 +41,8 @@ impl TransportSpec {
                     .map_err(|_| Error::Rtsp("RTCP interleaved channel exceeds 255".into()))?,
             });
         }
-        if !profile.eq_ignore_ascii_case("RTP/AVP") {
+        if !profile.eq_ignore_ascii_case("RTP/AVP") && !profile.eq_ignore_ascii_case("RTP/AVP/UDP")
+        {
             return Err(Error::Rtsp("unsupported RTP transport profile".into()));
         }
         let client = parts
@@ -197,7 +198,11 @@ mod tests {
     #[test]
     fn udp_roundtrip() {
         let t = TransportSpec::parse("RTP/AVP;unicast;client_port=1000-1001").unwrap();
-        assert_eq!(t.render(), "RTP/AVP;unicast;client_port=1000-1001")
+        assert_eq!(t.render(), "RTP/AVP;unicast;client_port=1000-1001");
+        assert_eq!(
+            TransportSpec::parse("RTP/AVP/UDP;unicast;client_port=1000-1001").unwrap(),
+            t
+        );
     }
     #[test]
     fn rejects_invalid_interleaved_bounds() {

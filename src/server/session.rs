@@ -512,11 +512,17 @@ async fn authorize_request(
     state: &State,
     cseq: String,
 ) -> Option<Response> {
-    let path = registered_mount_for_uri(state, &req.uri)
-        .await
-        .map(|(path, _)| path)
+    let registered = registered_mount_for_uri(state, &req.uri).await;
+    let path = registered
+        .as_ref()
+        .map(|(path, _)| path.clone())
         .unwrap_or_else(|| uri_path(&req.uri));
-    let role = if matches!(req.method, Method::Announce | Method::Record) {
+    let publisher_mount = registered
+        .as_ref()
+        .is_some_and(|(_, mount)| matches!(mount.config, MountConfig::Publisher { .. }));
+    let role = if matches!(req.method, Method::Announce | Method::Record)
+        || (req.method == Method::Setup && publisher_mount)
+    {
         AccessRole::Publish
     } else {
         AccessRole::Read
