@@ -1,0 +1,48 @@
+use bytes::Bytes;
+use std::{sync::Arc, time::Duration};
+pub type TrackId = u8;
+pub type RtpTimestamp = u32;
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum Codec {
+    H264,
+    H265,
+    Aac,
+    Pcma,
+    Pcmu,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MediaKind {
+    Video,
+    Audio,
+}
+#[derive(Clone, Debug)]
+pub struct AccessUnit {
+    pub track_id: TrackId,
+    pub codec: Codec,
+    pub pts: Duration,
+    pub dts: Option<Duration>,
+    pub rtp_timestamp: RtpTimestamp,
+    pub is_keyframe: bool,
+    pub data: Bytes,
+}
+#[derive(Clone, Debug)]
+pub struct TrackDescription {
+    pub id: TrackId,
+    pub kind: MediaKind,
+    pub codec: Codec,
+    pub clock_rate: u32,
+    pub channels: Option<u8>,
+    pub payload_type: u8,
+    pub fmtp: Option<Arc<str>>,
+    pub control: Arc<str>,
+}
+#[derive(Clone, Debug)]
+pub struct MediaDescription {
+    pub session_name: Arc<str>,
+    pub tracks: Vec<TrackDescription>,
+}
+impl MediaDescription {
+    pub fn track(&self, id: TrackId) -> Option<&TrackDescription> {
+        self.tracks.iter().find(|t| t.id == id)
+    }
+}
