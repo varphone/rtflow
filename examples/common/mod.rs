@@ -1,0 +1,163 @@
+#![allow(dead_code)]
+
+pub mod live_tools;
+
+use bytes::Bytes;
+use clap::ValueEnum;
+use rtsp::{
+    AccessUnit, Codec, Credentials, MediaDescription, MediaKind, TrackDescription,
+    proxy::UpstreamTransport,
+};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum TransportArg {
+    Udp,
+    Tcp,
+}
+
+impl TransportArg {
+    pub fn as_rtsp_name(self) -> &'static str {
+        match self {
+            Self::Udp => "udp",
+            Self::Tcp => "tcp",
+        }
+    }
+}
+
+impl From<TransportArg> for UpstreamTransport {
+    fn from(value: TransportArg) -> Self {
+        match value {
+            TransportArg::Udp => Self::Udp,
+            TransportArg::Tcp => Self::TcpInterleaved,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, ValueEnum)]
+pub enum CodecArg {
+    H264,
+    H265,
+    Aac,
+    Pcma,
+    Pcmu,
+}
+
+impl From<CodecArg> for Codec {
+    fn from(value: CodecArg) -> Self {
+        match value {
+            CodecArg::H264 => Self::H264,
+            CodecArg::H265 => Self::H265,
+            CodecArg::Aac => Self::Aac,
+            CodecArg::Pcma => Self::Pcma,
+            CodecArg::Pcmu => Self::Pcmu,
+        }
+    }
+}
+
+pub fn init_tracing() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+}
+
+pub fn mount_path(value: &str) -> Result<Arc<str>, String> {
+    if !value.starts_with('/') || value.len() == 1 {
+        return Err("mount must start with '/' and contain a name".into());
+    }
+    Ok(Arc::from(value))
+}
+
+pub fn credentials(
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<Option<Credentials>, String> {
+    match (username, password) {
+        (None, None) => Ok(None),
+        (Some(username), Some(password)) => Ok(Some(Credentials { username, password })),
+        _ => Err("--username and --password must be supplied together".into()),
+    }
+}
+
+pub fn description(name: &str, codecs: &[CodecArg]) -> MediaDescription {
+    MediaDescription {
+        session_name: Arc::from(name),
+        tracks: codecs
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, value)| track(index as u8, value.into()))
+            .collect(),
+    }
+}
+
+pub fn publisher_description(name: &str, codecs: &[CodecArg]) -> MediaDescription {
+    let mut description = description(name, codecs);
+    for track in &mut description.tracks {
+        track.control = Arc::from(format!("streamid={}", track.id));
+    }
+    description
+}
+
+pub fn track(id: u8, codec: Codec) -> TrackDescription {
+    let (kind, clock_rate, channels, payload_type, fmtp) = match codec {
+        Codec::H264 => (
+            MediaKind::Video,
+            90_000,
+            None,
+            96,
+            Some("packetization-mode=1"),
+        ),
+        Codec::H265 => (MediaKind::Video, 90_000, None, 98, None),
+        Codec::Aac => (
+            MediaKind::Audio,
+            48_000,
+            Some(2),
+            97,
+            Some(
+                "profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=1190",
+            ),
+        ),
+        Codec::Pcma => (MediaKind::Audio, 8_000, Some(1), 8, None),
+        Codec::Pcmu => (MediaKind::Audio, 8_000, Some(1), 0, None),
+    };
+    TrackDescription {
+        id,
+        kind,
+        codec,
+        clock_rate,
+        channels,
+        payload_type,
+        fmtp: fmtp.map(Arc::from),
+        control: Arc::from(format!("trackID={id}")),
+    }
+}
+
+pub fn sample_unit(track: &TrackDescription, frame: u64, fps: u32) -> AccessUnit {
+    let data = match track.codec {
+        Codec::H264 => Bytes::from_static(&[0, 0, 0, 1, 0x65, 0x88, 0x84, 0x21]),
+        Codec::H265 => Bytes::from_static(&[0, 0, 0, 1, 0x26, 0x01, 0xaf, 0x09]),
+        Codec::Aac => Bytes::from_static(&[0x21, 0x10, 0x04, 0x60]),
+        Codec::Pcma => Bytes::from_static(&[0xd5; 160]),
+        Codec::Pcmu => Bytes::from_static(&[0xff; 160]),
+    };
+    let frame_duration = Duration::from_secs_f64(1.0 / f64::from(fps));
+    AccessUnit {
+        track_id: track.id,
+        codec: track.codec,
+        pts: frame_duration.mul_f64(frame as f64),
+        dts: None,
+        rtp_timestamp: frame.wrapping_mul(u64::from(track.clock_rate) / u64::from(fps)) as u32,
+        is_keyframe: matches!(track.kind, MediaKind::Audio) || frame.is_multiple_of(u64::from(fps)),
+        data,
+    }
+}
+
+pub fn advertised_url(listen: SocketAddr, mount: &str) -> String {
+    let host = if listen.ip().is_unspecified() {
+        "127.0.0.1".to_owned()
+    } else {
+        listen.ip().to_string()
+    };
+    format!("rtsp://{host}:{}{mount}", listen.port())
+}
