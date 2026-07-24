@@ -11,6 +11,8 @@ bytes = "1.10"
 futures = "0.3"
 base64 = "0.22"
 md-5 = "0.10"
+matroska-demuxer = "0.8"
+mp4box = { version = "0.12", default-features = false }
 thiserror = "2"
 tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util", "process"] }
 tracing = "0.1"

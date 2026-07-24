@@ -6,6 +6,7 @@
 #[path = "protocol/auth.rs"]
 pub mod auth;
 pub mod client;
+pub mod file;
 #[path = "media/types.rs"]
 pub mod media;
 #[path = "media/pipeline.rs"]
@@ -26,6 +27,10 @@ pub mod media_pipeline {
 }
 pub mod server;
 pub use auth::{AccessRole, AuthDecision, Authenticator, Credentials};
+pub use file::{
+    ContainerFormat, DemuxedSample, Demuxer, FilePlayback, FileSource, FileSourceOptions, LoopMode,
+    PlaybackStats, RawFormat,
+};
 pub use media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription};
 pub use server::{LocalPublisher, MountConfig, MountHandle, RtspServer, ServerConfig};
 use thiserror::Error;
