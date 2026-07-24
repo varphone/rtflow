@@ -14,7 +14,13 @@
 | RTCP 闭环 | 正确 NTP epoch、UDP/TCP SR/RR 与统计 | `udp_play`、`tcp_play`、NTP 精确测试 |
 | 鉴权 | 可插拔 Authenticator、Basic、Digest MD5/qop=auth，覆盖所有方法 | `authentication`、auth 单元测试 |
 | 真实外部互操作 | 标准 SDP Content-Base/control URI、静态 G711 PT、标准 TCP framing | `gstreamer_interop` 实际运行 `rtspsrc ! rtph264depay ! fakesink` |
-| 故障与资源边界 | header/body/frame/队列限制、Session 状态、代理重连、shutdown grace | `session_state`、`proxy_reconnect`、framing limit、shutdown 测试 |
+| 故障与资源边界 | header/body/frame/队列限制、Session 状态、代理重连、shutdown grace | `session_state`、`proxy_reconnect`、`resource_limits`、`resource_exhaustion`、shutdown 测试 |
 | 混合传输压力 | 有界广播、每客户端输出队列、UDP/TCP 同时 fan-out | `stress`：16 客户端、1000 帧并验证全部收帧与资源归零 |
+| 编码与传输矩阵 | H264/H265/AAC/PCMA/PCMU 经 UDP/TCP 完整服务链路 | `codec_matrix`、`fragmentation_integration`，并验证 PAUSE/PLAY 与大 AU 分片重组 |
+| 代理传输矩阵 | 上游 UDP/TCP 与下游 UDP/TCP 四种组合、双轨转发 | `proxy_transport_matrix` |
+| 确定性文件夹具 | 提交小型 MP4/MOV/fMP4/MKV/TS/M2TS/WAV/裸流及哈希清单 | `fixture_files` 默认必跑；再生成脚本可复现 |
+| 外部发布互操作 | FFmpeg ANNOUNCE/SETUP/RECORD TCP/UDP 发布，GStreamer 五编码 TCP/UDP 拉流 | ignored 外部测试由 `media-interop` CI 强制执行 |
+| 可运行示例 | 本地源、文件源、客户端、代理、发布、鉴权、Pipeline 七类 CLI | `cargo build --examples` 与 `docs/examples.md` |
+
 
 当前文件 mount 为多客户端共享时间线，不包含 RTSP Range/per-session 独立 seek。第一期明确不包含 TLS、SRTP、组播、转码、ONVIF、录像索引和完整 RTCP 拥塞控制；这些是独立后续功能。

@@ -58,7 +58,18 @@ async fn main() -> rtsp::Result<()> {
 }
 ```
 
-完整运行示例见 `examples/local_source.rs`；文件服务器见 `examples/file_server.rs`。文件格式矩阵和 VOD 边界见 `docs/file-streaming.md`，模块扩展约定见 `docs/architecture.md`。
+完整 CLI 覆盖本地源、文件源、播放客户端、按需代理、外部发布、鉴权和 Element Pipeline。命令与联调组合见 `docs/examples.md`；文件格式矩阵和 VOD 边界见 `docs/file-streaming.md`，模块扩展约定见 `docs/architecture.md`。
+
+## 动态实时串流
+
+无需准备媒体文件即可运行完整的 `FFmpeg → Rust RTSP → GStreamer` 链路：
+
+```text
+cargo run --example live_stream_demo
+cargo run --example live_stream_demo -- --headless --duration 10
+```
+
+也可以用 `ffmpeg_live_publish` 和 `gstreamer_live_play` 分别连接已有 RTSP 服务。详细参数、依赖和嵌入式 headless 用法见 `docs/examples.md`。
 
 ## 文件服务器
 
@@ -88,11 +99,15 @@ server.shutdown().await
 ```text
 cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
+cargo build --examples
 ```
 
-真实互操作测试会在安装 GStreamer `rtspsrc`/`rtph264depay` 时运行：
+默认测试使用仓库内的确定性媒体夹具，不依赖 FFmpeg/GStreamer。真实互操作测试显式标记为 ignored，由 CI 的媒体任务强制运行：
 
 ```text
-cargo test --test gstreamer_interop -- --nocapture
-cargo test --test file_stream -- --nocapture
+cargo test --test gstreamer_interop -- --ignored --nocapture
+cargo test --test gstreamer_codec_matrix -- --ignored --nocapture
+cargo test --test ffmpeg_publish_interop -- --ignored --nocapture
+cargo test --test live_tool_stream -- --ignored --nocapture
+cargo test --test file_stream -- --ignored --nocapture
 ```
