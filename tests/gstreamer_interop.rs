@@ -7,17 +7,15 @@ use std::{process::Stdio, sync::Arc, time::Duration};
 use tokio::{io::AsyncReadExt, process::Command};
 
 #[tokio::test]
+#[ignore = "requires GStreamer; run explicitly in the media interoperability job"]
 async fn gstreamer_rtspsrc_receives_interleaved_h264() {
-    if std::process::Command::new("gst-inspect-1.0")
+    let available = std::process::Command::new("gst-inspect-1.0")
         .arg("rtspsrc")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map_or(true, |status| !status.success())
-    {
-        eprintln!("skipped: GStreamer rtspsrc is not installed");
-        return;
-    }
+        .is_ok_and(|status| status.success());
+    assert!(available, "GStreamer rtspsrc is required for this test");
 
     let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
         .await
