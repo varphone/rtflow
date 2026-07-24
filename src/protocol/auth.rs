@@ -183,7 +183,14 @@ fn insert_field(out: &mut BTreeMap<String, String>, item: &str) -> Result<()> {
 }
 
 fn md5_hex(value: &str) -> String {
-    format!("{:x}", Md5::digest(value.as_bytes()))
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let digest = Md5::digest(value.as_bytes());
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for &byte in digest.iter() {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
 }
 
 #[cfg(test)]
@@ -206,6 +213,7 @@ mod tests {
 
     #[test]
     fn digest() {
+        assert_eq!(md5_hex(""), "d41d8cd98f00b204e9800998ecf8427e");
         let credentials = credentials();
         let header = authorization_from_challenge(
             "Digest realm=\"r\", nonce=\"n\"",
