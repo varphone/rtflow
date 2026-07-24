@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --all-targets
+      - name: Documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps
+      - name: Examples
+        run: |
+          cargo build --examples
+          ./tools/check-examples.sh
+
+  media-interop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            gstreamer1.0-tools \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav
+      - name: Verify committed fixtures
+        working-directory: tests/fixtures
+        run: sha256sum -c SHA256SUMS
+      - name: GStreamer live interoperability
+        run: |
+          cargo test --test gstreamer_interop -- --ignored --nocapture
+          cargo test --test gstreamer_codec_matrix -- --ignored --nocapture
+          cargo test --test live_tool_stream -- --ignored --nocapture
+      - name: FFmpeg publish interoperability
+        run: cargo test --test ffmpeg_publish_interop -- --ignored --nocapture
+      - name: Generated file-format interoperability
+        run: cargo test --test file_stream -- --ignored --nocapture
