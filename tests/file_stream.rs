@@ -329,6 +329,7 @@ fn inspect(path: &Path, format: ContainerFormat, expected: &[Codec]) {
 }
 
 #[tokio::test]
+#[ignore = "requires FFmpeg; committed fixtures cover the default format matrix"]
 async fn mainstream_files_demux_and_stream_over_rtsp() {
     let Some(fixture) = MediaFixture::generate() else {
         return;
@@ -473,6 +474,7 @@ async fn mainstream_files_demux_and_stream_over_rtsp() {
 }
 
 #[tokio::test]
+#[ignore = "requires FFmpeg and GStreamer; run in the media interoperability job"]
 async fn gstreamer_consumes_h264_from_mp4_file() {
     if !command_available("gst-inspect-1.0", &["rtspsrc"]) {
         return;
