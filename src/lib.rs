@@ -11,6 +11,8 @@ pub mod file;
 pub mod identity;
 #[path = "media/types.rs"]
 pub mod media;
+pub mod metrics;
+pub mod multicast;
 pub mod observe;
 #[path = "media/pipeline.rs"]
 pub mod pipeline;
@@ -21,12 +23,15 @@ pub mod rtp;
 pub mod rtsp;
 pub mod runtime;
 pub mod security;
+pub mod srtp;
 pub mod storage;
 /// Backward-compatible recording facade. New code may use [`storage`].
+#[deprecated(since = "0.2.0", note = "use `storage` module instead")]
 pub mod recording {
     pub use crate::storage::*;
 }
 /// Backward-compatible TLS facade. New code may use [`security`].
+#[deprecated(since = "0.2.0", note = "use `security` module instead")]
 pub mod tls {
     pub use crate::security::{TlsClientConfig, TlsServerConfig};
 }
@@ -58,6 +63,7 @@ pub use server::{
     ConfigError, LocalPublisher, MountConfig, MountHandle, ResourceLimits, RtspServer,
     ServerConfig, ServerConfigBuilder,
 };
+pub use srtp::{SessionKeys, SrtcpContext, SrtpContext, SrtpProfile};
 pub use storage::{
     RecordOutcome, RecordingCatalog, RecordingConfig, RecordingDemuxer, RecordingReport,
     RecordingSink, RecordingVodSource, SegmentInfo, SegmentRecorder, VodSource,
