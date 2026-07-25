@@ -17,6 +17,8 @@ pub enum ErrorCode {
     Io,
     Closed,
     Internal,
+    SrtpAuthenticationFailed,
+    SrtpReplayDetected,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -44,6 +46,8 @@ pub enum Operation {
     ProxyConnect,
     PipelineProcess,
     Shutdown,
+    SrtpProtect,
+    SrtpUnprotect,
 }
 
 #[derive(Debug, Error)]
@@ -67,6 +71,8 @@ pub enum Error {
     Conflict(String),
     #[error("authentication failed")]
     Unauthorized,
+    #[error("SRTP error: {0}")]
+    Srtp(String),
 }
 
 impl Error {
@@ -80,6 +86,7 @@ impl Error {
             Self::Limit(_) => ErrorCode::ResourceExhausted,
             Self::NotFound(_) | Self::Conflict(_) => ErrorCode::InvalidState,
             Self::Unauthorized => ErrorCode::Unauthorized,
+            Self::Srtp(_) => ErrorCode::InvalidMedia,
         }
     }
 
@@ -98,6 +105,7 @@ impl Error {
                 RetryClass::Backoff
             }
             Self::Closed => RetryClass::Immediate,
+            Self::Srtp(_) => RetryClass::Never,
             _ => RetryClass::Never,
         }
     }
@@ -109,6 +117,7 @@ impl Error {
             Self::Conflict(_) => 455,
             Self::Limit(_) => 453,
             Self::Rtsp(_) | Self::Media(_) => 400,
+            Self::Srtp(_) => 400,
             Self::Closed | Self::Io(_) | Self::Tls(_) => 500,
         }
     }
