@@ -35,11 +35,15 @@ pub struct TrackDescription {
     pub payload_type: u8,
     pub fmtp: Option<Arc<str>>,
     pub control: Arc<str>,
+    /// SRTP crypto parameters from SDP `a=crypto:` attribute.
+    pub crypto: Option<crate::protocol::sdp::SdpCrypto>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MediaDescription {
     pub session_name: Arc<str>,
     pub tracks: Vec<TrackDescription>,
+    /// SDP connection information (`c=` line). None if not present.
+    pub connection: Option<crate::protocol::sdp::SdpConnection>,
 }
 impl MediaDescription {
     pub fn track(&self, id: TrackId) -> Option<&TrackDescription> {
