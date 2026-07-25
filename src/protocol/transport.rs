@@ -192,6 +192,13 @@ pub enum PeerTransport {
     Udp(SocketAddr),
     Interleaved { rtp_channel: u8, rtcp_channel: u8 },
 }
+
+/// Upstream transport selection for proxy and client connections.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UpstreamTransport {
+    Udp,
+    TcpInterleaved,
+}
 #[cfg(test)]
 mod tests {
     use super::*;

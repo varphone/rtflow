@@ -1,18 +1,19 @@
 //! RTSP client control-plane primitives.
 mod setup;
 
+#[cfg(feature = "tls")]
+use crate::security::TlsClientConfig;
+use crate::transport::UpstreamTransport;
 use crate::{
     Error, Result,
     auth::{Credentials, authorization_from_challenge, basic_authorization},
     media::{AccessUnit, MediaDescription},
     protocol::range::NptRange,
     protocol::sdp,
-    proxy::UpstreamTransport,
     rtcp::{ReceptionSnapshot, RtcpSession},
     rtp::{Depacketizer, JitterBuffer, JitterBufferConfig, RtpPacket},
     rtsp::{self, Message, Method, Response},
     runtime::io::{ControlConnection, ControlWriteHalf},
-    tls::TlsClientConfig,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -37,6 +38,7 @@ pub struct ClientOptions {
     pub jitter: JitterBufferConfig,
     pub output_queue_capacity: usize,
     pub keep_alive_interval: Option<Duration>,
+    #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
     pub play_range: Option<NptRange>,
 }
@@ -49,6 +51,7 @@ impl Default for ClientOptions {
             jitter: JitterBufferConfig::default(),
             output_queue_capacity: 64,
             keep_alive_interval: Some(Duration::from_secs(20)),
+            #[cfg(feature = "tls")]
             tls: None,
             play_range: None,
         }
@@ -102,6 +105,7 @@ impl ClientOptionsBuilder {
         self
     }
 
+    #[cfg(feature = "tls")]
     pub fn tls(mut self, value: TlsClientConfig) -> Self {
         self.options.tls = Some(value);
         self
@@ -354,6 +358,7 @@ async fn open_and_describe(
     let peer_addr = tcp.peer_addr()?;
     let mut stream = match url.scheme() {
         "rtsp" => ControlConnection::new(tcp, local_addr, peer_addr),
+        #[cfg(feature = "tls")]
         "rtsps" => {
             let tls = options
                 .tls
@@ -369,6 +374,8 @@ async fn open_and_describe(
                 .map_err(|error| Error::Tls(error.to_string()))?;
             ControlConnection::new(secured, local_addr, peer_addr)
         }
+        #[cfg(not(feature = "tls"))]
+        "rtsps" => return Err(Error::Rtsp("RTSPS requires the tls feature".into())),
         scheme => return Err(Error::Rtsp(format!("unsupported RTSP URL scheme {scheme}"))),
     };
     let uri = url.as_str().to_owned();

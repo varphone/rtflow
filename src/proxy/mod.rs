@@ -1,8 +1,9 @@
 //! On-demand upstream proxy supervision.
 mod continuity;
-use crate::{
-    auth::Credentials, media::MediaDescription, rtp::JitterBufferConfig, security::TlsClientConfig,
-};
+#[cfg(feature = "tls")]
+use crate::security::TlsClientConfig;
+pub use crate::transport::UpstreamTransport;
+use crate::{auth::Credentials, media::MediaDescription, rtp::JitterBufferConfig};
 pub use continuity::{
     ContinuityPolicy, KeyframeCache, StartupCacheConfig, TimelineNormalizer, TimelineSnapshot,
     TrackCompatibility,
@@ -11,11 +12,6 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum UpstreamTransport {
-    Udp,
-    TcpInterleaved,
-}
 
 #[derive(Clone, Debug)]
 pub struct UpstreamEndpoint {
@@ -24,6 +20,7 @@ pub struct UpstreamEndpoint {
     pub credentials: Option<Credentials>,
     pub request_timeout: Duration,
     pub jitter: JitterBufferConfig,
+    #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
 }
 
@@ -35,6 +32,7 @@ impl UpstreamEndpoint {
             credentials: None,
             request_timeout: Duration::from_secs(5),
             jitter: JitterBufferConfig::default(),
+            #[cfg(feature = "tls")]
             tls: None,
         }
     }
@@ -203,6 +201,7 @@ pub struct UpstreamConfig {
     pub reconnect: ReconnectPolicy,
     pub request_timeout: Duration,
     pub jitter: JitterBufferConfig,
+    #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
     pub cached_description: Option<MediaDescription>,
     pub continuity: ContinuityPolicy,
@@ -220,6 +219,7 @@ impl UpstreamConfig {
             reconnect: ReconnectPolicy::default(),
             request_timeout: Duration::from_secs(5),
             jitter: JitterBufferConfig::default(),
+            #[cfg(feature = "tls")]
             tls: None,
             cached_description: None,
             continuity: ContinuityPolicy::default(),
@@ -240,6 +240,7 @@ impl UpstreamConfig {
             credentials: self.credentials.clone(),
             request_timeout: self.request_timeout,
             jitter: self.jitter.clone(),
+            #[cfg(feature = "tls")]
             tls: self.tls.clone(),
         });
         endpoints.extend(self.fallbacks.iter().cloned());
@@ -285,7 +286,10 @@ impl TryFrom<ProxyRoute> for UpstreamConfig {
         config.credentials = primary.credentials;
         config.request_timeout = primary.request_timeout;
         config.jitter = primary.jitter;
-        config.tls = primary.tls;
+        #[cfg(feature = "tls")]
+        {
+            config.tls = primary.tls;
+        }
         config.fallbacks = route.upstreams;
         config.reconnect = route.reconnect;
         config.failover = route.failover;

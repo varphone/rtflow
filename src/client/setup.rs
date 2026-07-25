@@ -25,10 +25,10 @@ pub(super) async fn connect(
     options: ClientOptions,
 ) -> Result<ClientSession> {
     match options.transport {
-        crate::proxy::UpstreamTransport::Udp => {
+        crate::transport::UpstreamTransport::Udp => {
             connect_udp(stream, uri, setup_base, description, options).await
         }
-        crate::proxy::UpstreamTransport::TcpInterleaved => {
+        crate::transport::UpstreamTransport::TcpInterleaved => {
             connect_interleaved(stream, uri, setup_base, description, options).await
         }
     }
