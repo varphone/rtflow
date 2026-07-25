@@ -36,6 +36,7 @@ pub struct TrackDescription {
     pub fmtp: Option<Arc<str>>,
     pub control: Arc<str>,
     /// SRTP crypto parameters from SDP `a=crypto:` attribute.
+    #[cfg(feature = "srtp")]
     pub crypto: Option<crate::protocol::sdp::SdpCrypto>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,6 +44,7 @@ pub struct MediaDescription {
     pub session_name: Arc<str>,
     pub tracks: Vec<TrackDescription>,
     /// SDP connection information (`c=` line). None if not present.
+    #[cfg(feature = "multicast")]
     pub connection: Option<crate::protocol::sdp::SdpConnection>,
 }
 impl MediaDescription {

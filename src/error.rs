@@ -17,7 +17,9 @@ pub enum ErrorCode {
     Io,
     Closed,
     Internal,
+    #[cfg(feature = "srtp")]
     SrtpAuthenticationFailed,
+    #[cfg(feature = "srtp")]
     SrtpReplayDetected,
 }
 
@@ -46,7 +48,9 @@ pub enum Operation {
     ProxyConnect,
     PipelineProcess,
     Shutdown,
+    #[cfg(feature = "srtp")]
     SrtpProtect,
+    #[cfg(feature = "srtp")]
     SrtpUnprotect,
 }
 
@@ -59,6 +63,7 @@ pub enum Error {
     Media(String),
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+    #[cfg(feature = "tls")]
     #[error("TLS error: {0}")]
     Tls(String),
     #[error("session closed")]
@@ -71,6 +76,7 @@ pub enum Error {
     Conflict(String),
     #[error("authentication failed")]
     Unauthorized,
+    #[cfg(feature = "srtp")]
     #[error("SRTP error: {0}")]
     Srtp(String),
 }
@@ -81,11 +87,15 @@ impl Error {
             Self::Rtsp(_) => ErrorCode::InvalidProtocol,
             Self::Media(_) => ErrorCode::InvalidMedia,
             Self::Io(error) if error.kind() == io::ErrorKind::TimedOut => ErrorCode::Timeout,
+            #[cfg(feature = "tls")]
             Self::Io(_) | Self::Tls(_) => ErrorCode::Io,
+            #[cfg(not(feature = "tls"))]
+            Self::Io(_) => ErrorCode::Io,
             Self::Closed => ErrorCode::Closed,
             Self::Limit(_) => ErrorCode::ResourceExhausted,
             Self::NotFound(_) | Self::Conflict(_) => ErrorCode::InvalidState,
             Self::Unauthorized => ErrorCode::Unauthorized,
+            #[cfg(feature = "srtp")]
             Self::Srtp(_) => ErrorCode::InvalidMedia,
         }
     }
@@ -105,6 +115,7 @@ impl Error {
                 RetryClass::Backoff
             }
             Self::Closed => RetryClass::Immediate,
+            #[cfg(feature = "srtp")]
             Self::Srtp(_) => RetryClass::Never,
             _ => RetryClass::Never,
         }
@@ -117,8 +128,12 @@ impl Error {
             Self::Conflict(_) => 455,
             Self::Limit(_) => 453,
             Self::Rtsp(_) | Self::Media(_) => 400,
+            #[cfg(feature = "srtp")]
             Self::Srtp(_) => 400,
+            #[cfg(feature = "tls")]
             Self::Closed | Self::Io(_) | Self::Tls(_) => 500,
+            #[cfg(not(feature = "tls"))]
+            Self::Closed | Self::Io(_) => 500,
         }
     }
 }
