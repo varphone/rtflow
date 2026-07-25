@@ -3,11 +3,30 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "17 2 * * 0"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - run: cargo check --lib
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo generate-lockfile
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   quality:
     runs-on: ubuntu-latest
     steps:
@@ -58,3 +77,34 @@ jobs:
         run: cargo test --test ffmpeg_publish_interop -- --ignored --nocapture
       - name: Generated file-format interoperability
         run: cargo test --test file_stream -- --ignored --nocapture
+
+  fuzz-smoke:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo install cargo-fuzz --locked
+      - name: Fuzz control framing
+        run: cargo fuzz run control_framing -- -max_total_time=60
+      - name: Fuzz RTP and RTCP
+        run: cargo fuzz run rtp_rtcp -- -max_total_time=60
+
+  soak:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Session churn and fanout soak
+        env:
+          RTSP_SOAK_SECONDS: 300
+        run: cargo test --test soak -- --ignored --nocapture
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo package
