@@ -1,12 +1,15 @@
 [package]
 name = "rtflow"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
 autobins = false
 description = "Async RTSP/RTP client, server and on-demand proxy framework for embedded media"
 documentation = "https://docs.rs/rtflow"
 readme = "README.md"
+license = "MIT OR Apache-2.0"
+categories = ["network-programming", "asynchronous", "multimedia"]
+keywords = ["rtsp", "rtp", "streaming", "media", "embedded"]
 publish = ["crates-io"]
 
 [[bench]]
@@ -14,10 +17,14 @@ name = "hot_path"
 harness = false
 
 [dependencies]
+aes = "0.9"
 base64 = "0.23"
 bytes = "1.10"
+cipher = "0.5"
 futures = "0.3"
+hmac = "0.13"
 md-5 = "0.11"
+sha1 = "0.11"
 sha2 = "0.11"
 subtle = "2.6"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
@@ -33,5 +40,10 @@ url = "2.5"
 
 [dev-dependencies]
 clap = { version = "4.5", features = ["derive"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rcgen = "0.14"
+
+[[bench]]
+name = "throughput"
+harness = false
