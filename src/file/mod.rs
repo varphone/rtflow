@@ -4,7 +4,9 @@
 //! decodes or transcodes, so the live-source RTP path remains unchanged.
 
 mod bitstream;
+#[cfg(feature = "mkv")]
 mod matroska;
+#[cfg(feature = "mp4")]
 mod mp4;
 mod mpeg_ts;
 mod raw;

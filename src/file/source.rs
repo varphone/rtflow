@@ -1,9 +1,14 @@
-use super::{matroska::MatroskaDemuxer, mp4::Mp4Demuxer, mpeg_ts::MpegTsDemuxer, raw};
+#[cfg(feature = "mkv")]
+use super::matroska::MatroskaDemuxer;
+#[cfg(feature = "mp4")]
+use super::mp4::Mp4Demuxer;
+use super::{mpeg_ts::MpegTsDemuxer, raw};
+#[cfg(feature = "server")]
+use crate::server::{LocalPublisher, PushResult};
 use crate::{
     Error, Result,
     media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription},
     pipeline::{ElementId, IngressOutcome, PipelineIngress},
-    server::{LocalPublisher, PushResult},
 };
 use std::{
     path::{Path, PathBuf},
@@ -25,7 +30,9 @@ pub enum RawFormat {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContainerFormat {
     Auto,
+    #[cfg(feature = "mp4")]
     Mp4,
+    #[cfg(feature = "mkv")]
     Matroska,
     MpegTs,
     Wave,
@@ -99,7 +106,9 @@ impl FileSource {
         let format = detect_format(&path, options.format)?;
         let demuxer: Box<dyn Demuxer> = match format {
             ContainerFormat::Auto => unreachable!(),
+            #[cfg(feature = "mp4")]
             ContainerFormat::Mp4 => Box::new(Mp4Demuxer::open(&path, options.max_sample_size)?),
+            #[cfg(feature = "mkv")]
             ContainerFormat::Matroska => {
                 Box::new(MatroskaDemuxer::open(&path, options.max_sample_size)?)
             }
@@ -158,6 +167,7 @@ impl FileSource {
         self.demuxer
     }
 
+    #[cfg(feature = "server")]
     pub fn play(self, publisher: LocalPublisher) -> FilePlayback {
         self.play_target(PlaybackTarget::Publisher(publisher))
     }
@@ -268,6 +278,7 @@ impl FileSource {
 }
 
 enum PlaybackTarget {
+    #[cfg(feature = "server")]
     Publisher(LocalPublisher),
     Pipeline {
         ingress: PipelineIngress,
@@ -278,6 +289,7 @@ enum PlaybackTarget {
 impl PlaybackTarget {
     fn consumer_count(&self) -> usize {
         match self {
+            #[cfg(feature = "server")]
             Self::Publisher(publisher) => publisher.subscriber_count(),
             Self::Pipeline { .. } => 1,
         }
@@ -285,6 +297,7 @@ impl PlaybackTarget {
 
     fn is_closed(&self) -> bool {
         match self {
+            #[cfg(feature = "server")]
             Self::Publisher(publisher) => publisher.is_closed(),
             Self::Pipeline { .. } => false,
         }
@@ -292,6 +305,7 @@ impl PlaybackTarget {
 
     fn try_push(&self, unit: AccessUnit) -> Result<bool> {
         match self {
+            #[cfg(feature = "server")]
             Self::Publisher(publisher) => {
                 Ok(matches!(publisher.try_push(unit)?, PushResult::Accepted))
             }
@@ -445,7 +459,9 @@ fn detect_format(path: &Path, requested: ContainerFormat) -> Result<ContainerFor
         .unwrap_or_default()
         .to_ascii_lowercase();
     let by_extension = match extension.as_str() {
+        #[cfg(feature = "mp4")]
         "mp4" | "m4v" | "m4a" | "mov" => Some(ContainerFormat::Mp4),
+        #[cfg(feature = "mkv")]
         "mkv" | "mka" | "webm" => Some(ContainerFormat::Matroska),
         "ts" | "m2ts" | "mts" => Some(ContainerFormat::MpegTs),
         "wav" | "wave" => Some(ContainerFormat::Wave),
@@ -506,6 +522,7 @@ pub(crate) fn track_description(
         payload_type,
         fmtp,
         control: Arc::from(format!("trackID={id}")),
+        #[cfg(feature = "srtp")]
         crypto: None,
     }
 }
@@ -514,6 +531,7 @@ pub(crate) fn file_description(name: &str, tracks: Vec<TrackDescription>) -> Med
     MediaDescription {
         session_name: Arc::from(name),
         tracks,
+        #[cfg(feature = "multicast")]
         connection: None,
     }
 }
