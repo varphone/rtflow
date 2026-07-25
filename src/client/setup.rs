@@ -1,27 +1,24 @@
 use super::{
-    ClientOptions, ClientSession, drain_jitter, receive_rtp, request, response_session_id,
+    ClientOptions, ClientSession, drain_jitter, receive_rtp_packet, request, response_session_id,
 };
 use crate::{
     Error, Result,
     media::MediaDescription,
-    rtcp::Packet as RtcpPacket,
-    rtp::{Depacketizer, JitterBuffer},
+    rtcp::{Packet as RtcpPacket, RtcpSession},
+    rtp::{Depacketizer, JitterBuffer, RtpPacket},
     runtime::framing::{ConnectionFramer, InboundFrame},
+    runtime::io::ControlConnection,
     transport::{InterleavedFrame, TransportSpec, UdpPair},
 };
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
     sync::{Mutex, mpsc},
 };
 use tokio_util::sync::CancellationToken;
 
 pub(super) async fn connect(
-    stream: TcpStream,
+    stream: ControlConnection,
     uri: String,
     setup_base: String,
     description: MediaDescription,
@@ -38,7 +35,7 @@ pub(super) async fn connect(
 }
 
 async fn connect_interleaved(
-    mut stream: TcpStream,
+    mut stream: ControlConnection,
     uri: String,
     setup_base: String,
     description: MediaDescription,
@@ -47,7 +44,7 @@ async fn connect_interleaved(
     let mut cseq = 3u32;
     let mut session_id = None;
     let mut tracks = HashMap::new();
-    let mut rtcp_channels = HashSet::new();
+    let mut rtcp_channels = HashMap::new();
     for (index, track) in description.tracks.iter().cloned().enumerate() {
         let channel = (index * 2) as u8;
         let setup_uri = crate::protocol::sdp::control_uri(&setup_base, &track.control)?;
@@ -83,12 +80,18 @@ async fn connect_interleaved(
             (
                 JitterBuffer::new(options.jitter.clone()),
                 Depacketizer::new(track.codec, track.id),
+                track.id,
+                track.clock_rate,
+                client_ssrc(track.id),
             ),
         );
-        rtcp_channels.insert(channel.saturating_add(1));
+        rtcp_channels.insert(channel.saturating_add(1), channel);
     }
     let session_id = session_id.ok_or_else(|| Error::Rtsp("SDP has no tracks".into()))?;
-    let extra = format!("Session: {session_id}\r\n");
+    let mut extra = format!("Session: {session_id}\r\n");
+    if let Some(range) = options.play_range {
+        extra.push_str(&format!("Range: {}\r\n", range.render()));
+    }
     let response = request(
         &mut stream,
         "PLAY",
@@ -103,13 +106,15 @@ async fn connect_interleaved(
     if response.status != 200 {
         return Err(Error::Rtsp(format!("PLAY returned {}", response.status)));
     }
-    let (mut reader, writer) = stream.into_split();
+    let (mut reader, writer) = tokio::io::split(stream);
     let writer = Arc::new(Mutex::new(writer));
     let rtcp_writer = writer.clone();
     let (tx, rx) = mpsc::channel(options.output_queue_capacity);
     let (response_tx, response_rx) = mpsc::channel(8);
     let cancel = CancellationToken::new();
     let reader_cancel = cancel.clone();
+    let quality = Arc::new(Mutex::new(HashMap::new()));
+    let reader_quality = quality.clone();
     let jitter_poll = options
         .jitter
         .max_delay
@@ -124,7 +129,7 @@ async fn connect_interleaved(
             let read = tokio::select! {
                 _ = reader_cancel.cancelled() => return,
                 _ = jitter_tick.tick() => {
-                    for (jitter, depacketizer) in tracks.values_mut() {
+                    for (jitter, depacketizer, ..) in tracks.values_mut() {
                         for result in drain_jitter(jitter, depacketizer) {
                             if tx.send(result).await.is_err() {
                                 return;
@@ -142,20 +147,59 @@ async fn connect_interleaved(
                     loop {
                         match framer.next_frame() {
                             Ok(Some(InboundFrame::Interleaved(frame))) => {
-                                if let Some((jitter, depacketizer)) = tracks.get_mut(&frame.channel)
+                                if let Some((
+                                    jitter,
+                                    depacketizer,
+                                    track_id,
+                                    clock_rate,
+                                    local_ssrc,
+                                )) = tracks.get_mut(&frame.channel)
                                 {
-                                    for result in receive_rtp(frame.payload, jitter, depacketizer) {
+                                    let packet = match RtpPacket::parse(frame.payload) {
+                                        Ok(packet) => packet,
+                                        Err(error) => {
+                                            if tx.send(Err(error)).await.is_err() {
+                                                return;
+                                            }
+                                            continue;
+                                        }
+                                    };
+                                    if let Err(error) = observe_quality(
+                                        &reader_quality,
+                                        *track_id,
+                                        *clock_rate,
+                                        *local_ssrc,
+                                        &packet,
+                                    )
+                                    .await
+                                    {
+                                        if tx.send(Err(error)).await.is_err() {
+                                            return;
+                                        }
+                                        continue;
+                                    }
+                                    for result in receive_rtp_packet(packet, jitter, depacketizer) {
                                         if tx.send(result).await.is_err() {
                                             return;
                                         }
                                     }
-                                } else if rtcp_channels.contains(&frame.channel)
-                                    && RtcpPacket::parse(frame.payload).is_ok()
+                                } else if let Some(rtp_channel) = rtcp_channels.get(&frame.channel)
+                                    && let Ok(packets) = RtcpPacket::parse(frame.payload)
+                                    && let Some((_, _, track_id, clock_rate, local_ssrc)) =
+                                        tracks.get(rtp_channel)
+                                    && let Ok(Some(report)) = quality_report(
+                                        &reader_quality,
+                                        *track_id,
+                                        *clock_rate,
+                                        *local_ssrc,
+                                        &packets,
+                                    )
+                                    .await
+                                    && let Ok(payload) = report.try_encode()
                                 {
-                                    let report = RtcpPacket::ReceiverReport { ssrc: 0x434c_4e54 };
                                     let Ok(wire) = (InterleavedFrame {
                                         channel: frame.channel,
-                                        payload: report.encode(),
+                                        payload,
                                     })
                                     .try_encode() else {
                                         return;
@@ -202,11 +246,12 @@ async fn connect_interleaved(
         options.keep_alive_interval,
         cancel,
         vec![reader_task],
+        quality,
     ))
 }
 
 async fn connect_udp(
-    mut stream: TcpStream,
+    mut stream: ControlConnection,
     uri: String,
     setup_base: String,
     description: MediaDescription,
@@ -216,7 +261,7 @@ async fn connect_udp(
     let mut session_id = None;
     let mut receivers = Vec::new();
     for track in description.tracks.iter().cloned() {
-        let bind_ip = match stream.local_addr()?.ip() {
+        let bind_ip = match stream.local_addr().ip() {
             std::net::IpAddr::V4(_) => std::net::Ipv4Addr::UNSPECIFIED.into(),
             std::net::IpAddr::V6(_) => std::net::Ipv6Addr::UNSPECIFIED.into(),
         };
@@ -263,11 +308,14 @@ async fn connect_udp(
             }) => port,
             _ => return Err(Error::Rtsp("SETUP response has no server RTCP port".into())),
         };
-        let rtcp_target = std::net::SocketAddr::new(stream.peer_addr()?.ip(), server_rtcp);
+        let rtcp_target = std::net::SocketAddr::new(stream.peer_addr().ip(), server_rtcp);
         receivers.push((pair, track, rtcp_target));
     }
     let session_id = session_id.ok_or_else(|| Error::Rtsp("SDP has no tracks".into()))?;
-    let extra = format!("Session: {session_id}\r\n");
+    let mut extra = format!("Session: {session_id}\r\n");
+    if let Some(range) = options.play_range {
+        extra.push_str(&format!("Range: {}\r\n", range.render()));
+    }
     let response = request(
         &mut stream,
         "PLAY",
@@ -284,6 +332,7 @@ async fn connect_udp(
     }
     let (tx, rx) = mpsc::channel(options.output_queue_capacity);
     let cancel = CancellationToken::new();
+    let quality = Arc::new(Mutex::new(HashMap::new()));
     let mut tasks = Vec::new();
     for (pair, track, rtcp_target) in receivers {
         let tx = tx.clone();
@@ -294,6 +343,10 @@ async fn connect_udp(
             .max(std::time::Duration::from_millis(1));
         let rtcp_pair = pair.clone();
         let rtp_cancel = cancel.clone();
+        let rtp_quality = quality.clone();
+        let track_id = track.id;
+        let clock_rate = track.clock_rate;
+        let local_ssrc = client_ssrc(track_id);
         tasks.push(tokio::spawn(async move {
             let mut jitter = JitterBuffer::new(jitter_config);
             let mut depacketizer = Depacketizer::new(track.codec, track.id);
@@ -315,11 +368,27 @@ async fn connect_udp(
                 };
                 match received {
                     Ok((size, _)) => {
-                        for result in receive_rtp(
-                            bytes::Bytes::copy_from_slice(&buffer[..size]),
-                            &mut jitter,
-                            &mut depacketizer,
-                        ) {
+                        let packet = match RtpPacket::parse(bytes::Bytes::copy_from_slice(
+                            &buffer[..size],
+                        )) {
+                            Ok(packet) => packet,
+                            Err(error) => {
+                                if tx.send(Err(error)).await.is_err() {
+                                    return;
+                                }
+                                continue;
+                            }
+                        };
+                        if let Err(error) =
+                            observe_quality(&rtp_quality, track_id, clock_rate, local_ssrc, &packet)
+                                .await
+                        {
+                            if tx.send(Err(error)).await.is_err() {
+                                return;
+                            }
+                            continue;
+                        }
+                        for result in receive_rtp_packet(packet, &mut jitter, &mut depacketizer) {
                             if tx.send(result).await.is_err() {
                                 return;
                             }
@@ -333,6 +402,7 @@ async fn connect_udp(
             }
         }));
         let rtcp_cancel = cancel.clone();
+        let rtcp_quality = quality.clone();
         tasks.push(tokio::spawn(async move {
             let mut buffer = vec![0u8; 2048];
             loop {
@@ -343,8 +413,13 @@ async fn connect_udp(
                 let Ok((size, _)) = received else {
                     return;
                 };
-                if RtcpPacket::parse(bytes::Bytes::copy_from_slice(&buffer[..size])).is_ok() {
-                    let report = RtcpPacket::ReceiverReport { ssrc: 0x434c_4e54 }.encode();
+                if let Ok(packets) =
+                    RtcpPacket::parse(bytes::Bytes::copy_from_slice(&buffer[..size]))
+                    && let Ok(Some(report)) =
+                        quality_report(&rtcp_quality, track_id, clock_rate, local_ssrc, &packets)
+                            .await
+                    && let Ok(report) = report.try_encode()
+                {
                     let _ = rtcp_pair.rtcp.send_to(&report, rtcp_target).await;
                 }
             }
@@ -365,5 +440,81 @@ async fn connect_udp(
         options.keep_alive_interval,
         cancel,
         tasks,
+        quality,
     ))
+}
+
+fn client_ssrc(track_id: u8) -> u32 {
+    0x434c_4e54 ^ u32::from(track_id)
+}
+
+async fn observe_quality(
+    quality: &Mutex<HashMap<u8, RtcpSession>>,
+    track_id: u8,
+    clock_rate: u32,
+    local_ssrc: u32,
+    packet: &RtpPacket,
+) -> Result<()> {
+    let now = tokio::time::Instant::now();
+    let mut quality = quality.lock().await;
+    let session = match quality.entry(track_id) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(entry) => entry.insert(RtcpSession::new(
+            local_ssrc,
+            packet.header.ssrc,
+            clock_rate,
+            bytes::Bytes::from_static(b"rtsp-client"),
+            std::time::Duration::from_secs(5),
+            now,
+        )?),
+    };
+    if session.on_rtp(packet, now).is_err() {
+        *session = RtcpSession::new(
+            local_ssrc,
+            packet.header.ssrc,
+            clock_rate,
+            bytes::Bytes::from_static(b"rtsp-client"),
+            std::time::Duration::from_secs(5),
+            now,
+        )?;
+        session.on_rtp(packet, now)?;
+    }
+    Ok(())
+}
+
+async fn quality_report(
+    quality: &Mutex<HashMap<u8, RtcpSession>>,
+    track_id: u8,
+    clock_rate: u32,
+    local_ssrc: u32,
+    packets: &[RtcpPacket],
+) -> Result<Option<crate::rtcp::CompoundPacket>> {
+    let now = tokio::time::Instant::now();
+    let mut quality = quality.lock().await;
+    if !quality.contains_key(&track_id)
+        && let Some(remote_ssrc) = packets.iter().find_map(|packet| match packet {
+            RtcpPacket::SenderReport { ssrc, .. }
+            | RtcpPacket::SenderReportWithReports { ssrc, .. } => Some(*ssrc),
+            _ => None,
+        })
+    {
+        quality.insert(
+            track_id,
+            RtcpSession::new(
+                local_ssrc,
+                remote_ssrc,
+                clock_rate,
+                bytes::Bytes::from_static(b"rtsp-client"),
+                std::time::Duration::from_secs(5),
+                now,
+            )?,
+        );
+    }
+    let Some(session) = quality.get_mut(&track_id) else {
+        return Ok(None);
+    };
+    for packet in packets {
+        session.on_rtcp(packet, now);
+    }
+    session.report_now(now).map(Some)
 }

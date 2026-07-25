@@ -2,41 +2,54 @@
 use super::{
     ConnectionPhase, Mount, MountConfig, State, description_for,
     proxy_runtime::start_proxy_if_idle,
-    tasks::{spawn_interleaved_sender, spawn_udp_receiver, spawn_udp_sender},
+    tasks::{
+        SenderInput, spawn_interleaved_sender, spawn_interleaved_sender_from, spawn_udp_receiver,
+        spawn_udp_sender, spawn_udp_sender_from,
+    },
+    vod_runtime::{VodPlayback, spawn_vod_playback},
 };
 use crate::{
     Error, Result,
     auth::{AccessRole, AuthDecision, AuthRequest},
+    identity::{MountId, SessionId},
     media::MediaDescription,
+    observe::{FrameworkEvent, SecurityEvent, emit},
+    protocol::range::{NptPosition, NptRange},
     protocol::sdp,
     rtcp::Packet as RtcpPacket,
     rtp::{Depacketizer, RtpPacket},
     rtsp::{self, Message, Method, Response},
-    runtime::framing::{ConnectionFramer, InboundFrame},
+    runtime::{
+        framing::{ConnectionFramer, InboundFrame},
+        io::ControlConnection,
+    },
     transport::{TransportSpec, UdpPair},
 };
 use std::{
     collections::{BTreeMap, HashMap},
     net::SocketAddr,
-    sync::{Arc, atomic::Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU16, Ordering},
+    },
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
     sync::Mutex,
 };
 
 pub(super) async fn serve_connection(
-    stream: TcpStream,
+    stream: ControlConnection,
     peer: SocketAddr,
+    session_id: SessionId,
     state: Arc<State>,
 ) -> Result<()> {
-    let (mut reader, write_half) = stream.into_split();
+    let (mut reader, write_half) = tokio::io::split(stream);
     let writer = Arc::new(Mutex::new(write_half));
     let mut framer = ConnectionFramer::new(
         state.config.max_rtsp_header_bytes,
         state.config.max_rtsp_body_bytes,
-        65_536,
+        state.config.resource_limits.max_interleaved_frame_bytes,
     );
     let mut scratch = [0u8; 4096];
     let mut setups: Vec<(
@@ -48,13 +61,12 @@ pub(super) async fn serve_connection(
     )> = Vec::new();
     let mut resources = ConnectionResources::default();
     let mut interleaved: Vec<(Arc<Mount>, u8, u8, crate::media::TrackDescription)> = Vec::new();
-    let session_id = state
-        .next_session
-        .fetch_add(1, Ordering::Relaxed)
-        .to_string();
+    let session_id = session_id.to_string();
     let mut phase = ConnectionPhase::Init;
     let mut selected_mount: Option<String> = None;
     let mut interleaved_depacketizers: HashMap<u8, Depacketizer> = HashMap::new();
+    let mut vod_cursor = std::time::Duration::ZERO;
+    let mut rtp_sequences: HashMap<u8, Arc<AtomicU16>> = HashMap::new();
     loop {
         let n = tokio::select! { _ = state.cancel.cancelled() => break, result = tokio::time::timeout(state.config.session_timeout, reader.read(&mut scratch)) => result.map_err(|_| Error::Closed)?? };
         if n == 0 {
@@ -74,12 +86,14 @@ pub(super) async fn serve_connection(
                             let reports = packets
                                 .iter()
                                 .filter(|packet| {
-                                    matches!(packet, RtcpPacket::ReceiverReport { .. })
+                                    matches!(
+                                        packet,
+                                        RtcpPacket::ReceiverReport { .. }
+                                            | RtcpPacket::ReceiverReportWithReports { .. }
+                                    )
                                 })
                                 .count() as u64;
-                            let mut stats = mount.stats.lock().unwrap();
-                            stats.rtcp_receiver_reports =
-                                stats.rtcp_receiver_reports.saturating_add(reports);
+                            mount.stats.add_receiver_reports(reports);
                         }
                         continue;
                     }
@@ -96,9 +110,9 @@ pub(super) async fn serve_connection(
                             .and_then(|packet| depacketizer.push(packet))
                         {
                             if mount.frames.send(unit).is_ok() {
-                                mount.stats.lock().unwrap().accepted_frames += 1;
+                                mount.stats.add_accepted(1);
                             } else {
-                                mount.stats.lock().unwrap().dropped_frames += 1;
+                                mount.stats.add_dropped(1);
                             }
                         }
                     }
@@ -163,6 +177,20 @@ pub(super) async fn serve_connection(
                 continue;
             }
             if req.method == Method::Setup {
+                if setups.len() + interleaved.len()
+                    >= state.config.resource_limits.max_tracks_per_session
+                {
+                    writer
+                        .lock()
+                        .await
+                        .write_all(&rtsp::encode_response(&simple_response(
+                            453,
+                            "Not Enough Bandwidth",
+                            cseq,
+                        )))
+                        .await?;
+                    continue;
+                }
                 let Some((path, mount)) = registered_mount_for_uri(&state, &req.uri).await else {
                     writer
                         .lock()
@@ -280,39 +308,65 @@ pub(super) async fn serve_connection(
                     .write_all(&rtsp::encode_response(&response))
                     .await?;
             } else if req.method == Method::Play {
-                phase = ConnectionPhase::Playing;
+                let vod_source = interleaved
+                    .iter()
+                    .map(|(mount, ..)| mount)
+                    .chain(setups.iter().map(|(mount, ..)| mount))
+                    .find_map(|mount| match &mount.config {
+                        MountConfig::Vod { source } => Some(source.clone()),
+                        _ => None,
+                    });
+                let requested_range = match req.headers.get("range") {
+                    Some(value) => match NptRange::parse(value) {
+                        Ok(range) => Some(range),
+                        Err(_) => {
+                            writer
+                                .lock()
+                                .await
+                                .write_all(&rtsp::encode_response(&simple_response(
+                                    457,
+                                    "Invalid Range",
+                                    cseq,
+                                )))
+                                .await?;
+                            continue;
+                        }
+                    },
+                    None => None,
+                };
+                let live_range_supported = requested_range.is_none_or(|range| {
+                    matches!(range.start, NptPosition::Now)
+                        || matches!(range.start, NptPosition::Time(position) if position == std::time::Duration::ZERO)
+                }) && requested_range.is_none_or(|range| range.end.is_none());
+                if vod_source.is_none() && !live_range_supported {
+                    writer
+                        .lock()
+                        .await
+                        .write_all(&rtsp::encode_response(&simple_response(
+                            457,
+                            "Invalid Range",
+                            cseq,
+                        )))
+                        .await?;
+                    continue;
+                }
                 for task in resources.senders.drain(..) {
                     task.abort();
                 }
-                for (mount, rtp_channel, rtcp_channel, track) in interleaved.iter().cloned() {
-                    start_proxy_if_idle(
-                        mount.clone(),
-                        state.cancel.clone(),
-                        state.config.no_subscriber_grace,
-                    );
-                    resources.senders.push(spawn_interleaved_sender(
-                        mount,
-                        rtp_channel,
-                        rtcp_channel,
-                        track,
-                        writer.clone(),
-                    ));
+                if let Some(position) = resources.stop_vod() {
+                    vod_cursor = position;
                 }
-                for (mount, socket, rtp_target, rtcp_target, track) in setups.iter().cloned() {
-                    start_proxy_if_idle(
-                        mount.clone(),
-                        state.cancel.clone(),
-                        state.config.no_subscriber_grace,
-                    );
-                    resources.senders.push(spawn_udp_sender(
-                        mount,
-                        socket,
-                        rtp_target,
-                        rtcp_target,
-                        track,
-                    ));
-                }
-                if resources.senders.is_empty() {
+                let start = requested_range
+                    .map(|range| match range.start {
+                        NptPosition::Time(position) => position,
+                        NptPosition::Now => vod_cursor,
+                    })
+                    .unwrap_or(vod_cursor);
+                let end = requested_range.and_then(|range| range.end);
+                let vod_output = vod_source.as_ref().map(|_| {
+                    tokio::sync::broadcast::channel(state.config.consumer_queue_capacity).0
+                });
+                if interleaved.is_empty() && setups.is_empty() {
                     writer
                         .lock()
                         .await
@@ -323,15 +377,108 @@ pub(super) async fn serve_connection(
                         )))
                         .await?;
                 } else {
+                    phase = ConnectionPhase::Playing;
                     let mut response = simple_response(200, "OK", cseq);
                     response
                         .headers
                         .insert("session".into(), session_id.clone());
+                    if vod_source.is_some() {
+                        response.headers.insert(
+                            "range".into(),
+                            NptRange {
+                                start: NptPosition::Time(start),
+                                end,
+                            }
+                            .render(),
+                        );
+                    } else if let Some(range) = requested_range {
+                        response.headers.insert("range".into(), range.render());
+                    }
                     writer
                         .lock()
                         .await
                         .write_all(&rtsp::encode_response(&response))
                         .await?;
+                    for (mount, rtp_channel, rtcp_channel, track) in interleaved.iter().cloned() {
+                        let sequence = rtp_sequences
+                            .entry(track.id)
+                            .or_insert_with(|| Arc::new(AtomicU16::new(0)))
+                            .clone();
+                        resources.senders.push(if let Some(output) = &vod_output {
+                            spawn_interleaved_sender_from(
+                                mount.clone(),
+                                SenderInput {
+                                    receiver: output.subscribe(),
+                                    startup: Vec::new(),
+                                    sequence,
+                                },
+                                rtp_channel,
+                                rtcp_channel,
+                                track,
+                                writer.clone(),
+                            )
+                        } else {
+                            spawn_interleaved_sender(
+                                mount.clone(),
+                                rtp_channel,
+                                rtcp_channel,
+                                track,
+                                writer.clone(),
+                                sequence,
+                            )
+                        });
+                        start_proxy_if_idle(
+                            mount,
+                            state.cancel.clone(),
+                            state.supervisor.clone(),
+                            state.config.no_subscriber_grace,
+                        );
+                    }
+                    for (mount, socket, rtp_target, rtcp_target, track) in setups.iter().cloned() {
+                        let sequence = rtp_sequences
+                            .entry(track.id)
+                            .or_insert_with(|| Arc::new(AtomicU16::new(0)))
+                            .clone();
+                        resources.senders.push(if let Some(output) = &vod_output {
+                            spawn_udp_sender_from(
+                                mount.clone(),
+                                SenderInput {
+                                    receiver: output.subscribe(),
+                                    startup: Vec::new(),
+                                    sequence,
+                                },
+                                socket,
+                                rtp_target,
+                                rtcp_target,
+                                track,
+                            )
+                        } else {
+                            spawn_udp_sender(
+                                mount.clone(),
+                                socket,
+                                rtp_target,
+                                rtcp_target,
+                                track,
+                                sequence,
+                            )
+                        });
+                        start_proxy_if_idle(
+                            mount,
+                            state.cancel.clone(),
+                            state.supervisor.clone(),
+                            state.config.no_subscriber_grace,
+                        );
+                    }
+                    if let (Some(source), Some(output)) = (vod_source, vod_output) {
+                        resources.vod = Some(spawn_vod_playback(
+                            &state.supervisor,
+                            source,
+                            output,
+                            start,
+                            end,
+                            state.config.consumer_queue_capacity,
+                        )?);
+                    }
                 }
             } else if req.method == Method::Record {
                 let candidates = setups
@@ -354,6 +501,9 @@ pub(super) async fn serve_connection(
                 }
                 for task in resources.senders.drain(..) {
                     task.abort();
+                }
+                if let Some(position) = resources.stop_vod() {
+                    vod_cursor = position;
                 }
                 for (mount, socket, _rtp_target, _rtcp_target, track) in setups.iter().cloned() {
                     if matches!(mount.config, MountConfig::Publisher { .. }) {
@@ -408,6 +558,9 @@ pub(super) async fn serve_connection(
                 for task in resources.senders.drain(..) {
                     task.abort();
                 }
+                if let Some(position) = resources.stop_vod() {
+                    vod_cursor = position;
+                }
                 writer
                     .lock()
                     .await
@@ -444,6 +597,7 @@ struct ConnectionResources {
     senders: Vec<tokio::task::JoinHandle<()>>,
     recording_mounts: Vec<Arc<Mount>>,
     claims: Vec<Arc<Mount>>,
+    vod: Option<VodPlayback>,
 }
 impl ConnectionResources {
     fn abort_senders(&mut self) {
@@ -452,8 +606,13 @@ impl ConnectionResources {
         }
     }
 
+    fn stop_vod(&mut self) -> Option<std::time::Duration> {
+        self.vod.take().map(VodPlayback::stop)
+    }
+
     fn cleanup(&mut self) {
         self.abort_senders();
+        self.stop_vod();
         release_recording_mounts(&mut self.recording_mounts);
         release_remote_publishers(&mut self.claims, false);
     }
@@ -527,7 +686,7 @@ async fn authorize_request(
     } else {
         AccessRole::Read
     };
-    match state
+    let decision = state
         .config
         .authenticator
         .authorize(AuthRequest {
@@ -537,8 +696,21 @@ async fn authorize_request(
             role,
             authorization: req.headers.get("authorization").map(String::as_str),
         })
-        .await
-    {
+        .await;
+    if !matches!(decision, AuthDecision::Allow) {
+        emit(
+            &state.config.event_sink,
+            FrameworkEvent::Security(SecurityEvent::AuthenticationFailed {
+                peer,
+                mount: Some(MountId::from(path.as_str())),
+            }),
+        );
+        let delay = state.config.security.authentication_failure_delay;
+        if delay != std::time::Duration::ZERO {
+            tokio::time::sleep(delay).await;
+        }
+    }
+    match decision {
         AuthDecision::Allow => None,
         AuthDecision::Challenge { realm } => {
             let mut response = simple_response(401, "Unauthorized", cseq);
@@ -598,7 +770,22 @@ async fn handle_request(req: crate::rtsp::Request, state: &State) -> Response {
             }
         }
         Method::Describe => {
-            let d = description_for(&mount.unwrap().config).unwrap();
+            let Some(mount) = mount else {
+                return Response {
+                    status: 404,
+                    reason: "Not Found".into(),
+                    headers,
+                    body: vec![],
+                };
+            };
+            let Ok(d) = description_for(&mount.config) else {
+                return Response {
+                    status: 503,
+                    reason: "Service Unavailable".into(),
+                    headers,
+                    body: vec![],
+                };
+            };
             headers.insert("content-type".into(), "application/sdp".into());
             headers.insert(
                 "content-base".into(),

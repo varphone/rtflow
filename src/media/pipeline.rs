@@ -3,7 +3,13 @@
 mod bus;
 pub use bus::{FanoutOutcome, FrameBus};
 
-use crate::{Error, Result, media::AccessUnit};
+use crate::{
+    Error, Result,
+    error::Operation,
+    media::AccessUnit,
+    observe::{EventSink, FrameworkEvent, NoopEventSink, PipelineEvent, emit},
+    runtime::{ShutdownReport, TaskSpec, TaskSupervisor},
+};
 use futures::future::{BoxFuture, ready};
 use std::{
     collections::{HashSet, VecDeque},
@@ -12,10 +18,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
-use tokio::{
-    sync::{mpsc, watch},
-    task::JoinHandle,
-};
+use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -121,10 +124,21 @@ struct LinkSpec {
     queue: QueueConfig,
 }
 
-#[derive(Default)]
 pub struct PipelineBuilder {
     nodes: Vec<NodeSpec>,
     links: Vec<LinkSpec>,
+    event_sink: Arc<dyn EventSink>,
+    shutdown_grace: std::time::Duration,
+}
+impl Default for PipelineBuilder {
+    fn default() -> Self {
+        Self {
+            nodes: Vec::new(),
+            links: Vec::new(),
+            event_sink: Arc::new(NoopEventSink),
+            shutdown_grace: std::time::Duration::from_secs(5),
+        }
+    }
 }
 impl PipelineBuilder {
     pub fn new() -> Self {
@@ -140,6 +154,19 @@ impl PipelineBuilder {
         let id = ElementId(self.nodes.len());
         self.nodes.push(NodeSpec { element, input });
         Ok(id)
+    }
+
+    pub fn event_sink(&mut self, event_sink: Arc<dyn EventSink>) -> &mut Self {
+        self.event_sink = event_sink;
+        self
+    }
+
+    pub fn shutdown_grace(&mut self, grace: std::time::Duration) -> Result<&mut Self> {
+        if grace == std::time::Duration::ZERO {
+            return Err(Error::Limit("pipeline shutdown grace"));
+        }
+        self.shutdown_grace = grace;
+        Ok(self)
     }
 
     pub fn link(
@@ -189,7 +216,8 @@ impl PipelineBuilder {
             prepared.push(node.element.clone());
         }
 
-        let cancel = CancellationToken::new();
+        let supervisor = TaskSupervisor::new(self.event_sink.clone());
+        let cancel = supervisor.cancellation_token();
         let (state_tx, state_rx) = watch::channel(PipelineState::Ready);
         let mut inputs = Vec::with_capacity(self.nodes.len());
         let mut receivers = Vec::with_capacity(self.nodes.len());
@@ -205,7 +233,6 @@ impl PipelineBuilder {
         let stats = (0..self.nodes.len())
             .map(|_| Arc::new(NodeCounters::default()))
             .collect::<Vec<_>>();
-        let mut tasks = Vec::with_capacity(self.nodes.len() + self.links.len());
         let mut outgoing_by_node = (0..self.nodes.len())
             .map(|_| Vec::new())
             .collect::<Vec<_>>();
@@ -218,32 +245,47 @@ impl PipelineBuilder {
             });
             let target = inputs[link.to.0].sender.clone();
             let edge_cancel = cancel.clone();
-            tasks.push(tokio::spawn(async move {
-                loop {
-                    let unit = tokio::select! {
-                        _ = edge_cancel.cancelled() => return,
-                        unit = edge_receiver.recv() => match unit {
-                            Some(unit) => unit,
-                            None => return,
-                        },
-                    };
-                    if target.send(unit).await.is_err() {
-                        return;
+            supervisor.spawn(
+                TaskSpec::new(
+                    format!("pipeline-edge-{}-{}", link.from.0, link.to.0),
+                    Operation::PipelineProcess,
+                ),
+                async move {
+                    loop {
+                        let unit = tokio::select! {
+                            _ = edge_cancel.cancelled() => return Ok(()),
+                            unit = edge_receiver.recv() => match unit {
+                                Some(unit) => unit,
+                                None => return Ok(()),
+                            },
+                        };
+                        if target.send(unit).await.is_err() {
+                            return Ok(());
+                        }
                     }
-                }
-            }));
+                },
+            );
         }
         for (index, node) in self.nodes.iter().enumerate() {
             let outgoing = std::mem::take(&mut outgoing_by_node[index]);
             let runtime = NodeRuntime {
                 element: node.element.clone(),
-                input: receivers[index].take().unwrap(),
+                input: receivers[index]
+                    .take()
+                    .ok_or_else(|| Error::Media("pipeline input state is inconsistent".into()))?,
                 outgoing,
                 state: state_rx.clone(),
                 cancel: cancel.clone(),
                 counters: stats[index].clone(),
+                event_sink: self.event_sink.clone(),
             };
-            tasks.push(tokio::spawn(runtime.run()));
+            supervisor.spawn(
+                TaskSpec::new(
+                    format!("pipeline-element-{}-{}", index, node.element.name()),
+                    Operation::PipelineProcess,
+                ),
+                runtime.run(),
+            );
         }
 
         Ok(Pipeline {
@@ -253,7 +295,8 @@ impl PipelineBuilder {
             transition_lock: tokio::sync::Mutex::new(()),
             state_tx,
             cancel,
-            tasks,
+            supervisor,
+            shutdown_grace: self.shutdown_grace,
             stats,
         })
     }
@@ -317,7 +360,8 @@ pub struct Pipeline {
     transition_lock: tokio::sync::Mutex<()>,
     state_tx: watch::Sender<PipelineState>,
     cancel: CancellationToken,
-    tasks: Vec<JoinHandle<()>>,
+    supervisor: TaskSupervisor,
+    shutdown_grace: std::time::Duration,
     stats: Vec<Arc<NodeCounters>>,
 }
 impl Pipeline {
@@ -328,7 +372,10 @@ impl Pipeline {
     }
 
     pub fn state(&self) -> PipelineState {
-        *self.state.lock().unwrap()
+        *self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub async fn set_state(&self, to: PipelineState) -> Result<()> {
@@ -355,7 +402,10 @@ impl Pipeline {
             }
             changed.push(element.clone());
         }
-        *self.state.lock().unwrap() = to;
+        *self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = to;
         self.state_tx.send_replace(to);
         if to == PipelineState::Stopped {
             self.cancel.cancel();
@@ -387,15 +437,17 @@ impl Pipeline {
     }
 
     pub async fn shutdown(&self) -> Result<()> {
-        self.set_state(PipelineState::Stopped).await
+        self.shutdown_with_report().await.map(drop)
+    }
+
+    pub async fn shutdown_with_report(&self) -> Result<ShutdownReport> {
+        self.set_state(PipelineState::Stopped).await?;
+        Ok(self.supervisor.shutdown_after(self.shutdown_grace).await)
     }
 }
 impl Drop for Pipeline {
     fn drop(&mut self) {
         self.cancel.cancel();
-        for task in self.tasks.drain(..) {
-            task.abort();
-        }
     }
 }
 
@@ -417,34 +469,42 @@ struct NodeRuntime {
     state: watch::Receiver<PipelineState>,
     cancel: CancellationToken,
     counters: Arc<NodeCounters>,
+    event_sink: Arc<dyn EventSink>,
 }
 impl NodeRuntime {
-    async fn run(mut self) {
+    async fn run(mut self) -> Result<()> {
         loop {
             while *self.state.borrow() != PipelineState::Playing {
                 if *self.state.borrow() == PipelineState::Stopped {
-                    return;
+                    return Ok(());
                 }
                 tokio::select! {
-                    _ = self.cancel.cancelled() => return,
-                    changed = self.state.changed() => if changed.is_err() { return; },
+                    _ = self.cancel.cancelled() => return Ok(()),
+                    changed = self.state.changed() => if changed.is_err() { return Ok(()); },
                 }
             }
             let input = tokio::select! {
-                _ = self.cancel.cancelled() => return,
+                _ = self.cancel.cancelled() => return Ok(()),
                 changed = self.state.changed() => {
-                    if changed.is_err() { return; }
+                    if changed.is_err() { return Ok(()); }
                     continue;
                 }
                 input = self.input.recv() => match input {
                     Some(input) => input,
-                    None => return,
+                    None => return Ok(()),
                 },
             };
             let output = match self.element.process(input).await {
                 Ok(output) => output,
-                Err(_) => {
+                Err(error) => {
                     self.counters.errors.fetch_add(1, Ordering::Relaxed);
+                    emit(
+                        &self.event_sink,
+                        FrameworkEvent::Pipeline(PipelineEvent::ElementFailed {
+                            element: Arc::from(self.element.name()),
+                            code: error.code(),
+                        }),
+                    );
                     continue;
                 }
             };

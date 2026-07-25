@@ -2,4 +2,5 @@
 pub use crate::auth;
 pub use crate::rtsp;
 pub use crate::transport;
+pub mod range;
 pub mod sdp;

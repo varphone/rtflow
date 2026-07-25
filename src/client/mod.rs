@@ -5,14 +5,23 @@ use crate::{
     Error, Result,
     auth::{Credentials, authorization_from_challenge, basic_authorization},
     media::{AccessUnit, MediaDescription},
+    protocol::range::NptRange,
     protocol::sdp,
     proxy::UpstreamTransport,
+    rtcp::{ReceptionSnapshot, RtcpSession},
     rtp::{Depacketizer, JitterBuffer, JitterBufferConfig, RtpPacket},
     rtsp::{self, Message, Method, Response},
+    runtime::io::{ControlConnection, ControlWriteHalf},
+    tls::TlsClientConfig,
 };
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::TcpStream,
     sync::{Mutex, mpsc},
     task::JoinHandle,
@@ -28,6 +37,8 @@ pub struct ClientOptions {
     pub jitter: JitterBufferConfig,
     pub output_queue_capacity: usize,
     pub keep_alive_interval: Option<Duration>,
+    pub tls: Option<TlsClientConfig>,
+    pub play_range: Option<NptRange>,
 }
 impl Default for ClientOptions {
     fn default() -> Self {
@@ -38,19 +49,84 @@ impl Default for ClientOptions {
             jitter: JitterBufferConfig::default(),
             output_queue_capacity: 64,
             keep_alive_interval: Some(Duration::from_secs(20)),
+            tls: None,
+            play_range: None,
         }
+    }
+}
+
+impl ClientOptions {
+    pub fn builder() -> ClientOptionsBuilder {
+        ClientOptionsBuilder {
+            options: Self::default(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        validate_options(self)
+    }
+}
+
+pub struct ClientOptionsBuilder {
+    options: ClientOptions,
+}
+
+impl ClientOptionsBuilder {
+    pub fn transport(mut self, value: UpstreamTransport) -> Self {
+        self.options.transport = value;
+        self
+    }
+
+    pub fn credentials(mut self, value: Credentials) -> Self {
+        self.options.credentials = Some(value);
+        self
+    }
+
+    pub fn request_timeout(mut self, value: Duration) -> Self {
+        self.options.request_timeout = value;
+        self
+    }
+
+    pub fn jitter(mut self, value: JitterBufferConfig) -> Self {
+        self.options.jitter = value;
+        self
+    }
+
+    pub fn output_queue_capacity(mut self, value: usize) -> Self {
+        self.options.output_queue_capacity = value;
+        self
+    }
+
+    pub fn keep_alive_interval(mut self, value: Option<Duration>) -> Self {
+        self.options.keep_alive_interval = value;
+        self
+    }
+
+    pub fn tls(mut self, value: TlsClientConfig) -> Self {
+        self.options.tls = Some(value);
+        self
+    }
+
+    pub fn play_range(mut self, value: NptRange) -> Self {
+        self.options.play_range = Some(value);
+        self
+    }
+
+    pub fn build(self) -> Result<ClientOptions> {
+        self.options.validate()?;
+        Ok(self.options)
     }
 }
 
 pub struct ClientSession {
     pub description: MediaDescription,
     receiver: mpsc::Receiver<Result<AccessUnit>>,
-    control: Option<TcpStream>,
+    control: Option<ControlConnection>,
     cseq: u32,
     session_id: String,
     uri: String,
     playing: bool,
-    interleaved_writer: Option<Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>>,
+    interleaved_writer: Option<Arc<Mutex<ControlWriteHalf>>>,
     interleaved_responses: Option<mpsc::Receiver<Response>>,
     credentials: Option<Credentials>,
     request_timeout: Duration,
@@ -58,14 +134,20 @@ pub struct ClientSession {
     last_control: Instant,
     cancel: CancellationToken,
     tasks: Vec<JoinHandle<()>>,
+    quality: Arc<Mutex<HashMap<u8, RtcpSession>>>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ClientQualitySnapshot {
+    pub tracks: BTreeMap<u8, ReceptionSnapshot>,
 }
 impl ClientSession {
     #[allow(clippy::too_many_arguments)]
     fn new(
         description: MediaDescription,
         receiver: mpsc::Receiver<Result<AccessUnit>>,
-        control: Option<TcpStream>,
-        interleaved_writer: Option<Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>>,
+        control: Option<ControlConnection>,
+        interleaved_writer: Option<Arc<Mutex<ControlWriteHalf>>>,
         interleaved_responses: Option<mpsc::Receiver<Response>>,
         cseq: u32,
         session_id: String,
@@ -75,6 +157,7 @@ impl ClientSession {
         keep_alive_interval: Option<Duration>,
         cancel: CancellationToken,
         tasks: Vec<JoinHandle<()>>,
+        quality: Arc<Mutex<HashMap<u8, RtcpSession>>>,
     ) -> Self {
         Self {
             description,
@@ -92,6 +175,7 @@ impl ClientSession {
             last_control: Instant::now(),
             cancel,
             tasks,
+            quality,
         }
     }
     pub async fn play(&mut self) -> Result<()> {
@@ -202,6 +286,18 @@ impl ClientSession {
     pub fn is_playing(&self) -> bool {
         self.playing
     }
+
+    pub async fn quality_snapshot(&self) -> ClientQualitySnapshot {
+        ClientQualitySnapshot {
+            tracks: self
+                .quality
+                .lock()
+                .await
+                .iter()
+                .map(|(track, session)| (*track, session.snapshot()))
+                .collect(),
+        }
+    }
 }
 impl Drop for ClientSession {
     fn drop(&mut self) {
@@ -234,20 +330,47 @@ fn validate_options(options: &ClientOptions) -> Result<()> {
     if options.keep_alive_interval == Some(Duration::ZERO) {
         return Err(Error::Limit("client keep-alive interval"));
     }
+    if options.request_timeout == Duration::ZERO {
+        return Err(Error::Limit("client request timeout"));
+    }
     Ok(())
 }
 
 async fn open_and_describe(
     url: &url::Url,
     options: &ClientOptions,
-) -> Result<(TcpStream, String, String, MediaDescription)> {
+) -> Result<(ControlConnection, String, String, MediaDescription)> {
     let host = url
         .host_str()
         .ok_or_else(|| Error::Rtsp("RTSP URL has no host".into()))?;
-    let port = url.port().unwrap_or(554);
-    let mut stream = timeout(options.request_timeout, TcpStream::connect((host, port)))
+    let port = url
+        .port()
+        .unwrap_or_else(|| if url.scheme() == "rtsps" { 322 } else { 554 });
+    let tcp = timeout(options.request_timeout, TcpStream::connect((host, port)))
         .await
         .map_err(|_| Error::Rtsp("RTSP connect timeout".into()))??;
+    tcp.set_nodelay(true)?;
+    let local_addr = tcp.local_addr()?;
+    let peer_addr = tcp.peer_addr()?;
+    let mut stream = match url.scheme() {
+        "rtsp" => ControlConnection::new(tcp, local_addr, peer_addr),
+        "rtsps" => {
+            let tls = options
+                .tls
+                .as_ref()
+                .ok_or_else(|| Error::Tls("RTSPS requires a client TLS configuration".into()))?;
+            let server_name = tls.server_name.as_deref().unwrap_or(host).to_owned();
+            let server_name = rustls::pki_types::ServerName::try_from(server_name)
+                .map_err(|error| Error::Tls(error.to_string()))?;
+            let connector = tokio_rustls::TlsConnector::from(tls.config.clone());
+            let secured = timeout(tls.handshake_timeout, connector.connect(server_name, tcp))
+                .await
+                .map_err(|_| Error::Tls("TLS handshake timeout".into()))?
+                .map_err(|error| Error::Tls(error.to_string()))?;
+            ControlConnection::new(secured, local_addr, peer_addr)
+        }
+        scheme => return Err(Error::Rtsp(format!("unsupported RTSP URL scheme {scheme}"))),
+    };
     let uri = url.as_str().to_owned();
     let response = request(
         &mut stream,
@@ -294,15 +417,12 @@ fn status_error(method: &str, status: u16) -> Error {
     }
 }
 
-fn receive_rtp(
-    data: bytes::Bytes,
+fn receive_rtp_packet(
+    packet: RtpPacket,
     jitter: &mut JitterBuffer,
     depacketizer: &mut Depacketizer,
 ) -> Vec<Result<AccessUnit>> {
-    match RtpPacket::parse(data) {
-        Ok(packet) => depacketize_packets(jitter.push(packet), depacketizer),
-        Err(error) => vec![Err(error)],
-    }
+    depacketize_packets(jitter.push(packet), depacketizer)
 }
 
 fn drain_jitter(
@@ -359,7 +479,7 @@ fn encode_request(
 }
 
 async fn request(
-    stream: &mut TcpStream,
+    stream: &mut ControlConnection,
     method: &str,
     uri: &str,
     cseq: u32,
@@ -403,7 +523,7 @@ async fn request(
 
 #[allow(clippy::too_many_arguments)]
 async fn send_request(
-    stream: &mut TcpStream,
+    stream: &mut ControlConnection,
     method: &str,
     uri: &str,
     cseq: u32,
@@ -415,21 +535,22 @@ async fn send_request(
     timeout(wait, stream.write_all(wire.as_bytes()))
         .await
         .map_err(|_| Error::Rtsp("RTSP write timeout".into()))??;
-    let mut buffer = bytes::BytesMut::with_capacity(4096);
     let mut temporary = [0u8; 4096];
     loop {
-        if let Some(message) = rtsp::parse(&mut buffer, 16 * 1024, 256 * 1024)? {
+        if let Some(message) = rtsp::parse(stream.read_ahead_mut(), 16 * 1024, 256 * 1024)? {
             return match message {
                 Message::Response(response) => Ok(response),
                 _ => Err(Error::Rtsp("server sent request".into())),
             };
         }
-        let size = timeout(wait, stream.read(&mut temporary))
+        let size = timeout(wait, stream.read_transport(&mut temporary))
             .await
             .map_err(|_| Error::Rtsp("RTSP response timeout".into()))??;
         if size == 0 {
             return Err(Error::Closed);
         }
-        buffer.extend_from_slice(&temporary[..size]);
+        stream
+            .read_ahead_mut()
+            .extend_from_slice(&temporary[..size]);
     }
 }

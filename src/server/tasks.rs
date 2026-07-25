@@ -3,21 +3,68 @@ use crate::{
     media::{MediaKind, TrackDescription},
     rtcp::Packet as RtcpPacket,
     rtp::{Depacketizer, Packetizer, RtpPacket},
+    runtime::io::ControlWriteHalf,
     transport::{InterleavedFrame, UdpPair},
 };
 use bytes::Bytes;
-use std::{net::SocketAddr, sync::Arc};
-use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::Mutex, task::JoinHandle};
+use std::{
+    collections::VecDeque,
+    net::SocketAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicU16, Ordering},
+    },
+};
+use tokio::{
+    io::AsyncWriteExt,
+    sync::{Mutex, broadcast},
+    task::JoinHandle,
+};
+
+pub(super) struct SenderInput {
+    pub receiver: broadcast::Receiver<crate::media::AccessUnit>,
+    pub startup: Vec<crate::media::AccessUnit>,
+    pub sequence: Arc<AtomicU16>,
+}
 
 pub(super) fn spawn_interleaved_sender(
     mount: Arc<Mount>,
     rtp_channel: u8,
     rtcp_channel: u8,
     track: TrackDescription,
-    writer: Arc<Mutex<OwnedWriteHalf>>,
+    writer: Arc<Mutex<ControlWriteHalf>>,
+    sequence: Arc<AtomicU16>,
+) -> JoinHandle<()> {
+    let (receiver, startup) = mount.subscribe_with_startup(track.id);
+    spawn_interleaved_sender_from(
+        mount,
+        SenderInput {
+            receiver,
+            startup,
+            sequence,
+        },
+        rtp_channel,
+        rtcp_channel,
+        track,
+        writer,
+    )
+}
+
+pub(super) fn spawn_interleaved_sender_from(
+    mount: Arc<Mount>,
+    input: SenderInput,
+    rtp_channel: u8,
+    rtcp_channel: u8,
+    track: TrackDescription,
+    writer: Arc<Mutex<ControlWriteHalf>>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut receiver = mount.frames.subscribe();
+        let SenderInput {
+            mut receiver,
+            startup,
+            sequence,
+        } = input;
+        let mut startup = VecDeque::from(startup);
         let ssrc = 0x5254_5350u32.wrapping_add(track.id as u32);
         let mut packetizer = match Packetizer::new(track.codec, track.payload_type, ssrc, 1200) {
             Ok(value) => value,
@@ -27,22 +74,31 @@ pub(super) fn spawn_interleaved_sender(
         let mut sent_packets = 0u32;
         let mut sent_octets = 0u32;
         loop {
-            let frame = match receiver.recv().await {
-                Ok(frame) => frame,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                    let mut stats = mount.stats.lock().unwrap();
-                    stats.dropped_frames = stats.dropped_frames.saturating_add(count);
-                    awaiting_key = track.kind == MediaKind::Video;
-                    continue;
+            let frame = if let Some(frame) = startup.pop_front() {
+                frame
+            } else {
+                match receiver.recv().await {
+                    Ok(frame) => frame,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                        mount.stats.add_dropped(count);
+                        awaiting_key = track.kind == MediaKind::Video;
+                        continue;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
             if frame.track_id != track.id || (awaiting_key && !frame.is_keyframe) {
                 continue;
             }
+            if frame.data.len() > mount.max_queued_bytes_per_session {
+                mount.stats.add_dropped(1);
+                awaiting_key = track.kind == MediaKind::Video;
+                continue;
+            }
             awaiting_key = false;
             if let Ok(packets) = packetizer.packetize(&frame) {
-                for packet in packets {
+                for mut packet in packets {
+                    packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
                     let payload_len = packet.payload.len() as u32;
                     let wire = InterleavedFrame {
                         channel: rtp_channel,
@@ -57,11 +113,7 @@ pub(super) fn spawn_interleaved_sender(
                     }
                     sent_packets = sent_packets.wrapping_add(1);
                     sent_octets = sent_octets.wrapping_add(payload_len);
-                    {
-                        let mut stats = mount.stats.lock().unwrap();
-                        stats.rtp_packets = stats.rtp_packets.saturating_add(1);
-                        stats.rtp_octets = stats.rtp_octets.saturating_add(payload_len as u64);
-                    }
+                    mount.stats.add_rtp(1, u64::from(payload_len));
                     if sent_packets == 1 || sent_packets.is_multiple_of(30) {
                         let report = RtcpPacket::SenderReport {
                             ssrc,
@@ -82,7 +134,7 @@ pub(super) fn spawn_interleaved_sender(
                         if writer.lock().await.write_all(&wire).await.is_err() {
                             return;
                         }
-                        mount.stats.lock().unwrap().rtcp_sender_reports += 1;
+                        mount.stats.add_sender_reports(1);
                     }
                 }
             }
@@ -96,9 +148,38 @@ pub(super) fn spawn_udp_sender(
     rtp_target: SocketAddr,
     rtcp_target: SocketAddr,
     track: TrackDescription,
+    sequence: Arc<AtomicU16>,
+) -> JoinHandle<()> {
+    let (receiver, startup) = mount.subscribe_with_startup(track.id);
+    spawn_udp_sender_from(
+        mount,
+        SenderInput {
+            receiver,
+            startup,
+            sequence,
+        },
+        pair,
+        rtp_target,
+        rtcp_target,
+        track,
+    )
+}
+
+pub(super) fn spawn_udp_sender_from(
+    mount: Arc<Mount>,
+    input: SenderInput,
+    pair: UdpPair,
+    rtp_target: SocketAddr,
+    rtcp_target: SocketAddr,
+    track: TrackDescription,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut receiver = mount.frames.subscribe();
+        let SenderInput {
+            mut receiver,
+            startup,
+            sequence,
+        } = input;
+        let mut startup = VecDeque::from(startup);
         let ssrc = 0x5254_5350u32.wrapping_add(track.id as u32);
         let mut packetizer = match Packetizer::new(track.codec, track.payload_type, ssrc, 1200) {
             Ok(value) => value,
@@ -113,17 +194,29 @@ pub(super) fn spawn_udp_sender(
                 report = pair.rtcp.recv_from(&mut rtcp_buffer) => {
                     let Ok((size, _)) = report else { return; };
                     if let Ok(packets) = RtcpPacket::parse(Bytes::copy_from_slice(&rtcp_buffer[..size])) {
-                        let reports = packets.iter().filter(|packet| matches!(packet, RtcpPacket::ReceiverReport { .. })).count() as u64;
-                        let mut stats = mount.stats.lock().unwrap();
-                        stats.rtcp_receiver_reports = stats.rtcp_receiver_reports.saturating_add(reports);
+                        let reports = packets
+                            .iter()
+                            .filter(|packet| {
+                                matches!(
+                                    packet,
+                                    RtcpPacket::ReceiverReport { .. }
+                                        | RtcpPacket::ReceiverReportWithReports { .. }
+                                )
+                            })
+                            .count() as u64;
+                        mount.stats.add_receiver_reports(reports);
                     }
                 }
-                received = receiver.recv() => {
+                received = async {
+                    match startup.pop_front() {
+                        Some(frame) => Ok(frame),
+                        None => receiver.recv().await,
+                    }
+                } => {
                     let frame = match received {
                         Ok(frame) => frame,
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                            let mut stats = mount.stats.lock().unwrap();
-                            stats.dropped_frames = stats.dropped_frames.saturating_add(count);
+                            mount.stats.add_dropped(count);
                             awaiting_key = track.kind == MediaKind::Video;
                             continue;
                         }
@@ -132,20 +225,22 @@ pub(super) fn spawn_udp_sender(
                     if frame.track_id != track.id || (awaiting_key && !frame.is_keyframe) {
                         continue;
                     }
+                    if frame.data.len() > mount.max_queued_bytes_per_session {
+                        mount.stats.add_dropped(1);
+                        awaiting_key = track.kind == MediaKind::Video;
+                        continue;
+                    }
                     awaiting_key = false;
                     if let Ok(packets) = packetizer.packetize(&frame) {
-                        for packet in packets {
+                        for mut packet in packets {
+                            packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
                             let wire = packet.encode();
                             if pair.rtp.send_to(&wire, rtp_target).await.is_err() {
                                 continue;
                             }
                             sent_packets = sent_packets.wrapping_add(1);
                             sent_octets = sent_octets.wrapping_add(packet.payload.len() as u32);
-                            {
-                                let mut stats = mount.stats.lock().unwrap();
-                                stats.rtp_packets = stats.rtp_packets.saturating_add(1);
-                                stats.rtp_octets = stats.rtp_octets.saturating_add(packet.payload.len() as u64);
-                            }
+                            mount.stats.add_rtp(1, packet.payload.len() as u64);
                             if sent_packets == 1 || sent_packets.is_multiple_of(30) {
                                 let report = RtcpPacket::SenderReport {
                                     ssrc,
@@ -156,7 +251,7 @@ pub(super) fn spawn_udp_sender(
                                 }
                                 .encode();
                                 if pair.rtcp.send_to(&report, rtcp_target).await.is_ok() {
-                                    mount.stats.lock().unwrap().rtcp_sender_reports += 1;
+                                    mount.stats.add_sender_reports(1);
                                 }
                             }
                         }
@@ -196,9 +291,9 @@ pub(super) fn spawn_udp_receiver(
                 .and_then(|packet| depacketizer.push(packet))
             {
                 if mount.frames.send(frame).is_ok() {
-                    mount.stats.lock().unwrap().accepted_frames += 1;
+                    mount.stats.add_accepted(1);
                 } else {
-                    mount.stats.lock().unwrap().dropped_frames += 1;
+                    mount.stats.add_dropped(1);
                 }
             }
         }

@@ -25,7 +25,7 @@ pub struct AccessUnit {
     pub is_keyframe: bool,
     pub data: Bytes,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TrackDescription {
     pub id: TrackId,
     pub kind: MediaKind,
@@ -36,7 +36,7 @@ pub struct TrackDescription {
     pub fmtp: Option<Arc<str>>,
     pub control: Arc<str>,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MediaDescription {
     pub session_name: Arc<str>,
     pub tracks: Vec<TrackDescription>,

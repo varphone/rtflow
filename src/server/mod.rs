@@ -1,21 +1,32 @@
 mod proxy_runtime;
 mod session;
 mod tasks;
+mod vod_runtime;
 use session::serve_connection;
 
 use crate::{
     Error, Result,
     auth::{AllowAll, Authenticator},
     client::{ClientOptions, RtspClient},
+    error::Operation,
+    identity::{MountId, SessionId},
     media::{AccessUnit, MediaDescription},
-    proxy::{ProxyState, UpstreamConfig},
+    observe::{
+        EventSink, FrameworkEvent, MountEvent, NoopEventSink, RejectReason, SecurityEvent,
+        ServerEvent, SessionEvent, emit,
+    },
+    proxy::{KeyframeCache, ProxyState, StartupCacheConfig, UpstreamConfig},
+    runtime::{ShutdownReport, TaskSpec, TaskSupervisor, io::ControlConnection},
+    security::{ConnectionRateLimiter, SecurityConfig},
+    storage::VodSource,
+    tls::TlsServerConfig,
 };
 use std::{
     collections::HashMap,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     ops::RangeInclusive,
     sync::{
-        Arc,
+        Arc, Mutex, Weak,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
@@ -23,7 +34,7 @@ use std::{
 use tokio::{
     net::TcpListener,
     sync::{RwLock, Semaphore, broadcast},
-    task::{JoinHandle, JoinSet},
+    task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -39,6 +50,10 @@ pub struct ServerConfig {
     pub no_subscriber_grace: Duration,
     pub shutdown_grace: Duration,
     pub authenticator: Arc<dyn Authenticator>,
+    pub resource_limits: ResourceLimits,
+    pub event_sink: Arc<dyn EventSink>,
+    pub security: SecurityConfig,
+    pub tls: Option<TlsServerConfig>,
 }
 impl ServerConfig {
     pub fn new(listen: SocketAddr) -> Self {
@@ -53,7 +68,184 @@ impl ServerConfig {
             no_subscriber_grace: Duration::from_secs(5),
             shutdown_grace: Duration::from_secs(5),
             authenticator: Arc::new(AllowAll),
+            resource_limits: ResourceLimits::default(),
+            event_sink: Arc::new(NoopEventSink),
+            security: SecurityConfig::default(),
+            tls: None,
         }
+    }
+
+    pub fn builder(listen: SocketAddr) -> ServerConfigBuilder {
+        ServerConfigBuilder {
+            config: Self::new(listen),
+        }
+    }
+
+    pub fn validate(&self) -> std::result::Result<(), ConfigError> {
+        let positive = [
+            (self.max_rtsp_header_bytes, "RTSP header bytes"),
+            (self.max_rtsp_body_bytes, "RTSP body bytes"),
+            (self.max_sessions, "RTSP sessions"),
+            (self.consumer_queue_capacity, "consumer queue capacity"),
+            (self.resource_limits.max_sessions_per_ip, "sessions per IP"),
+            (self.resource_limits.max_mounts, "mounts"),
+            (
+                self.resource_limits.max_tracks_per_session,
+                "tracks per session",
+            ),
+            (
+                self.resource_limits.max_interleaved_frame_bytes,
+                "interleaved frame bytes",
+            ),
+            (
+                self.resource_limits.max_queued_bytes_per_session,
+                "queued bytes per session",
+            ),
+        ];
+        if let Some((_, name)) = positive.into_iter().find(|(value, _)| *value == 0) {
+            return Err(ConfigError::Zero(name));
+        }
+        if self.session_timeout == Duration::ZERO {
+            return Err(ConfigError::Zero("session timeout"));
+        }
+        if self.shutdown_grace == Duration::ZERO {
+            return Err(ConfigError::Zero("shutdown grace"));
+        }
+        if self
+            .udp_port_range
+            .as_ref()
+            .is_some_and(|range| range.start() >= range.end())
+        {
+            return Err(ConfigError::Invalid(
+                "UDP port range must contain an RTP/RTCP pair",
+            ));
+        }
+        if let Some(rate_limit) = self.security.connection_rate_limit {
+            rate_limit
+                .validate()
+                .map_err(|_| ConfigError::Invalid("invalid connection rate limit"))?;
+        }
+        if self
+            .tls
+            .as_ref()
+            .is_some_and(|tls| tls.handshake_timeout == Duration::ZERO)
+        {
+            return Err(ConfigError::Zero("TLS handshake timeout"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ResourceLimits {
+    pub max_sessions_per_ip: usize,
+    pub max_mounts: usize,
+    pub max_tracks_per_session: usize,
+    pub max_interleaved_frame_bytes: usize,
+    pub max_queued_bytes_per_session: usize,
+}
+
+impl Default for ResourceLimits {
+    fn default() -> Self {
+        Self {
+            max_sessions_per_ip: 32,
+            max_mounts: 1_024,
+            max_tracks_per_session: 16,
+            max_interleaved_frame_bytes: 65_536,
+            max_queued_bytes_per_session: 4 * 1024 * 1024,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConfigError {
+    Zero(&'static str),
+    Invalid(&'static str),
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Zero(name) => write!(formatter, "{name} must be greater than zero"),
+            Self::Invalid(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
+impl From<ConfigError> for Error {
+    fn from(error: ConfigError) -> Self {
+        match error {
+            ConfigError::Zero(name) => Self::Limit(name),
+            ConfigError::Invalid(message) => Self::Rtsp(message.into()),
+        }
+    }
+}
+
+pub struct ServerConfigBuilder {
+    config: ServerConfig,
+}
+
+impl ServerConfigBuilder {
+    pub fn session_timeout(mut self, value: Duration) -> Self {
+        self.config.session_timeout = value;
+        self
+    }
+
+    pub fn max_sessions(mut self, value: usize) -> Self {
+        self.config.max_sessions = value;
+        self
+    }
+
+    pub fn consumer_queue_capacity(mut self, value: usize) -> Self {
+        self.config.consumer_queue_capacity = value;
+        self
+    }
+
+    pub fn udp_port_range(mut self, value: RangeInclusive<u16>) -> Self {
+        self.config.udp_port_range = Some(value);
+        self
+    }
+
+    pub fn no_subscriber_grace(mut self, value: Duration) -> Self {
+        self.config.no_subscriber_grace = value;
+        self
+    }
+
+    pub fn shutdown_grace(mut self, value: Duration) -> Self {
+        self.config.shutdown_grace = value;
+        self
+    }
+
+    pub fn authenticator(mut self, value: Arc<dyn Authenticator>) -> Self {
+        self.config.authenticator = value;
+        self
+    }
+
+    pub fn resource_limits(mut self, value: ResourceLimits) -> Self {
+        self.config.resource_limits = value;
+        self
+    }
+
+    pub fn event_sink(mut self, value: Arc<dyn EventSink>) -> Self {
+        self.config.event_sink = value;
+        self
+    }
+
+    pub fn security(mut self, value: SecurityConfig) -> Self {
+        self.config.security = value;
+        self
+    }
+
+    pub fn tls(mut self, value: TlsServerConfig) -> Self {
+        self.config.tls = Some(value);
+        self
+    }
+
+    pub fn build(self) -> std::result::Result<ServerConfig, ConfigError> {
+        self.config.validate()?;
+        Ok(self.config)
     }
 }
 
@@ -68,6 +260,9 @@ pub enum MountConfig {
     },
     Proxy {
         upstream: Box<UpstreamConfig>,
+    },
+    Vod {
+        source: Arc<dyn VodSource>,
     },
 }
 #[derive(Clone)]
@@ -102,15 +297,21 @@ pub struct MountSnapshot {
     pub publisher_connected: bool,
     pub proxy_state: Option<ProxyState>,
     pub stats: StreamStats,
+    pub startup_cache_frames: usize,
+    pub startup_cache_bytes: usize,
 }
 struct Mount {
+    id: MountId,
     config: MountConfig,
     frames: broadcast::Sender<AccessUnit>,
-    stats: std::sync::Mutex<StreamStats>,
+    stats: StreamCounters,
+    startup_cache: Mutex<KeyframeCache>,
+    event_sink: Arc<dyn EventSink>,
     cancel: CancellationToken,
     proxy_running: AtomicBool,
     publishers: AtomicUsize,
     publisher_claimed: AtomicBool,
+    max_queued_bytes_per_session: usize,
 }
 struct State {
     mounts: RwLock<HashMap<Arc<str>, Arc<Mount>>>,
@@ -118,6 +319,124 @@ struct State {
     session_slots: Arc<Semaphore>,
     next_session: AtomicU64,
     cancel: CancellationToken,
+    supervisor: TaskSupervisor,
+    peer_sessions: Mutex<HashMap<IpAddr, usize>>,
+    connection_rate_limiter: ConnectionRateLimiter,
+}
+
+#[derive(Default)]
+struct StreamCounters {
+    accepted_frames: AtomicU64,
+    dropped_frames: AtomicU64,
+    rtp_packets: AtomicU64,
+    rtp_octets: AtomicU64,
+    rtcp_sender_reports: AtomicU64,
+    rtcp_receiver_reports: AtomicU64,
+}
+
+impl StreamCounters {
+    fn add_accepted(&self, value: u64) {
+        self.accepted_frames.fetch_add(value, Ordering::Relaxed);
+    }
+    fn add_dropped(&self, value: u64) {
+        self.dropped_frames.fetch_add(value, Ordering::Relaxed);
+    }
+    fn add_rtp(&self, packets: u64, octets: u64) {
+        self.rtp_packets.fetch_add(packets, Ordering::Relaxed);
+        self.rtp_octets.fetch_add(octets, Ordering::Relaxed);
+    }
+    fn add_sender_reports(&self, value: u64) {
+        self.rtcp_sender_reports.fetch_add(value, Ordering::Relaxed);
+    }
+    fn add_receiver_reports(&self, value: u64) {
+        self.rtcp_receiver_reports
+            .fetch_add(value, Ordering::Relaxed);
+    }
+    fn snapshot(&self, subscribers: usize) -> StreamStats {
+        StreamStats {
+            accepted_frames: self.accepted_frames.load(Ordering::Relaxed),
+            dropped_frames: self.dropped_frames.load(Ordering::Relaxed),
+            subscribers,
+            rtp_packets: self.rtp_packets.load(Ordering::Relaxed),
+            rtp_octets: self.rtp_octets.load(Ordering::Relaxed),
+            rtcp_sender_reports: self.rtcp_sender_reports.load(Ordering::Relaxed),
+            rtcp_receiver_reports: self.rtcp_receiver_reports.load(Ordering::Relaxed),
+        }
+    }
+}
+
+impl Mount {
+    fn publish_cached(
+        &self,
+        frame: AccessUnit,
+    ) -> std::result::Result<usize, broadcast::error::SendError<AccessUnit>> {
+        let mut cache = self
+            .startup_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.push(&frame);
+        self.frames.send(frame)
+    }
+
+    fn subscribe_with_startup(
+        &self,
+        track_id: u8,
+    ) -> (broadcast::Receiver<AccessUnit>, Vec<AccessUnit>) {
+        let cache = self
+            .startup_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let receiver = self.frames.subscribe();
+        let mut startup = cache.snapshot(track_id);
+        let bytes = startup.iter().fold(0usize, |total, frame| {
+            total.saturating_add(frame.data.len())
+        });
+        if bytes > self.max_queued_bytes_per_session {
+            startup.clear();
+        }
+        (receiver, startup)
+    }
+}
+
+struct PeerSessionLease {
+    state: Weak<State>,
+    peer: IpAddr,
+}
+
+impl Drop for PeerSessionLease {
+    fn drop(&mut self) {
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        let mut sessions = state
+            .peer_sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(count) = sessions.get_mut(&self.peer) {
+            *count -= 1;
+            if *count == 0 {
+                sessions.remove(&self.peer);
+            }
+        }
+    }
+}
+
+impl State {
+    fn try_acquire_peer(self: &Arc<Self>, peer: IpAddr) -> Option<PeerSessionLease> {
+        let mut sessions = self
+            .peer_sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let count = sessions.entry(peer).or_default();
+        if *count >= self.config.resource_limits.max_sessions_per_ip {
+            return None;
+        }
+        *count += 1;
+        Some(PeerSessionLease {
+            state: Arc::downgrade(self),
+            peer,
+        })
+    }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConnectionPhase {
@@ -131,63 +450,166 @@ enum ConnectionPhase {
 pub struct RtspServer {
     local_addr: SocketAddr,
     state: Arc<State>,
-    accept_task: Option<JoinHandle<()>>,
+    accept_task: Option<JoinHandle<ShutdownReport>>,
 }
 
 impl RtspServer {
     pub async fn bind(config: ServerConfig) -> Result<Self> {
-        if config.consumer_queue_capacity == 0 {
-            return Err(Error::Limit("consumer queue capacity"));
-        }
-        if config.max_sessions == 0 {
-            return Err(Error::Limit("RTSP sessions"));
-        }
+        config.validate()?;
         let listener = TcpListener::bind(config.listen).await?;
         let local_addr = listener.local_addr()?;
+        let supervisor = TaskSupervisor::new(config.event_sink.clone());
+        let connection_rate_limiter =
+            ConnectionRateLimiter::new(config.security.connection_rate_limit)?;
         let state = Arc::new(State {
             mounts: RwLock::new(HashMap::new()),
             session_slots: Arc::new(Semaphore::new(config.max_sessions)),
             next_session: AtomicU64::new(1),
-            cancel: CancellationToken::new(),
+            cancel: supervisor.cancellation_token(),
+            supervisor,
+            peer_sessions: Mutex::new(HashMap::new()),
+            connection_rate_limiter,
             config,
         });
+        emit(
+            &state.config.event_sink,
+            FrameworkEvent::Server(ServerEvent::Started { local_addr }),
+        );
         let task_state = state.clone();
         let accept_task = tokio::spawn(async move {
-            let mut sessions = JoinSet::new();
             loop {
                 tokio::select! {
                     _ = task_state.cancel.cancelled() => break,
-                    joined = sessions.join_next(), if !sessions.is_empty() => {
-                        let _ = joined;
-                    }
                     accepted = listener.accept() => match accepted {
                         Ok((stream, peer)) => {
+                            if !task_state.config.security.ip_acl.permits(peer.ip()) {
+                                emit(
+                                    &task_state.config.event_sink,
+                                    FrameworkEvent::Session(SessionEvent::Rejected {
+                                        peer,
+                                        reason: RejectReason::AccessDenied,
+                                    }),
+                                );
+                                drop(stream);
+                                continue;
+                            }
+                            if !task_state
+                                .connection_rate_limiter
+                                .admit(peer.ip(), std::time::Instant::now())
+                            {
+                                emit(
+                                    &task_state.config.event_sink,
+                                    FrameworkEvent::Security(SecurityEvent::RateLimited { peer }),
+                                );
+                                emit(
+                                    &task_state.config.event_sink,
+                                    FrameworkEvent::Session(SessionEvent::Rejected {
+                                        peer,
+                                        reason: RejectReason::RateLimited,
+                                    }),
+                                );
+                                drop(stream);
+                                continue;
+                            }
                             let Ok(slot) = task_state.session_slots.clone().try_acquire_owned() else {
+                                emit(
+                                    &task_state.config.event_sink,
+                                    FrameworkEvent::Session(SessionEvent::Rejected {
+                                        peer,
+                                        reason: RejectReason::GlobalLimit,
+                                    }),
+                                );
                                 drop(stream);
                                 continue;
                             };
+                            let Some(peer_lease) = task_state.try_acquire_peer(peer.ip()) else {
+                                emit(
+                                    &task_state.config.event_sink,
+                                    FrameworkEvent::Session(SessionEvent::Rejected {
+                                        peer,
+                                        reason: RejectReason::PeerLimit,
+                                    }),
+                                );
+                                drop((stream, slot));
+                                continue;
+                            };
+                            let id = SessionId::new(
+                                task_state.next_session.fetch_add(1, Ordering::Relaxed),
+                            );
+                            emit(
+                                &task_state.config.event_sink,
+                                FrameworkEvent::Session(SessionEvent::Accepted { id, peer }),
+                            );
                             let state = task_state.clone();
-                            sessions.spawn(async move {
+                            let sink = state.config.event_sink.clone();
+                            let tls = state.config.tls.clone();
+                            task_state.supervisor.spawn(
+                                TaskSpec::new(format!("rtsp-session-{id}"), Operation::ReadControl),
+                                async move {
                                 let _slot = slot;
-                                let _ = serve_connection(stream, peer, state).await;
+                                let _peer_lease = peer_lease;
+                                let started = std::time::Instant::now();
+                                let local_addr = stream.local_addr()?;
+                                stream.set_nodelay(true)?;
+                                let connection = if let Some(tls) = tls {
+                                    let acceptor = tokio_rustls::TlsAcceptor::from(tls.config);
+                                    match tokio::time::timeout(
+                                        tls.handshake_timeout,
+                                        acceptor.accept(stream),
+                                    )
+                                    .await
+                                    {
+                                        Ok(Ok(stream)) => ControlConnection::new(stream, local_addr, peer),
+                                        result => {
+                                            let message: Arc<str> = match result {
+                                                Ok(Err(error)) => Arc::from(error.to_string()),
+                                                Err(_) => Arc::from("TLS handshake timeout"),
+                                                Ok(Ok(_)) => unreachable!(),
+                                            };
+                                            emit(
+                                                &sink,
+                                                FrameworkEvent::Security(
+                                                    SecurityEvent::TlsHandshakeFailed {
+                                                        peer,
+                                                        error: message.clone(),
+                                                    },
+                                                ),
+                                            );
+                                            return Err(Error::Tls(message.to_string()));
+                                        }
+                                    }
+                                } else {
+                                    ControlConnection::new(stream, local_addr, peer)
+                                };
+                                let result = serve_connection(connection, peer, id, state).await;
+                                emit(
+                                    &sink,
+                                    FrameworkEvent::Session(SessionEvent::Closed {
+                                        id,
+                                        peer,
+                                        elapsed: started.elapsed(),
+                                        error: result.as_ref().err().map(Error::code),
+                                    }),
+                                );
+                                result
                             });
                         }
-                        Err(_) => break,
+                        Err(error) => {
+                            emit(
+                                &task_state.config.event_sink,
+                                FrameworkEvent::Server(ServerEvent::AcceptFailed {
+                                    error: Arc::from(error.to_string()),
+                                }),
+                            );
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
                     }
                 }
             }
-            let deadline = tokio::time::Instant::now() + task_state.config.shutdown_grace;
-            while !sessions.is_empty() {
-                tokio::select! {
-                    _ = tokio::time::sleep_until(deadline) => {
-                        sessions.shutdown().await;
-                        break;
-                    }
-                    joined = sessions.join_next() => {
-                        let _ = joined;
-                    }
-                }
-            }
+            task_state
+                .supervisor
+                .shutdown_after(task_state.config.shutdown_grace)
+                .await
         });
         Ok(Self {
             local_addr,
@@ -207,35 +629,76 @@ impl RtspServer {
         if !path.starts_with('/') {
             return Err(Error::Rtsp("mount path must start with '/'".into()));
         }
+        if self.state.mounts.read().await.len() >= self.state.config.resource_limits.max_mounts {
+            return Err(Error::Limit("mounts"));
+        }
         if let MountConfig::Proxy { upstream } = &mut config
             && upstream.cached_description.is_none()
         {
-            let options = ClientOptions {
-                transport: upstream.transport,
-                credentials: upstream.credentials.clone(),
-                request_timeout: upstream.request_timeout,
-                jitter: upstream.jitter.clone(),
-                ..Default::default()
-            };
-            upstream.cached_description =
-                Some(RtspClient::describe(upstream.url.clone(), options).await?);
+            let mut last_error = None;
+            for endpoint in upstream.endpoints() {
+                let options = ClientOptions {
+                    transport: endpoint.transport,
+                    credentials: endpoint.credentials,
+                    request_timeout: endpoint.request_timeout,
+                    jitter: endpoint.jitter,
+                    tls: endpoint.tls,
+                    ..Default::default()
+                };
+                match RtspClient::describe(endpoint.url, options).await {
+                    Ok(description) => {
+                        upstream.cached_description = Some(description);
+                        break;
+                    }
+                    Err(error) => last_error = Some(error),
+                }
+            }
+            if upstream.cached_description.is_none() {
+                return Err(last_error.unwrap_or(Error::Limit("proxy upstreams")));
+            }
         }
         let description = description_for(&config)?;
+        let startup_cache_config = match &config {
+            MountConfig::Proxy { upstream } => upstream.startup_cache,
+            _ => StartupCacheConfig {
+                enabled: false,
+                ..Default::default()
+            },
+        };
+        let startup_cache = KeyframeCache::new(&description, startup_cache_config)?;
         let (tx, _) = broadcast::channel(self.state.config.consumer_queue_capacity);
         let mount = Arc::new(Mount {
+            id: MountId::from(path.clone()),
             config,
             frames: tx,
-            stats: std::sync::Mutex::new(StreamStats::default()),
+            stats: StreamCounters::default(),
+            startup_cache: Mutex::new(startup_cache),
+            event_sink: self.state.config.event_sink.clone(),
             cancel: self.state.cancel.child_token(),
             proxy_running: AtomicBool::new(false),
             publishers: AtomicUsize::new(0),
             publisher_claimed: AtomicBool::new(false),
+            max_queued_bytes_per_session: self
+                .state
+                .config
+                .resource_limits
+                .max_queued_bytes_per_session,
         });
         let mut mounts = self.state.mounts.write().await;
         if mounts.contains_key(&path) {
             return Err(Error::Conflict(path.to_string()));
         }
+        if mounts.len() >= self.state.config.resource_limits.max_mounts {
+            return Err(Error::Limit("mounts"));
+        }
         mounts.insert(path.clone(), mount.clone());
+        drop(mounts);
+        emit(
+            &self.state.config.event_sink,
+            FrameworkEvent::Mount(MountEvent::Registered {
+                id: MountId::from(path.clone()),
+            }),
+        );
         Ok(MountHandle {
             path,
             description,
@@ -251,15 +714,35 @@ impl RtspServer {
             .remove(path)
             .ok_or_else(|| Error::NotFound(path.into()))?;
         mount.cancel.cancel();
+        emit(
+            &self.state.config.event_sink,
+            FrameworkEvent::Mount(MountEvent::Unregistered {
+                id: MountId::from(path),
+            }),
+        );
         Ok(())
     }
     pub async fn shutdown(mut self) -> Result<()> {
+        self.shutdown_with_report().await.map(drop)
+    }
+
+    pub async fn shutdown_with_report(&mut self) -> Result<ShutdownReport> {
+        emit(
+            &self.state.config.event_sink,
+            FrameworkEvent::Server(ServerEvent::Stopping),
+        );
         self.state.cancel.cancel();
         if let Some(task) = self.accept_task.take() {
-            task.await
+            let report = task
+                .await
                 .map_err(|error| Error::Rtsp(format!("server supervisor failed: {error}")))?;
+            emit(
+                &self.state.config.event_sink,
+                FrameworkEvent::Server(ServerEvent::Stopped),
+            );
+            return Ok(report);
         }
-        Ok(())
+        Ok(ShutdownReport::default())
     }
 }
 impl Drop for RtspServer {
@@ -278,6 +761,7 @@ fn description_for(config: &MountConfig) -> Result<MediaDescription> {
         MountConfig::Proxy { upstream } => upstream.cached_description.clone().ok_or_else(|| {
             Error::Rtsp("proxy mount requires cached SDP description before serving".into())
         }),
+        MountConfig::Vod { source } => Ok(source.description().clone()),
     }
 }
 impl MountHandle {
@@ -296,8 +780,14 @@ impl MountHandle {
         self.inner.frames.subscribe()
     }
     pub fn snapshot(&self) -> MountSnapshot {
-        let mut s = self.inner.stats.lock().unwrap().clone();
-        s.subscribers = self.inner.frames.receiver_count();
+        let subscribers = self.inner.frames.receiver_count();
+        let s = self.inner.stats.snapshot(subscribers);
+        let (startup_cache_frames, startup_cache_bytes) = self
+            .inner
+            .startup_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .usage();
         MountSnapshot {
             subscriber_count: s.subscribers,
             publisher_connected: self.inner.publishers.load(Ordering::Relaxed) > 0,
@@ -306,6 +796,8 @@ impl MountHandle {
                 _ => None,
             },
             stats: s,
+            startup_cache_frames,
+            startup_cache_bytes,
         }
     }
 }
@@ -335,16 +827,16 @@ impl LocalPublisher {
             )));
         }
         if self.inner.frames.receiver_count() == 0 {
-            self.inner.stats.lock().unwrap().dropped_frames += 1;
+            self.inner.stats.add_dropped(1);
             return Ok(PushResult::DroppedNoSubscribers);
         }
         match self.inner.frames.send(frame) {
             Ok(_) => {
-                self.inner.stats.lock().unwrap().accepted_frames += 1;
+                self.inner.stats.add_accepted(1);
                 Ok(PushResult::Accepted)
             }
             Err(_) => {
-                self.inner.stats.lock().unwrap().dropped_frames += 1;
+                self.inner.stats.add_dropped(1);
                 Ok(PushResult::DroppedQueueFull)
             }
         }
