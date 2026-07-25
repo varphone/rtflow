@@ -650,11 +650,13 @@ fn read_description(reader: &mut impl Read) -> Result<MediaDescription> {
             clock_rate: u32::from_be_bytes([fixed[5], fixed[6], fixed[7], fixed[8]]),
             fmtp: (!fmtp.is_empty()).then(|| Arc::from(fmtp)),
             control: Arc::from(control),
+            crypto: None,
         });
     }
     Ok(MediaDescription {
         session_name: Arc::from(session_name),
         tracks: descriptions,
+        connection: None,
     })
 }
 

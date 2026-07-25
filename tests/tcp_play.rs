@@ -23,7 +23,9 @@ async fn local_h264_frame_reaches_interleaved_client() {
             payload_type: 96,
             fmtp: None,
             control: Arc::from("trackID=0"),
+            crypto: None,
         }],
+        connection: None,
     };
     let mount = server
         .register_mount(Arc::from("/stream"), MountConfig::Local { description })
@@ -92,7 +94,9 @@ async fn live_stream_accepts_gstreamer_style_zero_npt_range() {
             payload_type: 96,
             fmtp: None,
             control: Arc::from("trackID=0"),
+            crypto: None,
         }],
+        connection: None,
     };
     let mount = server
         .register_mount(Arc::from("/live"), MountConfig::Local { description })

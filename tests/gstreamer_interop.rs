@@ -35,7 +35,9 @@ async fn gstreamer_rtspsrc_receives_interleaved_h264() {
                         payload_type: 96,
                         fmtp: Some(Arc::from("packetization-mode=1")),
                         control: Arc::from("video"),
+                        crypto: None,
                     }],
+                    connection: None,
                 },
             },
         )

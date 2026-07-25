@@ -340,7 +340,9 @@ mod tests {
                 payload_type: 96,
                 fmtp: None,
                 control: Arc::from("trackID=0"),
+                crypto: None,
             }],
+            connection: None,
         }
     }
 

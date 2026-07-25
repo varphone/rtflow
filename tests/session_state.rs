@@ -44,7 +44,9 @@ async fn rejects_invalid_session_and_state_transitions() {
                         payload_type: 96,
                         fmtp: None,
                         control: Arc::from("video"),
+                        crypto: None,
                     }],
+                    connection: None,
                 },
             },
         )

@@ -88,6 +88,7 @@ pub fn description(name: &str, codecs: &[CodecArg]) -> MediaDescription {
             .enumerate()
             .map(|(index, value)| track(index as u8, value.into()))
             .collect(),
+        connection: None,
     }
 }
 
@@ -130,6 +131,7 @@ pub fn track(id: u8, codec: Codec) -> TrackDescription {
         payload_type,
         fmtp: fmtp.map(Arc::from),
         control: Arc::from(format!("trackID={id}")),
+        crypto: None,
     }
 }
 

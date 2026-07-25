@@ -506,6 +506,7 @@ pub(crate) fn track_description(
         payload_type,
         fmtp,
         control: Arc::from(format!("trackID={id}")),
+        crypto: None,
     }
 }
 
@@ -513,6 +514,7 @@ pub(crate) fn file_description(name: &str, tracks: Vec<TrackDescription>) -> Med
     MediaDescription {
         session_name: Arc::from(name),
         tracks,
+        connection: None,
     }
 }
 

@@ -19,7 +19,9 @@ fn description() -> MediaDescription {
             payload_type: 96,
             fmtp: None,
             control: Arc::from("video-main"),
+            crypto: None,
         }],
+        connection: None,
     }
 }
 

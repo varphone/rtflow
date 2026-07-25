@@ -31,7 +31,9 @@ async fn mixed_transport_fanout_stays_bounded_under_burst() {
                         payload_type: 96,
                         fmtp: Some(Arc::from("packetization-mode=1")),
                         control: Arc::from("video"),
+                        crypto: None,
                     }],
+                    connection: None,
                 },
             },
         )

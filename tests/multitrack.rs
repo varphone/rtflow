@@ -19,6 +19,7 @@ fn description() -> MediaDescription {
                 payload_type: 96,
                 fmtp: None,
                 control: Arc::from("trackID=0"),
+                crypto: None,
             },
             TrackDescription {
                 id: 1,
@@ -29,8 +30,10 @@ fn description() -> MediaDescription {
                 payload_type: 8,
                 fmtp: None,
                 control: Arc::from("trackID=1"),
+                crypto: None,
             },
         ],
+        connection: None,
     }
 }
 async fn run(transport: UpstreamTransport) {
