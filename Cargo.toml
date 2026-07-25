@@ -25,7 +25,7 @@ file-storage = []
 metrics = []
 multicast = []
 ffmpeg = []
-gstreamer = []
+gstreamer = ["dep:gstreamer", "dep:gstreamer-app"]
 
 [[bench]]
 name = "hot_path"
@@ -56,6 +56,8 @@ tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "net", "syn
 tracing = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 url = "2.5"
+gstreamer = { version = "0.25", optional = true }
+gstreamer-app = { version = "0.25", optional = true }
 
 [dev-dependencies]
 clap = { version = "4.5", features = ["derive"] }

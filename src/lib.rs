@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(not(feature = "gstreamer"), forbid(unsafe_code))]
 //! Async RTSP/RTP primitives for embedded media gateways.
 //!
 //! Encoded [`AccessUnit`] values travel through the pipeline; the crate never
@@ -30,6 +30,8 @@ pub mod runtime;
 pub mod security;
 #[cfg(feature = "srtp")]
 pub mod srtp;
+#[cfg(feature = "gstreamer")]
+pub mod gst;
 #[cfg(feature = "file-storage")]
 pub mod storage;
 /// Backward-compatible recording facade. New code may use [`storage`].
