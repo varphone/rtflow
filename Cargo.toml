@@ -6,6 +6,10 @@ autobins = false
 description = "Async RTSP/RTP client, server and on-demand proxy framework for embedded media"
 publish = ["crates-io"]
 
+[[bench]]
+name = "hot_path"
+harness = false
+
 [dependencies]
 base64 = "0.23"
 bytes = "1.10"
