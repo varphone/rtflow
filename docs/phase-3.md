@@ -42,12 +42,49 @@
 - 迁移指南（`docs/migration-0.1-to-0.2.md`）
 - 弃用注解（`recording`、`tls`、`media_pipeline` 门面）
 
+## Feature Flags
+
+所有模块均可通过 Cargo features 按需启用，减少编译时间和二进制体积。
+
+```toml
+[features]
+default = ["full"]
+full = ["srtp", "tls", "mp4", "mkv", "client", "server", "file-storage", "metrics", "multicast"]
+srtp = ["dep:aes", "dep:cipher", "dep:hmac", "dep:sha1"]       # SRTP 加密
+tls = ["dep:rustls", "dep:rustls-pemfile", "dep:tokio-rustls"]  # RTSPS
+mp4 = ["dep:mp4box"]                                             # MP4 容器
+mkv = ["dep:matroska-demuxer"]                                   # MKV 容器
+client = []                                                       # RTSP 客户端
+server = ["client", "file-storage"]                               # RTSP 服务端 + 代理
+file-storage = []                                                 # 文件播放 + 录制
+metrics = []                                                      # Prometheus 指标
+multicast = []                                                    # 组播支持
+```
+
+下游用户示例：
+
+```toml
+# 最小依赖（仅协议解析 + RTP）
+rtflow = { version = "0.2", default-features = false }
+
+# 仅客户端
+rtflow = { version = "0.2", default-features = false, features = ["client"] }
+
+# 完整服务端
+rtflow = { version = "0.2", default-features = false, features = ["server", "tls"] }
+```
+
 ## 目录边界
 
 ```text
-srtp/       SRTP/SRTCP 加密与认证
-multicast/  组播配置与 socket 管理
-metrics/    指标注册表、直方图、导出端点
+srtp/       SRTP/SRTCP 加密与认证         (feature: srtp)
+multicast/  组播配置与 socket 管理         (feature: multicast)
+metrics/    指标注册表、直方图、导出端点     (feature: metrics)
+client/     RTSP 客户端                    (feature: client)
+server/     RTSP 服务端 + 代理              (feature: server)
+file/       文件解复用                      (feature: file-storage, mp4, mkv)
+storage/    录制与 VOD                      (feature: file-storage)
+security/   ACL + TLS                       (ACL: 始终编译, TLS: feature: tls)
 ```
 
 ## 运行基准
