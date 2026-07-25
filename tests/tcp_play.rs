@@ -4,6 +4,7 @@ use rtsp::proxy::UpstreamTransport;
 use rtsp::{
     AccessUnit, Codec, MediaDescription, MediaKind, MountConfig, RtspServer, ServerConfig,
     TrackDescription,
+    protocol::range::{NptPosition, NptRange},
 };
 use std::{sync::Arc, time::Duration};
 #[tokio::test]
@@ -57,6 +58,10 @@ async fn local_h264_frame_reaches_interleaved_client() {
         .unwrap()
         .unwrap();
     assert_eq!(frame.data, Bytes::from_static(&[0x65, 1, 2]));
+    let quality = client.quality_snapshot().await;
+    let track_quality = quality.tracks.get(&0).expect("track quality is available");
+    assert_eq!(track_quality.packets_received, 1);
+    assert_eq!(track_quality.packets_lost, 0);
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let stats = mount.snapshot().stats;
@@ -68,5 +73,64 @@ async fn local_h264_frame_reaches_interleaved_client() {
     })
     .await
     .unwrap();
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn live_stream_accepts_gstreamer_style_zero_npt_range() {
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let description = MediaDescription {
+        session_name: Arc::from("live-range"),
+        tracks: vec![TrackDescription {
+            id: 0,
+            kind: MediaKind::Video,
+            codec: Codec::H264,
+            clock_rate: 90_000,
+            channels: None,
+            payload_type: 96,
+            fmtp: None,
+            control: Arc::from("trackID=0"),
+        }],
+    };
+    let mount = server
+        .register_mount(Arc::from("/live"), MountConfig::Local { description })
+        .await
+        .unwrap();
+    let publisher = mount.publisher().unwrap();
+    let mut client = RtspClient::connect(
+        url::Url::parse(&format!("rtsp://{}/live", server.local_addr())).unwrap(),
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .play_range(NptRange {
+                start: NptPosition::Time(Duration::ZERO),
+                end: None,
+            })
+            .build()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    publisher
+        .try_push(AccessUnit {
+            track_id: 0,
+            codec: Codec::H264,
+            pts: Duration::ZERO,
+            dts: None,
+            rtp_timestamp: 90_000,
+            is_keyframe: true,
+            data: Bytes::from_static(&[0x65, 0x01]),
+        })
+        .unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(1), client.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(frame.data, Bytes::from_static(&[0x65, 0x01]));
+
+    client.teardown().await.unwrap();
     server.shutdown().await.unwrap();
 }

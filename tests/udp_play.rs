@@ -51,6 +51,10 @@ async fn local_h264_frame_reaches_udp_client() {
         .unwrap()
         .unwrap();
     assert_eq!(received.data, Bytes::from_static(&[0x65, 1, 2, 3]));
+    let quality = client.quality_snapshot().await;
+    let track_quality = quality.tracks.get(&0).expect("track quality is available");
+    assert_eq!(track_quality.packets_received, 1);
+    assert_eq!(track_quality.packets_lost, 0);
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let stats = mount.snapshot().stats;

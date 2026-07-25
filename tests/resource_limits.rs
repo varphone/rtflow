@@ -3,6 +3,7 @@ mod support;
 use rtsp::{
     Codec, Error, MountConfig, RtspServer, ServerConfig,
     client::{ClientOptions, RtspClient},
+    proxy::UpstreamTransport,
 };
 use std::{sync::Arc, time::Duration};
 use support::{description, unit};
@@ -76,6 +77,45 @@ async fn invalid_capacities_and_mount_operations_fail_explicitly() {
         server.unregister_mount("/limits").await,
         Err(Error::NotFound(_))
     ));
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn per_session_byte_budget_drops_oversized_access_units() {
+    let mut config = ServerConfig::new("127.0.0.1:0".parse().unwrap());
+    config.resource_limits.max_queued_bytes_per_session = 2;
+    let server = RtspServer::bind(config).await.unwrap();
+    let mount = server
+        .register_mount(
+            Arc::from("/bytes"),
+            MountConfig::Local {
+                description: description("bytes", &[Codec::H264]),
+            },
+        )
+        .await
+        .unwrap();
+    let publisher = mount.publisher().unwrap();
+    let url = url::Url::parse(&format!("rtsp://{}/bytes", server.local_addr())).unwrap();
+    let options = ClientOptions::builder()
+        .transport(UpstreamTransport::TcpInterleaved)
+        .build()
+        .unwrap();
+    let mut client = RtspClient::connect(url, options).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    publisher.try_push(unit(0, Codec::H264, 1)).unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while mount.snapshot().stats.dropped_frames == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), client.next())
+            .await
+            .is_err()
+    );
+    drop(client);
     server.shutdown().await.unwrap();
 }
 
