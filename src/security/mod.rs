@@ -1,4 +1,5 @@
 //! Network admission controls independent of a particular management plane.
+#[cfg(feature = "tls")]
 mod tls;
 
 use crate::{Error, Result};
@@ -9,6 +10,7 @@ use std::{
     sync::Mutex,
     time::{Duration, Instant},
 };
+#[cfg(feature = "tls")]
 pub use tls::{TlsClientConfig, TlsServerConfig};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

@@ -169,6 +169,7 @@ async fn run_proxy(
             credentials: endpoint.credentials.clone(),
             request_timeout: endpoint.request_timeout,
             jitter: endpoint.jitter.clone(),
+            #[cfg(feature = "tls")]
             tls: endpoint.tls.clone(),
             ..Default::default()
         };

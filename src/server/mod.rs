@@ -1,9 +1,14 @@
 mod proxy_runtime;
 mod session;
 mod tasks;
+#[cfg(feature = "file-storage")]
 mod vod_runtime;
 use session::serve_connection;
 
+#[cfg(feature = "tls")]
+use crate::security::TlsServerConfig;
+#[cfg(feature = "file-storage")]
+use crate::storage::VodSource;
 use crate::{
     Error, Result,
     auth::{AllowAll, Authenticator},
@@ -18,8 +23,6 @@ use crate::{
     proxy::{KeyframeCache, ProxyState, StartupCacheConfig, UpstreamConfig},
     runtime::{ShutdownReport, TaskSpec, TaskSupervisor, io::ControlConnection},
     security::{ConnectionRateLimiter, SecurityConfig},
-    storage::VodSource,
-    tls::TlsServerConfig,
 };
 use std::{
     collections::HashMap,
@@ -53,6 +56,7 @@ pub struct ServerConfig {
     pub resource_limits: ResourceLimits,
     pub event_sink: Arc<dyn EventSink>,
     pub security: SecurityConfig,
+    #[cfg(feature = "tls")]
     pub tls: Option<TlsServerConfig>,
 }
 impl ServerConfig {
@@ -71,6 +75,7 @@ impl ServerConfig {
             resource_limits: ResourceLimits::default(),
             event_sink: Arc::new(NoopEventSink),
             security: SecurityConfig::default(),
+            #[cfg(feature = "tls")]
             tls: None,
         }
     }
@@ -125,6 +130,7 @@ impl ServerConfig {
                 .validate()
                 .map_err(|_| ConfigError::Invalid("invalid connection rate limit"))?;
         }
+        #[cfg(feature = "tls")]
         if self
             .tls
             .as_ref()
@@ -238,6 +244,7 @@ impl ServerConfigBuilder {
         self
     }
 
+    #[cfg(feature = "tls")]
     pub fn tls(mut self, value: TlsServerConfig) -> Self {
         self.config.tls = Some(value);
         self
@@ -261,6 +268,7 @@ pub enum MountConfig {
     Proxy {
         upstream: Box<UpstreamConfig>,
     },
+    #[cfg(feature = "file-storage")]
     Vod {
         source: Arc<dyn VodSource>,
     },
@@ -542,6 +550,7 @@ impl RtspServer {
                             );
                             let state = task_state.clone();
                             let sink = state.config.event_sink.clone();
+                            #[cfg(feature = "tls")]
                             let tls = state.config.tls.clone();
                             task_state.supervisor.spawn(
                                 TaskSpec::new(format!("rtsp-session-{id}"), Operation::ReadControl),
@@ -551,6 +560,7 @@ impl RtspServer {
                                 let started = std::time::Instant::now();
                                 let local_addr = stream.local_addr()?;
                                 stream.set_nodelay(true)?;
+                                #[cfg(feature = "tls")]
                                 let connection = if let Some(tls) = tls {
                                     let acceptor = tokio_rustls::TlsAcceptor::from(tls.config);
                                     match tokio::time::timeout(
@@ -581,6 +591,8 @@ impl RtspServer {
                                 } else {
                                     ControlConnection::new(stream, local_addr, peer)
                                 };
+                                #[cfg(not(feature = "tls"))]
+                                let connection = ControlConnection::new(stream, local_addr, peer);
                                 let result = serve_connection(connection, peer, id, state).await;
                                 emit(
                                     &sink,
@@ -642,6 +654,7 @@ impl RtspServer {
                     credentials: endpoint.credentials,
                     request_timeout: endpoint.request_timeout,
                     jitter: endpoint.jitter,
+                    #[cfg(feature = "tls")]
                     tls: endpoint.tls,
                     ..Default::default()
                 };
@@ -761,6 +774,7 @@ fn description_for(config: &MountConfig) -> Result<MediaDescription> {
         MountConfig::Proxy { upstream } => upstream.cached_description.clone().ok_or_else(|| {
             Error::Rtsp("proxy mount requires cached SDP description before serving".into())
         }),
+        #[cfg(feature = "file-storage")]
         MountConfig::Vod { source } => Ok(source.description().clone()),
     }
 }

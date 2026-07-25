@@ -1,4 +1,6 @@
 //! Per-connection RTSP state machine and media task ownership.
+#[cfg(feature = "file-storage")]
+use super::vod_runtime::{VodPlayback, spawn_vod_playback};
 use super::{
     ConnectionPhase, Mount, MountConfig, State, description_for,
     proxy_runtime::start_proxy_if_idle,
@@ -6,7 +8,6 @@ use super::{
         SenderInput, spawn_interleaved_sender, spawn_interleaved_sender_from, spawn_udp_receiver,
         spawn_udp_sender, spawn_udp_sender_from,
     },
-    vod_runtime::{VodPlayback, spawn_vod_playback},
 };
 use crate::{
     Error, Result,
@@ -308,6 +309,7 @@ pub(super) async fn serve_connection(
                     .write_all(&rtsp::encode_response(&response))
                     .await?;
             } else if req.method == Method::Play {
+                #[cfg(feature = "file-storage")]
                 let vod_source = interleaved
                     .iter()
                     .map(|(mount, ..)| mount)
