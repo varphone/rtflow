@@ -1,0 +1,300 @@
+//! GStreamer integration for zero-copy media streaming.
+
+pub mod app_sink;
+pub mod app_src;
+pub mod buffer;
+pub mod pipeline;
+
+use crate::media::{Codec, MediaDescription, MediaKind, TrackDescription};
+use crate::server::{LocalPublisher, MountConfig, RtspServer};
+use crate::{Error, Result};
+use gstreamer::prelude::*;
+use gstreamer as gst;
+use gstreamer_app as gst_app;
+use pipeline::{AudioSourceConfig, EncoderConfig, TrackInfo, VideoSourceConfig};
+use std::mem::ManuallyDrop;
+use std::sync::Arc;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+
+/// GStreamer source with push or pull mode.
+pub struct GStreamerSource {
+    pipeline: gst::Pipeline,
+    tracks: Vec<TrackInfo>,
+    _mode: StreamMode,
+}
+
+#[allow(dead_code)]
+enum StreamMode {
+    Push,
+    Pull,
+}
+
+/// Builder for constructing a GStreamerSource.
+pub struct GstPipelineBuilder {
+    video: Option<VideoSourceConfig>,
+    audio: Option<AudioSourceConfig>,
+    video_encoder: Option<EncoderConfig>,
+    audio_encoder: Option<EncoderConfig>,
+    pull_mode: bool,
+}
+
+impl GstPipelineBuilder {
+    pub fn new() -> Self {
+        Self {
+            video: None,
+            audio: None,
+            video_encoder: None,
+            audio_encoder: None,
+            pull_mode: false,
+        }
+    }
+
+    pub fn video(mut self, config: VideoSourceConfig) -> Self {
+        self.video = Some(config);
+        self
+    }
+
+    pub fn audio(mut self, config: AudioSourceConfig) -> Self {
+        self.audio = Some(config);
+        self
+    }
+
+    pub fn encoder(mut self, config: EncoderConfig) -> Self {
+        match config.codec {
+            Codec::H264 | Codec::H265 => self.video_encoder = Some(config),
+            Codec::Aac | Codec::Pcma | Codec::Pcmu => self.audio_encoder = Some(config),
+        }
+        self
+    }
+
+    pub fn video_encoder(mut self, config: EncoderConfig) -> Self {
+        self.video_encoder = Some(config);
+        self
+    }
+
+    pub fn audio_encoder(mut self, config: EncoderConfig) -> Self {
+        self.audio_encoder = Some(config);
+        self
+    }
+
+    pub fn pull_mode(mut self) -> Self {
+        self.pull_mode = true;
+        self
+    }
+
+    pub fn build(self) -> Result<GStreamerSource> {
+        gst::init().map_err(|e| Error::Media(format!("GStreamer init failed: {e}")))?;
+
+        let pipeline = gst::Pipeline::new();
+        let mut tracks = Vec::new();
+
+        if let (Some(video), Some(enc)) = (&self.video, &self.video_encoder) {
+            let chain = pipeline::build_video_chain(&pipeline, video, enc)?;
+            tracks.push(TrackInfo {
+                kind: MediaKind::Video,
+                codec: enc.codec,
+                clock_rate: 90_000,
+                channels: None,
+                payload_type: 96,
+                caps: chain.caps,
+            });
+        }
+
+        if let (Some(audio), Some(enc)) = (&self.audio, &self.audio_encoder) {
+            let chain = pipeline::build_audio_chain(&pipeline, audio, enc)?;
+            let (clock_rate, channels) = match enc.codec {
+                Codec::Aac => (48_000, Some(2)),
+                Codec::Pcma | Codec::Pcmu => (8_000, Some(1)),
+                _ => (48_000, None),
+            };
+            tracks.push(TrackInfo {
+                kind: MediaKind::Audio,
+                codec: enc.codec,
+                clock_rate,
+                channels,
+                payload_type: 97,
+                caps: chain.caps,
+            });
+        }
+
+        if tracks.is_empty() {
+            return Err(Error::Media("no tracks configured".into()));
+        }
+
+        Ok(GStreamerSource {
+            pipeline,
+            tracks,
+            _mode: if self.pull_mode { StreamMode::Pull } else { StreamMode::Push },
+        })
+    }
+}
+
+impl Default for GstPipelineBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GStreamerSource {
+    /// Build a MediaDescription from the configured tracks.
+    pub fn build_media_description(&self) -> MediaDescription {
+        let tracks = self
+            .tracks
+            .iter()
+            .enumerate()
+            .map(|(i, t)| TrackDescription {
+                id: i as u8,
+                kind: t.kind,
+                codec: t.codec,
+                clock_rate: t.clock_rate,
+                channels: t.channels,
+                payload_type: t.payload_type,
+                fmtp: None,
+                control: Arc::from(format!("trackID={i}")),
+                #[cfg(feature = "srtp")]
+                crypto: None,
+            })
+            .collect();
+
+        MediaDescription {
+            session_name: Arc::from("gstreamer-source"),
+            tracks,
+            #[cfg(feature = "multicast")]
+            connection: None,
+        }
+    }
+
+    /// Register with an RTSP server and start push-mode playback.
+    pub async fn register_and_play(
+        self,
+        server: &RtspServer,
+        path: impl Into<Arc<str>>,
+    ) -> Result<GstPlayback> {
+        let description = self.build_media_description();
+        let handle = server
+            .register_mount(path, MountConfig::Local { description })
+            .await?;
+        let publisher = handle.publisher()?;
+        self.play(publisher)
+    }
+
+    /// Start push-mode playback to a LocalPublisher.
+    pub fn play(self, publisher: LocalPublisher) -> Result<GstPlayback> {
+        let bus = self
+            .pipeline
+            .bus()
+            .ok_or_else(|| Error::Media("pipeline has no bus".into()))?;
+
+        let publisher = Arc::new(publisher);
+
+        for (i, track) in self.tracks.iter().enumerate() {
+            let sink_name = match track.kind {
+                MediaKind::Video => "video-sink",
+                MediaKind::Audio => "audio-sink",
+            };
+            let appsink = self
+                .pipeline
+                .by_name(sink_name)
+                .ok_or_else(|| Error::Media(format!("appsink '{sink_name}' not found")))?
+                .downcast::<gst_app::AppSink>()
+                .map_err(|_| Error::Media(format!("'{sink_name}' is not AppSink")))?;
+
+            app_sink::setup_push_callback(
+                &appsink,
+                publisher.clone(),
+                i as u8,
+                track.codec,
+                track.clock_rate,
+            );
+        }
+
+        self.pipeline
+            .set_state(gst::State::Playing)
+            .map_err(|e| Error::Media(format!("pipeline play failed: {e}")))?;
+
+        let cancel = CancellationToken::new();
+        let task_cancel = cancel.clone();
+        let pipeline_ref = self.pipeline.clone();
+
+        let task = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = task_cancel.cancelled() => break,
+                    msg = async { bus.timed_pop(gst::ClockTime::from_seconds(1)) } => {
+                        match msg {
+                            Some(msg) => match msg.view() {
+                                gst::MessageView::Error(err) => {
+                                    return Err(Error::Media(format!(
+                                        "GStreamer error: {} ({:?})",
+                                        err.error().message(),
+                                        err.debug()
+                                    )));
+                                }
+                                gst::MessageView::Eos(_) => break,
+                                _ => {}
+                            },
+                            None => continue,
+                        }
+                    }
+                }
+            }
+
+            let _ = pipeline_ref.set_state(gst::State::Null);
+            Ok(())
+        });
+
+        Ok(GstPlayback {
+            pipeline: self.pipeline,
+            cancel,
+            task: ManuallyDrop::new(task),
+        })
+    }
+
+    /// Get the GStreamer pipeline for pull-mode setup.
+    pub fn pipeline(&self) -> &gst::Pipeline {
+        &self.pipeline
+    }
+
+    /// Get the track info.
+    pub fn tracks(&self) -> &[TrackInfo] {
+        &self.tracks
+    }
+}
+
+/// Handle to a running GStreamer playback.
+pub struct GstPlayback {
+    pipeline: gst::Pipeline,
+    cancel: CancellationToken,
+    task: ManuallyDrop<JoinHandle<Result<()>>>,
+}
+
+impl GstPlayback {
+    /// Wait for the playback to finish.
+    pub async fn wait(mut self) -> Result<()> {
+        let task = unsafe { ManuallyDrop::take(&mut self.task) };
+        // Prevent Drop from running since we took the task
+        std::mem::forget(self);
+        task.await.map_err(|e| Error::Media(e.to_string()))?
+    }
+
+    /// Stop the playback gracefully (send EOS).
+    pub fn stop(&self) {
+        self.cancel.cancel();
+        let _ = self.pipeline.send_event(gst::event::Eos::new());
+    }
+
+    /// Abort the playback immediately.
+    pub fn abort(&self) {
+        self.cancel.cancel();
+        let _ = self.pipeline.set_state(gst::State::Null);
+    }
+}
+
+impl Drop for GstPlayback {
+    fn drop(&mut self) {
+        let _ = self.pipeline.set_state(gst::State::Null);
+        // Safety: task is always initialized and we're in drop
+        unsafe { ManuallyDrop::take(&mut self.task) }.abort();
+    }
+}
