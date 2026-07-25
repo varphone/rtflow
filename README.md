@@ -10,8 +10,9 @@
 - 编码载荷：H.264 RFC 6184、H.265 RFC 7798、AAC MPEG4-GENERIC、G.711 PCMA/PCMU。
 - 文件源：MP4/MOV/M4A、Matroska/MKV、MPEG-TS/M2TS、G.711 WAV，以及裸 H.264/H.265/ADTS AAC/PCMA/PCMU；支持实时节流、起播位置、有限/无限循环、空闲暂停与有界预取。
 - 实时性：有界广播队列和 Element DAG 管线、逐 Link 溢出策略、慢消费者隔离、视频丢包后等待关键帧、乱序/重复/序号回绕处理。
-- 可靠性：UDP/TCP RTCP SR/RR、代理指数退避与抖动、无订阅者自动停拉、客户端/mount/服务端分层取消及可等待 shutdown。
-- 鉴权：服务端可插拔 `Authenticator`；客户端支持 Basic 及 Digest MD5/qop=auth。
+- 可靠性：完整 RTCP 质量统计、多上游故障转移与时间线连续、关键帧启动缓存、统一任务监督和有期限 shutdown。
+- 安全：RTSPS/Rustls、IPv4/IPv6 ACL、有界连接限流、Basic/Digest、签名 nonce 和防重放。
+- 录制/VOD：崩溃安全分段、容量保留和恢复索引；每客户端独立 `Range: npt=`、PAUSE/续播及 UDP/TCP 输出。
 
 ## 最小服务端示例
 
@@ -92,7 +93,7 @@ server.shutdown().await
 # }
 ```
 
-文件 mount 是多客户端共享同一播放时间线的广播源。第一位订阅者到来时启动，默认在没有订阅者时暂停；它不是每个 RTSP session 各自 seek 的完整 VOD 服务。
+普通文件 mount 是多客户端共享时间线；录制目录可通过 `RecordingVodSource` 注册为 `MountConfig::Vod`，为每个 RTSP session 提供独立 seek 和播放游标。
 
 ## 验证
 
@@ -100,6 +101,7 @@ server.shutdown().await
 cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo build --examples
+./tools/release-check.sh
 ```
 
 默认测试使用仓库内的确定性媒体夹具，不依赖 FFmpeg/GStreamer。真实互操作测试显式标记为 ignored，由 CI 的媒体任务强制运行：

@@ -49,4 +49,10 @@ WebM 容器可以被 Matroska parser 识别，但第一期 RTP 编码集合不�
 
 当前 `MountConfig::Local + FileSource` 是共享播放时间线：所有客户端看到同一位置，适合循环宣传片、设备回放频道、告警片段广播和文件转直播。默认无订阅者时暂停，第一位订阅者到来后继续。
 
-每个客户端独立 `Range: npt=`、PLAY/PAUSE 游标、随机 seek 和速率控制需要把 demuxer 放入 RTSP session 作用域，并为每个 session 创建独立调度器。这属于后续 VOD session 模块，不应通过为共享 mount 隐式复制 N 份 reader 来实现。
+分段录制目录可通过 `RecordingVodSource + MountConfig::Vod` 进入每会话 VOD：每个客户端拥有独立 demux、`Range: npt=` 和 PLAY/PAUSE 游标，并复用 UDP/TCP RTP sender。运行示例：
+
+```text
+cargo run --example recording_vod_server -- recordings --mount /archive
+```
+
+普通 MP4/MKV/TS 的每会话 VOD 可实现同一 `VodSource` 接口；共享 `FileSource` 不会被隐式改成 N 份 reader。

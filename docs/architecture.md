@@ -6,11 +6,11 @@
 application / device integration
         │ AccessUnit / MediaDescription
         ▼
-file ── pipeline ── server ── client ── proxy
+file/storage ── pipeline ── server ── client ── proxy
   │            │             │
   └────── runtime/framing ───┘
                │
-       protocol/{rtsp,sdp,auth,transport}
+       protocol/{rtsp,sdp,range,auth,transport}
                │
         rtp + rtcp + media
 ```
@@ -20,6 +20,8 @@ file ── pipeline ── server ── client ── proxy
 - `protocol/`：RTSP、SDP、鉴权和 Transport 的纯协议解析/编码，输入全部设上限。
 - `rtp/`、`rtcp/`：载荷编解包、jitter buffer 和控制报告。
 - `runtime/`：连接 framing，把 RTSP 消息和 `$` interleaved frame 从同一字节流中分离。
+- `security/`：CIDR ACL、有界连接限流以及 Rustls 客户端/服务端配置。
+- `storage/`：崩溃安全分段录制、恢复扫描、保留策略和每会话 VOD source。
 - `client/`：播放会话、Content-Base/control URI 解析、每轨接收任务、jitter 定时排空与自动保活。
 - `server/`：mount registry、会话状态机及发送/接收任务。
 - `proxy/`：上游配置、状态和重连策略；Proxy mount 可自动 DESCRIBE，上游 supervisor 由 mount 生命周期托管。
@@ -47,4 +49,4 @@ file ── pipeline ── server ── client ── proxy
 
 ## 当前边界
 
-第一期聚焦 RTSP/1.0 单播实时流。文件 mount 是共享时间线；RTSP `Range`、每 session 独立 demux/seek、随机访问索引缓存属于后续 VOD session 层。TLS、组播、SRTP、完整 RTCP reception report block/拥塞控制、ONVIF、录制索引和转码不在当前 crate 内；可在不改变 media/protocol 公共类型的前提下作为后续 transport、VOD session 或 pipeline 模块增加。
+共享文件 mount 仍适合循环宣传片；`MountConfig::Vod` 则为每个 RTSP session 创建独立 demux、NPT Range 和 PAUSE 游标。RTSPS 保护 RTSP 控制连接及 TCP interleaved 媒体；UDP RTP 若需加密应使用后续 SRTP transport。组播、SRTP、ONVIF、转码和集群状态复制仍是独立扩展。
