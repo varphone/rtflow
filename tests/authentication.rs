@@ -1,5 +1,5 @@
 use futures::future::BoxFuture;
-use rtsp::{
+use rtflow::{
     AccessUnit, AuthDecision, Authenticator, Codec, Credentials, MediaDescription, MediaKind,
     MountConfig, RtspServer, ServerConfig, TrackDescription,
     auth::{AuthRequest, verify_basic},
@@ -65,7 +65,7 @@ async fn credentials_protect_describe_setup_and_play() {
         .unwrap();
     let url = url::Url::parse(&format!("rtsp://{}/secured", server.local_addr())).unwrap();
     let unauthorized = RtspClient::connect(url.clone(), ClientOptions::default()).await;
-    assert!(matches!(unauthorized, Err(rtsp::Error::Unauthorized)));
+    assert!(matches!(unauthorized, Err(rtflow::Error::Unauthorized)));
     let mut session = RtspClient::connect(
         url,
         ClientOptions {

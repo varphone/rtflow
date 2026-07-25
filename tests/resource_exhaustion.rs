@@ -1,6 +1,6 @@
 mod support;
 
-use rtsp::{
+use rtflow::{
     Codec, MountConfig, RtspServer, ServerConfig,
     client::{ClientOptions, RtspClient},
 };

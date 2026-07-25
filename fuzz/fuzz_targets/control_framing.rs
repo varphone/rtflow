@@ -1,6 +1,6 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use rtsp::runtime::framing::ConnectionFramer;
+use rtflow::runtime::framing::ConnectionFramer;
 
 fuzz_target!(|data: &[u8]| {
     let mut framer = ConnectionFramer::new(16 * 1024, 256 * 1024, 65_536);

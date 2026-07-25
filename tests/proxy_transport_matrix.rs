@@ -1,6 +1,6 @@
 mod support;
 
-use rtsp::{
+use rtflow::{
     Codec, MountConfig, RtspServer, ServerConfig,
     client::{ClientOptions, RtspClient},
     proxy::{UpstreamConfig, UpstreamTransport},
@@ -76,7 +76,7 @@ async fn proxy_forwards_every_upstream_downstream_transport_pair() {
             wait_until(Duration::from_secs(2), || {
                 matches!(
                     proxy_mount.snapshot().proxy_state,
-                    Some(rtsp::proxy::ProxyState::Idle)
+                    Some(rtflow::proxy::ProxyState::Idle)
                 )
             })
             .await;

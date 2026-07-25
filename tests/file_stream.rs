@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use rtsp::{
+use rtflow::{
     AccessUnit, Codec, ContainerFormat, DemuxedSample, Demuxer, FileSource, FileSourceOptions,
     LoopMode, MediaDescription, MediaKind, MountConfig, RawFormat, RtspServer, ServerConfig,
     TrackDescription,
@@ -569,7 +569,7 @@ impl Demuxer for SyntheticDemuxer {
     fn duration(&self) -> Option<Duration> {
         Some(Duration::from_millis(20))
     }
-    fn next_sample(&mut self) -> rtsp::Result<Option<DemuxedSample>> {
+    fn next_sample(&mut self) -> rtflow::Result<Option<DemuxedSample>> {
         if self.index >= 2 {
             return Ok(None);
         }
@@ -588,7 +588,7 @@ impl Demuxer for SyntheticDemuxer {
             duration: Some(Duration::from_millis(10)),
         }))
     }
-    fn seek(&mut self, position: Duration) -> rtsp::Result<()> {
+    fn seek(&mut self, position: Duration) -> rtflow::Result<()> {
         self.index = if position >= Duration::from_millis(10) {
             1
         } else {

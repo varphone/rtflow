@@ -1,6 +1,6 @@
 use bytes::Bytes;
-use rtsp::client::{ClientOptions, RtspClient};
-use rtsp::{
+use rtflow::client::{ClientOptions, RtspClient};
+use rtflow::{
     AccessUnit, Codec, MediaDescription, MediaKind, MountConfig, RtspServer, ServerConfig,
     TrackDescription,
 };

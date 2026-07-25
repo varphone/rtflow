@@ -1,7 +1,7 @@
 mod support;
 
 use futures::future::BoxFuture;
-use rtsp::{
+use rtflow::{
     Codec, Error, LocalPublisher, MountConfig, RtspServer, ServerConfig,
     client::{ClientOptions, RtspClient},
     pipeline::{
@@ -22,8 +22,8 @@ impl Element for PublisherSink {
 
     fn process<'a>(
         &'a self,
-        input: rtsp::AccessUnit,
-    ) -> BoxFuture<'a, rtsp::Result<ElementOutput>> {
+        input: rtflow::AccessUnit,
+    ) -> BoxFuture<'a, rtflow::Result<ElementOutput>> {
         Box::pin(ready(
             self.publisher.try_push(input).map(|_| ElementOutput::Drop),
         ))
@@ -39,8 +39,8 @@ impl Element for FailingElement {
 
     fn process<'a>(
         &'a self,
-        _input: rtsp::AccessUnit,
-    ) -> BoxFuture<'a, rtsp::Result<ElementOutput>> {
+        _input: rtflow::AccessUnit,
+    ) -> BoxFuture<'a, rtflow::Result<ElementOutput>> {
         Box::pin(ready(Err(Error::Media("intentional failure".into()))))
     }
 }

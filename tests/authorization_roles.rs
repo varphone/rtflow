@@ -1,7 +1,7 @@
 mod support;
 
 use futures::future::BoxFuture;
-use rtsp::{
+use rtflow::{
     AccessRole, AuthDecision, Authenticator, Codec, MountConfig, RtspServer, ServerConfig,
     auth::AuthRequest,
 };
@@ -12,7 +12,7 @@ use std::{
 use support::{RawRtsp, description, wait_until};
 
 struct RoleRecorder {
-    roles: Arc<Mutex<Vec<(rtsp::rtsp::Method, AccessRole)>>>,
+    roles: Arc<Mutex<Vec<(rtflow::rtsp::Method, AccessRole)>>>,
 }
 
 impl Authenticator for RoleRecorder {
@@ -81,8 +81,8 @@ async fn setup_role_tracks_the_target_mount_kind() {
     wait_until(Duration::from_secs(1), || roles.lock().unwrap().len() >= 2).await;
     {
         let roles = roles.lock().unwrap();
-        assert!(roles.contains(&(rtsp::rtsp::Method::Setup, AccessRole::Read)));
-        assert!(roles.contains(&(rtsp::rtsp::Method::Setup, AccessRole::Publish)));
+        assert!(roles.contains(&(rtflow::rtsp::Method::Setup, AccessRole::Read)));
+        assert!(roles.contains(&(rtflow::rtsp::Method::Setup, AccessRole::Publish)));
     }
     server.shutdown().await.unwrap();
 }

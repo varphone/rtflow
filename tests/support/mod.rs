@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use bytes::{Bytes, BytesMut};
-use rtsp::{
+use rtflow::{
     AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription,
     rtsp::{self as wire_rtsp, Message, Response},
 };

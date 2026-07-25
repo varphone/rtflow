@@ -1,6 +1,6 @@
 mod support;
 
-use rtsp::{
+use rtflow::{
     Codec, Demuxer, MountConfig, RecordOutcome, RecordingCatalog, RecordingConfig,
     RecordingDemuxer, RecordingVodSource, RtspServer, SegmentRecorder, ServerConfig,
     client::{ClientOptions, RtspClient},

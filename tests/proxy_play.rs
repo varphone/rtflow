@@ -1,7 +1,7 @@
 use bytes::Bytes;
-use rtsp::client::{ClientOptions, RtspClient};
-use rtsp::proxy::{UpstreamConfig, UpstreamTransport};
-use rtsp::{
+use rtflow::client::{ClientOptions, RtspClient};
+use rtflow::proxy::{UpstreamConfig, UpstreamTransport};
+use rtflow::{
     AccessUnit, Codec, MediaDescription, MediaKind, MountConfig, RtspServer, ServerConfig,
     TrackDescription,
 };
@@ -81,7 +81,7 @@ async fn proxy_forwards_upstream_frames() {
         loop {
             if matches!(
                 proxy_mount.snapshot().proxy_state,
-                Some(rtsp::proxy::ProxyState::Idle)
+                Some(rtflow::proxy::ProxyState::Idle)
             ) {
                 break;
             }

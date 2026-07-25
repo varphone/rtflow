@@ -2,7 +2,7 @@ mod common;
 
 use clap::Parser;
 use common::{CodecArg, advertised_url, init_tracing, mount_path, publisher_description};
-use rtsp::{MountConfig, RtspServer, ServerConfig};
+use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
 
 /// Accept ANNOUNCE/SETUP/RECORD from an external RTSP publisher.

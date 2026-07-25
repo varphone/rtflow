@@ -3,7 +3,7 @@ mod common;
 use clap::Parser;
 use common::{CodecArg, advertised_url, description, init_tracing, mount_path, sample_unit};
 use futures::future::BoxFuture;
-use rtsp::{
+use rtflow::{
     LocalPublisher, MountConfig, RtspServer, ServerConfig,
     pipeline::{Element, ElementOutput, PipelineBuilder, PipelineState, QueueConfig},
 };
@@ -20,8 +20,8 @@ impl Element for PublisherSink {
 
     fn process<'a>(
         &'a self,
-        input: rtsp::AccessUnit,
-    ) -> BoxFuture<'a, rtsp::Result<ElementOutput>> {
+        input: rtflow::AccessUnit,
+    ) -> BoxFuture<'a, rtflow::Result<ElementOutput>> {
         Box::pin(ready(
             self.publisher.try_push(input).map(|_| ElementOutput::Drop),
         ))
@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut builder = PipelineBuilder::new();
     let source = builder.add_element(
-        Arc::new(rtsp::pipeline::IdentityElement::new("device-source")),
+        Arc::new(rtflow::pipeline::IdentityElement::new("device-source")),
         QueueConfig::default(),
     )?;
     let sink = builder.add_element(

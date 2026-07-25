@@ -1,5 +1,5 @@
 use bytes::{Bytes, BytesMut};
-use rtsp::{
+use rtflow::{
     AccessUnit, Codec,
     rtp::{Packetizer, RtpPacket},
 };
@@ -46,6 +46,6 @@ fn main() {
     let response = b"RTSP/1.0 200 OK\r\nCSeq: 42\r\nContent-Length: 0\r\n\r\n";
     measure("rtsp-parse", 200_000, || {
         let mut bytes = BytesMut::from(&response[..]);
-        black_box(rtsp::rtsp::parse(&mut bytes, 16 * 1024, 256 * 1024).unwrap());
+        black_box(rtflow::rtsp::parse(&mut bytes, 16 * 1024, 256 * 1024).unwrap());
     });
 }

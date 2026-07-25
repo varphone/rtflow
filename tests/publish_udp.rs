@@ -1,5 +1,5 @@
 use bytes::{Bytes, BytesMut};
-use rtsp::{
+use rtflow::{
     Codec, MediaDescription, MediaKind, MountConfig, RtspServer, ServerConfig, TrackDescription,
     client::{ClientOptions, RtspClient},
     proxy::UpstreamTransport,

@@ -2,7 +2,7 @@ mod common;
 
 use clap::Parser;
 use common::{advertised_url, init_tracing, mount_path};
-use rtsp::{MountConfig, RecordingVodSource, RtspServer, ServerConfig};
+use rtflow::{MountConfig, RecordingVodSource, RtspServer, ServerConfig};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 /// Serve a segmented recording directory with per-session NPT seek.

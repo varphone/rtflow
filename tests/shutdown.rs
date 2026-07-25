@@ -1,4 +1,4 @@
-use rtsp::{RtspServer, ServerConfig};
+use rtflow::{RtspServer, ServerConfig};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 

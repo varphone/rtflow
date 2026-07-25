@@ -3,7 +3,7 @@ mod common;
 use clap::{Parser, ValueEnum};
 use common::{CodecArg, advertised_url, description, init_tracing, mount_path, sample_unit};
 use futures::future::BoxFuture;
-use rtsp::{
+use rtflow::{
     AccessRole, AuthDecision, Authenticator, Credentials, MountConfig, RtspServer, ServerConfig,
     auth::{AuthRequest, verify_basic, verify_digest},
 };

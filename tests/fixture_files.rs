@@ -1,4 +1,4 @@
-use rtsp::{Codec, FileSource, FileSourceOptions};
+use rtflow::{Codec, FileSource, FileSourceOptions};
 use std::{collections::HashSet, path::PathBuf};
 
 fn fixture(name: &str) -> PathBuf {

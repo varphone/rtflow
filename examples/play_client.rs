@@ -2,7 +2,7 @@ mod common;
 
 use clap::Parser;
 use common::{TransportArg, credentials, init_tracing};
-use rtsp::{
+use rtflow::{
     Codec,
     client::{ClientOptions, RtspClient},
 };

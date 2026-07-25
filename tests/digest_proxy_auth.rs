@@ -1,7 +1,7 @@
 mod support;
 
 use futures::future::BoxFuture;
-use rtsp::{
+use rtflow::{
     AuthDecision, Authenticator, Codec, Credentials, MountConfig, RtspServer, ServerConfig,
     auth::{AuthRequest, verify_digest},
     client::{ClientOptions, RtspClient},
@@ -58,7 +58,7 @@ async fn proxy_authenticates_to_a_digest_protected_upstream() {
     assert!(
         matches!(
             RtspClient::describe(upstream_url.clone(), ClientOptions::default()).await,
-            Err(rtsp::Error::Unauthorized)
+            Err(rtflow::Error::Unauthorized)
         ),
         "anonymous DESCRIBE must be rejected"
     );

@@ -1,7 +1,7 @@
 mod support;
 
 use bytes::Bytes;
-use rtsp::{
+use rtflow::{
     AccessUnit, Codec, MountConfig, RtspServer, ServerConfig,
     client::{ClientOptions, RtspClient},
     proxy::{UpstreamConfig, UpstreamTransport},

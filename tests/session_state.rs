@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use rtsp::{
+use rtflow::{
     Codec, MediaDescription, MediaKind, MountConfig, RtspServer, ServerConfig, TrackDescription,
     rtsp::{self as wire_rtsp, Message, Response},
 };

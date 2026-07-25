@@ -9,7 +9,7 @@ use common::{
     },
     mount_path, publisher_description,
 };
-use rtsp::{MountConfig, RtspServer, ServerConfig};
+use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use url::Url;
 

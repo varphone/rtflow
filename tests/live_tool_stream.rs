@@ -1,6 +1,6 @@
 mod support;
 
-use rtsp::{Codec, MountConfig, RtspServer, ServerConfig};
+use rtflow::{Codec, MountConfig, RtspServer, ServerConfig};
 use std::{process::Stdio, sync::Arc, time::Duration};
 use support::{description, wait_until};
 use tokio::{io::AsyncReadExt, process::Command};

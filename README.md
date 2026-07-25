@@ -1,4 +1,4 @@
-# rtsp-rust
+# rtspflow
 
 面向嵌入式实时音视频网关的异步 RTSP/RTP 框架。核心数据面只传递编码后的 `bytes::Bytes`，不做解码或转码，便于直接连接硬件编码器、DMA 输出缓冲区和自定义媒体管线。
 
@@ -18,7 +18,7 @@
 
 ```rust,no_run
 use bytes::Bytes;
-use rtsp::{
+use rtflow::{
     AccessUnit, Codec, MediaDescription, MediaKind, MountConfig, RtspServer,
     ServerConfig, TrackDescription,
 };
@@ -63,7 +63,7 @@ async fn main() -> rtsp::Result<()> {
 
 ## 动态实时串流
 
-无需准备媒体文件即可运行完整的 `FFmpeg → Rust RTSP → GStreamer` 链路：
+无需准备媒体文件即可运行完整的 `FFmpeg → Rtflow → GStreamer` 链路：
 
 ```text
 cargo run --example live_stream_demo
@@ -75,7 +75,7 @@ cargo run --example live_stream_demo -- --headless --duration 10
 ## 文件服务器
 
 ```rust,no_run
-use rtsp::{FileSource, FileSourceOptions, LoopMode, MountConfig, RtspServer, ServerConfig};
+use rtflow::{FileSource, FileSourceOptions, LoopMode, MountConfig, RtspServer, ServerConfig};
 use std::sync::Arc;
 
 # async fn serve() -> rtsp::Result<()> {

@@ -2,7 +2,7 @@ mod common;
 
 use clap::Parser;
 use common::{CodecArg, advertised_url, description, init_tracing, mount_path, sample_unit};
-use rtsp::{MountConfig, RtspServer, ServerConfig};
+use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
 
 /// Publish mock hardware-encoder access units into a local RTSP mount.

@@ -1,6 +1,6 @@
 mod support;
 
-use rtsp::{
+use rtflow::{
     EventSink, FrameworkEvent, MountConfig, ResourceLimits, RtspServer, ServerConfig,
     observe::{MountEvent, RejectReason, ServerEvent, SessionEvent},
 };
@@ -56,7 +56,7 @@ async fn emits_lifecycle_events_and_releases_peer_quota() {
         .register_mount(
             Arc::from("/observed"),
             MountConfig::Local {
-                description: description("observed", &[rtsp::Codec::H264]),
+                description: description("observed", &[rtflow::Codec::H264]),
             },
         )
         .await
@@ -153,7 +153,7 @@ fn builders_reject_zero_limits_before_runtime_start() {
             .is_err()
     );
     assert!(
-        rtsp::client::ClientOptions::builder()
+        rtflow::client::ClientOptions::builder()
             .request_timeout(Duration::ZERO)
             .build()
             .is_err()

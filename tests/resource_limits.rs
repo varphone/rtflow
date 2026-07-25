@@ -1,6 +1,6 @@
 mod support;
 
-use rtsp::{
+use rtflow::{
     Codec, Error, MountConfig, RtspServer, ServerConfig,
     client::{ClientOptions, RtspClient},
     proxy::UpstreamTransport,
@@ -68,7 +68,7 @@ async fn invalid_capacities_and_mount_operations_fail_explicitly() {
     ));
     assert_eq!(
         publisher.try_push(unit(0, Codec::H264, 1)).unwrap(),
-        rtsp::server::PushResult::DroppedNoSubscribers
+        rtflow::server::PushResult::DroppedNoSubscribers
     );
     assert_eq!(mount.snapshot().stats.dropped_frames, 1);
     server.unregister_mount("/limits").await.unwrap();

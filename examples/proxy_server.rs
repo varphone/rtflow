@@ -2,7 +2,7 @@ mod common;
 
 use clap::Parser;
 use common::{TransportArg, advertised_url, credentials, init_tracing, mount_path};
-use rtsp::{
+use rtflow::{
     MountConfig, RtspServer, ServerConfig,
     proxy::{ReconnectPolicy, UpstreamConfig},
 };

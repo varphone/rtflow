@@ -1,7 +1,7 @@
 mod support;
 
 use rcgen::{CertifiedKey, generate_simple_self_signed};
-use rtsp::{
+use rtflow::{
     Codec, MountConfig, RtspServer, ServerConfig, TlsClientConfig, TlsServerConfig,
     client::{ClientOptions, RtspClient},
     proxy::{UpstreamConfig, UpstreamTransport},

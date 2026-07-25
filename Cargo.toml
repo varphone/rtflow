@@ -1,11 +1,11 @@
 [package]
-name = "rtsp"
+name = "rtflow"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 autobins = false
 description = "Async RTSP/RTP client, server and on-demand proxy framework for embedded media"
-documentation = "https://docs.rs/rtsp"
+documentation = "https://docs.rs/rtflow"
 readme = "README.md"
 publish = ["crates-io"]
 

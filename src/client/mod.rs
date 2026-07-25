@@ -464,8 +464,7 @@ fn encode_request(
     extra: Option<&str>,
     authorization: Option<&str>,
 ) -> String {
-    let mut wire =
-        format!("{method} {uri} RTSP/1.0\r\nCSeq: {cseq}\r\nUser-Agent: rtsp-rust/0.1\r\n");
+    let mut wire = format!("{method} {uri} RTSP/1.0\r\nCSeq: {cseq}\r\nUser-Agent: rtflow/0.1\r\n");
     if let Some(value) = authorization {
         wire.push_str("Authorization: ");
         wire.push_str(value);
