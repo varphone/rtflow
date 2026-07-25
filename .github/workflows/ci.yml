@@ -49,6 +49,22 @@ jobs:
           cargo build --examples
           ./tools/check-examples.sh
 
+  feature-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test no default features
+        run: cargo test --no-default-features --lib
+      - name: Test each feature individually
+        run: |
+          for feat in srtp tls mp4 mkv client server file-storage metrics multicast; do
+            echo "=== Testing feature: $feat ==="
+            cargo check --no-default-features --features "$feat"
+          done
+      - name: Test combined features
+        run: cargo check --no-default-features --features "server,tls,srtp"
+
   media-interop:
     runs-on: ubuntu-latest
     steps:
