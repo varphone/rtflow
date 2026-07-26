@@ -10,7 +10,6 @@ const FLV_TAG_HEADER_SIZE: usize = 11;
 pub struct FlvMuxer {
     has_video: bool,
     has_audio: bool,
-    video_codec: Codec,
     video_sequence_header_sent: bool,
     audio_sequence_header_sent: bool,
     tag_buffer: BytesMut,
@@ -35,7 +34,6 @@ impl FlvMuxer {
             .iter()
             .find(|t| t.kind == crate::media::MediaKind::Video);
         let has_video = video_track.is_some();
-        let video_codec = video_track.map(|t| t.codec).unwrap_or(Codec::H264);
         let has_audio = description
             .tracks
             .iter()
@@ -43,7 +41,6 @@ impl FlvMuxer {
         Self {
             has_video,
             has_audio,
-            video_codec,
             video_sequence_header_sent: false,
             audio_sequence_header_sent: false,
             tag_buffer: BytesMut::with_capacity(4096),
