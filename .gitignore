@@ -6,3 +6,6 @@ Cargo.lock
 /fuzz/target
 /fuzz/artifacts
 /fuzz/corpus
+
+# Reasonix configuration
+reasonix.toml
