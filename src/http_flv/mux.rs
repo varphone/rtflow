@@ -1,3 +1,4 @@
+use base64::Engine;
 use bytes::{BufMut, Bytes, BytesMut};
 use std::time::Duration;
 
@@ -17,8 +18,10 @@ pub struct FlvMuxer {
     video_sequence_header: Option<Bytes>,
     /// Cached AAC audio specific config (sequence header).
     aac_sequence_header: Option<Bytes>,
-    /// PTS of the first frame, used to normalize timestamps to start at 0.
-    first_pts: Option<Duration>,
+    /// PTS of the first video frame, used to normalize timestamps to start at 0.
+    first_video_pts: Option<Duration>,
+    /// PTS of the first audio frame, used to normalize timestamps to start at 0.
+    first_audio_pts: Option<Duration>,
 }
 
 impl FlvMuxer {
@@ -36,7 +39,8 @@ impl FlvMuxer {
             tag_buffer: BytesMut::with_capacity(4096),
             video_sequence_header: None,
             aac_sequence_header: None,
-            first_pts: None,
+            first_video_pts: None,
+            first_audio_pts: None,
         }
     }
 
@@ -70,12 +74,20 @@ impl FlvMuxer {
 
         // Normalize PTS to start at 0 so the FLV player doesn't wait
         // for a distant initial timestamp.
-        let base = *self.first_pts.get_or_insert(unit.pts);
-        let normalized_pts = unit.pts.saturating_sub(base);
+        let normalized_pts = match unit.codec {
+            Codec::H264 | Codec::H265 => {
+                let base = *self.first_video_pts.get_or_insert(unit.pts);
+                unit.pts.saturating_sub(base)
+            }
+            Codec::Aac | Codec::Pcma | Codec::Pcmu => {
+                let base = *self.first_audio_pts.get_or_insert(unit.pts);
+                unit.pts.saturating_sub(base)
+            }
+        };
         let mut normalized = unit.clone();
         normalized.pts = normalized_pts;
         if let Some(dts) = normalized.dts {
-            normalized.dts = Some(dts.saturating_sub(base));
+            normalized.dts = Some(dts); // dts already relative to stream base
         }
 
         match normalized.codec {
@@ -222,6 +234,66 @@ impl FlvMuxer {
         buf.put_slice(&pps);
 
         Some(buf.freeze())
+    }
+
+    /// Build an AVCDecoderConfigurationRecord from pre-extracted SPS/PPS NALs.
+    pub fn build_avc_sequence_header_from_nals(sps: &[u8], pps: &[u8]) -> Option<Bytes> {
+        if sps.len() < 4 || pps.is_empty() { return None; }
+        let mut buf = BytesMut::new();
+        buf.put_u8(1); buf.put_u8(sps[1]); buf.put_u8(sps[2]); buf.put_u8(sps[3]);
+        buf.put_u8(0xff); buf.put_u8(0xe1); buf.put_u16(sps.len() as u16); buf.put_slice(sps);
+        buf.put_u8(1); buf.put_u16(pps.len() as u16); buf.put_slice(pps);
+        Some(buf.freeze())
+    }
+
+    /// Build a HEVCDecoderConfigurationRecord from pre-extracted VPS/SPS/PPS NALs.
+    pub fn build_h265_sequence_header_from_nals(vps: &[u8], sps: &[u8], pps: &[u8]) -> Option<Bytes> {
+        if vps.len() < 2 || sps.len() <= 12 || pps.len() < 2 { return None; }
+        let p = &sps[2..];
+        let mut buf = BytesMut::with_capacity(128);
+        buf.put_u8(1); buf.put_u8(p[0]);
+        buf.put_slice(&p[1..5]); buf.put_slice(&p[5..11]);
+        buf.put_u8(p[11]); buf.put_u16(0xf000);
+        buf.put_u8(0xfc); buf.put_u8(0xfd); buf.put_u8(0xf8); buf.put_u8(0xf8);
+        buf.put_u16(0); buf.put_u8(0x0f); buf.put_u8(3);
+        buf.put_u8(0xa0); buf.put_u16(1); buf.put_u16(vps.len() as u16); buf.put_slice(vps);
+        buf.put_u8(0xa1); buf.put_u16(1); buf.put_u16(sps.len() as u16); buf.put_slice(sps);
+        buf.put_u8(0xa2); buf.put_u16(1); buf.put_u16(pps.len() as u16); buf.put_slice(pps);
+        Some(buf.freeze())
+    }
+
+    /// Parse AAC AudioSpecificConfig from an fmtp string.
+    pub fn parse_aac_config_from_fmtp(fmtp: &str) -> Option<Bytes> {
+        let config_hex = fmtp.split(';').find(|kv| kv.trim().starts_with("config="))
+            .and_then(|kv| kv.split('=').nth(1))?.trim();
+        let bytes: Option<Vec<u8>> = (0..config_hex.len()).step_by(2)
+            .map(|i| u8::from_str_radix(&config_hex[i..i+2], 16).ok()).collect();
+        let bytes = bytes?;
+        if bytes.is_empty() { return None; }
+        Some(Bytes::from(bytes))
+    }
+
+    /// Parse H.265 sprop-vps/sprop-sps/sprop-pps from an fmtp string.
+    pub fn parse_h265_sprop_from_fmtp(fmtp: &str) -> (Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>) {
+        let b64_decode = |key: &str| -> Option<Vec<u8>> {
+            let val = fmtp.split(';').find(|kv| kv.trim().starts_with(key))
+                .and_then(|kv| kv.split('=').nth(1))?.trim();
+            base64::engine::general_purpose::STANDARD.decode(val).ok()
+        };
+        (b64_decode("sprop-vps"), b64_decode("sprop-sps"), b64_decode("sprop-pps"))
+    }
+
+    /// Parse H.264 sprop-parameter-sets from an fmtp string.
+    pub fn parse_h264_sprop_from_fmtp(fmtp: &str) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+        let val = match fmtp.split(';').find(|kv| kv.trim().starts_with("sprop-parameter-sets"))
+            .and_then(|kv| kv.split('=').nth(1)) {
+            Some(v) => v.trim(),
+            None => return (None, None),
+        };
+        let parts: Vec<&str> = val.split(',').collect();
+        if parts.len() < 2 { return (None, None); }
+        let decode = |b64: &str| base64::engine::general_purpose::STANDARD.decode(b64.trim()).ok();
+        (decode(parts[0]), decode(parts[1]))
     }
 }
 
@@ -383,7 +455,11 @@ fn write_g711_audio_tag(buf: &mut BytesMut, unit: &AccessUnit) {
 fn annex_b_to_avcc(data: &Bytes) -> Bytes {
     let nals = parse_annex_b_nals(data);
     if nals.is_empty() {
-        return data.clone();
+        // No start code — treat whole buffer as a single NAL.
+        let mut buf = BytesMut::with_capacity(4 + data.len());
+        buf.put_u32(data.len() as u32);
+        buf.put_slice(data);
+        return buf.freeze();
     }
 
     let total_size: usize = nals.iter().map(|n| 4 + n.len()).sum();
