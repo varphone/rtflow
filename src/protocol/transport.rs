@@ -1,6 +1,7 @@
 //! Transport-independent RTP delivery primitives shared by client and server.
 use crate::{Error, Result};
 use bytes::{Buf, Bytes, BytesMut};
+use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     net::{IpAddr, SocketAddr},
     ops::RangeInclusive,
@@ -137,6 +138,22 @@ pub struct UdpPair {
     pub rtp: Arc<UdpSocket>,
     pub rtcp: Arc<UdpSocket>,
 }
+const UDP_RECEIVE_BUFFER_SIZE: usize = 4 * 1024 * 1024;
+
+fn bind_udp(addr: SocketAddr) -> Result<UdpSocket> {
+    let domain = match addr {
+        SocketAddr::V4(_) => Domain::IPV4,
+        SocketAddr::V6(_) => Domain::IPV6,
+    };
+    let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP)).map_err(Error::Io)?;
+    socket.set_nonblocking(true).map_err(Error::Io)?;
+    socket
+        .set_recv_buffer_size(UDP_RECEIVE_BUFFER_SIZE)
+        .map_err(Error::Io)?;
+    socket.bind(&addr.into()).map_err(Error::Io)?;
+    UdpSocket::from_std(socket.into()).map_err(Error::Io)
+}
+
 impl UdpPair {
     pub async fn bind(ip: IpAddr, range: Option<RangeInclusive<u16>>) -> Result<Self> {
         if let Some(range) = range {
@@ -147,8 +164,8 @@ impl UdpPair {
                 if !range.contains(&rtcp_port) {
                     continue;
                 }
-                if let Ok(rtp) = UdpSocket::bind(SocketAddr::new(ip, rtp_port)).await
-                    && let Ok(rtcp) = UdpSocket::bind(SocketAddr::new(ip, rtcp_port)).await
+                if let Ok(rtp) = bind_udp(SocketAddr::new(ip, rtp_port))
+                    && let Ok(rtcp) = bind_udp(SocketAddr::new(ip, rtcp_port))
                 {
                     return Ok(Self {
                         rtp: Arc::new(rtp),
@@ -162,12 +179,12 @@ impl UdpPair {
             )));
         }
         for _ in 0..64 {
-            let rtp = UdpSocket::bind(SocketAddr::new(ip, 0)).await?;
+            let rtp = bind_udp(SocketAddr::new(ip, 0))?;
             let port = rtp.local_addr()?.port();
             let Some(rtcp_port) = port.checked_add(1) else {
                 continue;
             };
-            if let Ok(rtcp) = UdpSocket::bind(SocketAddr::new(ip, rtcp_port)).await {
+            if let Ok(rtcp) = bind_udp(SocketAddr::new(ip, rtcp_port)) {
                 return Ok(Self {
                     rtp: Arc::new(rtp),
                     rtcp: Arc::new(rtcp),
