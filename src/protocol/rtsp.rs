@@ -14,6 +14,7 @@ pub enum Method {
     Teardown,
     GetParameter,
     SetParameter,
+    Unsupported,
 }
 impl Method {
     pub fn as_str(self) -> &'static str {
@@ -28,6 +29,7 @@ impl Method {
             Self::Teardown => "TEARDOWN",
             Self::GetParameter => "GET_PARAMETER",
             Self::SetParameter => "SET_PARAMETER",
+            Self::Unsupported => "UNSUPPORTED",
         }
     }
 }
@@ -45,7 +47,7 @@ impl FromStr for Method {
             "TEARDOWN" => Ok(Self::Teardown),
             "GET_PARAMETER" => Ok(Self::GetParameter),
             "SET_PARAMETER" => Ok(Self::SetParameter),
-            _ => Err(Error::Rtsp(format!("unsupported method {s}"))),
+            _ => Ok(Self::Unsupported),
         }
     }
 }
@@ -91,7 +93,17 @@ pub fn parse(input: &mut BytesMut, max_header: usize, max_body: usize) -> Result
         let (k, v) = line
             .split_once(':')
             .ok_or_else(|| Error::Rtsp("malformed header".into()))?;
-        headers.insert(k.trim().to_ascii_lowercase(), v.trim().to_owned());
+        let key = k.trim();
+        if key.is_empty()
+            || !key
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            || headers
+                .insert(key.to_ascii_lowercase(), v.trim().to_owned())
+                .is_some()
+        {
+            return Err(Error::Rtsp("duplicate or malformed header".into()));
+        }
     }
     let len = headers
         .get("content-length")
@@ -174,6 +186,23 @@ mod tests {
         let mut input = BytesMut::from(&wire[..]);
         assert!(parse(&mut input, 1024, 1024).is_err());
         assert_eq!(&input[..], wire);
+    }
+
+    #[test]
+    fn rejects_duplicate_headers_and_preserves_input() {
+        let wire = b"OPTIONS rtsp://x/a RTSP/1.0\r\nCSeq: 1\r\nCSeq: 2\r\n\r\n";
+        let mut input = BytesMut::from(&wire[..]);
+        assert!(parse(&mut input, 1024, 1024).is_err());
+        assert_eq!(&input[..], wire);
+    }
+
+    #[test]
+    fn preserves_unknown_methods_for_a_501_response() {
+        let mut input = BytesMut::from("FROBNICATE rtsp://x/a RTSP/1.0\r\nCSeq: 1\r\n\r\n");
+        let Some(Message::Request(request)) = parse(&mut input, 1024, 1024).unwrap() else {
+            panic!("expected request");
+        };
+        assert_eq!(request.method, Method::Unsupported);
     }
 
     #[test]

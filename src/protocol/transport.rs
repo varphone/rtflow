@@ -25,14 +25,70 @@ pub enum TransportSpec {
 }
 impl TransportSpec {
     pub fn parse(value: &str) -> Result<Self> {
-        let parts: Vec<_> = value.split(';').map(str::trim).collect();
+        let mut alternatives = Self::parse_all(value)?;
+        if alternatives.len() != 1 {
+            return Err(Error::Rtsp(
+                "expected exactly one Transport alternative".into(),
+            ));
+        }
+        Ok(alternatives.remove(0))
+    }
+
+    pub fn parse_all(value: &str) -> Result<Vec<Self>> {
+        let alternatives = value
+            .split(',')
+            .map(str::trim)
+            .map(Self::parse_one)
+            .collect::<Result<Vec<_>>>()?;
+        if alternatives.is_empty() {
+            return Err(Error::Rtsp("empty Transport".into()));
+        }
+        Ok(alternatives)
+    }
+
+    fn parse_one(value: &str) -> Result<Self> {
+        let mut parts = value.split(';').map(str::trim);
         let profile = parts
-            .first()
+            .next()
+            .filter(|value| !value.is_empty())
             .ok_or_else(|| Error::Rtsp("empty Transport".into()))?;
+        let mut parameters = std::collections::BTreeMap::new();
+        let mut unicast = false;
+        for part in parts {
+            if part.eq_ignore_ascii_case("unicast") {
+                if unicast {
+                    return Err(Error::Rtsp("duplicate unicast Transport parameter".into()));
+                }
+                unicast = true;
+                continue;
+            }
+            if part.eq_ignore_ascii_case("multicast") {
+                return Err(Error::Rtsp("multicast Transport is unsupported".into()));
+            }
+            let (name, value) = part
+                .split_once('=')
+                .ok_or_else(|| Error::Rtsp("malformed Transport parameter".into()))?;
+            let name = name.trim().to_ascii_lowercase();
+            let value = value.trim();
+            if name.is_empty() || value.is_empty() || parameters.insert(name, value).is_some() {
+                return Err(Error::Rtsp(
+                    "duplicate or malformed Transport parameter".into(),
+                ));
+            }
+        }
+        if !unicast {
+            return Err(Error::Rtsp("only unicast Transport is supported".into()));
+        }
+        if let Some(mode) = parameters.get("mode")
+            && !mode.eq_ignore_ascii_case("play")
+            && !mode.eq_ignore_ascii_case("record")
+        {
+            return Err(Error::Rtsp("unsupported Transport mode".into()));
+        }
+
         if profile.eq_ignore_ascii_case("RTP/AVP/TCP") {
-            let channels = parts
-                .iter()
-                .find_map(|p| p.strip_prefix("interleaved="))
+            let channels = parameters
+                .get("interleaved")
                 .ok_or_else(|| Error::Rtsp("TCP Transport has no interleaved channels".into()))?;
             let (rtp, rtcp) = port_pair(channels)?;
             return Ok(Self::TcpInterleaved {
@@ -46,15 +102,16 @@ impl TransportSpec {
         {
             return Err(Error::Rtsp("unsupported RTP transport profile".into()));
         }
-        let client = parts
-            .iter()
-            .find_map(|p| p.strip_prefix("client_port="))
+        let client = parameters
+            .get("client_port")
             .ok_or_else(|| Error::Rtsp("UDP Transport has no client_port".into()))?;
         let (client_rtp, client_rtcp) = port_pair(client)?;
-        let (server_rtp, server_rtcp) = parts
-            .iter()
-            .find_map(|p| p.strip_prefix("server_port="))
-            .map(port_pair)
+        if client_rtp == 0 {
+            return Err(Error::Rtsp("UDP client_port must be non-zero".into()));
+        }
+        let (server_rtp, server_rtcp) = parameters
+            .get("server_port")
+            .map(|value| port_pair(value))
             .transpose()?
             .map_or((None, None), |(a, b)| (Some(a), Some(b)));
         Ok(Self::Udp {
@@ -64,6 +121,7 @@ impl TransportSpec {
             server_rtcp,
         })
     }
+
     pub fn render(&self) -> String {
         match self {
             Self::Udp {
@@ -89,8 +147,13 @@ fn port_pair(s: &str) -> Result<(u16, u16)> {
     let (a, b) = s
         .split_once('-')
         .ok_or_else(|| Error::Rtsp("port pair must use '-'".into()))?;
-    let a = u16::from_str(a).map_err(|_| Error::Rtsp("invalid RTP port".into()))?;
-    let b = u16::from_str(b).map_err(|_| Error::Rtsp("invalid RTCP port".into()))?;
+    let a = u16::from_str(a.trim()).map_err(|_| Error::Rtsp("invalid RTP port".into()))?;
+    let b = u16::from_str(b.trim()).map_err(|_| Error::Rtsp("invalid RTCP port".into()))?;
+    if b != a.checked_add(1).unwrap_or_default() {
+        return Err(Error::Rtsp(
+            "RTP/RTCP values must be an adjacent pair".into(),
+        ));
+    }
     Ok((a, b))
 }
 #[derive(Clone, Debug)]
@@ -213,6 +276,8 @@ pub enum PeerTransport {
 /// Upstream transport selection for proxy and client connections.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UpstreamTransport {
+    /// Attempt UDP first, then reconnect and use TCP interleaving if SETUP fails.
+    Auto,
     Udp,
     TcpInterleaved,
 }
@@ -228,6 +293,25 @@ mod tests {
             t
         );
     }
+    #[test]
+    fn parses_transport_alternatives_in_client_order() {
+        let alternatives = TransportSpec::parse_all(
+            "RTP/AVP;unicast;client_port=5000-5001, RTP/AVP/TCP;unicast;interleaved=0-1",
+        )
+        .unwrap();
+        assert!(matches!(alternatives[0], TransportSpec::Udp { .. }));
+        assert!(matches!(
+            alternatives[1],
+            TransportSpec::TcpInterleaved { .. }
+        ));
+        assert!(
+            TransportSpec::parse(
+                "RTP/AVP;unicast;client_port=5000-5001, RTP/AVP/TCP;unicast;interleaved=0-1"
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn rejects_invalid_interleaved_bounds() {
         assert!(TransportSpec::parse("RTP/AVP/TCP;interleaved=256-257").is_err());
