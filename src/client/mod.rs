@@ -26,7 +26,7 @@ use tokio::{
     net::TcpStream,
     sync::{Mutex, mpsc},
     task::JoinHandle,
-    time::{Instant, sleep_until, timeout},
+    time::{Instant, sleep, sleep_until, timeout},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -45,7 +45,7 @@ pub struct ClientOptions {
 impl Default for ClientOptions {
     fn default() -> Self {
         Self {
-            transport: UpstreamTransport::Udp,
+            transport: UpstreamTransport::Auto,
             credentials: None,
             request_timeout: Duration::from_secs(5),
             jitter: JitterBufferConfig::default(),
@@ -55,6 +55,60 @@ impl Default for ClientOptions {
             tls: None,
             play_range: None,
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ClientReconnectPolicy {
+    /// Delay before the first reconnect attempt.
+    pub initial_delay: Duration,
+    /// Upper bound for exponential reconnect backoff.
+    pub max_delay: Duration,
+    /// Number of failed reconnect attempts before reporting an error; zero retries forever.
+    pub max_attempts: u32,
+}
+
+impl Default for ClientReconnectPolicy {
+    fn default() -> Self {
+        Self {
+            initial_delay: Duration::from_secs(1),
+            max_delay: Duration::from_secs(10),
+            max_attempts: 0,
+        }
+    }
+}
+
+impl ClientReconnectPolicy {
+    fn validate(&self) -> Result<()> {
+        if self.initial_delay == Duration::ZERO || self.max_delay < self.initial_delay {
+            return Err(Error::Limit("client reconnect delay"));
+        }
+        Ok(())
+    }
+}
+
+pub struct ReconnectingClientSession {
+    pub description: MediaDescription,
+    receiver: mpsc::Receiver<Result<AccessUnit>>,
+    cancel: CancellationToken,
+    task: JoinHandle<()>,
+}
+
+impl ReconnectingClientSession {
+    pub async fn next(&mut self) -> Option<Result<AccessUnit>> {
+        self.receiver.recv().await
+    }
+
+    pub async fn teardown(self) {
+        self.cancel.cancel();
+        self.task.abort();
+    }
+}
+
+impl Drop for ReconnectingClientSession {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        self.task.abort();
     }
 }
 
@@ -250,6 +304,7 @@ impl ClientSession {
                 .await
                 .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
                 .ok_or(Error::Closed)?;
+            validate_response_cseq(&response, cseq)?;
             if response.status == 401
                 && let (Some(credentials), Some(challenge)) = (
                     self.credentials.as_ref(),
@@ -274,6 +329,7 @@ impl ClientSession {
                     .await
                     .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
                     .ok_or(Error::Closed)?;
+                validate_response_cseq(&response, cseq)?;
             }
             if response.status != 200 {
                 return Err(status_error(method, response.status));
@@ -322,8 +378,98 @@ impl RtspClient {
 
     pub async fn connect(url: url::Url, options: ClientOptions) -> Result<ClientSession> {
         validate_options(&options)?;
-        let (stream, uri, setup_base, description) = open_and_describe(&url, &options).await?;
-        setup::connect(stream, uri, setup_base, description, options).await
+        if options.transport != UpstreamTransport::Auto {
+            let (stream, uri, setup_base, description) = open_and_describe(&url, &options).await?;
+            return setup::connect(stream, uri, setup_base, description, options).await;
+        }
+
+        let mut udp_options = options.clone();
+        udp_options.transport = UpstreamTransport::Udp;
+        let (stream, uri, setup_base, description) = open_and_describe(&url, &udp_options).await?;
+        match setup::connect(stream, uri, setup_base, description, udp_options).await {
+            Ok(session) => Ok(session),
+            Err(udp_error) => {
+                tracing::debug!(error = %udp_error, "UDP RTSP SETUP failed; retrying with TCP interleaving");
+                let mut tcp_options = options;
+                tcp_options.transport = UpstreamTransport::TcpInterleaved;
+                let (stream, uri, setup_base, description) =
+                    open_and_describe(&url, &tcp_options).await?;
+                setup::connect(stream, uri, setup_base, description, tcp_options).await
+            }
+        }
+    }
+
+    /// Connect and keep retrying after a media-session disconnect.
+    ///
+    /// Initial connection failures are still returned to the caller.
+    pub async fn connect_reconnecting(
+        url: url::Url,
+        options: ClientOptions,
+        policy: ClientReconnectPolicy,
+    ) -> Result<ReconnectingClientSession> {
+        policy.validate()?;
+        let initial = Self::connect(url.clone(), options.clone()).await?;
+        let description = initial.description.clone();
+        let (tx, receiver) = mpsc::channel(options.output_queue_capacity);
+        let cancel = CancellationToken::new();
+        let task_cancel = cancel.clone();
+        let task = tokio::spawn(async move {
+            let mut active = Some(initial);
+            let mut failures = 0u32;
+            let mut delay = policy.initial_delay;
+            loop {
+                let mut session = match active.take() {
+                    Some(session) => session,
+                    None => match Self::connect(url.clone(), options.clone()).await {
+                        Ok(session) => {
+                            failures = 0;
+                            delay = policy.initial_delay;
+                            session
+                        }
+                        Err(error) => {
+                            failures = failures.saturating_add(1);
+                            if policy.max_attempts != 0 && failures >= policy.max_attempts {
+                                let _ = tx.send(Err(error)).await;
+                                return;
+                            }
+                            tracing::warn!(error = %error, delay_ms = delay.as_millis(), "RTSP client reconnect failed");
+                            tokio::select! {
+                                _ = task_cancel.cancelled() => return,
+                                _ = sleep(delay) => {}
+                            }
+                            delay = delay.saturating_mul(2).min(policy.max_delay);
+                            continue;
+                        }
+                    },
+                };
+
+                loop {
+                    tokio::select! {
+                        _ = task_cancel.cancelled() => return,
+                        frame = session.next() => match frame {
+                            Some(frame) => {
+                                if tx.send(frame).await.is_err() {
+                                    return;
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                }
+                tracing::warn!("RTSP client session ended; reconnecting");
+                tokio::select! {
+                    _ = task_cancel.cancelled() => return,
+                    _ = sleep(delay) => {}
+                }
+                delay = delay.saturating_mul(2).min(policy.max_delay);
+            }
+        });
+        Ok(ReconnectingClientSession {
+            description,
+            receiver,
+            cancel,
+            task,
+        })
     }
 }
 
@@ -526,6 +672,15 @@ async fn request(
     Ok(response)
 }
 
+fn validate_response_cseq(response: &Response, cseq: u32) -> Result<()> {
+    if response.headers.get("cseq").map(String::as_str) != Some(cseq.to_string().as_str()) {
+        return Err(Error::Rtsp(
+            "RTSP response CSeq does not match request".into(),
+        ));
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn send_request(
     stream: &mut ControlConnection,
@@ -544,7 +699,10 @@ async fn send_request(
     loop {
         if let Some(message) = rtsp::parse(stream.read_ahead_mut(), 16 * 1024, 256 * 1024)? {
             return match message {
-                Message::Response(response) => Ok(response),
+                Message::Response(response) => {
+                    validate_response_cseq(&response, cseq)?;
+                    Ok(response)
+                }
                 _ => Err(Error::Rtsp("server sent request".into())),
             };
         }

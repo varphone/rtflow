@@ -3,6 +3,7 @@ mod support;
 use rtflow::{
     Codec, MountConfig, RtspServer, ServerConfig,
     client::{ClientOptions, RtspClient},
+    proxy::UpstreamTransport,
 };
 use std::{ops::RangeInclusive, sync::Arc, time::Duration};
 use support::{RawRtsp, description};
@@ -73,13 +74,25 @@ async fn udp_port_range_exhaustion_fails_the_second_setup() {
         .await
         .unwrap();
     let url = url::Url::parse(&format!("rtsp://{}/ports", server.local_addr())).unwrap();
-    let first = RtspClient::connect(url.clone(), ClientOptions::default())
-        .await
-        .unwrap();
+    let first = RtspClient::connect(
+        url.clone(),
+        ClientOptions {
+            transport: UpstreamTransport::Udp,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
     assert!(
-        RtspClient::connect(url, ClientOptions::default())
-            .await
-            .is_err(),
+        RtspClient::connect(
+            url,
+            ClientOptions {
+                transport: UpstreamTransport::Udp,
+                ..Default::default()
+            }
+        )
+        .await
+        .is_err(),
         "a second UDP SETUP must fail when the configured pair is occupied"
     );
     first.teardown().await.unwrap();

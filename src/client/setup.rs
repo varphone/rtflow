@@ -31,6 +31,9 @@ pub(super) async fn connect(
         crate::transport::UpstreamTransport::TcpInterleaved => {
             connect_interleaved(stream, uri, setup_base, description, options).await
         }
+        crate::transport::UpstreamTransport::Auto => Err(Error::Rtsp(
+            "automatic transport selection must be resolved before SETUP".into(),
+        )),
     }
 }
 
