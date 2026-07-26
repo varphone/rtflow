@@ -118,7 +118,7 @@ async fn handle_connection(
     }
 
     let (mut read_half, write_half) = stream.into_split();
-    let mut writer = Some(ResponseWriter::new(tokio::io::BufWriter::new(write_half)));
+    let mut writer = Some(ResponseWriter::new(write_half));
     let mut buf = Vec::with_capacity(READ_BUF_SIZE);
 
     loop {

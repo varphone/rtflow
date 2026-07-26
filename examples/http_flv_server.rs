@@ -60,8 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // HTTP server (FLV playback)
     let mut http_server = HttpServer::bind(HttpConfig::new(args.http_listen)).await?;
     let flv_path = format!("{}.flv", args.mount);
-    let receiver = mount.subscribe();
-    let handler = create_flv_handler(mount.description.clone(), receiver);
+    let handler = create_flv_handler(mount.description.clone(), mount.frame_sender().clone());
     http_server.add_route(Method::Get, &flv_path, handler).await;
     http_server.run().await?;
 

@@ -45,13 +45,6 @@ fn h264_keyframe() -> Bytes {
     Bytes::from(data)
 }
 
-fn h264_interframe() -> Bytes {
-    let mut data = Vec::new();
-    data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-    data.extend_from_slice(&[0x41, 0x9a, 0x00, 0x10]);
-    Bytes::from(data)
-}
-
 #[test]
 fn flv_muxer_video_tag_roundtrip() {
     let desc = h264_description();
@@ -137,24 +130,28 @@ async fn http_flv_e2e_stream() {
     let mut http_server = HttpServer::bind(http_config).await.unwrap();
     let http_addr = http_server.local_addr();
 
-    // Create FLV handler
-    let receiver = mount.subscribe();
-    let handler = create_flv_handler(description.clone(), receiver);
+    // Create FLV handler using frame_sender for per-request subscribe()
+    let handler = create_flv_handler(description.clone(), mount.frame_sender().clone());
     http_server.add_route(Method::Get, "/live/test.flv", handler).await;
     http_server.run().await.unwrap();
 
-    // Push a keyframe
-    publisher
-        .try_push(AccessUnit {
-            track_id: 0,
-            codec: Codec::H264,
-            pts: Duration::from_millis(0),
-            dts: None,
-            rtp_timestamp: 0,
-            is_keyframe: true,
-            data: h264_keyframe(),
-        })
-        .unwrap();
+    // Publish frames continuously in background (simulates live encoder)
+    let pub_handle = tokio::spawn(async move {
+        for i in 0..20u64 {
+            let is_key = i % 10 == 0;
+            let data = h264_keyframe();
+            let _ = publisher.try_push(AccessUnit {
+                track_id: 0,
+                codec: Codec::H264,
+                pts: Duration::from_millis(i * 40),
+                dts: None,
+                rtp_timestamp: (i * 3600) as u32,
+                is_keyframe: is_key,
+                data,
+            });
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    });
 
     // Connect to HTTP-FLV endpoint
     let mut stream = tokio::net::TcpStream::connect(http_addr).await.unwrap();
@@ -163,18 +160,18 @@ async fn http_flv_e2e_stream() {
         .await
         .unwrap();
 
-    // Read response
+    // Read response — the handler writes headers + FLV data as they arrive
     let mut buf = vec![0u8; 4096];
     let mut total = Vec::new();
-    // Give some time for the response
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Read until we get enough FLV data or timeout
     loop {
-        match tokio::time::timeout(Duration::from_millis(200), stream.read(&mut buf)).await {
+        match tokio::time::timeout(Duration::from_millis(500), stream.read(&mut buf)).await {
             Ok(Ok(0)) => break,
             Ok(Ok(n)) => {
                 total.extend_from_slice(&buf[..n]);
-                if total.len() >= 13 {
-                    break; // Got enough data
+                // We need at least: HTTP headers + FLV header (13 bytes) + one tag
+                if total.len() > 100 {
+                    break;
                 }
             }
             _ => break,
@@ -187,10 +184,10 @@ async fn http_flv_e2e_stream() {
     assert!(response.contains("Transfer-Encoding: chunked"));
     assert!(response.contains("video/x-flv"));
     // The response body should contain FLV data (chunked encoded)
-    // Find the FLV signature in the response body (after chunk headers)
     let has_flv = total.windows(3).any(|w| w == b"FLV");
     assert!(has_flv, "response should contain FLV data");
 
+    let _ = pub_handle.await;
     http_server.shutdown();
 }
 
@@ -216,28 +213,29 @@ async fn http_flv_concurrent_subscribers() {
     let http_addr = http_server.local_addr();
 
     // Register two FLV handlers for different paths
-    let receiver1 = mount.subscribe();
-    let handler1 = create_flv_handler(description.clone(), receiver1);
+    let handler1 = create_flv_handler(description.clone(), mount.frame_sender().clone());
     http_server.add_route(Method::Get, "/live/stream1.flv", handler1).await;
 
-    let receiver2 = mount.subscribe();
-    let handler2 = create_flv_handler(description.clone(), receiver2);
+    let handler2 = create_flv_handler(description.clone(), mount.frame_sender().clone());
     http_server.add_route(Method::Get, "/live/stream2.flv", handler2).await;
 
     http_server.run().await.unwrap();
 
-    // Push a frame
-    publisher
-        .try_push(AccessUnit {
-            track_id: 0,
-            codec: Codec::H264,
-            pts: Duration::from_millis(0),
-            dts: None,
-            rtp_timestamp: 0,
-            is_keyframe: true,
-            data: h264_keyframe(),
-        })
-        .unwrap();
+    // Publish frames continuously in background
+    let pub_handle = tokio::spawn(async move {
+        for i in 0..20u64 {
+            let _ = publisher.try_push(AccessUnit {
+                track_id: 0,
+                codec: Codec::H264,
+                pts: Duration::from_millis(i * 40),
+                dts: None,
+                rtp_timestamp: (i * 3600) as u32,
+                is_keyframe: i % 10 == 0,
+                data: h264_keyframe(),
+            });
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    });
 
     // Connect two clients
     let mut stream1 = tokio::net::TcpStream::connect(http_addr).await.unwrap();
@@ -255,13 +253,12 @@ async fn http_flv_concurrent_subscribers() {
     // Both should receive data
     let mut buf1 = vec![0u8; 4096];
     let mut buf2 = vec![0u8; 4096];
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let n1 = tokio::time::timeout(Duration::from_millis(200), stream1.read(&mut buf1))
+    let n1 = tokio::time::timeout(Duration::from_millis(500), stream1.read(&mut buf1))
         .await
         .unwrap_or(Ok(0))
         .unwrap_or(0);
-    let n2 = tokio::time::timeout(Duration::from_millis(200), stream2.read(&mut buf2))
+    let n2 = tokio::time::timeout(Duration::from_millis(500), stream2.read(&mut buf2))
         .await
         .unwrap_or(Ok(0))
         .unwrap_or(0);
@@ -269,5 +266,6 @@ async fn http_flv_concurrent_subscribers() {
     assert!(n1 > 0, "stream1 should receive HTTP response");
     assert!(n2 > 0, "stream2 should receive HTTP response");
 
+    let _ = pub_handle.await;
     http_server.shutdown();
 }

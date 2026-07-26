@@ -34,10 +34,13 @@ impl Default for HlsConfig {
 
 /// Create HLS HTTP handlers for a mount.
 /// Returns handlers for playlist, segment, and init segment endpoints.
+///
+/// Uses `frame_sender.subscribe()` to create a fresh receiver for the
+/// background segmenter, ensuring it receives frames from the start.
 pub fn create_hls_handlers(
     config: HlsConfig,
     description: MediaDescription,
-    receiver: broadcast::Receiver<AccessUnit>,
+    frame_sender: broadcast::Sender<AccessUnit>,
 ) -> (Handler, Handler, Handler) {
     let ring = Arc::new(SegmentRing::new(config.segment_count));
     let target_duration = config.segment_duration;
@@ -46,7 +49,7 @@ pub fn create_hls_handlers(
     // Spawn background segmenter task
     let ring_clone = ring.clone();
     let desc_clone = description.clone();
-    let mut rx = receiver.resubscribe();
+    let mut rx = frame_sender.subscribe();
     let seg_config = SegmenterConfig {
         segment_duration: config.segment_duration,
         lookback_count: config.segment_count,

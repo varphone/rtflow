@@ -5,9 +5,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::tcp::OwnedWriteHalf;
-use tokio::io::BufWriter;
 
-type ConnWriter = BufWriter<OwnedWriteHalf>;
+type ConnWriter = OwnedWriteHalf;
 
 pub type Handler = Arc<
     dyn Fn(HttpRequest, ResponseWriter<ConnWriter>) -> Pin<Box<dyn Future<Output = Result<ResponseWriter<ConnWriter>>> + Send>>

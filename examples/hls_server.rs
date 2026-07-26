@@ -77,9 +77,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         segment_count: args.segment_count,
         live: true,
     };
-    let receiver = mount.subscribe();
     let (playlist_handler, segment_handler, init_handler) =
-        create_hls_handlers(hls_config, mount.description.clone(), receiver);
+        create_hls_handlers(hls_config, mount.description.clone(), mount.frame_sender().clone());
 
     // Register HLS routes
     let playlist_path = format!("{}.m3u8", args.mount);

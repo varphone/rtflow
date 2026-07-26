@@ -793,6 +793,11 @@ impl MountHandle {
     pub fn subscribe(&self) -> broadcast::Receiver<AccessUnit> {
         self.inner.frames.subscribe()
     }
+    /// Get the broadcast sender for creating per-request subscribers.
+    /// Use `sender.subscribe()` to create a fresh receiver for each connection.
+    pub fn frame_sender(&self) -> &broadcast::Sender<AccessUnit> {
+        &self.inner.frames
+    }
     pub fn snapshot(&self) -> MountSnapshot {
         let subscribers = self.inner.frames.receiver_count();
         let s = self.inner.stats.snapshot(subscribers);
