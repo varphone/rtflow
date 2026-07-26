@@ -1,4 +1,5 @@
 use bytes::{BufMut, Bytes, BytesMut};
+use std::time::Duration;
 
 use crate::media::{AccessUnit, Codec, MediaDescription};
 
@@ -16,6 +17,8 @@ pub struct FlvMuxer {
     video_sequence_header: Option<Bytes>,
     /// Cached AAC audio specific config (sequence header).
     aac_sequence_header: Option<Bytes>,
+    /// PTS of the first frame, used to normalize timestamps to start at 0.
+    first_pts: Option<Duration>,
 }
 
 impl FlvMuxer {
@@ -33,6 +36,7 @@ impl FlvMuxer {
             tag_buffer: BytesMut::with_capacity(4096),
             video_sequence_header: None,
             aac_sequence_header: None,
+            first_pts: None,
         }
     }
 
@@ -64,35 +68,45 @@ impl FlvMuxer {
     pub fn encode(&mut self, unit: &AccessUnit) -> Bytes {
         self.tag_buffer.clear();
 
-        match unit.codec {
+        // Normalize PTS to start at 0 so the FLV player doesn't wait
+        // for a distant initial timestamp.
+        let base = *self.first_pts.get_or_insert(unit.pts);
+        let normalized_pts = unit.pts.saturating_sub(base);
+        let mut normalized = unit.clone();
+        normalized.pts = normalized_pts;
+        if let Some(dts) = normalized.dts {
+            normalized.dts = Some(dts.saturating_sub(base));
+        }
+
+        match normalized.codec {
             Codec::H264 => {
                 if !self.video_sequence_header_sent {
                     if let Some(ref seq) = self.video_sequence_header {
-                        write_h264_video_tag(&mut self.tag_buffer, unit, seq, true);
+                        write_h264_video_tag(&mut self.tag_buffer, &normalized, seq, true);
                         self.video_sequence_header_sent = true;
                     }
                 }
-                let avcc_data = annex_b_to_avcc(&unit.data);
-                write_h264_video_tag(&mut self.tag_buffer, unit, &avcc_data, false);
+                let avcc_data = annex_b_to_avcc(&normalized.data);
+                write_h264_video_tag(&mut self.tag_buffer, &normalized, &avcc_data, false);
             }
             Codec::H265 => {
                 if !self.video_sequence_header_sent {
                     if let Some(ref seq) = self.video_sequence_header {
-                        write_h265_video_tag(&mut self.tag_buffer, unit, seq, true);
+                        write_h265_video_tag(&mut self.tag_buffer, &normalized, seq, true);
                         self.video_sequence_header_sent = true;
                     }
                 }
-                let hvcc_data = annex_b_to_avcc(&unit.data);
-                write_h265_video_tag(&mut self.tag_buffer, unit, &hvcc_data, false);
+                let hvcc_data = annex_b_to_avcc(&normalized.data);
+                write_h265_video_tag(&mut self.tag_buffer, &normalized, &hvcc_data, false);
             }
             Codec::Aac => {
                 if !self.audio_sequence_header_sent {
                     if let Some(ref seq) = self.aac_sequence_header {
-                        write_audio_tag(&mut self.tag_buffer, unit, seq, true);
+                        write_audio_tag(&mut self.tag_buffer, &normalized, seq, true);
                         self.audio_sequence_header_sent = true;
                     }
                 }
-                write_audio_tag(&mut self.tag_buffer, unit, &unit.data, false);
+                write_audio_tag(&mut self.tag_buffer, &normalized, &normalized.data, false);
             }
             Codec::Pcma | Codec::Pcmu => {
                 write_g711_audio_tag(&mut self.tag_buffer, unit);
@@ -547,15 +561,27 @@ mod tests {
         let desc = make_h265_description();
         let mut muxer = FlvMuxer::new(&desc);
 
-        // Minimal H.265 data with VPS/SPS/PPS
+        // Minimal H.265 data with VPS/SPS/PPS.
+        // SPS must be long enough for build_h265_sequence_header to parse
+        // profile_tier_level (needs >=13 bytes after the 2-byte NAL header + 1-byte SPS header).
         let mut data = Vec::new();
-        // VPS (nal_type=32, byte = 0x40)
+        // VPS (nal_type=32, first byte = 0x40)
         data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
         data.extend_from_slice(&[0x40, 0x01]);
-        // SPS (nal_type=33, byte = 0x42)
+        // SPS (nal_type=33, first byte = 0x42)
         data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-        data.extend_from_slice(&[0x42, 0x01]);
-        // PPS (nal_type=34, byte = 0x44)
+        // NAL header: [0x42, 0x01], then SPS RBSP:
+        //   [0]: sps_video_parameter_set_id(4)+sps_max_sub_layers_minus1(3)+sps_temporal_id_nesting_flag(1)
+        //   [1..12]: profile_tier_level (12 bytes minimum)
+        data.extend_from_slice(&[
+            0x42, 0x01,       // NAL header
+            0x00,             // sps params
+            0x01,             // general_profile_idc = 1 (Main)
+            0x00, 0x00, 0x00, 0x00, // general_profile_compatibility_flags
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x60, // general_constraint_indicator_flags
+            0x78,             // general_level_idc = 120 (level 3.0)
+        ]);
+        // PPS (nal_type=34, first byte = 0x44)
         data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
         data.extend_from_slice(&[0x44, 0x01]);
 
