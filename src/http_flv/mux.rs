@@ -155,18 +155,36 @@ impl FlvMuxer {
         let sps = sps?;
         let pps = pps?;
 
-        // Parse SPS to extract profile/level info
-        // HEVCDecoderConfigurationRecord
+        // Parse profile_tier_level from SPS.
+        // SPS NAL: 2-byte NAL header, then sps_video_parameter_set_id(4),
+        // sps_max_sub_layers_minus1(3), sps_temporal_id_nesting_flag(1),
+        // then profile_tier_level starts at byte 2 of the NAL unit.
+        let p = if sps.len() > 12 { &sps[2..] } else { &[] };
+
+        let general_profile_idc = if !p.is_empty() { p[0] & 0x1f } else { 1 }; // Main
+        let general_profile_compatibility_flags = if p.len() >= 6 {
+            [p[1], p[2], p[3], p[4]]
+        } else {
+            [0, 0, 0, 0]
+        };
+        // general_constraint_indicator_flags: 6 bytes starting at p[5]
+        let general_constraint_indicator_flags = if p.len() >= 12 {
+            [p[5], p[6], p[7], p[8], p[9], p[10]]
+        } else {
+            [0, 0, 0, 0, 0, 0]
+        };
+        let general_level_idc = if p.len() >= 13 { p[11] } else { 120 }; // level 3.0
+
         let mut buf = BytesMut::new();
         buf.put_u8(1);                       // configurationVersion
         // general_profile_space(2) + general_tier_flag(1) + general_profile_idc(5)
-        buf.put_u8(sps.get(3).copied().unwrap_or(0));
+        buf.put_u8(general_profile_idc);
         // general_profile_compatibility_flags (4 bytes)
-        buf.put_slice(&[0, 0, 0, 0]); // simplified
+        buf.put_slice(&general_profile_compatibility_flags);
         // general_constraint_indicator_flags (6 bytes)
-        buf.put_slice(&[0, 0, 0, 0, 0, 0]);
+        buf.put_slice(&general_constraint_indicator_flags);
         // general_level_idc
-        buf.put_u8(sps.get(12).copied().unwrap_or(0));
+        buf.put_u8(general_level_idc);
         // min_spatial_segmentation_idc (16 bits, top 4 bits reserved)
         buf.put_u16(0xf000);
         // parallelismType (8 bits, top 6 bits reserved)
