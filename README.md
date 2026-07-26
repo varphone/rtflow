@@ -13,6 +13,13 @@
 - 可靠性：完整 RTCP 质量统计、多上游故障转移与时间线连续、关键帧启动缓存、统一任务监督和有期限 shutdown。
 - 安全：RTSPS/Rustls、IPv4/IPv6 ACL、有界连接限流、Basic/Digest、签名 nonce 和防重放。
 - 录制/VOD：崩溃安全分段、容量保留和恢复索引；每客户端独立 `Range: npt=`、PAUSE/续播及 UDP/TCP 输出。
+- HTTP 分发：HTTP-FLV（H.264/H.265 + AAC）和基于 fMP4 的 HLS live playlist；HLS 分段在随机访问点切换，并提供独立 init segment。
+
+## 分发能力边界
+
+HTTP-FLV 与 HLS 是当前优先维护的 RTSP 输出协议。HLS 仍是 live 基线：实际分段长度取决于下一个视频随机访问点，因此要达到 1–3 秒端到端延迟，编码器 GOP/关键帧间隔必须不大于目标分段时长。
+
+`dash`、`rtmp`、`srt`、`webrtc` feature 目前仅保留模块占位，不能视为可用协议实现；生产部署不应启用或对外承诺这些能力。
 
 ## 最小服务端示例
 

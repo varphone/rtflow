@@ -825,6 +825,14 @@ impl MountHandle {
     pub fn announce_fmtp(&self) -> HashMap<u8, Arc<str>> {
         self.inner.announce_fmtp.lock().unwrap().clone()
     }
+    /// Cancellation token tied to the mount lifetime.
+    pub fn cancellation_token(&self) -> CancellationToken {
+        self.inner.cancel.clone()
+    }
+    /// RTSP mount path, suitable as the canonical HTTP asset prefix.
+    pub fn path(&self) -> &str {
+        self.inner.id.as_str()
+    }
     pub fn snapshot(&self) -> MountSnapshot {
         let subscribers = self.inner.frames.receiver_count();
         let s = self.inner.stats.snapshot(subscribers);

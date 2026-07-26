@@ -3,12 +3,12 @@ pub mod playlist;
 pub mod segment_ring;
 pub mod segmenter;
 
-use crate::http::{Handler, Method};
-use crate::media::{AccessUnit, MediaDescription};
+use crate::http::Handler;
+use crate::media::MediaDescription;
 use segment_ring::SegmentRing;
 use segmenter::{Segmenter, SegmenterConfig};
-use std::sync::Arc;
 use std::time::Duration;
+use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::broadcast;
 
 /// HLS configuration.
@@ -32,91 +32,86 @@ impl Default for HlsConfig {
     }
 }
 
-/// Create HLS HTTP handlers for a mount.
-/// Returns handlers for playlist, segment, and init segment endpoints.
-///
-/// Uses `frame_sender.subscribe()` to create a fresh receiver for the
-/// background segmenter, ensuring it receives frames from the start.
+/// Create HLS HTTP handlers backed by a mount startup snapshot and tied to its lifetime.
 pub fn create_hls_handlers(
     config: HlsConfig,
-    description: MediaDescription,
-    frame_sender: broadcast::Sender<AccessUnit>,
+    mount: &crate::server::MountHandle,
 ) -> (Handler, Handler, Handler) {
     let ring = Arc::new(SegmentRing::new(config.segment_count));
     let target_duration = config.segment_duration;
     let is_live = config.live;
+    let mut description: MediaDescription = mount.description.clone();
+    let announced_fmtp = mount.announce_fmtp();
+    for track in &mut description.tracks {
+        if let Some(fmtp) = announced_fmtp.get(&track.id) {
+            track.fmtp = Some(fmtp.clone());
+        }
+    }
+    let (mut receiver, startup) = mount.subscribe_with_startup();
+    let cancel = mount.cancellation_token();
+    let asset_prefix: Arc<str> = Arc::from(mount.path());
 
-    // Spawn background segmenter task
     let ring_clone = ring.clone();
-    let desc_clone = description.clone();
-    let mut rx = frame_sender.subscribe();
     let seg_config = SegmenterConfig {
         segment_duration: config.segment_duration,
         lookback_count: config.segment_count,
     };
-
     tokio::spawn(async move {
-        let mut segmenter = Segmenter::new(seg_config, &desc_clone);
-        let mut seg_rx = segmenter.subscribe();
-
-        // Spawn a task to push frames into the segmenter
-        let segmenter = Arc::new(tokio::sync::Mutex::new(segmenter));
-        let seg_for_push = segmenter.clone();
-
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(unit) => {
-                        seg_for_push.lock().await.push(unit);
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
-
-        // Receive completed segments and push to ring
+        let mut segmenter = Segmenter::new(seg_config, &description);
+        let mut segments = segmenter.subscribe();
+        let mut startup = VecDeque::from(startup);
         loop {
-            match seg_rx.recv().await {
-                Ok(segment) => {
-                    ring_clone.push(segment);
+            let unit = if let Some(unit) = startup.pop_front() {
+                unit
+            } else {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    result = receiver.recv() => match result {
+                        Ok(unit) => unit,
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    },
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => break,
+            };
+            segmenter.push(unit);
+            while let Ok(segment) = segments.try_recv() {
+                ring_clone.push(segment);
             }
+        }
+        segmenter.flush();
+        while let Ok(segment) = segments.try_recv() {
+            ring_clone.push(segment);
         }
     });
 
-    // Playlist handler
     let ring_p = ring.clone();
+    let playlist_asset_prefix = asset_prefix.clone();
     let playlist_handler: Handler = Arc::new(move |_req, writer| {
         let r = ring_p.clone();
+        let asset_prefix = playlist_asset_prefix.clone();
         Box::pin(async move {
-            handler::serve_playlist(_req, writer, &r, is_live, target_duration).await
+            handler::serve_playlist(_req, writer, &r, is_live, target_duration, &asset_prefix).await
         })
     });
 
-    // Segment handler (/{seq}.m4s)
     let ring_s = ring.clone();
     let segment_handler: Handler = Arc::new(move |_req, writer| {
         let r = ring_s.clone();
         Box::pin(async move {
-            let seq_str = _req.path.rsplit('/').next().unwrap_or("0");
-            let seq = seq_str
-                .trim_end_matches(".m4s")
-                .parse::<u64>()
-                .unwrap_or(0);
+            let seq = _req
+                .path
+                .rsplit('/')
+                .next()
+                .and_then(|value| value.trim_end_matches(".m4s").parse::<u64>().ok())
+                .unwrap_or(u64::MAX);
             handler::serve_segment(_req, writer, &r, seq).await
         })
     });
 
-    // Init segment handler
     let ring_i = ring.clone();
     let init_handler: Handler = Arc::new(move |_req, writer| {
         let r = ring_i.clone();
-        Box::pin(async move {
-            handler::serve_init_segment(_req, writer, &r).await
-        })
+        Box::pin(async move { handler::serve_init_segment(_req, writer, &r).await })
     });
 
     (playlist_handler, segment_handler, init_handler)

@@ -77,17 +77,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         segment_count: args.segment_count,
         live: true,
     };
-    let (playlist_handler, segment_handler, init_handler) =
-        create_hls_handlers(hls_config, mount.description.clone(), mount.frame_sender().clone());
+    let (playlist_handler, segment_handler, init_handler) = create_hls_handlers(hls_config, &mount);
 
     // Register HLS routes
     let playlist_path = format!("{}.m3u8", args.mount);
-    let segment_path = format!("{}/{{seq}}.m4s", args.mount);
+    let segment_path = format!("{}/{{seq}}", args.mount);
     let init_path = format!("{}/init.m4s", args.mount);
 
-    http_server.add_route(Method::Get, &playlist_path, playlist_handler).await;
-    http_server.add_route(Method::Get, &segment_path, segment_handler).await;
-    http_server.add_route(Method::Get, &init_path, init_handler).await;
+    http_server
+        .add_route(Method::Get, &playlist_path, playlist_handler)
+        .await;
+    http_server
+        .add_route(Method::Get, &init_path, init_handler)
+        .await;
+    http_server
+        .add_route(Method::Get, &segment_path, segment_handler)
+        .await;
     http_server.run().await?;
 
     let rtsp_url = format!(

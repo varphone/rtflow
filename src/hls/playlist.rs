@@ -1,13 +1,37 @@
 use super::segmenter::Segment;
 use std::time::Duration;
 
+fn asset_uri(asset_prefix: &str, asset: &str) -> String {
+    let prefix = asset_prefix.trim_end_matches('/');
+    if prefix.is_empty() {
+        asset.to_owned()
+    } else {
+        format!("{prefix}/{asset}")
+    }
+}
+
 /// Generate a live HLS M3U8 playlist.
 pub fn write_live_playlist(segments: &[Segment], target_duration: Duration) -> String {
+    write_live_playlist_at(segments, target_duration, "")
+}
+
+/// Generate a live playlist whose init and media URIs are rooted at `asset_prefix`.
+pub fn write_live_playlist_at(
+    segments: &[Segment],
+    target_duration: Duration,
+    asset_prefix: &str,
+) -> String {
     if segments.is_empty() {
         return String::new();
     }
 
-    let target_secs = target_duration.as_secs().max(1);
+    let target_secs = segments
+        .iter()
+        .map(|segment| segment.duration.as_secs_f64().ceil() as u64)
+        .max()
+        .unwrap_or(1)
+        .max(target_duration.as_secs_f64().ceil() as u64)
+        .max(1);
     let mut playlist = String::with_capacity(512);
 
     playlist.push_str("#EXTM3U\n");
@@ -20,11 +44,18 @@ pub fn write_live_playlist(segments: &[Segment], target_duration: Duration) -> S
     }
 
     playlist.push_str("#EXT-X-DISCONTINUITY-SEQUENCE:0\n");
+    playlist.push_str(&format!(
+        "#EXT-X-MAP:URI=\"{}\"\n",
+        asset_uri(asset_prefix, "init.m4s")
+    ));
 
     for segment in segments {
         let duration = segment.duration.as_secs_f64();
         playlist.push_str(&format!("#EXTINF:{:.3},\n", duration));
-        playlist.push_str(&format!("segment-{}.m4s\n", segment.sequence));
+        playlist.push_str(&format!(
+            "{}\n",
+            asset_uri(asset_prefix, &format!("{}.m4s", segment.sequence))
+        ));
     }
 
     playlist
@@ -32,13 +63,18 @@ pub fn write_live_playlist(segments: &[Segment], target_duration: Duration) -> S
 
 /// Generate a VOD HLS M3U8 playlist (with EXT-X-ENDLIST).
 pub fn write_vod_playlist(segments: &[Segment]) -> String {
+    write_vod_playlist_at(segments, "")
+}
+
+/// Generate a VOD playlist whose init and media URIs are rooted at `asset_prefix`.
+pub fn write_vod_playlist_at(segments: &[Segment], asset_prefix: &str) -> String {
     if segments.is_empty() {
         return String::new();
     }
 
     let max_duration = segments
         .iter()
-        .map(|s| s.duration.as_secs())
+        .map(|s| s.duration.as_secs_f64().ceil() as u64)
         .max()
         .unwrap_or(1)
         .max(1);
@@ -50,11 +86,18 @@ pub fn write_vod_playlist(segments: &[Segment]) -> String {
     playlist.push_str(&format!("#EXT-X-TARGETDURATION:{}\n", max_duration));
     playlist.push_str("#EXT-X-MEDIA-SEQUENCE:0\n");
     playlist.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
+    playlist.push_str(&format!(
+        "#EXT-X-MAP:URI=\"{}\"\n",
+        asset_uri(asset_prefix, "init.m4s")
+    ));
 
     for segment in segments {
         let duration = segment.duration.as_secs_f64();
         playlist.push_str(&format!("#EXTINF:{:.3},\n", duration));
-        playlist.push_str(&format!("segment-{}.m4s\n", segment.sequence));
+        playlist.push_str(&format!(
+            "{}\n",
+            asset_uri(asset_prefix, &format!("{}.m4s", segment.sequence))
+        ));
     }
 
     playlist.push_str("#EXT-X-ENDLIST\n");
@@ -90,10 +133,11 @@ mod tests {
         assert!(playlist.contains("#EXT-X-VERSION:7"));
         assert!(playlist.contains("#EXT-X-TARGETDURATION:3"));
         assert!(playlist.contains("#EXT-X-MEDIA-SEQUENCE:0"));
+        assert!(playlist.contains("#EXT-X-MAP:URI=\"init.m4s\""));
         assert!(playlist.contains("#EXTINF:2.000,"));
         assert!(playlist.contains("#EXTINF:2.500,"));
-        assert!(playlist.contains("segment-0.m4s"));
-        assert!(playlist.contains("segment-2.m4s"));
+        assert!(playlist.contains("0.m4s"));
+        assert!(playlist.contains("2.m4s"));
         assert!(!playlist.contains("#EXT-X-ENDLIST"));
     }
 
@@ -124,7 +168,7 @@ mod tests {
         let playlist = write_live_playlist(&segments, Duration::from_secs(2));
 
         assert!(playlist.contains("#EXT-X-MEDIA-SEQUENCE:100"));
-        assert!(playlist.contains("segment-100.m4s"));
-        assert!(playlist.contains("segment-102.m4s"));
+        assert!(playlist.contains("100.m4s"));
+        assert!(playlist.contains("102.m4s"));
     }
 }
