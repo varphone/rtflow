@@ -5,11 +5,10 @@ use super::mux::FlvMuxer;
 use crate::{
     Result,
     http::{HttpRequest, ResponseWriter},
-    media::{AccessUnit, MediaDescription},
+    media::{AccessUnit, Codec, MediaDescription},
 };
 
 /// Serve a live FLV stream over HTTP chunked response.
-/// Returns the writer back for potential keep-alive reuse.
 pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
     _req: HttpRequest,
     mut writer: ResponseWriter<W>,
@@ -18,16 +17,25 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
 ) -> Result<ResponseWriter<W>> {
     let mut muxer = FlvMuxer::new(&description);
 
-    // Try to extract sequence headers from initial frames
-    let mut video_seq_pending = true;
-    let mut audio_seq_pending = true;
+    // Detect video codec from description for sequence header building
+    let video_codec = description
+        .tracks
+        .iter()
+        .find(|t| t.kind == crate::media::MediaKind::Video)
+        .map(|t| t.codec);
+
+    let mut video_seq_pending = video_codec.is_some();
+    let mut audio_seq_pending = description.tracks.iter().any(|t| t.codec == Codec::Aac);
 
     // Send FLV header
     let flv_header = muxer.flv_header();
-
-    writer
-        .write_chunked_headers("video/x-flv", &[])
-        .await?;
+    writer.write_headers(200, &[
+        ("Content-Type", "video/x-flv"),
+        ("Transfer-Encoding", "chunked"),
+        ("Cache-Control", "no-cache, no-store"),
+        ("Connection", "close"),
+        ("Access-Control-Allow-Origin", "*"),
+    ]).await?;
     writer.write_chunk(&flv_header).await?;
     writer.flush().await?;
 
@@ -43,18 +51,19 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
         };
 
         // On first video keyframe, build sequence header
-        if video_seq_pending && unit.is_keyframe {
-            match unit.codec {
-                crate::media::Codec::H264 | crate::media::Codec::H265 => {
-                    if let Some(seq) = FlvMuxer::build_avc_sequence_header(&unit.data) {
-                        muxer.set_avc_sequence_header(seq);
-                    }
-                    video_seq_pending = false;
-                }
-                _ => {}
+        let is_video = matches!(unit.codec, Codec::H264 | Codec::H265);
+        if video_seq_pending && unit.is_keyframe && is_video {
+            let seq = match unit.codec {
+                Codec::H264 => FlvMuxer::build_avc_sequence_header(&unit.data),
+                Codec::H265 => FlvMuxer::build_h265_sequence_header(&unit.data),
+                _ => None,
+            };
+            if let Some(seq) = seq {
+                muxer.set_video_sequence_header(seq);
             }
+            video_seq_pending = false;
         }
-        if audio_seq_pending && unit.codec == crate::media::Codec::Aac {
+        if audio_seq_pending && unit.codec == Codec::Aac {
             audio_seq_pending = false;
         }
 

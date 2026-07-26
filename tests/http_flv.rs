@@ -66,7 +66,7 @@ fn flv_muxer_video_tag_roundtrip() {
 
     // Set sequence header from keyframe
     if let Some(seq) = FlvMuxer::build_avc_sequence_header(&keyframe.data) {
-        muxer.set_avc_sequence_header(seq);
+        muxer.set_video_sequence_header(seq);
     }
 
     let tags = muxer.encode(&keyframe);
@@ -99,7 +99,7 @@ fn flv_muxer_annex_b_to_avcc() {
     };
 
     if let Some(seq) = FlvMuxer::build_avc_sequence_header(&unit.data) {
-        muxer.set_avc_sequence_header(seq);
+        muxer.set_video_sequence_header(seq);
     }
 
     let tags = muxer.encode(&unit);

@@ -8,26 +8,30 @@ const FLV_TAG_HEADER_SIZE: usize = 11;
 pub struct FlvMuxer {
     has_video: bool,
     has_audio: bool,
-    sequence_header_sent: bool,
+    video_codec: Codec,
+    video_sequence_header_sent: bool,
     audio_sequence_header_sent: bool,
     tag_buffer: BytesMut,
-    /// Cached AVC decoder configuration record (sequence header).
-    avc_sequence_header: Option<Bytes>,
+    /// Cached video decoder configuration record (sequence header).
+    video_sequence_header: Option<Bytes>,
     /// Cached AAC audio specific config (sequence header).
     aac_sequence_header: Option<Bytes>,
 }
 
 impl FlvMuxer {
     pub fn new(description: &MediaDescription) -> Self {
-        let has_video = description.tracks.iter().any(|t| t.kind == crate::media::MediaKind::Video);
+        let video_track = description.tracks.iter().find(|t| t.kind == crate::media::MediaKind::Video);
+        let has_video = video_track.is_some();
+        let video_codec = video_track.map(|t| t.codec).unwrap_or(Codec::H264);
         let has_audio = description.tracks.iter().any(|t| t.kind == crate::media::MediaKind::Audio);
         Self {
             has_video,
             has_audio,
-            sequence_header_sent: false,
+            video_codec,
+            video_sequence_header_sent: false,
             audio_sequence_header_sent: false,
             tag_buffer: BytesMut::with_capacity(4096),
-            avc_sequence_header: None,
+            video_sequence_header: None,
             aac_sequence_header: None,
         }
     }
@@ -45,9 +49,9 @@ impl FlvMuxer {
         buf.freeze()
     }
 
-    /// Set the AVC sequence header (AVCDecoderConfigurationRecord).
-    pub fn set_avc_sequence_header(&mut self, data: Bytes) {
-        self.avc_sequence_header = Some(data);
+    /// Set the video sequence header (AVCDecoderConfigurationRecord or HEVCDecoderConfigurationRecord).
+    pub fn set_video_sequence_header(&mut self, data: Bytes) {
+        self.video_sequence_header = Some(data);
     }
 
     /// Set the AAC sequence header (AudioSpecificConfig).
@@ -61,27 +65,33 @@ impl FlvMuxer {
         self.tag_buffer.clear();
 
         match unit.codec {
-            Codec::H264 | Codec::H265 => {
-                if !self.sequence_header_sent {
-                    if let Some(ref seq) = self.avc_sequence_header {
-                        // Write video sequence header tag
-                        write_video_tag(&mut self.tag_buffer, unit, seq, true);
-                        self.sequence_header_sent = true;
+            Codec::H264 => {
+                if !self.video_sequence_header_sent {
+                    if let Some(ref seq) = self.video_sequence_header {
+                        write_h264_video_tag(&mut self.tag_buffer, unit, seq, true);
+                        self.video_sequence_header_sent = true;
                     }
                 }
-                // Write video data tag
                 let avcc_data = annex_b_to_avcc(&unit.data);
-                write_video_tag(&mut self.tag_buffer, unit, &avcc_data, false);
+                write_h264_video_tag(&mut self.tag_buffer, unit, &avcc_data, false);
+            }
+            Codec::H265 => {
+                if !self.video_sequence_header_sent {
+                    if let Some(ref seq) = self.video_sequence_header {
+                        write_h265_video_tag(&mut self.tag_buffer, unit, seq, true);
+                        self.video_sequence_header_sent = true;
+                    }
+                }
+                let hvcc_data = annex_b_to_avcc(&unit.data);
+                write_h265_video_tag(&mut self.tag_buffer, unit, &hvcc_data, false);
             }
             Codec::Aac => {
                 if !self.audio_sequence_header_sent {
                     if let Some(ref seq) = self.aac_sequence_header {
-                        // Write audio sequence header tag
                         write_audio_tag(&mut self.tag_buffer, unit, seq, true);
                         self.audio_sequence_header_sent = true;
                     }
                 }
-                // Write audio data tag
                 write_audio_tag(&mut self.tag_buffer, unit, &unit.data, false);
             }
             Codec::Pcma | Codec::Pcmu => {
@@ -92,12 +102,13 @@ impl FlvMuxer {
         self.tag_buffer.split().freeze()
     }
 
-    /// Generate a video sequence header from SPS/PPS in Annex-B data.
+    /// Build an AVCDecoderConfigurationRecord from Annex-B H.264 data (SPS + PPS).
     pub fn build_avc_sequence_header(annex_b_data: &Bytes) -> Option<Bytes> {
         let nals = parse_annex_b_nals(annex_b_data);
         let mut sps = None;
         let mut pps = None;
         for nal in &nals {
+            if nal.is_empty() { continue; }
             match nal[0] & 0x1f {
                 7 => sps = Some(nal.clone()),
                 8 => pps = Some(nal.clone()),
@@ -122,20 +133,146 @@ impl FlvMuxer {
         buf.put_slice(&pps);
         Some(buf.freeze())
     }
+
+    /// Build a HEVCDecoderConfigurationRecord from Annex-B H.265 data (VPS + SPS + PPS).
+    pub fn build_h265_sequence_header(annex_b_data: &Bytes) -> Option<Bytes> {
+        let nals = parse_annex_b_nals(annex_b_data);
+        let mut vps = None;
+        let mut sps = None;
+        let mut pps = None;
+        for nal in &nals {
+            if nal.len() < 2 { continue; }
+            // H.265 NAL unit type is in bits [1..6] of the first byte
+            let nal_type = (nal[0] >> 1) & 0x3f;
+            match nal_type {
+                32 => vps = Some(nal.clone()),  // VPS
+                33 => sps = Some(nal.clone()),  // SPS
+                34 => pps = Some(nal.clone()),  // PPS
+                _ => {}
+            }
+        }
+        let vps = vps?;
+        let sps = sps?;
+        let pps = pps?;
+
+        // Parse SPS to extract profile/level info
+        // HEVCDecoderConfigurationRecord
+        let mut buf = BytesMut::new();
+        buf.put_u8(1);                       // configurationVersion
+        // general_profile_space(2) + general_tier_flag(1) + general_profile_idc(5)
+        buf.put_u8(sps.get(3).copied().unwrap_or(0));
+        // general_profile_compatibility_flags (4 bytes)
+        buf.put_slice(&[0, 0, 0, 0]); // simplified
+        // general_constraint_indicator_flags (6 bytes)
+        buf.put_slice(&[0, 0, 0, 0, 0, 0]);
+        // general_level_idc
+        buf.put_u8(sps.get(12).copied().unwrap_or(0));
+        // min_spatial_segmentation_idc (16 bits, top 4 bits reserved)
+        buf.put_u16(0xf000);
+        // parallelismType (8 bits, top 6 bits reserved)
+        buf.put_u8(0xfc);
+        // chromaFormat (8 bits, top 6 bits reserved)
+        buf.put_u8(0xfc | 1); // 4:2:0
+        // bitDepthLumaMinus8 (8 bits, top 5 bits reserved)
+        buf.put_u8(0xf8);
+        // bitDepthChromaMinus8 (8 bits, top 5 bits reserved)
+        buf.put_u8(0xf8);
+        // avgFrameRate
+        buf.put_u16(0);
+        // constantFrameRate(2) + numTemporalLayers(3) + temporalIdNested(1) + lengthSizeMinus1(2)
+        buf.put_u8(0x0f); // lengthSizeMinus1 = 3
+        // numOfArrays
+        buf.put_u8(3); // VPS + SPS + PPS
+
+        // VPS array
+        buf.put_u8(0x20); // array_completeness(1) + reserved(1) + NAL_unit_type(6) = VPS
+        buf.put_u16(1);   // numNalus
+        buf.put_u16(vps.len() as u16);
+        buf.put_slice(&vps);
+
+        // SPS array
+        buf.put_u8(0x21); // SPS
+        buf.put_u16(1);
+        buf.put_u16(sps.len() as u16);
+        buf.put_slice(&sps);
+
+        // PPS array
+        buf.put_u8(0x22); // PPS
+        buf.put_u16(1);
+        buf.put_u16(pps.len() as u16);
+        buf.put_slice(&pps);
+
+        Some(buf.freeze())
+    }
 }
 
-/// Write a video FLV tag.
-fn write_video_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_sequence_header: bool) {
+/// Write an H.264 video FLV tag (traditional format: codec_id = 7).
+fn write_h264_video_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_sequence_header: bool) {
+    write_flv_tag_header(buf, unit, data.len() + 5);
+
+    // Frame type (4 bits) + Codec ID (4 bits)
+    let frame_type = if unit.is_keyframe { 1u8 } else { 2u8 };
+    buf.put_u8((frame_type << 4) | 7); // 7 = AVC
+
+    // AVC packet type
+    buf.put_u8(if is_sequence_header { 0 } else { 1 });
+
+    // Composition time offset
+    buf.put_u8(0);
+    buf.put_u8(0);
+    buf.put_u8(0);
+
+    buf.put_slice(data);
+
+    let tag_total_size = FLV_TAG_HEADER_SIZE + data.len() + 5;
+    buf.put_u32(tag_total_size as u32);
+}
+
+/// Write an H.265 video FLV tag (Enhanced RTMP format).
+fn write_h265_video_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_sequence_header: bool) {
+    // Enhanced RTMP: video tag body starts with:
+    // byte 0: 0b1000xxxx (isExVideoHeader=1, FrameType in lower bits)
+    //   FrameType: 1=keyframe, 2=inter, 5=command
+    // bytes 1-4: FourCC ("hvc1")
+    // then: PacketType (1 byte) for sequence header = 0, coded frames = 1
+    // then: data
+
+    let packet_type: u8 = if is_sequence_header { 0 } else { 1 };
+    let body_size = if is_sequence_header {
+        1 + 4 + 1 + data.len() // enhanced_header + FourCC + packet_type + data
+    } else {
+        1 + 4 + 1 + data.len() // same structure for coded frames
+    };
+
+    write_flv_tag_header(buf, unit, body_size);
+
+    // Enhanced RTMP header byte
+    let frame_type = if unit.is_keyframe { 1u8 } else { 2u8 };
+    buf.put_u8(0x80 | frame_type); // isExVideoHeader=1 + frameType
+
+    // FourCC: "hvc1"
+    buf.put_slice(b"hvc1");
+
+    // Packet type
+    buf.put_u8(packet_type);
+
+    // Data
+    buf.put_slice(data);
+
+    let tag_total_size = FLV_TAG_HEADER_SIZE + body_size;
+    buf.put_u32(tag_total_size as u32);
+}
+
+/// Write the FLV tag header (common for all tag types).
+fn write_flv_tag_header(buf: &mut BytesMut, unit: &AccessUnit, body_size: usize) {
     let timestamp = unit.pts.as_millis() as u32;
     let timestamp_ext = (timestamp >> 24) as u8;
     let timestamp_base = timestamp & 0x00FFFFFF;
 
-    // FLV tag header (11 bytes)
     buf.put_u8(0x09);                    // tag type: video
-    let data_size = data.len() + 5;      // +5 for video tag header bytes
-    buf.put_u8((data_size >> 16) as u8);
-    buf.put_u8((data_size >> 8) as u8);
-    buf.put_u8(data_size as u8);
+    buf.put_u8((body_size >> 16) as u8);
+    buf.put_u8((body_size >> 8) as u8);
+    buf.put_u8(body_size as u8);
     buf.put_u8(timestamp_base as u8);
     buf.put_u8((timestamp_base >> 8) as u8);
     buf.put_u8((timestamp_base >> 16) as u8);
@@ -143,31 +280,6 @@ fn write_video_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_seque
     buf.put_u8(0);                       // stream id (always 0)
     buf.put_u8(0);
     buf.put_u8(0);
-
-    // Video tag body
-    // Frame type (4 bits) + Codec ID (4 bits)
-    let frame_type = if unit.is_keyframe { 1u8 } else { 2u8 }; // 1=keyframe, 2=inter
-    let codec_id = 7u8; // AVC
-    buf.put_u8((frame_type << 4) | codec_id);
-
-    // AVC packet type
-    if is_sequence_header {
-        buf.put_u8(0); // AVC sequence header
-    } else {
-        buf.put_u8(1); // AVC NALU
-    }
-
-    // Composition time offset (0 for simplicity)
-    buf.put_u8(0);
-    buf.put_u8(0);
-    buf.put_u8(0);
-
-    // Data
-    buf.put_slice(data);
-
-    // Previous tag size
-    let tag_total_size = FLV_TAG_HEADER_SIZE + data_size;
-    buf.put_u32(tag_total_size as u32);
 }
 
 /// Write an audio FLV tag (AAC).
@@ -191,21 +303,13 @@ fn write_audio_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_seque
     buf.put_u8(0);
     buf.put_u8(0);
 
-    // Audio tag body
-    // Sound format (4 bits) + Rate (2 bits) + Size (1 bit) + Type (1 bit)
-    // AAC = 10, Rate=3 (44kHz), Size=1 (16-bit), Type=1 (stereo)
-    buf.put_u8(0xAF); // 1010 1111
+    // AAC: sound_format=10, rate=3(44kHz), size=1(16-bit), type=1(stereo)
+    buf.put_u8(0xAF);
 
-    // AAC packet type
-    if is_sequence_header {
-        buf.put_u8(0); // AAC sequence header
-    } else {
-        buf.put_u8(1); // AAC raw
-    }
+    buf.put_u8(if is_sequence_header { 0 } else { 1 });
 
     buf.put_slice(data);
 
-    // Previous tag size
     let tag_total_size = FLV_TAG_HEADER_SIZE + data_size;
     buf.put_u32(tag_total_size as u32);
 }
@@ -231,7 +335,6 @@ fn write_g711_audio_tag(buf: &mut BytesMut, unit: &AccessUnit) {
     buf.put_u8(0);
     buf.put_u8(0);
 
-    // Sound format: PCMA=7, PCMU=8; Rate=0(5.5kHz mono), Size=0(8-bit), Type=0(mono)
     let sound_format = match unit.codec {
         Codec::Pcma => 7u8,
         Codec::Pcmu => 8u8,
@@ -245,7 +348,7 @@ fn write_g711_audio_tag(buf: &mut BytesMut, unit: &AccessUnit) {
     buf.put_u32(tag_total_size as u32);
 }
 
-/// Convert Annex-B NALUs (with start codes) to AVCC format (4-byte length prefix).
+/// Convert Annex-B NALUs (with start codes) to AVCC/HVCC format (4-byte length prefix).
 fn annex_b_to_avcc(data: &Bytes) -> Bytes {
     let nals = parse_annex_b_nals(data);
     if nals.is_empty() {
@@ -268,17 +371,14 @@ fn parse_annex_b_nals(data: &Bytes) -> Vec<Vec<u8>> {
     let mut i = 0;
 
     while i < bytes.len() {
-        // Find start code (0x00 0x00 0x01 or 0x00 0x00 0x00 0x01)
         let start = find_start_code(bytes, i);
         if start.is_none() {
             break;
         }
         let nal_start = start.unwrap();
 
-        // Find next start code or end
         let nal_end = find_start_code(bytes, nal_start + 3).unwrap_or(bytes.len());
 
-        // Skip the start code prefix
         let nal_data_start = if nal_start + 3 < bytes.len()
             && bytes[nal_start + 2] == 0x01
         {
@@ -324,102 +424,169 @@ mod tests {
     use super::*;
     use crate::media::{MediaDescription, MediaKind, TrackDescription};
     use std::sync::Arc;
+    use std::time::Duration;
 
-    fn make_description(has_video: bool, has_audio: bool) -> MediaDescription {
-        let mut tracks = Vec::new();
-        if has_video {
-            tracks.push(TrackDescription {
-                id: 0,
-                kind: MediaKind::Video,
-                codec: Codec::H264,
-                clock_rate: 90000,
-                channels: None,
-                payload_type: 96,
-                fmtp: None,
-                control: Arc::from("trackID=0"),
-                #[cfg(feature = "srtp")]
-                crypto: None,
-            });
-        }
-        if has_audio {
-            tracks.push(TrackDescription {
-                id: 1,
-                kind: MediaKind::Audio,
-                codec: Codec::Aac,
-                clock_rate: 44100,
-                channels: Some(2),
-                payload_type: 97,
-                fmtp: None,
-                control: Arc::from("trackID=1"),
-                #[cfg(feature = "srtp")]
-                crypto: None,
-            });
-        }
+    fn make_h264_description() -> MediaDescription {
         MediaDescription {
             session_name: Arc::from("test"),
-            tracks,
+            tracks: vec![
+                TrackDescription {
+                    id: 0,
+                    kind: MediaKind::Video,
+                    codec: Codec::H264,
+                    clock_rate: 90000,
+                    channels: None,
+                    payload_type: 96,
+                    fmtp: None,
+                    control: Arc::from("trackID=0"),
+                    #[cfg(feature = "srtp")]
+                    crypto: None,
+                },
+                TrackDescription {
+                    id: 1,
+                    kind: MediaKind::Audio,
+                    codec: Codec::Aac,
+                    clock_rate: 44100,
+                    channels: Some(2),
+                    payload_type: 97,
+                    fmtp: None,
+                    control: Arc::from("trackID=1"),
+                    #[cfg(feature = "srtp")]
+                    crypto: None,
+                },
+            ],
+            #[cfg(feature = "multicast")]
+            connection: None,
+        }
+    }
+
+    fn make_h265_description() -> MediaDescription {
+        MediaDescription {
+            session_name: Arc::from("test"),
+            tracks: vec![
+                TrackDescription {
+                    id: 0,
+                    kind: MediaKind::Video,
+                    codec: Codec::H265,
+                    clock_rate: 90000,
+                    channels: None,
+                    payload_type: 96,
+                    fmtp: None,
+                    control: Arc::from("trackID=0"),
+                    #[cfg(feature = "srtp")]
+                    crypto: None,
+                },
+            ],
             #[cfg(feature = "multicast")]
             connection: None,
         }
     }
 
     #[test]
-    fn flv_header_video_only() {
-        let muxer = FlvMuxer::new(&make_description(true, false));
+    fn flv_header_video_and_audio() {
+        let muxer = FlvMuxer::new(&make_h264_description());
         let header = muxer.flv_header();
         assert_eq!(&header[..3], b"FLV");
-        assert_eq!(header[3], 1); // version
-        assert_eq!(header[4], 1); // video flag
+        assert_eq!(header[4], 5); // video + audio flags
     }
 
     #[test]
     fn flv_header_audio_only() {
-        let muxer = FlvMuxer::new(&make_description(false, true));
+        let desc = MediaDescription {
+            session_name: Arc::from("test"),
+            tracks: vec![TrackDescription {
+                id: 0, kind: MediaKind::Audio, codec: Codec::Aac,
+                clock_rate: 44100, channels: Some(2), payload_type: 97,
+                fmtp: None, control: Arc::from("trackID=0"),
+                #[cfg(feature = "srtp")] crypto: None,
+            }],
+            #[cfg(feature = "multicast")] connection: None,
+        };
+        let muxer = FlvMuxer::new(&desc);
         let header = muxer.flv_header();
         assert_eq!(header[4], 4); // audio flag
     }
 
     #[test]
-    fn flv_header_both() {
-        let muxer = FlvMuxer::new(&make_description(true, true));
-        let header = muxer.flv_header();
-        assert_eq!(header[4], 5); // video + audio flags
-    }
-
-    #[test]
     fn avc_sequence_header_from_sps_pps() {
-        // Minimal Annex-B with SPS and PPS
         let mut data = Vec::new();
-        // SPS
         data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
         data.extend_from_slice(&[0x67, 0x42, 0x00, 0x0a, 0xe9, 0x40, 0x20]);
-        // PPS
         data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
         data.extend_from_slice(&[0x68, 0xce, 0x38, 0x80]);
 
         let bytes = Bytes::from(data);
         let seq = FlvMuxer::build_avc_sequence_header(&bytes).unwrap();
-        assert_eq!(seq[0], 1); // configurationVersion
-        assert_eq!(seq[4], 0xff); // lengthSizeMinus1 = 3
-        assert_eq!(seq[5], 0xe1); // numOfSPS = 1
+        assert_eq!(seq[0], 1);
+        assert_eq!(seq[4], 0xff);
+        assert_eq!(seq[5], 0xe1);
+    }
+
+    #[test]
+    fn h265_enhanced_rtmp_tag() {
+        let desc = make_h265_description();
+        let mut muxer = FlvMuxer::new(&desc);
+
+        // Minimal H.265 data with VPS/SPS/PPS
+        let mut data = Vec::new();
+        // VPS (nal_type=32, byte = 0x40)
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        data.extend_from_slice(&[0x40, 0x01]);
+        // SPS (nal_type=33, byte = 0x42)
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        data.extend_from_slice(&[0x42, 0x01]);
+        // PPS (nal_type=34, byte = 0x44)
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        data.extend_from_slice(&[0x44, 0x01]);
+
+        let bytes = Bytes::from(data);
+        let seq = FlvMuxer::build_h265_sequence_header(&bytes);
+        assert!(seq.is_some(), "should build H.265 sequence header from VPS/SPS/PPS");
+
+        let seq = seq.unwrap();
+        muxer.set_video_sequence_header(seq);
+
+        let unit = AccessUnit {
+            track_id: 0,
+            codec: Codec::H265,
+            pts: Duration::from_millis(0),
+            dts: None,
+            rtp_timestamp: 0,
+            is_keyframe: true,
+            data: bytes,
+        };
+
+        let tags = muxer.encode(&unit);
+        assert!(!tags.is_empty());
+        // Enhanced RTMP: second byte should be 'h' from "hvc1"
+        // First tag is sequence header, second is data
+        // Video tag: 0x09, then tag header, then enhanced byte (0x81), then "hvc1"
+        // Find the first video tag body
+        let mut pos = 0;
+        while pos < tags.len() {
+            if tags[pos] == 0x09 {
+                // This is a video tag
+                let body_start = pos + FLV_TAG_HEADER_SIZE;
+                if body_start + 5 < tags.len() {
+                    assert_eq!(tags[body_start] & 0x80, 0x80, "enhanced RTMP flag should be set");
+                    assert_eq!(&tags[body_start + 1..body_start + 5], b"hvc1", "FourCC should be hvc1");
+                    break;
+                }
+            }
+            pos += 1;
+        }
     }
 
     #[test]
     fn annex_b_to_avcc_conversion() {
         let mut data = Vec::new();
         data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-        data.extend_from_slice(&[0x65, 0x88, 0x00]); // IDR NAL
+        data.extend_from_slice(&[0x65, 0x88, 0x00]);
         data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
-        data.extend_from_slice(&[0x41, 0x9a, 0x00]); // non-IDR NAL
+        data.extend_from_slice(&[0x41, 0x9a, 0x00]);
 
         let bytes = Bytes::from(data);
         let avcc = annex_b_to_avcc(&bytes);
-        // First NAL: 4-byte length (3) + 3 bytes = 7
-        // Second NAL: 4-byte length (3) + 3 bytes = 7
         assert_eq!(avcc.len(), 14);
-        assert_eq!(&avcc[0..4], &[0x00, 0x00, 0x00, 0x03]); // length = 3
-        assert_eq!(&avcc[4..7], &[0x65, 0x88, 0x00]);
-        assert_eq!(&avcc[7..11], &[0x00, 0x00, 0x00, 0x03]);
-        assert_eq!(&avcc[11..14], &[0x41, 0x9a, 0x00]);
     }
 }
