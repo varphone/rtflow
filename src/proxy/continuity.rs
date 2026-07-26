@@ -240,6 +240,16 @@ impl KeyframeCache {
             .unwrap_or_default()
     }
 
+    pub fn snapshot_all(&self) -> Vec<AccessUnit> {
+        let mut frames = self
+            .tracks
+            .values()
+            .flat_map(|track| track.frames.iter().cloned())
+            .collect::<Vec<_>>();
+        frames.sort_by_key(|frame| (frame.pts, frame.track_id));
+        frames
+    }
+
     pub fn clear(&mut self) {
         for track in self.tracks.values_mut() {
             track.frames.clear();

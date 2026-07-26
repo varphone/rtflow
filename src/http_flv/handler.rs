@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use tokio::io::AsyncWrite;
 use tokio::sync::broadcast;
 
@@ -14,69 +15,232 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
     mut writer: ResponseWriter<W>,
     description: MediaDescription,
     mut receiver: broadcast::Receiver<AccessUnit>,
-    announce_fmtp: std::collections::HashMap<u8, std::sync::Arc<str>>,
+    startup: Vec<AccessUnit>,
+    fmtp_source: crate::server::MountHandle,
 ) -> Result<ResponseWriter<W>> {
     let mut muxer = FlvMuxer::new(&description);
 
-    let video_codec = description.tracks.iter().find(|t| t.kind == crate::media::MediaKind::Video).map(|t| t.codec);
+    let video_codec = description
+        .tracks
+        .iter()
+        .find(|t| t.kind == crate::media::MediaKind::Video)
+        .map(|t| t.codec);
     let mut video_seq_pending = video_codec.is_some();
     let mut audio_seq_pending = description.tracks.iter().any(|t| t.codec == Codec::Aac);
 
-    // Extract sequence headers from ANNOUNCE fmtp for H.265
-    if video_seq_pending {
-        for track in &description.tracks {
-            if matches!(track.codec, Codec::H264 | Codec::H265) {
-                let effective = track.fmtp.as_deref().or_else(|| announce_fmtp.get(&track.id).map(|v| v.as_ref()));
-                if let Some(fmtp) = effective {
-                    let seq = match track.codec {
-                        Codec::H264 => {
-                            let (s,p) = FlvMuxer::parse_h264_sprop_from_fmtp(fmtp);
-                            if let (Some(s),Some(p)) = (s,p) { FlvMuxer::build_avc_sequence_header_from_nals(&s,&p) } else { None }
-                        }
-                        Codec::H265 => {
-                            let (v,s,p) = FlvMuxer::parse_h265_sprop_from_fmtp(fmtp);
-                            if let (Some(v),Some(s),Some(p)) = (v,s,p) { FlvMuxer::build_h265_sequence_header_from_nals(&v,&s,&p) } else { None }
-                        }
-                        _ => None,
-                    };
-                    if let Some(seq) = seq { muxer.set_video_sequence_header(seq); video_seq_pending = false; }
-                }
-            }
-        }
-    }
+    configure_sequence_headers(
+        &mut muxer,
+        &description,
+        &fmtp_source.announce_fmtp(),
+        &mut video_seq_pending,
+        &mut audio_seq_pending,
+    );
 
-    writer.write_headers(200, &[
-        ("Content-Type", "video/x-flv"),
-        ("Cache-Control", "no-cache, no-store"),
-        ("Connection", "close"),
-        ("Access-Control-Allow-Origin", "*"),
-    ]).await?;
+    // Cached audio may predate the cached video keyframe.  Start both tracks at
+    // that keyframe so their normalized timestamps remain monotonic.
+    let startup_keyframe_pts = startup
+        .iter()
+        .find(|unit| matches!(unit.codec, Codec::H264 | Codec::H265) && unit.is_keyframe)
+        .map(|unit| unit.pts);
+
+    writer
+        .write_headers(
+            200,
+            &[
+                ("Content-Type", "video/x-flv"),
+                ("Cache-Control", "no-cache, no-store"),
+                ("Connection", "close"),
+                ("Access-Control-Allow-Origin", "*"),
+            ],
+        )
+        .await?;
     writer.write_raw(&muxer.flv_header()).await?;
     writer.flush().await?;
 
+    let startup: Vec<AccessUnit> = startup_keyframe_pts
+        .map(|keyframe_pts| {
+            startup
+                .into_iter()
+                .filter(|unit| unit.pts >= keyframe_pts)
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut startup = VecDeque::from(startup);
+    let mut awaiting_video_keyframe = video_codec.is_some();
+    // A CRA picture is a valid random-access point, but it can be followed by
+    // RASL pictures which still reference pictures from before the CRA. Those
+    // leading pictures must not be sent to a newly joined decoder.
+    let mut dropping_h265_cra_leading_pictures = false;
     loop {
-        let unit = match receiver.recv().await {
-            Ok(u) => u,
-            Err(broadcast::error::RecvError::Lagged(n)) => { tracing::debug!("http-flv lagged {n}"); continue; }
-            Err(broadcast::error::RecvError::Closed) => break,
+        let unit = if let Some(unit) = startup.pop_front() {
+            unit
+        } else {
+            match receiver.recv().await {
+                Ok(unit) => unit,
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::debug!("http-flv lagged {n}");
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
         };
         let is_video = matches!(unit.codec, Codec::H264 | Codec::H265);
+        if awaiting_video_keyframe {
+            if !is_video || !unit.is_keyframe {
+                continue;
+            }
+            awaiting_video_keyframe = false;
+            dropping_h265_cra_leading_pictures = false;
+        }
+        if dropping_h265_cra_leading_pictures {
+            if !is_video {
+                continue;
+            }
+            match h265_vcl_nal_type(&unit.data) {
+                Some(8 | 9) => continue,
+                Some(_) => dropping_h265_cra_leading_pictures = false,
+                None => continue,
+            }
+        }
+        let starts_h265_cra = unit.codec == Codec::H265 && h265_random_access_is_cra(&unit.data);
+        if video_seq_pending || audio_seq_pending {
+            configure_sequence_headers(
+                &mut muxer,
+                &description,
+                &fmtp_source.announce_fmtp(),
+                &mut video_seq_pending,
+                &mut audio_seq_pending,
+            );
+        }
         if video_seq_pending && unit.is_keyframe && is_video {
             let seq = match unit.codec {
                 Codec::H264 => FlvMuxer::build_avc_sequence_header(&unit.data),
                 Codec::H265 => FlvMuxer::build_h265_sequence_header(&unit.data),
                 _ => None,
             };
-            if let Some(seq) = seq { muxer.set_video_sequence_header(seq); }
-            video_seq_pending = false;
+            if let Some(seq) = seq {
+                muxer.set_video_sequence_header(seq);
+                video_seq_pending = false;
+            }
         }
-        if audio_seq_pending && unit.codec == Codec::Aac { audio_seq_pending = false; }
+        if audio_seq_pending && unit.codec == Codec::Aac {
+            audio_seq_pending = false;
+        }
 
         let tags = muxer.encode(&unit);
+        if starts_h265_cra {
+            dropping_h265_cra_leading_pictures = true;
+        }
         if !tags.is_empty() {
-            if let Err(e) = writer.write_raw(&tags).await { tracing::debug!("flv write: {e}"); break; }
-            if let Err(e) = writer.flush().await { tracing::debug!("flv flush: {e}"); break; }
+            if let Err(e) = writer.write_raw(&tags).await {
+                tracing::debug!("flv write: {e}");
+                break;
+            }
+            if let Err(e) = writer.flush().await {
+                tracing::debug!("flv flush: {e}");
+                break;
+            }
         }
     }
     Ok(writer)
+}
+
+fn configure_sequence_headers(
+    muxer: &mut FlvMuxer,
+    description: &MediaDescription,
+    announce_fmtp: &std::collections::HashMap<u8, std::sync::Arc<str>>,
+    video_seq_pending: &mut bool,
+    audio_seq_pending: &mut bool,
+) {
+    for track in &description.tracks {
+        let effective = announce_fmtp
+            .get(&track.id)
+            .map(|value| value.as_ref())
+            .or(track.fmtp.as_deref());
+        let Some(fmtp) = effective else { continue };
+
+        match track.codec {
+            Codec::H264 if *video_seq_pending => {
+                let (sps, pps) = FlvMuxer::parse_h264_sprop_from_fmtp(fmtp);
+                if let (Some(sps), Some(pps)) = (sps, pps)
+                    && let Some(seq) = FlvMuxer::build_avc_sequence_header_from_nals(&sps, &pps)
+                {
+                    muxer.set_video_sequence_header(seq);
+                    *video_seq_pending = false;
+                }
+            }
+            Codec::H265 if *video_seq_pending => {
+                let (vps, sps, pps) = FlvMuxer::parse_h265_sprop_from_fmtp(fmtp);
+                if let (Some(vps), Some(sps), Some(pps)) = (vps, sps, pps)
+                    && let Some(seq) =
+                        FlvMuxer::build_h265_sequence_header_from_nals(&vps, &sps, &pps)
+                {
+                    muxer.set_video_sequence_header(seq);
+                    *video_seq_pending = false;
+                }
+            }
+            Codec::Aac if *audio_seq_pending => {
+                if let Some(seq) = FlvMuxer::parse_aac_config_from_fmtp(fmtp) {
+                    muxer.set_aac_sequence_header(seq);
+                    *audio_seq_pending = false;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn h265_random_access_is_cra(data: &[u8]) -> bool {
+    h265_nal_types(data)
+        .into_iter()
+        .any(|nal_type| nal_type == 21)
+}
+
+fn h265_vcl_nal_type(data: &[u8]) -> Option<u8> {
+    h265_nal_types(data)
+        .into_iter()
+        .find(|nal_type| *nal_type <= 31)
+}
+
+fn h265_nal_types(data: &[u8]) -> Vec<u8> {
+    let mut starts = Vec::new();
+    let mut index = 0;
+    while index + 3 <= data.len() {
+        let length = if data[index..].starts_with(&[0, 0, 1]) {
+            3
+        } else if index + 4 <= data.len() && data[index..].starts_with(&[0, 0, 0, 1]) {
+            4
+        } else {
+            index += 1;
+            continue;
+        };
+        starts.push(index + length);
+        index += length;
+    }
+    if starts.is_empty() {
+        return data
+            .first()
+            .copied()
+            .into_iter()
+            .map(|byte| (byte >> 1) & 0x3f)
+            .collect::<Vec<_>>();
+    }
+    starts
+        .into_iter()
+        .filter_map(|start| data.get(start).copied())
+        .map(|byte| (byte >> 1) & 0x3f)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identifies_cra_and_rasl_access_units() {
+        let cra = [0, 0, 0, 1, 21 << 1, 1];
+        let rasl = [0, 0, 0, 1, 9 << 1, 1];
+        assert!(h265_random_access_is_cra(&cra));
+        assert_eq!(h265_vcl_nal_type(&rasl), Some(9));
+    }
 }

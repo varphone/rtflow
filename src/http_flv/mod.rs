@@ -2,31 +2,22 @@ pub mod handler;
 pub mod mux;
 
 use crate::http::Handler;
-use crate::media::AccessUnit;
 use std::sync::Arc;
-use tokio::sync::broadcast;
 
 /// Create an HTTP-FLV handler for a given mount.
 ///
-/// Leaks a receiver so the broadcast channel always has at least one
-/// subscriber, preventing writes from being rejected.  Each client gets
-/// a fresh receiver via `Sender::subscribe()`.
-pub fn create_flv_handler(
-    mount: &crate::server::MountHandle,
-) -> Handler {
-    let frame_sender = mount.frame_sender().clone();
+/// Each client receives the cached decodable stream start, followed by a
+/// fresh subscription to live frames.
+pub fn create_flv_handler(mount: &crate::server::MountHandle) -> Handler {
     let description = mount.description.clone();
     let mount_clone = mount.clone();
 
-    // Keep one receiver alive for the server's lifetime.
-    let _ = Box::leak(Box::new(frame_sender.subscribe()));
-
     Arc::new(move |_req, writer| {
         let desc = description.clone();
-        let rx = frame_sender.subscribe();
-        let fmtp = mount_clone.announce_fmtp();
+        let (rx, startup) = mount_clone.subscribe_with_startup();
+        let fmtp_source = mount_clone.clone();
         Box::pin(async move {
-            handler::serve_flv_stream(_req, writer, desc, rx, fmtp).await
+            handler::serve_flv_stream(_req, writer, desc, rx, startup, fmtp_source).await
         })
     })
 }

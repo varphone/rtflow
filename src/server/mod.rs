@@ -406,6 +406,22 @@ impl Mount {
         }
         (receiver, startup)
     }
+
+    fn subscribe_with_all_startup(&self) -> (broadcast::Receiver<AccessUnit>, Vec<AccessUnit>) {
+        let receiver = self.frames.subscribe();
+        let cache = self
+            .startup_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut startup = cache.snapshot_all();
+        let bytes = startup.iter().fold(0usize, |total, frame| {
+            total.saturating_add(frame.data.len())
+        });
+        if bytes > self.max_queued_bytes_per_session {
+            startup.clear();
+        }
+        (receiver, startup)
+    }
 }
 
 struct PeerSessionLease {
@@ -796,6 +812,10 @@ impl MountHandle {
     pub fn subscribe(&self) -> broadcast::Receiver<AccessUnit> {
         self.inner.frames.subscribe()
     }
+    /// Subscribe to live frames together with a cached decodable stream start.
+    pub fn subscribe_with_startup(&self) -> (broadcast::Receiver<AccessUnit>, Vec<AccessUnit>) {
+        self.inner.subscribe_with_all_startup()
+    }
     /// Get the broadcast sender for creating per-request subscribers.
     /// Use `sender.subscribe()` to create a fresh receiver for each connection.
     pub fn frame_sender(&self) -> &broadcast::Sender<AccessUnit> {
@@ -856,7 +876,7 @@ impl LocalPublisher {
             self.inner.stats.add_dropped(1);
             return Ok(PushResult::DroppedNoSubscribers);
         }
-        match self.inner.frames.send(frame) {
+        match self.inner.publish_cached(frame) {
             Ok(_) => {
                 self.inner.stats.add_accepted(1);
                 Ok(PushResult::Accepted)

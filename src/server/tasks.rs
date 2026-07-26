@@ -291,7 +291,7 @@ pub(super) fn spawn_udp_receiver(
                 .and_then(|packet| depacketizer.push(packet))
             {
                 for frame in frames {
-                    if mount.frames.send(frame).is_ok() {
+                    if mount.publish_cached(frame).is_ok() {
                         mount.stats.add_accepted(1);
                     } else {
                         mount.stats.add_dropped(1);

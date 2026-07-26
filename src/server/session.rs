@@ -106,13 +106,15 @@ pub(super) async fn serve_connection(
                     {
                         let depacketizer = interleaved_depacketizers
                             .entry(frame.channel)
-                            .or_insert_with(|| Depacketizer::new(track.codec, track.id, track.clock_rate));
+                            .or_insert_with(|| {
+                                Depacketizer::new(track.codec, track.id, track.clock_rate)
+                            });
                         match RtpPacket::parse(frame.payload)
                             .and_then(|packet| depacketizer.push(packet))
                         {
                             Ok(units) => {
                                 for unit in units {
-                                    if mount.frames.send(unit).is_ok() {
+                                    if mount.publish_cached(unit).is_ok() {
                                         mount.stats.add_accepted(1);
                                     } else {
                                         mount.stats.add_dropped(1);
@@ -181,6 +183,67 @@ pub(super) async fn serve_connection(
                         "Method Not Valid in This State",
                         cseq,
                     )))
+                    .await?;
+                continue;
+            }
+            if req.method == Method::Announce {
+                let Some((_path, mount)) = registered_mount_for_uri(&state, &req.uri).await else {
+                    writer
+                        .lock()
+                        .await
+                        .write_all(&rtsp::encode_response(&simple_response(
+                            404,
+                            "Not Found",
+                            cseq,
+                        )))
+                        .await?;
+                    continue;
+                };
+                if !matches!(mount.config, MountConfig::Publisher { .. }) {
+                    writer
+                        .lock()
+                        .await
+                        .write_all(&rtsp::encode_response(&simple_response(
+                            405,
+                            "Method Not Allowed",
+                            cseq,
+                        )))
+                        .await?;
+                    continue;
+                }
+                let announced = match sdp::parse(&req.body) {
+                    Ok(description) => description,
+                    Err(_) => {
+                        writer
+                            .lock()
+                            .await
+                            .write_all(&rtsp::encode_response(&simple_response(
+                                400,
+                                "Bad Request",
+                                cseq,
+                            )))
+                            .await?;
+                        continue;
+                    }
+                };
+                let fmtp = announced
+                    .tracks
+                    .into_iter()
+                    .filter_map(|track| track.fmtp.map(|value| (track.id, value)))
+                    .collect();
+                mount
+                    .startup_cache
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clear();
+                *mount
+                    .announce_fmtp
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = fmtp;
+                writer
+                    .lock()
+                    .await
+                    .write_all(&rtsp::encode_response(&simple_response(200, "OK", cseq)))
                     .await?;
                 continue;
             }
@@ -525,8 +588,10 @@ pub(super) async fn serve_connection(
                 for (mount, rtp_channel, _rtcp_channel, track) in interleaved.iter().cloned() {
                     if matches!(mount.config, MountConfig::Publisher { .. }) {
                         has_interleaved_receiver = true;
-                        interleaved_depacketizers
-                            .insert(rtp_channel, Depacketizer::new(track.codec, track.id, track.clock_rate));
+                        interleaved_depacketizers.insert(
+                            rtp_channel,
+                            Depacketizer::new(track.codec, track.id, track.clock_rate),
+                        );
                         if !resources
                             .recording_mounts
                             .iter()
