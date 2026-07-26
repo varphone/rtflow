@@ -14,7 +14,10 @@ publish = ["crates-io"]
 
 [features]
 default = ["full"]
-full = ["srtp", "tls", "mp4", "mkv", "client", "server", "file-storage", "metrics", "multicast"]
+full = [
+    "srtp", "tls", "mp4", "mkv", "client", "server", "file-storage",
+    "metrics", "multicast", "http", "http-flv", "hls", "dash", "rtmp", "srt", "webrtc",
+]
 srtp = ["dep:aes", "dep:cipher", "dep:hmac", "dep:sha1"]
 tls = ["dep:rustls", "dep:rustls-pemfile", "dep:tokio-rustls"]
 mp4 = ["dep:mp4box"]
@@ -26,6 +29,13 @@ metrics = []
 multicast = []
 ffmpeg = []
 gstreamer = ["dep:gstreamer", "dep:gstreamer-app"]
+http = ["dep:http-crate"]
+http-flv = ["http"]
+hls = ["http", "mp4"]
+dash = ["http", "mp4"]
+rtmp = []
+srt = []
+webrtc = ["srtp", "tls"]
 
 [[bench]]
 name = "hot_path"
@@ -58,6 +68,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 url = "2.5"
 gstreamer = { version = "0.25", optional = true }
 gstreamer-app = { version = "0.25", optional = true }
+http-crate = { package = "http", version = "1", optional = true }
 
 [dev-dependencies]
 clap = { version = "4.5", features = ["derive"] }

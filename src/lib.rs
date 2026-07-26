@@ -32,6 +32,20 @@ pub mod security;
 pub mod srtp;
 #[cfg(feature = "gstreamer")]
 pub mod gst;
+#[cfg(feature = "http")]
+pub mod http;
+#[cfg(feature = "http-flv")]
+pub mod http_flv;
+#[cfg(feature = "hls")]
+pub mod hls;
+#[cfg(feature = "dash")]
+pub mod dash;
+#[cfg(feature = "rtmp")]
+pub mod rtmp;
+#[cfg(feature = "srt")]
+pub mod srt;
+#[cfg(feature = "webrtc")]
+pub mod webrtc;
 #[cfg(feature = "file-storage")]
 pub mod storage;
 /// Backward-compatible recording facade. New code may use [`storage`].
