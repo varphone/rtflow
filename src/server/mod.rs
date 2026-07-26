@@ -68,7 +68,7 @@ impl ServerConfig {
             max_rtsp_body_bytes: 256 * 1024,
             max_sessions: 256,
             udp_port_range: None,
-            consumer_queue_capacity: 64,
+            consumer_queue_capacity: 4096,
             no_subscriber_grace: Duration::from_secs(5),
             shutdown_grace: Duration::from_secs(5),
             authenticator: Arc::new(AllowAll),
@@ -320,6 +320,8 @@ struct Mount {
     publishers: AtomicUsize,
     publisher_claimed: AtomicBool,
     max_queued_bytes_per_session: usize,
+    /// SDP fmtp parameters received via ANNOUNCE, keyed by track_id.
+    announce_fmtp: Mutex<HashMap<u8, Arc<str>>>,
 }
 struct State {
     mounts: RwLock<HashMap<Arc<str>, Arc<Mount>>>,
@@ -696,6 +698,7 @@ impl RtspServer {
                 .config
                 .resource_limits
                 .max_queued_bytes_per_session,
+            announce_fmtp: Mutex::new(HashMap::new()),
         });
         let mut mounts = self.state.mounts.write().await;
         if mounts.contains_key(&path) {
@@ -797,6 +800,10 @@ impl MountHandle {
     /// Use `sender.subscribe()` to create a fresh receiver for each connection.
     pub fn frame_sender(&self) -> &broadcast::Sender<AccessUnit> {
         &self.inner.frames
+    }
+    /// Get ANNOUNCE SDP fmtp parameters (snapshot at call time).
+    pub fn announce_fmtp(&self) -> HashMap<u8, Arc<str>> {
+        self.inner.announce_fmtp.lock().unwrap().clone()
     }
     pub fn snapshot(&self) -> MountSnapshot {
         let subscribers = self.inner.frames.receiver_count();

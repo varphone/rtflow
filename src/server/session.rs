@@ -106,14 +106,21 @@ pub(super) async fn serve_connection(
                     {
                         let depacketizer = interleaved_depacketizers
                             .entry(frame.channel)
-                            .or_insert_with(|| Depacketizer::new(track.codec, track.id));
-                        if let Ok(Some(unit)) = RtpPacket::parse(frame.payload)
+                            .or_insert_with(|| Depacketizer::new(track.codec, track.id, track.clock_rate));
+                        match RtpPacket::parse(frame.payload)
                             .and_then(|packet| depacketizer.push(packet))
                         {
-                            if mount.frames.send(unit).is_ok() {
-                                mount.stats.add_accepted(1);
-                            } else {
-                                mount.stats.add_dropped(1);
+                            Ok(units) => {
+                                for unit in units {
+                                    if mount.frames.send(unit).is_ok() {
+                                        mount.stats.add_accepted(1);
+                                    } else {
+                                        mount.stats.add_dropped(1);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(channel=frame.channel, error=%e, "depacketizer error");
                             }
                         }
                     }
@@ -519,7 +526,7 @@ pub(super) async fn serve_connection(
                     if matches!(mount.config, MountConfig::Publisher { .. }) {
                         has_interleaved_receiver = true;
                         interleaved_depacketizers
-                            .insert(rtp_channel, Depacketizer::new(track.codec, track.id));
+                            .insert(rtp_channel, Depacketizer::new(track.codec, track.id, track.clock_rate));
                         if !resources
                             .recording_mounts
                             .iter()
