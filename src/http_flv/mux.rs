@@ -155,67 +155,54 @@ impl FlvMuxer {
         let sps = sps?;
         let pps = pps?;
 
-        // Parse profile_tier_level from SPS.
-        // SPS NAL: 2-byte NAL header, then sps_video_parameter_set_id(4),
-        // sps_max_sub_layers_minus1(3), sps_temporal_id_nesting_flag(1),
-        // then profile_tier_level starts at byte 2 of the NAL unit.
-        let p = if sps.len() > 12 { &sps[2..] } else { &[] };
+        // Extract profile_tier_level fields from SPS RBSP.
+        // After the 2-byte NAL header, SPS RBSP starts with:
+        //   sps_video_parameter_set_id (4 bits)
+        //   sps_max_sub_layers_minus1 (3 bits)
+        //   sps_temporal_id_nesting_flag (1 bit)
+        // Then profile_tier_level() begins at offset 2.
+        // profile_tier_level layout:
+        //   [0]  general_profile_space(2) + general_tier_flag(1) + general_profile_idc(5)
+        //   [1..4] general_profile_compatibility_flags (4 bytes)
+        //   [5..10] general_constraint_indicator_flags (6 bytes)
+        //   [11] general_level_idc
 
-        let general_profile_idc = if !p.is_empty() { p[0] & 0x1f } else { 1 }; // Main
-        let general_profile_compatibility_flags = if p.len() >= 6 {
-            [p[1], p[2], p[3], p[4]]
-        } else {
-            [0, 0, 0, 0]
-        };
-        // general_constraint_indicator_flags: 6 bytes starting at p[5]
-        let general_constraint_indicator_flags = if p.len() >= 12 {
-            [p[5], p[6], p[7], p[8], p[9], p[10]]
-        } else {
-            [0, 0, 0, 0, 0, 0]
-        };
-        let general_level_idc = if p.len() >= 13 { p[11] } else { 120 }; // level 3.0
+        let p = if sps.len() > 12 { &sps[2..] } else { return None };
 
-        let mut buf = BytesMut::new();
+        let general_profile_space_tier_idc = p[0];
+        let general_profile_compatibility_flags = [p[1], p[2], p[3], p[4]];
+        let general_constraint_indicator_flags = [p[5], p[6], p[7], p[8], p[9], p[10]];
+        let general_level_idc = p[11];
+
+        let mut buf = BytesMut::with_capacity(128);
         buf.put_u8(1);                       // configurationVersion
-        // general_profile_space(2) + general_tier_flag(1) + general_profile_idc(5)
-        buf.put_u8(general_profile_idc);
-        // general_profile_compatibility_flags (4 bytes)
+        buf.put_u8(general_profile_space_tier_idc);
         buf.put_slice(&general_profile_compatibility_flags);
-        // general_constraint_indicator_flags (6 bytes)
         buf.put_slice(&general_constraint_indicator_flags);
-        // general_level_idc
         buf.put_u8(general_level_idc);
-        // min_spatial_segmentation_idc (16 bits, top 4 bits reserved)
-        buf.put_u16(0xf000);
-        // parallelismType (8 bits, top 6 bits reserved)
-        buf.put_u8(0xfc);
-        // chromaFormat (8 bits, top 6 bits reserved)
-        buf.put_u8(0xfc | 1); // 4:2:0
-        // bitDepthLumaMinus8 (8 bits, top 5 bits reserved)
-        buf.put_u8(0xf8);
-        // bitDepthChromaMinus8 (8 bits, top 5 bits reserved)
-        buf.put_u8(0xf8);
-        // avgFrameRate
-        buf.put_u16(0);
-        // constantFrameRate(2) + numTemporalLayers(3) + temporalIdNested(1) + lengthSizeMinus1(2)
-        buf.put_u8(0x0f); // lengthSizeMinus1 = 3
-        // numOfArrays
-        buf.put_u8(3); // VPS + SPS + PPS
+        buf.put_u16(0xf000);                 // min_spatial_segmentation_idc (reserved)
+        buf.put_u8(0xfc);                    // parallelismType (reserved)
+        buf.put_u8(0xfd);                    // chromaFormatIdc = 1 (4:2:0)
+        buf.put_u8(0xf8);                    // bitDepthLumaMinus8 = 0
+        buf.put_u8(0xf8);                    // bitDepthChromaMinus8 = 0
+        buf.put_u16(0);                      // avgFrameRate
+        buf.put_u8(0x0f);                    // constantFrameRate(0) + numTemporalLayers(1) + temporalIdNested(1) + lengthSizeMinus1(3)
+        buf.put_u8(3);                       // numOfArrays (VPS + SPS + PPS)
 
         // VPS array
-        buf.put_u8(0x20); // array_completeness(1) + reserved(1) + NAL_unit_type(6) = VPS
-        buf.put_u16(1);   // numNalus
+        buf.put_u8(0x20); // NAL_unit_type = 32 (VPS)
+        buf.put_u16(1);
         buf.put_u16(vps.len() as u16);
         buf.put_slice(&vps);
 
         // SPS array
-        buf.put_u8(0x21); // SPS
+        buf.put_u8(0x21); // NAL_unit_type = 33 (SPS)
         buf.put_u16(1);
         buf.put_u16(sps.len() as u16);
         buf.put_slice(&sps);
 
         // PPS array
-        buf.put_u8(0x22); // PPS
+        buf.put_u8(0x22); // NAL_unit_type = 34 (PPS)
         buf.put_u16(1);
         buf.put_u16(pps.len() as u16);
         buf.put_slice(&pps);
@@ -248,31 +235,46 @@ fn write_h264_video_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_
 
 /// Write an H.265 video FLV tag (Enhanced RTMP format).
 fn write_h265_video_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_sequence_header: bool) {
-    // Enhanced RTMP: video tag body starts with:
-    // byte 0: 0b1000xxxx (isExVideoHeader=1, FrameType in lower bits)
-    //   FrameType: 1=keyframe, 2=inter, 5=command
-    // bytes 1-4: FourCC ("hvc1")
-    // then: PacketType (1 byte) for sequence header = 0, coded frames = 1
-    // then: data
+    // Enhanced RTMP video tag body:
+    //   byte 0: 0b1XYY0000
+    //     bit 7: isExVideoHeader = 1
+    //     bits 4-6: X = FrameType (0=sequence header, 1=keyframe, 2=inter)
+    //   bytes 1-4: FourCC ("hvc1")
+    //   byte 5: PacketType (0=SequenceStart, 1=CodedFrames)
+    //   [if PacketType=1]: 3 bytes CompositionTime
+    //   data: HVCC record (seq hdr) or length-prefixed NALUs (coded frames)
 
-    let packet_type: u8 = if is_sequence_header { 0 } else { 1 };
-    let body_size = if is_sequence_header {
-        1 + 4 + 1 + data.len() // enhanced_header + FourCC + packet_type + data
+    let (frame_type, packet_type): (u8, u8) = if is_sequence_header {
+        (0, 0) // FrameType=0 for sequence header in Enhanced RTMP
+    } else if unit.is_keyframe {
+        (1, 1)
     } else {
-        1 + 4 + 1 + data.len() // same structure for coded frames
+        (2, 1)
+    };
+
+    let body_size = if is_sequence_header {
+        1 + 4 + 1 + data.len()
+    } else {
+        1 + 4 + 1 + 3 + data.len() // +3 for CompositionTime
     };
 
     write_flv_tag_header(buf, unit, body_size);
 
-    // Enhanced RTMP header byte
-    let frame_type = if unit.is_keyframe { 1u8 } else { 2u8 };
-    buf.put_u8(0x80 | frame_type); // isExVideoHeader=1 + frameType
+    // Enhanced RTMP header byte: isExVideoHeader=1 + frameType in bits 4-6
+    buf.put_u8(0x80 | (frame_type << 4));
 
     // FourCC: "hvc1"
     buf.put_slice(b"hvc1");
 
     // Packet type
     buf.put_u8(packet_type);
+
+    // CompositionTime (3 bytes, SI24, big-endian) — only for coded frames
+    if !is_sequence_header {
+        buf.put_u8(0);
+        buf.put_u8(0);
+        buf.put_u8(0);
+    }
 
     // Data
     buf.put_slice(data);
@@ -576,20 +578,17 @@ mod tests {
 
         let tags = muxer.encode(&unit);
         assert!(!tags.is_empty());
-        // Enhanced RTMP: second byte should be 'h' from "hvc1"
-        // First tag is sequence header, second is data
-        // Video tag: 0x09, then tag header, then enhanced byte (0x81), then "hvc1"
-        // Find the first video tag body
+        // Find the first video tag and verify Enhanced RTMP format
         let mut pos = 0;
-        while pos < tags.len() {
+        while pos + FLV_TAG_HEADER_SIZE + 6 < tags.len() {
             if tags[pos] == 0x09 {
-                // This is a video tag
                 let body_start = pos + FLV_TAG_HEADER_SIZE;
-                if body_start + 5 < tags.len() {
-                    assert_eq!(tags[body_start] & 0x80, 0x80, "enhanced RTMP flag should be set");
-                    assert_eq!(&tags[body_start + 1..body_start + 5], b"hvc1", "FourCC should be hvc1");
-                    break;
-                }
+                // Enhanced RTMP header byte: 0x80 | (frame_type << 4)
+                // Sequence header: frame_type=0, so byte = 0x80
+                assert_eq!(tags[body_start], 0x80, "seq hdr: enhanced flag + frame_type=0");
+                assert_eq!(&tags[body_start + 1..body_start + 5], b"hvc1");
+                assert_eq!(tags[body_start + 5], 0, "PacketType=0 for SequenceStart");
+                break;
             }
             pos += 1;
         }
