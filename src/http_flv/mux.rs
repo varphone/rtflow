@@ -203,20 +203,20 @@ impl FlvMuxer {
         buf.put_u8(0x0f);                    // constantFrameRate(0) + numTemporalLayers(1) + temporalIdNested(1) + lengthSizeMinus1(3)
         buf.put_u8(3);                       // numOfArrays (VPS + SPS + PPS)
 
-        // VPS array
-        buf.put_u8(0x20); // NAL_unit_type = 32 (VPS)
+        // VPS array: array_completeness=1, reserved=1, NAL_unit_type=32
+        buf.put_u8(0xa0); // 0b10100000 = complete(1) + reserved(1) + type(32)
         buf.put_u16(1);
         buf.put_u16(vps.len() as u16);
         buf.put_slice(&vps);
 
-        // SPS array
-        buf.put_u8(0x21); // NAL_unit_type = 33 (SPS)
+        // SPS array: array_completeness=1, reserved=1, NAL_unit_type=33
+        buf.put_u8(0xa1); // 0b10100001
         buf.put_u16(1);
         buf.put_u16(sps.len() as u16);
         buf.put_slice(&sps);
 
-        // PPS array
-        buf.put_u8(0x22); // NAL_unit_type = 34 (PPS)
+        // PPS array: array_completeness=1, reserved=1, NAL_unit_type=34
+        buf.put_u8(0xa2); // 0b10100010
         buf.put_u16(1);
         buf.put_u16(pps.len() as u16);
         buf.put_slice(&pps);
@@ -247,50 +247,47 @@ fn write_h264_video_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_
     buf.put_u32(tag_total_size as u32);
 }
 
-/// Write an H.265 video FLV tag (Enhanced RTMP format).
+/// Write an H.265 video FLV tag (Enhanced RTMP / Veovera format).
+///
+/// Format (Veovera Enhanced RTMP spec):
+///   byte 0: IsExVideoHeader(1) | VideoFrameType(3) | VideoPacketType(4)
+///     bit 7:   isExVideoHeader = 1
+///     bits 4-6: FrameType (1=keyframe, 2=inter, 5=command)
+///     bits 0-3: PacketType (0=SequenceStart, 1=CodedFrames, 3=CodedFramesX)
+///   bytes 1-4: FourCC ("hvc1")
+///   [if PacketType=1]: 3 bytes CompositionTime (SI24, big-endian)
+///   data: HVCC record (SequenceStart) or length-prefixed NALUs (CodedFrames)
 fn write_h265_video_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_sequence_header: bool) {
-    // Enhanced RTMP video tag body:
-    //   byte 0: 0b1XYY0000
-    //     bit 7: isExVideoHeader = 1
-    //     bits 4-6: X = FrameType (0=sequence header, 1=keyframe, 2=inter)
-    //   bytes 1-4: FourCC ("hvc1")
-    //   byte 5: PacketType (0=SequenceStart, 1=CodedFrames)
-    //   [if PacketType=1]: 3 bytes CompositionTime
-    //   data: HVCC record (seq hdr) or length-prefixed NALUs (coded frames)
-
     let (frame_type, packet_type): (u8, u8) = if is_sequence_header {
-        (0, 0) // FrameType=0 for sequence header in Enhanced RTMP
+        (1, 0) // keyframe + SequenceStart
     } else if unit.is_keyframe {
-        (1, 1)
+        (1, 1) // keyframe + CodedFrames
     } else {
-        (2, 1)
+        (2, 1) // inter + CodedFrames
     };
 
     let body_size = if is_sequence_header {
-        1 + 4 + 1 + data.len()
+        1 + 4 + data.len() // header + FourCC + HVCC
     } else {
-        1 + 4 + 1 + 3 + data.len() // +3 for CompositionTime
+        1 + 4 + 3 + data.len() // header + FourCC + CompTime + NALUs
     };
 
     write_flv_tag_header(buf, unit, body_size);
 
-    // Enhanced RTMP header byte: isExVideoHeader=1 + frameType in bits 4-6
-    buf.put_u8(0x80 | (frame_type << 4));
+    // Enhanced RTMP header byte: PacketType is embedded in bits 0-3
+    buf.put_u8(0x80 | (frame_type << 4) | packet_type);
 
     // FourCC: "hvc1"
     buf.put_slice(b"hvc1");
 
-    // Packet type
-    buf.put_u8(packet_type);
-
-    // CompositionTime (3 bytes, SI24, big-endian) — only for coded frames
+    // CompositionTime (3 bytes, SI24) — only for CodedFrames (PacketType=1)
     if !is_sequence_header {
         buf.put_u8(0);
         buf.put_u8(0);
         buf.put_u8(0);
     }
 
-    // Data
+    // Data: HVCC (SequenceStart) or AVCC NALUs (CodedFrames)
     buf.put_slice(data);
 
     let tag_total_size = FLV_TAG_HEADER_SIZE + body_size;
@@ -604,16 +601,17 @@ mod tests {
 
         let tags = muxer.encode(&unit);
         assert!(!tags.is_empty());
-        // Find the first video tag and verify Enhanced RTMP format
+        // Find the first video tag and verify Enhanced RTMP format (Veovera spec)
+        // Byte 0: IsExVideoHeader(1) | VideoFrameType(3) | VideoPacketType(4)
         let mut pos = 0;
-        while pos + FLV_TAG_HEADER_SIZE + 6 < tags.len() {
+        while pos + FLV_TAG_HEADER_SIZE + 5 < tags.len() {
             if tags[pos] == 0x09 {
                 let body_start = pos + FLV_TAG_HEADER_SIZE;
-                // Enhanced RTMP header byte: 0x80 | (frame_type << 4)
-                // Sequence header: frame_type=0, so byte = 0x80
-                assert_eq!(tags[body_start], 0x80, "seq hdr: enhanced flag + frame_type=0");
+                // Sequence header: IsEx=1, FrameType=1(keyframe), PacketType=0
+                // = 0x80 | 0x10 | 0x00 = 0x90
+                assert_eq!(tags[body_start], 0x90, "seq hdr: IsEx=1, FrameType=1, PacketType=0");
                 assert_eq!(&tags[body_start + 1..body_start + 5], b"hvc1");
-                assert_eq!(tags[body_start + 5], 0, "PacketType=0 for SequenceStart");
+                // No separate PacketType byte — it's embedded in byte 0
                 break;
             }
             pos += 1;

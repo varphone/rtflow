@@ -8,7 +8,10 @@ use crate::{
     media::{AccessUnit, Codec, MediaDescription},
 };
 
-/// Serve a live FLV stream over HTTP chunked response.
+/// Serve a live FLV stream over HTTP.
+///
+/// Uses raw bytes (no chunked encoding) with `Connection: close`.
+/// The stream ends when the client disconnects or the source stops.
 pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
     _req: HttpRequest,
     mut writer: ResponseWriter<W>,
@@ -17,7 +20,6 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
 ) -> Result<ResponseWriter<W>> {
     let mut muxer = FlvMuxer::new(&description);
 
-    // Detect video codec from description for sequence header building
     let video_codec = description
         .tracks
         .iter()
@@ -27,19 +29,19 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
     let mut video_seq_pending = video_codec.is_some();
     let mut audio_seq_pending = description.tracks.iter().any(|t| t.codec == Codec::Aac);
 
-    // Send FLV header
-    let flv_header = muxer.flv_header();
+    // Send HTTP headers — no Transfer-Encoding: chunked.
+    // We write raw FLV bytes directly; the stream ends on Connection: close.
     writer.write_headers(200, &[
         ("Content-Type", "video/x-flv"),
-        ("Transfer-Encoding", "chunked"),
         ("Cache-Control", "no-cache, no-store"),
         ("Connection", "close"),
         ("Access-Control-Allow-Origin", "*"),
     ]).await?;
-    writer.write_chunk(&flv_header).await?;
+    // Write FLV file header immediately
+    writer.write_raw(&muxer.flv_header()).await?;
     writer.flush().await?;
 
-    // Stream loop
+    // Stream loop: receive frames from publisher, encode to FLV, write raw
     loop {
         let unit = match receiver.recv().await {
             Ok(u) => u,
@@ -69,7 +71,7 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
 
         let tags = muxer.encode(&unit);
         if !tags.is_empty() {
-            if let Err(e) = writer.write_chunk(&tags).await {
+            if let Err(e) = writer.write_raw(&tags).await {
                 tracing::debug!("http-flv write error: {e}");
                 break;
             }

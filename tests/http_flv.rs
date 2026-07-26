@@ -181,9 +181,8 @@ async fn http_flv_e2e_stream() {
     // Verify we got HTTP response with FLV data
     let response = String::from_utf8_lossy(&total);
     assert!(response.contains("200 OK") || response.starts_with("HTTP/1.1"));
-    assert!(response.contains("Transfer-Encoding: chunked"));
     assert!(response.contains("video/x-flv"));
-    // The response body should contain FLV data (chunked encoded)
+    // The response body should contain FLV data
     let has_flv = total.windows(3).any(|w| w == b"FLV");
     assert!(has_flv, "response should contain FLV data");
 

@@ -61,6 +61,16 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
         Ok(())
     }
 
+    /// Write raw bytes directly to the stream (no chunked framing).
+    /// Use with `Transfer-Encoding: none` / `Connection: close` for streaming.
+    pub async fn write_raw(&mut self, data: &[u8]) -> Result<()> {
+        if data.is_empty() {
+            return Ok(());
+        }
+        self.inner.write_all(data).await?;
+        Ok(())
+    }
+
     pub async fn write_body(&mut self, status: u16, content_type: &str, body: &[u8]) -> Result<()> {
         let content_length = body.len().to_string();
         let headers = vec![
