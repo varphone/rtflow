@@ -64,6 +64,7 @@ pub(super) async fn serve_connection(
     let mut interleaved: Vec<(Arc<Mount>, u8, u8, crate::media::TrackDescription)> = Vec::new();
     let session_id = session_id.to_string();
     let mut phase = ConnectionPhase::Init;
+    let mut has_announced = false;
     let mut selected_mount: Option<String> = None;
     let mut interleaved_depacketizers: HashMap<u8, Depacketizer> = HashMap::new();
     let mut vod_cursor = std::time::Duration::ZERO;
@@ -132,7 +133,51 @@ pub(super) async fn serve_connection(
             let Message::Request(req) = msg else {
                 return Err(Error::Rtsp("client sent response".into()));
             };
-            let cseq = req.headers.get("cseq").cloned().unwrap_or_default();
+            let Some(cseq) = req
+                .headers
+                .get("cseq")
+                .filter(|value| value.parse::<u32>().is_ok())
+                .cloned()
+            else {
+                writer
+                    .lock()
+                    .await
+                    .write_all(&rtsp::encode_response(&simple_response(
+                        400,
+                        "Bad Request",
+                        String::new(),
+                    )))
+                    .await?;
+                continue;
+            };
+            if req.method == Method::Unsupported {
+                writer
+                    .lock()
+                    .await
+                    .write_all(&rtsp::encode_response(&simple_response(
+                        501,
+                        "Not Implemented",
+                        cseq,
+                    )))
+                    .await?;
+                continue;
+            }
+            if let Some(require) = req
+                .headers
+                .get("require")
+                .filter(|value| !value.trim().is_empty())
+            {
+                let mut response = simple_response(551, "Option Not Supported", cseq);
+                response
+                    .headers
+                    .insert("unsupported".into(), require.clone());
+                writer
+                    .lock()
+                    .await
+                    .write_all(&rtsp::encode_response(&response))
+                    .await?;
+                continue;
+            }
             if let Some(response) = authorize_request(&req, peer, &state, cseq.clone()).await {
                 writer
                     .lock()
@@ -149,7 +194,11 @@ pub(super) async fn serve_connection(
                 provided_session.is_some_and(|value| value != session_id)
             } else if matches!(
                 req.method,
-                Method::Play | Method::Pause | Method::Record | Method::Teardown
+                Method::Play
+                    | Method::Pause
+                    | Method::Record
+                    | Method::Teardown
+                    | Method::GetParameter
             ) {
                 provided_session != Some(session_id.as_str())
             } else {
@@ -168,6 +217,7 @@ pub(super) async fn serve_connection(
                 continue;
             }
             let valid_phase = match req.method {
+                Method::Announce => phase == ConnectionPhase::Init && !has_announced,
                 Method::Setup => matches!(phase, ConnectionPhase::Init | ConnectionPhase::Ready),
                 Method::Play => matches!(phase, ConnectionPhase::Ready | ConnectionPhase::Paused),
                 Method::Pause => phase == ConnectionPhase::Playing,
@@ -211,6 +261,23 @@ pub(super) async fn serve_connection(
                         .await?;
                     continue;
                 }
+                let content_type = req
+                    .headers
+                    .get("content-type")
+                    .map(|value| value.split(';').next().unwrap_or(value).trim());
+                if !content_type.is_some_and(|value| value.eq_ignore_ascii_case("application/sdp"))
+                {
+                    writer
+                        .lock()
+                        .await
+                        .write_all(&rtsp::encode_response(&simple_response(
+                            415,
+                            "Unsupported Media Type",
+                            cseq,
+                        )))
+                        .await?;
+                    continue;
+                }
                 let announced = match sdp::parse(&req.body) {
                     Ok(description) => description,
                     Err(_) => {
@@ -226,16 +293,28 @@ pub(super) async fn serve_connection(
                         continue;
                     }
                 };
-                let fmtp = announced
-                    .tracks
-                    .into_iter()
-                    .filter_map(|track| track.fmtp.map(|value| (track.id, value)))
-                    .collect();
+                let expected = description_for(&mount.config)?;
+                let fmtp = match announced_fmtp(&expected, &announced) {
+                    Ok(fmtp) => fmtp,
+                    Err(_) => {
+                        writer
+                            .lock()
+                            .await
+                            .write_all(&rtsp::encode_response(&simple_response(
+                                400,
+                                "Bad Request",
+                                cseq,
+                            )))
+                            .await?;
+                        continue;
+                    }
+                };
                 mount
                     .startup_cache
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .clear();
+                has_announced = true;
                 *mount
                     .announce_fmtp
                     .lock()
@@ -301,19 +380,48 @@ pub(super) async fn serve_connection(
                         .await?;
                     continue;
                 };
-                if let Ok(TransportSpec::TcpInterleaved {
+                let transport = TransportSpec::parse_all(raw).ok().and_then(|alternatives| {
+                    alternatives.into_iter().find(|candidate| match candidate {
+                        TransportSpec::TcpInterleaved {
+                            rtp_channel,
+                            rtcp_channel,
+                        } => {
+                            rtp_channel != rtcp_channel
+                                && !interleaved.iter().any(|(_, current_rtp, current_rtcp, _)| {
+                                    [*current_rtp, *current_rtcp].into_iter().any(|current| {
+                                        current == *rtp_channel || current == *rtcp_channel
+                                    })
+                                })
+                        }
+                        TransportSpec::Udp { .. } => true,
+                    })
+                });
+                let Some(transport) = transport else {
+                    writer
+                        .lock()
+                        .await
+                        .write_all(&rtsp::encode_response(&simple_response(
+                            461,
+                            "Unsupported Transport",
+                            cseq,
+                        )))
+                        .await?;
+                    continue;
+                };
+                if let TransportSpec::TcpInterleaved {
                     rtp_channel,
                     rtcp_channel,
-                }) = TransportSpec::parse(raw)
+                } = transport
                 {
                     let track = track_for_uri(&description_for(&mount.config)?, &req.uri)?;
                     interleaved.push((mount, rtp_channel, rtcp_channel, track));
                     selected_mount.get_or_insert(path.clone());
                     phase = ConnectionPhase::Ready;
                     let mut response = simple_response(200, "OK", cseq);
-                    response
-                        .headers
-                        .insert("session".into(), session_id.clone());
+                    response.headers.insert(
+                        "session".into(),
+                        session_header(&session_id, state.config.session_timeout),
+                    );
                     response.headers.insert(
                         "transport".into(),
                         TransportSpec::TcpInterleaved {
@@ -329,11 +437,11 @@ pub(super) async fn serve_connection(
                         .await?;
                     continue;
                 }
-                let Ok(TransportSpec::Udp {
+                let TransportSpec::Udp {
                     client_rtp,
                     client_rtcp,
                     ..
-                }) = TransportSpec::parse(raw)
+                } = transport
                 else {
                     writer
                         .lock()
@@ -357,9 +465,10 @@ pub(super) async fn serve_connection(
                 let rtcp_target = SocketAddr::new(peer.ip(), client_rtcp);
                 let track = track_for_uri(&description_for(&mount.config)?, &req.uri)?;
                 let mut response = simple_response(200, "OK", cseq);
-                response
-                    .headers
-                    .insert("session".into(), session_id.clone());
+                response.headers.insert(
+                    "session".into(),
+                    session_header(&session_id, state.config.session_timeout),
+                );
                 response.headers.insert(
                     "transport".into(),
                     TransportSpec::Udp {
@@ -451,9 +560,10 @@ pub(super) async fn serve_connection(
                 } else {
                     phase = ConnectionPhase::Playing;
                     let mut response = simple_response(200, "OK", cseq);
-                    response
-                        .headers
-                        .insert("session".into(), session_id.clone());
+                    response.headers.insert(
+                        "session".into(),
+                        session_header(&session_id, state.config.session_timeout),
+                    );
                     if vod_source.is_some() {
                         response.headers.insert(
                             "range".into(),
@@ -616,9 +726,10 @@ pub(super) async fn serve_connection(
                 } else {
                     phase = ConnectionPhase::Recording;
                     let mut response = simple_response(200, "OK", cseq);
-                    response
-                        .headers
-                        .insert("session".into(), session_id.clone());
+                    response.headers.insert(
+                        "session".into(),
+                        session_header(&session_id, state.config.session_timeout),
+                    );
                     writer
                         .lock()
                         .await
@@ -805,9 +916,15 @@ async fn authorize_request(
         AuthDecision::Deny => Some(simple_response(403, "Forbidden", cseq)),
     }
 }
+fn session_header(session_id: &str, timeout: std::time::Duration) -> String {
+    format!("{session_id};timeout={}", timeout.as_secs().max(1))
+}
+
 fn simple_response(status: u16, reason: &str, cseq: String) -> Response {
     let mut headers = BTreeMap::new();
-    headers.insert("cseq".into(), cseq);
+    if !cseq.is_empty() {
+        headers.insert("cseq".into(), cseq);
+    }
     Response {
         status,
         reason: reason.into(),
@@ -819,7 +936,9 @@ async fn handle_request(req: crate::rtsp::Request, state: &State) -> Response {
     let path = uri_path(&req.uri);
     let cseq = req.headers.get("cseq").cloned().unwrap_or_default();
     let mut headers = BTreeMap::new();
-    headers.insert("cseq".into(), cseq);
+    if !cseq.is_empty() {
+        headers.insert("cseq".into(), cseq);
+    }
     let mounts = state.mounts.read().await;
     let mount = mounts.get(path.as_str());
     if !matches!(req.method, Method::Options) && mount.is_none() {
@@ -834,7 +953,8 @@ async fn handle_request(req: crate::rtsp::Request, state: &State) -> Response {
         Method::Options => {
             headers.insert(
                 "public".into(),
-                "OPTIONS, DESCRIBE, ANNOUNCE, SETUP, PLAY, PAUSE, RECORD, TEARDOWN, GET_PARAMETER, SET_PARAMETER".into(),
+                "OPTIONS, DESCRIBE, ANNOUNCE, SETUP, PLAY, PAUSE, RECORD, TEARDOWN, GET_PARAMETER"
+                    .into(),
             );
             Response {
                 status: 200,
@@ -872,6 +992,12 @@ async fn handle_request(req: crate::rtsp::Request, state: &State) -> Response {
                 body: sdp::encode(&d).into_bytes(),
             }
         }
+        Method::SetParameter | Method::Unsupported => Response {
+            status: 501,
+            reason: "Not Implemented".into(),
+            headers,
+            body: vec![],
+        },
         _ => Response {
             status: 200,
             reason: "OK".into(),
@@ -880,6 +1006,40 @@ async fn handle_request(req: crate::rtsp::Request, state: &State) -> Response {
         },
     }
 }
+fn announced_fmtp(
+    expected: &MediaDescription,
+    announced: &MediaDescription,
+) -> Result<HashMap<u8, Arc<str>>> {
+    if expected.tracks.len() != announced.tracks.len() {
+        return Err(Error::Rtsp(
+            "ANNOUNCE track count does not match mount".into(),
+        ));
+    }
+
+    expected
+        .tracks
+        .iter()
+        .zip(announced.tracks.iter())
+        .map(|(expected, announced)| {
+            if expected.kind != announced.kind
+                || expected.codec != announced.codec
+                || expected.clock_rate != announced.clock_rate
+                || expected.channels != announced.channels
+            {
+                return Err(Error::Rtsp(format!(
+                    "ANNOUNCE track {} does not match mount",
+                    expected.id
+                )));
+            }
+            Ok(announced
+                .fmtp
+                .as_ref()
+                .map(|value| (expected.id, value.clone())))
+        })
+        .filter_map(|result| result.transpose())
+        .collect()
+}
+
 fn track_for_uri(
     description: &MediaDescription,
     uri: &str,

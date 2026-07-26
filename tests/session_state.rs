@@ -91,3 +91,36 @@ async fn rejects_invalid_session_and_state_transitions() {
     tokio::time::sleep(Duration::from_millis(5)).await;
     server.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn reports_protocol_errors_without_closing_the_session() {
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let base = format!("rtsp://{}/missing", server.local_addr());
+    let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+
+    let response = request(&mut stream, &format!("OPTIONS {base} RTSP/1.0\r\n\r\n")).await;
+    assert_eq!(response.status, 400);
+    assert!(!response.headers.contains_key("cseq"));
+
+    let response = request(
+        &mut stream,
+        &format!("FROBNICATE {base} RTSP/1.0\r\nCSeq: 2\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(response.status, 501);
+
+    let response = request(
+        &mut stream,
+        &format!("OPTIONS {base} RTSP/1.0\r\nCSeq: 3\r\nRequire: fancy-extension\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(response.status, 551);
+    assert_eq!(
+        response.headers.get("unsupported").map(String::as_str),
+        Some("fancy-extension")
+    );
+
+    server.shutdown().await.unwrap();
+}

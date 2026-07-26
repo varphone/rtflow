@@ -31,6 +31,10 @@ fn description() -> MediaDescription {
     }
 }
 
+fn announced_sdp() -> &'static str {
+    "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=published\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=control:trackID=0\r\n"
+}
+
 async fn request(stream: &mut TcpStream, wire: &str) -> Response {
     stream.write_all(wire.as_bytes()).await.unwrap();
     let mut input = BytesMut::new();
@@ -74,9 +78,13 @@ async fn interleaved_record_is_forwarded_to_a_player() {
     .unwrap();
 
     let mut publisher = TcpStream::connect(server.local_addr()).await.unwrap();
+    let sdp = announced_sdp();
     let announce = request(
         &mut publisher,
-        &format!("ANNOUNCE {base} RTSP/1.0\r\nCSeq: 1\r\n\r\n"),
+        &format!(
+            "ANNOUNCE {base} RTSP/1.0\r\nCSeq: 1\r\nContent-Type: application/sdp\r\nContent-Length: {}\r\n\r\n{sdp}",
+            sdp.len()
+        ),
     )
     .await;
     assert_eq!(announce.status, 200);
@@ -122,7 +130,10 @@ async fn interleaved_record_is_forwarded_to_a_player() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(received.data, Bytes::from_static(&[0, 0, 0, 1, 0x65, 4, 5, 6]));
+    assert_eq!(
+        received.data,
+        Bytes::from_static(&[0, 0, 0, 1, 0x65, 4, 5, 6])
+    );
 
     drop(publisher);
     tokio::time::timeout(Duration::from_secs(1), async {
@@ -186,5 +197,44 @@ async fn concurrent_publisher_is_rejected_and_disconnect_allows_replacement() {
     let (replacement, response) = open_record_session(server.local_addr(), &base).await;
     assert_eq!(response.status, 200);
     drop(replacement);
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn announce_requires_sdp_content_type_and_compatible_tracks() {
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    server
+        .register_mount(
+            Arc::from("/announce"),
+            MountConfig::Publisher {
+                description: description(),
+                allow_replace_after_disconnect: true,
+            },
+        )
+        .await
+        .unwrap();
+    let base = format!("rtsp://{}/announce", server.local_addr());
+    let mut publisher = TcpStream::connect(server.local_addr()).await.unwrap();
+
+    let response = request(
+        &mut publisher,
+        &format!("ANNOUNCE {base} RTSP/1.0\r\nCSeq: 1\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(response.status, 415);
+
+    let incompatible = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=published\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H265/90000\r\na=control:trackID=0\r\n";
+    let response = request(
+        &mut publisher,
+        &format!(
+            "ANNOUNCE {base} RTSP/1.0\r\nCSeq: 2\r\nContent-Type: application/sdp\r\nContent-Length: {}\r\n\r\n{incompatible}",
+            incompatible.len()
+        ),
+    )
+    .await;
+    assert_eq!(response.status, 400);
+
     server.shutdown().await.unwrap();
 }
