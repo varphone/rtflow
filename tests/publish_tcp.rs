@@ -122,7 +122,7 @@ async fn interleaved_record_is_forwarded_to_a_player() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(received.data, Bytes::from_static(&[0x65, 4, 5, 6]));
+    assert_eq!(received.data, Bytes::from_static(&[0, 0, 0, 1, 0x65, 4, 5, 6]));
 
     drop(publisher);
     tokio::time::timeout(Duration::from_secs(1), async {

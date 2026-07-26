@@ -91,7 +91,7 @@ async fn unavailable_primary_fails_over_to_compatible_fallback() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(frame.data, Bytes::from_static(&[0x65, 0xfa, 0x11]));
+    assert_eq!(frame.data, Bytes::from_static(&[0, 0, 0, 1, 0x65, 0xfa, 0x11]));
 
     drop(client);
     proxy.shutdown().await.unwrap();

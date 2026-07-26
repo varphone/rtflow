@@ -46,6 +46,10 @@ async fn round_trip(codec: Codec, transport: UpstreamTransport) {
         }
         _ => unreachable!(),
     }
+    // Prepend Annex-B start code so the pushed frame matches the format the
+    // depacketizer now consistently produces.
+    let mut data = vec![0u8, 0, 0, 1];
+    data.extend_from_slice(&payload);
     let expected = AccessUnit {
         track_id: 0,
         codec,
@@ -53,7 +57,7 @@ async fn round_trip(codec: Codec, transport: UpstreamTransport) {
         dts: None,
         rtp_timestamp: 90_000,
         is_keyframe: true,
-        data: Bytes::from(payload),
+        data: Bytes::from(data),
     };
     publisher.try_push(expected.clone()).unwrap();
     let received = within(Duration::from_secs(1), client.next())

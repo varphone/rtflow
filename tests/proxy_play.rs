@@ -77,7 +77,7 @@ async fn proxy_forwards_upstream_frames() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(frame.data, Bytes::from_static(&[0x65, 9, 8]));
+    assert_eq!(frame.data, Bytes::from_static(&[0, 0, 0, 1, 0x65, 9, 8]));
     drop(client);
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {

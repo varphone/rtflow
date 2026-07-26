@@ -61,8 +61,22 @@ pub fn track(id: u8, codec: Codec) -> TrackDescription {
 
 pub fn unit(track_id: u8, codec: Codec, sequence: u32) -> AccessUnit {
     let data = match codec {
-        Codec::H264 => Bytes::from_static(&[0x65, 0x88, 0x84, 0x21]),
-        Codec::H265 => Bytes::from_static(&[0x26, 0x01, 0xaf, 0x09]),
+        // H.264/H.265 access units are now consistently Annex-B (4-byte start
+        // code prefix).  The RTSP sender packetizes them and the remote
+        // depacketizer reconstructs Annex-B, so the round-trip preserves the
+        // start code.
+        Codec::H264 => {
+            let mut b = BytesMut::with_capacity(8);
+            b.extend_from_slice(&[0, 0, 0, 1]);
+            b.extend_from_slice(&[0x65, 0x88, 0x84, 0x21]);
+            b.freeze()
+        }
+        Codec::H265 => {
+            let mut b = BytesMut::with_capacity(8);
+            b.extend_from_slice(&[0, 0, 0, 1]);
+            b.extend_from_slice(&[0x26, 0x01, 0xaf, 0x09]);
+            b.freeze()
+        }
         Codec::Aac => Bytes::from_static(&[0x21, 0x10, 0x04, 0x60]),
         Codec::Pcma => Bytes::from_static(&[0xd5; 160]),
         Codec::Pcmu => Bytes::from_static(&[0xff; 160]),

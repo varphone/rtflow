@@ -59,7 +59,7 @@ async fn local_h264_frame_reaches_interleaved_client() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(frame.data, Bytes::from_static(&[0x65, 1, 2]));
+    assert_eq!(frame.data, Bytes::from_static(&[0, 0, 0, 1, 0x65, 1, 2]));
     let quality = client.quality_snapshot().await;
     let track_quality = quality.tracks.get(&0).expect("track quality is available");
     assert_eq!(track_quality.packets_received, 1);
@@ -133,7 +133,7 @@ async fn live_stream_accepts_gstreamer_style_zero_npt_range() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(frame.data, Bytes::from_static(&[0x65, 0x01]));
+    assert_eq!(frame.data, Bytes::from_static(&[0, 0, 0, 1, 0x65, 0x01]));
 
     client.teardown().await.unwrap();
     server.shutdown().await.unwrap();

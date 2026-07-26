@@ -71,7 +71,7 @@ async fn run(transport: UpstreamTransport) {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(frame.data, Bytes::from_static(&[0x65, 7, 8]));
+    assert_eq!(frame.data, Bytes::from_static(&[0, 0, 0, 1, 0x65, 7, 8]));
 
     drop(client);
     tokio::time::timeout(Duration::from_secs(1), async {

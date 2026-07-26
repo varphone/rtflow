@@ -84,7 +84,7 @@ async fn mixed_transport_fanout_stays_bounded_under_burst() {
             .unwrap()
             .unwrap()
             .unwrap();
-        assert_eq!(frame.data.len(), payload.len());
+        assert_eq!(frame.data.len(), payload.len() + 4); // +4 for Annex-B start code
     }
     assert_eq!(mount.snapshot().stats.accepted_frames, FRAMES as u64);
 

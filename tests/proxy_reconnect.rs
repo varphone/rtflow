@@ -116,7 +116,7 @@ async fn proxy_recovers_when_upstream_appears_after_backoff() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(frame.data, Bytes::from_static(&[0x65, 9, 9]));
+    assert_eq!(frame.data, Bytes::from_static(&[0, 0, 0, 1, 0x65, 9, 9]));
 
     proxy.shutdown().await.unwrap();
     upstream.shutdown().await.unwrap();

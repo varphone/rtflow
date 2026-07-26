@@ -125,7 +125,7 @@ async fn udp_record_is_forwarded_to_tcp_player() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(received.data, Bytes::from_static(&[0x65, 3, 2, 1]));
+    assert_eq!(received.data, Bytes::from_static(&[0, 0, 0, 1, 0x65, 3, 2, 1]));
     assert!(mount.snapshot().publisher_connected);
 
     drop(control);
