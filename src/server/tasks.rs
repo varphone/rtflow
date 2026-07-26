@@ -284,16 +284,18 @@ pub(super) fn spawn_udp_receiver(
             .publishers
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let _lease = PublisherLease(mount.clone());
-        let mut depacketizer = Depacketizer::new(track.codec, track.id);
+        let mut depacketizer = Depacketizer::new(track.codec, track.id, track.clock_rate);
         let mut buffer = vec![0u8; 65_536];
         while let Ok((size, _)) = pair.rtp.recv_from(&mut buffer).await {
-            if let Ok(Some(frame)) = RtpPacket::parse(Bytes::copy_from_slice(&buffer[..size]))
+            if let Ok(frames) = RtpPacket::parse(Bytes::copy_from_slice(&buffer[..size]))
                 .and_then(|packet| depacketizer.push(packet))
             {
-                if mount.frames.send(frame).is_ok() {
-                    mount.stats.add_accepted(1);
-                } else {
-                    mount.stats.add_dropped(1);
+                for frame in frames {
+                    if mount.frames.send(frame).is_ok() {
+                        mount.stats.add_accepted(1);
+                    } else {
+                        mount.stats.add_dropped(1);
+                    }
                 }
             }
         }

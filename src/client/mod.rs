@@ -445,10 +445,9 @@ fn depacketize_packets(
 ) -> Vec<Result<AccessUnit>> {
     packets
         .into_iter()
-        .filter_map(|packet| match depacketizer.push(packet) {
-            Ok(Some(unit)) => Some(Ok(unit)),
-            Ok(None) => None,
-            Err(error) => Some(Err(error)),
+        .flat_map(|packet| match depacketizer.push(packet) {
+            Ok(units) => units.into_iter().map(Ok).collect::<Vec<_>>(),
+            Err(error) => vec![Err(error)],
         })
         .collect()
 }

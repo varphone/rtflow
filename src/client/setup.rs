@@ -79,7 +79,7 @@ async fn connect_interleaved(
             channel,
             (
                 JitterBuffer::new(options.jitter.clone()),
-                Depacketizer::new(track.codec, track.id),
+                Depacketizer::new(track.codec, track.id, track.clock_rate),
                 track.id,
                 track.clock_rate,
                 client_ssrc(track.id),
@@ -349,7 +349,7 @@ async fn connect_udp(
         let local_ssrc = client_ssrc(track_id);
         tasks.push(tokio::spawn(async move {
             let mut jitter = JitterBuffer::new(jitter_config);
-            let mut depacketizer = Depacketizer::new(track.codec, track.id);
+            let mut depacketizer = Depacketizer::new(track.codec, track.id, track.clock_rate);
             let mut buffer = vec![0u8; 65_536];
             let mut jitter_tick = tokio::time::interval(jitter_poll);
             jitter_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

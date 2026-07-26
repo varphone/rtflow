@@ -197,6 +197,7 @@ fn annex_b_nals(data: &Bytes) -> Vec<Bytes> {
 pub struct Depacketizer {
     codec: Codec,
     track_id: TrackId,
+    clock_rate: u32,
     assembling: Option<BytesMut>,
     access_unit: Vec<Bytes>,
     current_timestamp: Option<u32>,
@@ -204,115 +205,65 @@ pub struct Depacketizer {
     damaged_timestamp: Option<u32>,
 }
 impl Depacketizer {
-    pub fn new(codec: Codec, track_id: TrackId) -> Self {
-        Self {
-            codec,
-            track_id,
-            assembling: None,
-            access_unit: Vec::new(),
-            current_timestamp: None,
-            expected_sequence: None,
-            damaged_timestamp: None,
-        }
+    pub fn new(codec: Codec, track_id: TrackId, clock_rate: u32) -> Self {
+        Self { codec, track_id, clock_rate, assembling: None, access_unit: Vec::new(), current_timestamp: None, expected_sequence: None, damaged_timestamp: None }
     }
-    pub fn push(&mut self, p: RtpPacket) -> Result<Option<AccessUnit>> {
+    fn pts_from_timestamp(&self, rtp_ts: u32) -> std::time::Duration {
+        if self.clock_rate == 0 { return std::time::Duration::ZERO; }
+        std::time::Duration::from_micros((rtp_ts as u64) * 1_000_000 / self.clock_rate as u64)
+    }
+    pub fn push(&mut self, p: RtpPacket) -> Result<Vec<AccessUnit>> {
         let timestamp = p.header.timestamp;
         let marker = p.header.marker;
-        if self
-            .expected_sequence
-            .is_some_and(|expected| expected != p.header.sequence)
-            && matches!(self.codec, Codec::H264 | Codec::H265)
-        {
-            let damages_current_unit = self.current_timestamp == Some(timestamp);
-            self.assembling = None;
-            self.access_unit.clear();
-            self.current_timestamp = None;
-            self.damaged_timestamp = damages_current_unit.then_some(timestamp);
+        if self.expected_sequence.is_some_and(|e| e != p.header.sequence) && matches!(self.codec, Codec::H264|Codec::H265) {
+            let d = self.current_timestamp == Some(timestamp);
+            self.assembling = None; self.access_unit.clear(); self.current_timestamp = None;
+            self.damaged_timestamp = d.then_some(timestamp);
         }
         self.expected_sequence = Some(p.header.sequence.wrapping_add(1));
-        if self
-            .damaged_timestamp
-            .is_some_and(|damaged| damaged != timestamp)
-        {
-            self.damaged_timestamp = None;
-        }
-        if matches!(self.codec, Codec::H264 | Codec::H265) {
-            if self
-                .current_timestamp
-                .is_some_and(|value| value != timestamp)
-            {
-                self.access_unit.clear();
-                self.assembling = None;
-            }
+        if self.damaged_timestamp.is_some_and(|d| d != timestamp) { self.damaged_timestamp = None; }
+        if matches!(self.codec, Codec::H264|Codec::H265) {
+            if self.current_timestamp.is_some_and(|v| v != timestamp) { self.access_unit.clear(); self.assembling = None; }
             self.current_timestamp = Some(timestamp);
-            let nal = match self.codec {
-                Codec::H264 => self.h264(p.payload)?,
-                Codec::H265 => self.h265(p.payload)?,
-                _ => unreachable!(),
-            };
-            if let Some(nal) = nal {
-                self.access_unit.push(nal);
-            }
-            if !marker || self.assembling.is_some() || self.access_unit.is_empty() {
-                return Ok(None);
-            }
-            if self.damaged_timestamp == Some(timestamp) {
-                self.access_unit.clear();
-                self.current_timestamp = None;
-                self.damaged_timestamp = None;
-                return Ok(None);
-            }
-            let data = if self.access_unit.len() == 1 {
-                self.access_unit.pop().unwrap()
-            } else {
+            let nal = match self.codec { Codec::H264 => self.h264(p.payload)?, Codec::H265 => self.h265(p.payload)?, _ => unreachable!() };
+            if let Some(nal) = nal { self.access_unit.push(nal); }
+            if !marker || self.assembling.is_some() || self.access_unit.is_empty() { return Ok(vec![]); }
+            if self.damaged_timestamp == Some(timestamp) { self.access_unit.clear(); self.current_timestamp = None; self.damaged_timestamp = None; return Ok(vec![]); }
+            let data = {
                 let mut output = BytesMut::new();
-                for nal in self.access_unit.drain(..) {
-                    output.extend_from_slice(&[0, 0, 0, 1]);
-                    output.extend_from_slice(&nal);
-                }
+                for nal in self.access_unit.drain(..) { output.extend_from_slice(&[0,0,0,1]); output.extend_from_slice(&nal); }
                 output.freeze()
             };
             self.current_timestamp = None;
-            return Ok(Some(AccessUnit {
-                track_id: self.track_id,
-                codec: self.codec,
-                pts: std::time::Duration::ZERO,
-                dts: None,
-                rtp_timestamp: timestamp,
-                is_keyframe: is_keyframe(self.codec, &data),
-                data,
-            }));
+            let pts = self.pts_from_timestamp(timestamp);
+            return Ok(vec![AccessUnit { track_id: self.track_id, codec: self.codec, pts, dts: None, rtp_timestamp: timestamp, is_keyframe: is_keyframe(self.codec, &data), data }]);
         }
-        let data = match self.codec {
+        match self.codec {
             Codec::Aac => {
-                if p.payload.len() < 4 {
-                    return Err(Error::Media("short AAC AU header".into()));
+                if p.payload.len() < 4 { return Err(Error::Media("short AAC AU header".into())); }
+                let header_bits = u16::from_be_bytes([p.payload[0],p.payload[1]]) as usize;
+                if header_bits % 16 != 0 || header_bits == 0 { return Err(Error::Media("invalid AAC AU-headers-length".into())); }
+                let au_count = header_bits / 16;
+                let header_end = 2 + au_count * 2;
+                if p.payload.len() < header_end { return Err(Error::Media("AAC AU headers exceed payload".into())); }
+                let mut units = Vec::with_capacity(au_count);
+                let mut data_offset = header_end;
+                for i in 0..au_count {
+                    let ah = u16::from_be_bytes([p.payload[2+i*2], p.payload[2+i*2+1]]);
+                    let size = (ah >> 3) as usize;
+                    if data_offset + size > p.payload.len() { return Err(Error::Media("AAC AU-size exceeds payload".into())); }
+                    let pts = self.pts_from_timestamp(timestamp);
+                    units.push(AccessUnit { track_id: self.track_id, codec: self.codec, pts, dts: None, rtp_timestamp: timestamp, is_keyframe: true, data: p.payload.slice(data_offset..data_offset+size) });
+                    data_offset += size;
                 }
-                let header_bits = u16::from_be_bytes([p.payload[0], p.payload[1]]);
-                if header_bits != 16 {
-                    return Err(Error::Media(
-                        "only one 16-bit AAC AU-header is supported".into(),
-                    ));
-                }
-                let au_header = u16::from_be_bytes([p.payload[2], p.payload[3]]);
-                let size_bytes = (au_header >> 3) as usize;
-                if p.payload.len() - 4 != size_bytes {
-                    return Err(Error::Media("AAC AU-size does not match payload".into()));
-                }
-                p.payload.slice(4..)
+                return Ok(units);
             }
-            Codec::Pcma | Codec::Pcmu => p.payload,
+            Codec::Pcma|Codec::Pcmu => {
+                let pts = self.pts_from_timestamp(timestamp);
+                return Ok(vec![AccessUnit { track_id: self.track_id, codec: self.codec, pts, dts: None, rtp_timestamp: timestamp, is_keyframe: true, data: p.payload }]);
+            }
             _ => unreachable!(),
-        };
-        Ok(Some(AccessUnit {
-            track_id: self.track_id,
-            codec: self.codec,
-            pts: std::time::Duration::ZERO,
-            dts: None,
-            rtp_timestamp: timestamp,
-            is_keyframe: true,
-            data,
-        }))
+        }
     }
     fn h264(&mut self, p: Bytes) -> Result<Option<Bytes>> {
         if p.is_empty() {
@@ -466,13 +417,14 @@ mod tests {
     fn h264_fu_roundtrip() {
         let f = frame(Codec::H264, &[0x65; 300]);
         let mut p = Packetizer::new(Codec::H264, 96, 1, 80).unwrap();
-        let mut d = Depacketizer::new(Codec::H264, 0);
+        let mut d = Depacketizer::new(Codec::H264, 0, 90000);
         let packets = p.packetize(&f).unwrap();
         let mut out = None;
         for x in packets {
-            out = d.push(x).unwrap().or(out)
+            out = d.push(x).unwrap().into_iter().last().or(out)
         }
-        assert_eq!(out.unwrap().data, f.data)
+        let expected: Vec<u8> = [&[0u8, 0, 0, 1][..], &[0x65u8; 300][..]].concat();
+        assert_eq!(out.unwrap().data, Bytes::from(expected))
     }
     #[test]
     fn video_access_units_preserve_multiple_nals() {
@@ -485,10 +437,10 @@ mod tests {
         ] {
             let f = frame(codec, input);
             let mut packetizer = Packetizer::new(codec, 96, 1, 1200).unwrap();
-            let mut depacketizer = Depacketizer::new(codec, 0);
+            let mut depacketizer = Depacketizer::new(codec, 0, if matches!(codec, Codec::H264|Codec::H265) {90000} else if codec == Codec::Aac {48000} else {8000});
             let mut output = None;
             for packet in packetizer.packetize(&f).unwrap() {
-                output = depacketizer.push(packet).unwrap().or(output);
+                output = depacketizer.push(packet).unwrap().into_iter().last().or(output);
             }
             let output = output.unwrap();
             assert_eq!(annex_b_nals(&output.data).len(), 2);
@@ -507,14 +459,15 @@ mod tests {
             },
             payload: Bytes::from_static(payload),
         };
-        let mut h264 = Depacketizer::new(Codec::H264, 0);
+        let mut h264 = Depacketizer::new(Codec::H264, 0, 90000);
         let out = h264
             .push(packet(&[24, 0, 2, 0x61, 1, 0, 2, 0x65, 2]))
             .unwrap()
+            .into_iter().next()
             .unwrap();
         assert_eq!(annex_b_nals(&out.data).len(), 2);
         assert!(out.is_keyframe);
-        let mut h265 = Depacketizer::new(Codec::H265, 0);
+        let mut h265 = Depacketizer::new(Codec::H265, 0, 90000);
         let out = h265
             .push(packet(&[
                 48 << 1,
@@ -531,6 +484,7 @@ mod tests {
                 2,
             ]))
             .unwrap()
+            .into_iter().next()
             .unwrap();
         assert_eq!(annex_b_nals(&out.data).len(), 2);
         assert!(out.is_keyframe);
@@ -540,12 +494,12 @@ mod tests {
         for codec in [Codec::Aac, Codec::Pcma, Codec::Pcmu] {
             let f = frame(codec, &[1, 2, 3, 4]);
             let mut packetizer = Packetizer::new(codec, 96, 1, 1200).unwrap();
-            let mut depacketizer = Depacketizer::new(codec, 0);
+            let mut depacketizer = Depacketizer::new(codec, 0, if matches!(codec, Codec::H264|Codec::H265) {90000} else if codec == Codec::Aac {48000} else {8000});
             let packet = packetizer.packetize(&f).unwrap().remove(0);
             if codec == Codec::Aac {
                 assert_eq!(&packet.payload[..4], &[0, 16, 0, 32]);
             }
-            assert_eq!(depacketizer.push(packet).unwrap().unwrap().data, f.data);
+            assert_eq!(depacketizer.push(packet).unwrap().into_iter().next().unwrap().data, f.data);
         }
     }
     #[test]
@@ -582,24 +536,24 @@ mod tests {
             },
             payload,
         };
-        let mut depacketizer = Depacketizer::new(Codec::H264, 0);
+        let mut depacketizer = Depacketizer::new(Codec::H264, 0, 90000);
         assert!(
             depacketizer
                 .push(packet(1, 10, false, Bytes::from_static(&[0x61, 1])))
                 .unwrap()
-                .is_none()
+                .is_empty()
         );
         assert!(
             depacketizer
                 .push(packet(3, 10, true, Bytes::from_static(&[0x65, 2])))
                 .unwrap()
-                .is_none()
+                .is_empty()
         );
         assert!(
             depacketizer
                 .push(packet(4, 11, true, Bytes::from_static(&[0x65, 3])))
                 .unwrap()
-                .is_some()
+                .len() > 0
         );
     }
 
