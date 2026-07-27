@@ -63,6 +63,8 @@ pub mod recording {
 pub mod tls {
     pub use crate::security::{TlsClientConfig, TlsServerConfig};
 }
+#[path = "protocol/token_auth.rs"]
+pub mod token_auth;
 #[path = "protocol/transport.rs"]
 pub mod transport;
 // Stable expansion-oriented facades.
