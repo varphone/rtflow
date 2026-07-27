@@ -525,6 +525,9 @@ pub(crate) fn track_description(
         payload_type,
         fmtp,
         control: Arc::from(format!("trackID={id}")),
+        width: None,
+        height: None,
+        frame_rate: None,
         #[cfg(feature = "srtp")]
         crypto: None,
     }

@@ -110,6 +110,9 @@ pub fn parse(data: &[u8]) -> Result<MediaDescription> {
                 payload_type,
                 fmtp: None,
                 control: Arc::from(""),
+                width: None,
+                height: None,
+                frame_rate: None,
                 #[cfg(feature = "srtp")]
                 crypto: None,
             });

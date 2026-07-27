@@ -59,6 +59,9 @@ pub fn track(id: u8, codec: Codec) -> TrackDescription {
         fmtp: fmtp.map(Arc::from),
         control: Arc::from(format!("trackID={id}")),
         crypto: None,
+        width: None,
+        height: None,
+        frame_rate: None,
     }
 }
 

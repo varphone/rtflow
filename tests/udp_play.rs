@@ -23,6 +23,9 @@ async fn local_h264_frame_reaches_udp_client() {
             fmtp: None,
             control: Arc::from("trackID=0"),
             crypto: None,
+            width: None,
+            height: None,
+            frame_rate: None,
         }],
         connection: None,
     };

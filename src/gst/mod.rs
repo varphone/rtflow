@@ -157,6 +157,9 @@ impl GStreamerSource {
                 payload_type: t.payload_type,
                 fmtp: None,
                 control: Arc::from(format!("trackID={i}")),
+                width: None,
+                height: None,
+                frame_rate: None,
                 #[cfg(feature = "srtp")]
                 crypto: None,
             })

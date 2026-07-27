@@ -26,6 +26,9 @@ fn description() -> MediaDescription {
             fmtp: None,
             control: Arc::from("camera-video"),
             crypto: None,
+            width: None,
+            height: None,
+            frame_rate: None,
         }],
         connection: None,
     }

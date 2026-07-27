@@ -28,6 +28,16 @@ pub struct AccessUnit {
     pub is_keyframe: bool,
     pub data: Bytes,
 }
+
+impl AccessUnit {
+    /// Determine the media kind from the codec.
+    pub fn kind(&self) -> MediaKind {
+        match self.codec {
+            Codec::H264 | Codec::H265 | Codec::Vp8 | Codec::Vp9 => MediaKind::Video,
+            Codec::Aac | Codec::Pcma | Codec::Pcmu | Codec::Opus => MediaKind::Audio,
+        }
+    }
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TrackDescription {
     pub id: TrackId,
@@ -38,6 +48,12 @@ pub struct TrackDescription {
     pub payload_type: u8,
     pub fmtp: Option<Arc<str>>,
     pub control: Arc<str>,
+    /// Video width in pixels (if known).
+    pub width: Option<u32>,
+    /// Video height in pixels (if known).
+    pub height: Option<u32>,
+    /// Video frame rate as (numerator, denominator) (if known).
+    pub frame_rate: Option<(u32, u32)>,
     /// SRTP crypto parameters from SDP `a=crypto:` attribute.
     #[cfg(feature = "srtp")]
     pub crypto: Option<crate::protocol::sdp::SdpCrypto>,

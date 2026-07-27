@@ -24,6 +24,9 @@ async fn local_h264_frame_reaches_interleaved_client() {
             fmtp: None,
             control: Arc::from("trackID=0"),
             crypto: None,
+            width: None,
+            height: None,
+            frame_rate: None,
         }],
         connection: None,
     };
@@ -95,6 +98,9 @@ async fn live_stream_accepts_gstreamer_style_zero_npt_range() {
             fmtp: None,
             control: Arc::from("trackID=0"),
             crypto: None,
+            width: None,
+            height: None,
+            frame_rate: None,
         }],
         connection: None,
     };

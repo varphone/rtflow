@@ -657,6 +657,9 @@ mod tests {
                     payload_type: 96,
                     fmtp: None,
                     control: Arc::from("trackID=0"),
+                    width: None,
+                    height: None,
+                    frame_rate: None,
                     #[cfg(feature = "srtp")]
                     crypto: None,
                 },
@@ -669,6 +672,9 @@ mod tests {
                     payload_type: 97,
                     fmtp: None,
                     control: Arc::from("trackID=1"),
+                    width: None,
+                    height: None,
+                    frame_rate: None,
                     #[cfg(feature = "srtp")]
                     crypto: None,
                 },
@@ -690,6 +696,9 @@ mod tests {
                 payload_type: 96,
                 fmtp: None,
                 control: Arc::from("trackID=0"),
+                width: None,
+                height: None,
+                frame_rate: None,
                 #[cfg(feature = "srtp")]
                 crypto: None,
             }],
@@ -719,6 +728,9 @@ mod tests {
                 payload_type: 97,
                 fmtp: None,
                 control: Arc::from("trackID=0"),
+                width: None,
+                height: None,
+                frame_rate: None,
                 #[cfg(feature = "srtp")]
                 crypto: None,
             }],
