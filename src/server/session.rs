@@ -118,7 +118,9 @@ pub(super) async fn serve_connection(
                                 continue;
                             }
                         };
-                        if packet.header.payload_type != track.payload_type {
+                        if packet.header.payload_type != track.payload_type
+                            && !(packet.header.payload_type >= 96 && track.payload_type >= 96)
+                        {
                             tracing::debug!(
                                 channel = frame.channel,
                                 payload_type = packet.header.payload_type,
