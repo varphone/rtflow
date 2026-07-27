@@ -564,6 +564,28 @@ impl MountRegistry {
             }
         })
     }
+
+    /// Snapshot all registered mounts (path + stats).
+    pub fn snapshots(&self) -> Vec<(Arc<str>, MountSnapshot)> {
+        self.mounts
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|(path, mount)| {
+                let handle = MountHandle {
+                    path: path.clone(),
+                    description: MediaDescription {
+                        session_name: path.clone(),
+                        tracks: Vec::new(),
+                        #[cfg(feature = "multicast")]
+                        connection: None,
+                    },
+                    inner: mount.clone(),
+                };
+                (path.clone(), handle.snapshot())
+            })
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------

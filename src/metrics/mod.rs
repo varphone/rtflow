@@ -55,6 +55,25 @@ pub struct MetricsRegistry {
     // Proxy
     pub proxy_reconnects: AtomicU64,
     pub proxy_failovers: AtomicU64,
+
+    // Protocol-level: RTMP
+    pub rtmp_connections_total: AtomicU64,
+    pub rtmp_publishers_active: AtomicI64,
+    pub rtmp_players_active: AtomicI64,
+
+    // Protocol-level: SRT
+    pub srt_connections_total: AtomicU64,
+    pub srt_streams_active: AtomicI64,
+
+    // Protocol-level: WebRTC
+    pub webrtc_sessions_total: AtomicU64,
+    pub webrtc_sessions_active: AtomicI64,
+
+    // Protocol-level: HTTP
+    pub http_requests_total: AtomicU64,
+    pub hls_segments_served: AtomicU64,
+    pub dash_segments_served: AtomicU64,
+    pub flv_streams_active: AtomicI64,
 }
 
 impl MetricsRegistry {
@@ -81,6 +100,17 @@ impl MetricsRegistry {
             errors_by_code: std::array::from_fn(|_| AtomicU64::new(0)),
             proxy_reconnects: AtomicU64::new(0),
             proxy_failovers: AtomicU64::new(0),
+            rtmp_connections_total: AtomicU64::new(0),
+            rtmp_publishers_active: AtomicI64::new(0),
+            rtmp_players_active: AtomicI64::new(0),
+            srt_connections_total: AtomicU64::new(0),
+            srt_streams_active: AtomicI64::new(0),
+            webrtc_sessions_total: AtomicU64::new(0),
+            webrtc_sessions_active: AtomicI64::new(0),
+            http_requests_total: AtomicU64::new(0),
+            hls_segments_served: AtomicU64::new(0),
+            dash_segments_served: AtomicU64::new(0),
+            flv_streams_active: AtomicI64::new(0),
         }
     }
 
@@ -94,6 +124,16 @@ impl MetricsRegistry {
 impl Default for MetricsRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Debug for MetricsRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MetricsRegistry")
+            .field("connections_total", &self.connections_total.load(Ordering::Relaxed))
+            .field("sessions_active", &self.sessions_active.load(Ordering::Relaxed))
+            .field("mounts_active", &self.mounts_active.load(Ordering::Relaxed))
+            .finish()
     }
 }
 
@@ -383,6 +423,74 @@ fn metrics_response(registry: &MetricsRegistry) -> String {
         registry.proxy_failovers.load(Ordering::Relaxed),
     );
 
+    // Protocol-level counters
+    write_counter(
+        &mut out,
+        "rtflow_rtmp_connections_total",
+        "Total RTMP connections",
+        registry.rtmp_connections_total.load(Ordering::Relaxed),
+    );
+    write_gauge(
+        &mut out,
+        "rtflow_rtmp_publishers_active",
+        "Active RTMP publishers",
+        registry.rtmp_publishers_active.load(Ordering::Relaxed),
+    );
+    write_gauge(
+        &mut out,
+        "rtflow_rtmp_players_active",
+        "Active RTMP players",
+        registry.rtmp_players_active.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut out,
+        "rtflow_srt_connections_total",
+        "Total SRT connections",
+        registry.srt_connections_total.load(Ordering::Relaxed),
+    );
+    write_gauge(
+        &mut out,
+        "rtflow_srt_streams_active",
+        "Active SRT streams",
+        registry.srt_streams_active.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut out,
+        "rtflow_webrtc_sessions_total",
+        "Total WebRTC sessions",
+        registry.webrtc_sessions_total.load(Ordering::Relaxed),
+    );
+    write_gauge(
+        &mut out,
+        "rtflow_webrtc_sessions_active",
+        "Active WebRTC sessions",
+        registry.webrtc_sessions_active.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut out,
+        "rtflow_http_requests_total",
+        "Total HTTP requests served",
+        registry.http_requests_total.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut out,
+        "rtflow_hls_segments_served_total",
+        "Total HLS segments served",
+        registry.hls_segments_served.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut out,
+        "rtflow_dash_segments_served_total",
+        "Total DASH segments served",
+        registry.dash_segments_served.load(Ordering::Relaxed),
+    );
+    write_gauge(
+        &mut out,
+        "rtflow_flv_streams_active",
+        "Active HTTP-FLV streams",
+        registry.flv_streams_active.load(Ordering::Relaxed),
+    );
+
     // Error counters by code
     let code_names = [
         "InvalidProtocol",
@@ -458,6 +566,138 @@ fn write_counter(out: &mut String, name: &str, help: &str, value: u64) {
     out.push_str(&format!("# HELP {name} {help}\n"));
     out.push_str(&format!("# TYPE {name} counter\n"));
     out.push_str(&format!("{name} {value}\n"));
+}
+
+// ---------------------------------------------------------------------------
+// Mount-level metrics and /stats HTTP handler
+// ---------------------------------------------------------------------------
+
+/// Per-mount metrics snapshot for JSON reporting.
+#[derive(Clone, Debug)]
+pub struct MountMetrics {
+    pub path: String,
+    pub publisher_connected: bool,
+    pub subscriber_count: usize,
+    pub accepted_frames: u64,
+    pub dropped_frames: u64,
+    pub rtp_packets: u64,
+    pub rtp_octets: u64,
+}
+
+/// Collect per-mount metrics from a registry.
+pub fn collect_mount_metrics(mounts: &crate::mount::MountRegistry) -> Vec<MountMetrics> {
+    mounts
+        .snapshots()
+        .into_iter()
+        .map(|(path, snap)| MountMetrics {
+            path: path.to_string(),
+            publisher_connected: snap.publisher_connected,
+            subscriber_count: snap.subscriber_count,
+            accepted_frames: snap.stats.accepted_frames,
+            dropped_frames: snap.stats.dropped_frames,
+            rtp_packets: snap.stats.rtp_packets,
+            rtp_octets: snap.stats.rtp_octets,
+        })
+        .collect()
+}
+
+/// Create an HTTP handler that serves /stats as JSON.
+///
+/// Returns global protocol metrics plus per-mount snapshots.
+#[cfg(feature = "http")]
+pub fn create_stats_handler(
+    registry: Arc<MetricsRegistry>,
+    mounts: Arc<crate::mount::MountRegistry>,
+) -> crate::http::Handler {
+    let handler: crate::http::Handler = Arc::new(move |_req, mut writer| {
+        let registry = registry.clone();
+        let mounts = mounts.clone();
+        Box::pin(async move {
+            let json = build_stats_json(&registry, &mounts);
+            writer
+                .write_body(200, "application/json", json.as_bytes())
+                .await?;
+            Ok(writer)
+        })
+    });
+    handler
+}
+
+/// Create an HTTP handler that serves Prometheus metrics text.
+#[cfg(feature = "http")]
+pub fn create_metrics_handler(registry: Arc<MetricsRegistry>) -> crate::http::Handler {
+    let handler: crate::http::Handler = Arc::new(move |_req, mut writer| {
+        let registry = registry.clone();
+        Box::pin(async move {
+            let mut body = String::with_capacity(6144);
+            // Reuse the same format as the standalone exporter
+            write_counter(&mut body, "rtflow_connections_total", "Total connections accepted",
+                registry.connections_total.load(Ordering::Relaxed));
+            write_gauge(&mut body, "rtflow_connections_active", "Currently active connections",
+                registry.connections_active.load(Ordering::Relaxed));
+            write_counter(&mut body, "rtflow_sessions_total", "Total sessions",
+                registry.sessions_total.load(Ordering::Relaxed));
+            write_gauge(&mut body, "rtflow_sessions_active", "Active sessions",
+                registry.sessions_active.load(Ordering::Relaxed));
+            write_gauge(&mut body, "rtflow_mounts_active", "Active mounts",
+                registry.mounts_active.load(Ordering::Relaxed));
+            write_counter(&mut body, "rtflow_frames_accepted_total", "Frames accepted",
+                registry.frames_accepted.load(Ordering::Relaxed));
+            write_counter(&mut body, "rtflow_frames_dropped_total", "Frames dropped",
+                registry.frames_dropped.load(Ordering::Relaxed));
+            write_counter(&mut body, "rtflow_rtmp_connections_total", "RTMP connections",
+                registry.rtmp_connections_total.load(Ordering::Relaxed));
+            write_counter(&mut body, "rtflow_srt_connections_total", "SRT connections",
+                registry.srt_connections_total.load(Ordering::Relaxed));
+            write_counter(&mut body, "rtflow_webrtc_sessions_total", "WebRTC sessions",
+                registry.webrtc_sessions_total.load(Ordering::Relaxed));
+            write_counter(&mut body, "rtflow_hls_segments_served_total", "HLS segments served",
+                registry.hls_segments_served.load(Ordering::Relaxed));
+            write_counter(&mut body, "rtflow_dash_segments_served_total", "DASH segments served",
+                registry.dash_segments_served.load(Ordering::Relaxed));
+            writer
+                .write_body(200, "text/plain; version=0.0.4; charset=utf-8", body.as_bytes())
+                .await?;
+            Ok(writer)
+        })
+    });
+    handler
+}
+
+#[cfg(feature = "http")]
+fn build_stats_json(registry: &MetricsRegistry, mounts: &crate::mount::MountRegistry) -> String {
+    let mount_metrics = collect_mount_metrics(mounts);
+    let mut out = String::with_capacity(2048);
+    out.push_str("{\"global\":{");
+    out.push_str(&format!("\"connections_total\":{},", registry.connections_total.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"connections_active\":{},", registry.connections_active.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"sessions_active\":{},", registry.sessions_active.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"mounts_active\":{},", registry.mounts_active.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"frames_accepted\":{},", registry.frames_accepted.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"frames_dropped\":{},", registry.frames_dropped.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"rtmp_connections_total\":{},", registry.rtmp_connections_total.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"rtmp_publishers_active\":{},", registry.rtmp_publishers_active.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"srt_connections_total\":{},", registry.srt_connections_total.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"srt_streams_active\":{},", registry.srt_streams_active.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"webrtc_sessions_total\":{},", registry.webrtc_sessions_total.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"webrtc_sessions_active\":{},", registry.webrtc_sessions_active.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"hls_segments_served\":{},", registry.hls_segments_served.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"dash_segments_served\":{},", registry.dash_segments_served.load(Ordering::Relaxed)));
+    out.push_str(&format!("\"flv_streams_active\":{}", registry.flv_streams_active.load(Ordering::Relaxed)));
+    out.push_str("},\"mounts\":[");
+    for (i, m) in mount_metrics.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let escaped_path = m.path.replace('\\', "\\\\").replace('"', "\\\"");
+        out.push_str(&format!(
+            "{{\"path\":\"{}\",\"publisher_connected\":{},\"subscriber_count\":{},\"accepted_frames\":{},\"dropped_frames\":{},\"rtp_packets\":{},\"rtp_octets\":{}}}",
+            escaped_path, m.publisher_connected, m.subscriber_count,
+            m.accepted_frames, m.dropped_frames, m.rtp_packets, m.rtp_octets
+        ));
+    }
+    out.push_str("]}");
+    out
 }
 
 fn write_gauge(out: &mut String, name: &str, help: &str, value: i64) {
