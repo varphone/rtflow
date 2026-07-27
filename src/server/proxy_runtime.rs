@@ -1,5 +1,5 @@
 //! On-demand proxy task lifecycle owned by a server mount.
-use super::{Mount, MountConfig};
+use crate::mount::{Mount, MountConfig};
 use crate::{
     client::{ClientOptions, RtspClient},
     error::Operation,

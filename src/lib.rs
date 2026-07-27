@@ -12,6 +12,7 @@ pub mod dash;
 mod error;
 #[cfg(feature = "file-storage")]
 pub mod file;
+pub mod gateway;
 #[cfg(feature = "gstreamer")]
 pub mod gst;
 #[cfg(feature = "hls")]
@@ -27,11 +28,13 @@ pub mod media;
 pub mod metrics;
 #[cfg(feature = "multicast")]
 pub mod multicast;
+pub mod mount;
 pub mod observe;
 #[path = "media/pipeline.rs"]
 pub mod pipeline;
 #[cfg(feature = "server")]
 pub mod proxy;
+pub mod protocol_trait;
 pub mod rtcp;
 #[cfg(feature = "rtmp")]
 pub mod rtmp;
@@ -82,7 +85,9 @@ pub use file::{
 };
 pub use identity::{MountId, SessionId, StreamEpoch, TaskId, TrackKey};
 pub use media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription, TrackId};
+pub use mount::{MountRegistry, PushResult};
 pub use observe::{EventSink, FrameworkEvent, NoopEventSink, TracingEventSink};
+pub use protocol_trait::{IngestProtocol, OutputProtocol};
 pub use security::{IpAcl, IpCidr, RateLimitConfig, SecurityConfig};
 #[cfg(feature = "tls")]
 pub use security::{TlsClientConfig, TlsServerConfig};

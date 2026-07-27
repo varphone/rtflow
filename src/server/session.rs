@@ -2,12 +2,13 @@
 #[cfg(feature = "file-storage")]
 use super::vod_runtime::{VodPlayback, spawn_vod_playback};
 use super::{
-    ConnectionPhase, Mount, MountConfig, State, description_for,
+    ConnectionPhase, State,
     proxy_runtime::start_proxy_if_idle,
     tasks::{
         SenderInput, spawn_interleaved_sender_from, spawn_udp_receiver, spawn_udp_sender_from,
     },
 };
+use crate::mount::{Mount, MountConfig, description_for};
 use crate::{
     Error, Result,
     auth::{AccessRole, AuthDecision, AuthRequest},
@@ -1041,8 +1042,7 @@ async fn handle_request(req: crate::rtsp::Request, state: &State) -> Response {
     if !cseq.is_empty() {
         headers.insert("cseq".into(), cseq);
     }
-    let mounts = state.mounts.read().await;
-    let mount = mounts.get(path.as_str());
+    let mount = state.mounts.get(path.as_str());
     if !matches!(req.method, Method::Options) && mount.is_none() {
         return Response {
             status: 404,
@@ -1165,17 +1165,10 @@ fn track_for_uri(
 
 async fn registered_mount_for_uri(state: &State, uri: &str) -> Option<(String, Arc<Mount>)> {
     let requested = uri_path(uri);
-    let mounts = state.mounts.read().await;
-    mounts
-        .iter()
-        .filter(|(path, _)| {
-            requested == path.as_ref()
-                || requested
-                    .strip_prefix(path.as_ref())
-                    .is_some_and(|suffix| suffix.starts_with('/'))
-        })
-        .max_by_key(|(path, _)| path.len())
-        .map(|(path, mount)| (path.to_string(), mount.clone()))
+    state
+        .mounts
+        .find_longest_prefix(&requested)
+        .map(|(path, mount)| (path.to_string(), mount))
 }
 fn uri_path(uri: &str) -> String {
     url::Url::parse(uri)

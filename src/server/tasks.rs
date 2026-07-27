@@ -1,4 +1,4 @@
-use super::{Mount, MountConfig};
+use crate::mount::{Mount, MountConfig};
 use crate::{
     media::{MediaKind, TrackDescription},
     rtcp::{CompoundPacket, Packet as RtcpPacket, SdesChunk, SdesItem},

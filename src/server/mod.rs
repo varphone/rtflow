@@ -5,22 +5,26 @@ mod tasks;
 mod vod_runtime;
 use session::serve_connection;
 
+// Re-export mount types for backward compatibility.
+pub use crate::mount::{
+    LocalPublisher, MountConfig, MountHandle, MountSnapshot, PushResult, StreamStats,
+};
+pub(crate) use crate::mount::{Mount, description_for};
+
 #[cfg(feature = "tls")]
 use crate::security::TlsServerConfig;
-#[cfg(feature = "file-storage")]
-use crate::storage::VodSource;
 use crate::{
     Error, Result,
     auth::{AllowAll, Authenticator},
     client::{ClientOptions, RtspClient},
     error::Operation,
     identity::{MountId, SessionId},
-    media::{AccessUnit, MediaDescription},
+    mount::MountRegistry,
     observe::{
         EventSink, FrameworkEvent, MountEvent, NoopEventSink, RejectReason, SecurityEvent,
         ServerEvent, SessionEvent, emit,
     },
-    proxy::{KeyframeCache, ProxyState, StartupCacheConfig, UpstreamConfig},
+    proxy::{KeyframeCache, StartupCacheConfig},
     runtime::{ShutdownReport, TaskSpec, TaskSupervisor, io::ControlConnection},
     security::{ConnectionRateLimiter, SecurityConfig},
 };
@@ -30,13 +34,13 @@ use std::{
     ops::RangeInclusive,
     sync::{
         Arc, Mutex, Weak,
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
 use tokio::{
     net::TcpListener,
-    sync::{RwLock, Semaphore, broadcast},
+    sync::Semaphore,
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
@@ -256,76 +260,8 @@ impl ServerConfigBuilder {
     }
 }
 
-#[derive(Clone)]
-pub enum MountConfig {
-    Local {
-        description: MediaDescription,
-    },
-    Publisher {
-        description: MediaDescription,
-        allow_replace_after_disconnect: bool,
-    },
-    Proxy {
-        upstream: Box<UpstreamConfig>,
-    },
-    #[cfg(feature = "file-storage")]
-    Vod {
-        source: Arc<dyn VodSource>,
-    },
-}
-#[derive(Clone)]
-pub struct MountHandle {
-    pub path: Arc<str>,
-    pub description: MediaDescription,
-    inner: Arc<Mount>,
-}
-pub struct LocalPublisher {
-    inner: Arc<Mount>,
-    active: bool,
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PushResult {
-    Accepted,
-    DroppedNoSubscribers,
-    DroppedQueueFull,
-}
-#[derive(Clone, Debug, Default)]
-pub struct StreamStats {
-    pub accepted_frames: u64,
-    pub dropped_frames: u64,
-    pub subscribers: usize,
-    pub rtp_packets: u64,
-    pub rtp_octets: u64,
-    pub rtcp_sender_reports: u64,
-    pub rtcp_receiver_reports: u64,
-}
-#[derive(Clone, Debug)]
-pub struct MountSnapshot {
-    pub subscriber_count: usize,
-    pub publisher_connected: bool,
-    pub proxy_state: Option<ProxyState>,
-    pub stats: StreamStats,
-    pub startup_cache_frames: usize,
-    pub startup_cache_bytes: usize,
-}
-struct Mount {
-    id: MountId,
-    config: MountConfig,
-    frames: broadcast::Sender<AccessUnit>,
-    stats: StreamCounters,
-    startup_cache: Mutex<KeyframeCache>,
-    bootstrap: Mutex<HashMap<u8, AccessUnit>>,
-    event_sink: Arc<dyn EventSink>,
-    cancel: CancellationToken,
-    proxy_running: AtomicBool,
-    publishers: AtomicUsize,
-    publisher_claimed: AtomicBool,
-    max_queued_bytes_per_session: usize,
-    /// SDP fmtp parameters received via ANNOUNCE, keyed by track_id.
-    announce_fmtp: Mutex<HashMap<u8, Arc<str>>>,
-}
 struct State {
-    mounts: RwLock<HashMap<Arc<str>, Arc<Mount>>>,
+    mounts: Arc<MountRegistry>,
     config: ServerConfig,
     session_slots: Arc<Semaphore>,
     next_session: AtomicU64,
@@ -333,118 +269,6 @@ struct State {
     supervisor: TaskSupervisor,
     peer_sessions: Mutex<HashMap<IpAddr, usize>>,
     connection_rate_limiter: ConnectionRateLimiter,
-}
-
-#[derive(Default)]
-struct StreamCounters {
-    accepted_frames: AtomicU64,
-    dropped_frames: AtomicU64,
-    rtp_packets: AtomicU64,
-    rtp_octets: AtomicU64,
-    rtcp_sender_reports: AtomicU64,
-    rtcp_receiver_reports: AtomicU64,
-}
-
-impl StreamCounters {
-    fn add_accepted(&self, value: u64) {
-        self.accepted_frames.fetch_add(value, Ordering::Relaxed);
-    }
-    fn add_dropped(&self, value: u64) {
-        self.dropped_frames.fetch_add(value, Ordering::Relaxed);
-    }
-    fn add_rtp(&self, packets: u64, octets: u64) {
-        self.rtp_packets.fetch_add(packets, Ordering::Relaxed);
-        self.rtp_octets.fetch_add(octets, Ordering::Relaxed);
-    }
-    fn add_sender_reports(&self, value: u64) {
-        self.rtcp_sender_reports.fetch_add(value, Ordering::Relaxed);
-    }
-    fn add_receiver_reports(&self, value: u64) {
-        self.rtcp_receiver_reports
-            .fetch_add(value, Ordering::Relaxed);
-    }
-    fn snapshot(&self, subscribers: usize) -> StreamStats {
-        StreamStats {
-            accepted_frames: self.accepted_frames.load(Ordering::Relaxed),
-            dropped_frames: self.dropped_frames.load(Ordering::Relaxed),
-            subscribers,
-            rtp_packets: self.rtp_packets.load(Ordering::Relaxed),
-            rtp_octets: self.rtp_octets.load(Ordering::Relaxed),
-            rtcp_sender_reports: self.rtcp_sender_reports.load(Ordering::Relaxed),
-            rtcp_receiver_reports: self.rtcp_receiver_reports.load(Ordering::Relaxed),
-        }
-    }
-}
-
-impl Mount {
-    fn publish_cached(
-        &self,
-        frame: AccessUnit,
-    ) -> std::result::Result<usize, broadcast::error::SendError<AccessUnit>> {
-        let mut cache = self
-            .startup_cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        cache.push(&frame);
-        drop(cache);
-        if frame.data.len() <= self.max_queued_bytes_per_session
-            && (!matches!(
-                frame.codec,
-                crate::media::Codec::H264 | crate::media::Codec::H265
-            ) || frame.is_keyframe)
-        {
-            self.bootstrap
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(frame.track_id, frame.clone());
-        }
-        self.frames.send(frame)
-    }
-
-    fn subscribe_with_startup(
-        &self,
-        track_id: u8,
-    ) -> (broadcast::Receiver<AccessUnit>, Vec<AccessUnit>) {
-        let cache = self
-            .startup_cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let receiver = self.frames.subscribe();
-        let mut startup = cache.snapshot(track_id);
-        let bytes = startup.iter().fold(0usize, |total, frame| {
-            total.saturating_add(frame.data.len())
-        });
-        if bytes > self.max_queued_bytes_per_session {
-            startup.clear();
-        }
-        if startup.is_empty()
-            && let Some(frame) = self
-                .bootstrap
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .get(&track_id)
-                .cloned()
-        {
-            startup.push(frame);
-        }
-        (receiver, startup)
-    }
-
-    fn subscribe_with_all_startup(&self) -> (broadcast::Receiver<AccessUnit>, Vec<AccessUnit>) {
-        let receiver = self.frames.subscribe();
-        let cache = self
-            .startup_cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut startup = cache.snapshot_all();
-        let bytes = startup.iter().fold(0usize, |total, frame| {
-            total.saturating_add(frame.data.len())
-        });
-        if bytes > self.max_queued_bytes_per_session {
-            startup.clear();
-        }
-        (receiver, startup)
-    }
 }
 
 struct PeerSessionLease {
@@ -511,7 +335,7 @@ impl RtspServer {
         let connection_rate_limiter =
             ConnectionRateLimiter::new(config.security.connection_rate_limit)?;
         let state = Arc::new(State {
-            mounts: RwLock::new(HashMap::new()),
+            mounts: Arc::new(MountRegistry::new(config.resource_limits.max_mounts)),
             session_slots: Arc::new(Semaphore::new(config.max_sessions)),
             next_session: AtomicU64::new(1),
             cancel: supervisor.cancellation_token(),
@@ -682,7 +506,7 @@ impl RtspServer {
         if !path.starts_with('/') {
             return Err(Error::Rtsp("mount path must start with '/'".into()));
         }
-        if self.state.mounts.read().await.len() >= self.state.config.resource_limits.max_mounts {
+        if self.state.mounts.len() >= self.state.config.resource_limits.max_mounts {
             return Err(Error::Limit("mounts"));
         }
         if let MountConfig::Proxy { upstream } = &mut config
@@ -720,19 +544,19 @@ impl RtspServer {
             },
         };
         let startup_cache = KeyframeCache::new(&description, startup_cache_config)?;
-        let (tx, _) = broadcast::channel(self.state.config.consumer_queue_capacity);
+        let (tx, _) = tokio::sync::broadcast::channel(self.state.config.consumer_queue_capacity);
         let mount = Arc::new(Mount {
             id: MountId::from(path.clone()),
             config,
             frames: tx,
-            stats: StreamCounters::default(),
+            stats: crate::mount::StreamCounters::default(),
             startup_cache: Mutex::new(startup_cache),
             bootstrap: Mutex::new(HashMap::new()),
             event_sink: self.state.config.event_sink.clone(),
             cancel: self.state.cancel.child_token(),
-            proxy_running: AtomicBool::new(false),
-            publishers: AtomicUsize::new(0),
-            publisher_claimed: AtomicBool::new(false),
+            proxy_running: std::sync::atomic::AtomicBool::new(false),
+            publishers: std::sync::atomic::AtomicUsize::new(0),
+            publisher_claimed: std::sync::atomic::AtomicBool::new(false),
             max_queued_bytes_per_session: self
                 .state
                 .config
@@ -740,15 +564,7 @@ impl RtspServer {
                 .max_queued_bytes_per_session,
             announce_fmtp: Mutex::new(HashMap::new()),
         });
-        let mut mounts = self.state.mounts.write().await;
-        if mounts.contains_key(&path) {
-            return Err(Error::Conflict(path.to_string()));
-        }
-        if mounts.len() >= self.state.config.resource_limits.max_mounts {
-            return Err(Error::Limit("mounts"));
-        }
-        mounts.insert(path.clone(), mount.clone());
-        drop(mounts);
+        self.state.mounts.insert(path.clone(), mount.clone())?;
         emit(
             &self.state.config.event_sink,
             FrameworkEvent::Mount(MountEvent::Registered {
@@ -765,8 +581,6 @@ impl RtspServer {
         let mount = self
             .state
             .mounts
-            .write()
-            .await
             .remove(path)
             .ok_or_else(|| Error::NotFound(path.into()))?;
         mount.cancel.cancel();
@@ -809,141 +623,13 @@ impl Drop for RtspServer {
         }
     }
 }
-fn description_for(config: &MountConfig) -> Result<MediaDescription> {
-    match config {
-        MountConfig::Local { description } | MountConfig::Publisher { description, .. } => {
-            Ok(description.clone())
-        }
-        MountConfig::Proxy { upstream } => upstream.cached_description.clone().ok_or_else(|| {
-            Error::Rtsp("proxy mount requires cached SDP description before serving".into())
-        }),
-        #[cfg(feature = "file-storage")]
-        MountConfig::Vod { source } => Ok(source.description().clone()),
-    }
-}
-impl MountHandle {
-    pub fn publisher(&self) -> Result<LocalPublisher> {
-        if matches!(self.inner.config, MountConfig::Local { .. }) {
-            self.inner.publishers.fetch_add(1, Ordering::AcqRel);
-            Ok(LocalPublisher {
-                inner: self.inner.clone(),
-                active: true,
-            })
-        } else {
-            Err(Error::Conflict("mount is not a local source".into()))
-        }
-    }
-    pub fn subscribe(&self) -> broadcast::Receiver<AccessUnit> {
-        self.inner.frames.subscribe()
-    }
-    /// Subscribe to live frames together with a cached decodable stream start.
-    pub fn subscribe_with_startup(&self) -> (broadcast::Receiver<AccessUnit>, Vec<AccessUnit>) {
-        self.inner.subscribe_with_all_startup()
-    }
-    /// Get the broadcast sender for creating per-request subscribers.
-    /// Use `sender.subscribe()` to create a fresh receiver for each connection.
-    pub fn frame_sender(&self) -> &broadcast::Sender<AccessUnit> {
-        &self.inner.frames
-    }
-    /// Get ANNOUNCE SDP fmtp parameters (snapshot at call time).
-    pub fn announce_fmtp(&self) -> HashMap<u8, Arc<str>> {
-        self.inner.announce_fmtp.lock().unwrap().clone()
-    }
-    /// Cancellation token tied to the mount lifetime.
-    pub fn cancellation_token(&self) -> CancellationToken {
-        self.inner.cancel.clone()
-    }
-    /// RTSP mount path, suitable as the canonical HTTP asset prefix.
-    pub fn path(&self) -> &str {
-        self.inner.id.as_str()
-    }
-    pub fn snapshot(&self) -> MountSnapshot {
-        let subscribers = self.inner.frames.receiver_count();
-        let s = self.inner.stats.snapshot(subscribers);
-        let (startup_cache_frames, startup_cache_bytes) = self
-            .inner
-            .startup_cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .usage();
-        MountSnapshot {
-            subscriber_count: s.subscribers,
-            publisher_connected: self.inner.publishers.load(Ordering::Relaxed) > 0,
-            proxy_state: match &self.inner.config {
-                MountConfig::Proxy { upstream } => Some(upstream.state()),
-                _ => None,
-            },
-            stats: s,
-            startup_cache_frames,
-            startup_cache_bytes,
-        }
-    }
-}
-impl LocalPublisher {
-    /// Number of RTSP sessions currently subscribed to this local source.
-    pub fn subscriber_count(&self) -> usize {
-        self.inner.frames.receiver_count()
-    }
-
-    /// True after the mount is unregistered or its server begins shutdown.
-    pub fn is_closed(&self) -> bool {
-        self.inner.cancel.is_cancelled()
-    }
-
-    pub fn try_push(&self, frame: AccessUnit) -> Result<PushResult> {
-        let description = description_for(&self.inner.config)?;
-        let Some(track) = description.track(frame.track_id) else {
-            return Err(Error::Media(format!(
-                "mount has no track {}",
-                frame.track_id
-            )));
-        };
-        if track.codec != frame.codec {
-            return Err(Error::Media(format!(
-                "track {} expects {:?}, got {:?}",
-                frame.track_id, track.codec, frame.codec
-            )));
-        }
-        if self.inner.frames.receiver_count() == 0 {
-            self.inner.stats.add_dropped(1);
-            return Ok(PushResult::DroppedNoSubscribers);
-        }
-        match self.inner.publish_cached(frame) {
-            Ok(_) => {
-                self.inner.stats.add_accepted(1);
-                Ok(PushResult::Accepted)
-            }
-            Err(_) => {
-                self.inner.stats.add_dropped(1);
-                Ok(PushResult::DroppedQueueFull)
-            }
-        }
-    }
-
-    pub async fn close(mut self) -> Result<()> {
-        self.release();
-        Ok(())
-    }
-
-    fn release(&mut self) {
-        if self.active {
-            self.inner.publishers.fetch_sub(1, Ordering::AcqRel);
-            self.active = false;
-        }
-    }
-}
-impl Drop for LocalPublisher {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         client::{ClientOptions, RtspClient},
-        media::{Codec, MediaKind, TrackDescription},
+        media::{Codec, MediaDescription, MediaKind, TrackDescription},
     };
     #[tokio::test]
     async fn describe_registered_mount() {
