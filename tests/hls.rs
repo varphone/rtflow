@@ -157,6 +157,7 @@ fn segment_ring_push_and_get() {
         init: Bytes::from_static(b"init"),
         data: Bytes::from_static(b"data0"),
         starts_with_keyframe: true,
+        discontinuity: false,
         timestamp: Duration::ZERO,
     });
     ring.push(Segment {
@@ -165,6 +166,7 @@ fn segment_ring_push_and_get() {
         init: Bytes::from_static(b"init"),
         data: Bytes::from_static(b"data1"),
         starts_with_keyframe: true,
+        discontinuity: false,
         timestamp: Duration::from_secs(2),
     });
 
@@ -185,6 +187,7 @@ fn segment_ring_eviction() {
             init: Bytes::new(),
             data: Bytes::from(format!("data{i}")),
             starts_with_keyframe: true,
+            discontinuity: false,
             timestamp: Duration::from_secs(i * 2),
         });
     }
@@ -207,6 +210,7 @@ fn live_playlist_format() {
             init: Bytes::new(),
             data: Bytes::new(),
             starts_with_keyframe: true,
+            discontinuity: false,
             timestamp: Duration::ZERO,
         },
         Segment {
@@ -215,6 +219,7 @@ fn live_playlist_format() {
             init: Bytes::new(),
             data: Bytes::new(),
             starts_with_keyframe: true,
+            discontinuity: false,
             timestamp: Duration::from_millis(2000),
         },
     ];
@@ -240,6 +245,7 @@ fn vod_playlist_format() {
         init: Bytes::new(),
         data: Bytes::new(),
         starts_with_keyframe: true,
+        discontinuity: false,
         timestamp: Duration::ZERO,
     }];
     let playlist = playlist::write_vod_playlist(&segments);

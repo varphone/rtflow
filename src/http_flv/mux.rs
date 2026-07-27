@@ -2,6 +2,8 @@ use base64::Engine;
 use bytes::{BufMut, Bytes, BytesMut};
 use std::time::Duration;
 
+type H265Sprop = (Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>);
+
 use crate::media::{AccessUnit, Codec, MediaDescription};
 
 const FLV_HEADER_SIZE: usize = 9;
@@ -75,6 +77,16 @@ impl FlvMuxer {
         self.aac_sequence_header = Some(data);
     }
 
+    /// Reset timestamp and codec-header emission state after a subscriber gap.
+    pub fn reset_after_discontinuity(&mut self) {
+        self.video_sequence_header_sent = false;
+        self.audio_sequence_header_sent = false;
+        self.first_pts = None;
+        self.next_video_dts = None;
+        self.last_video_pts = None;
+        self.video_frame_duration = None;
+    }
+
     /// Encode an AccessUnit into FLV tags.
     /// Returns one or more FLV tags (may include sequence headers).
     pub fn encode(&mut self, unit: &AccessUnit) -> Bytes {
@@ -98,31 +110,31 @@ impl FlvMuxer {
 
         match normalized.codec {
             Codec::H264 => {
-                if !self.video_sequence_header_sent {
-                    if let Some(ref seq) = self.video_sequence_header {
-                        write_h264_video_tag(&mut self.tag_buffer, &normalized, seq, true);
-                        self.video_sequence_header_sent = true;
-                    }
+                if !self.video_sequence_header_sent
+                    && let Some(ref seq) = self.video_sequence_header
+                {
+                    write_h264_video_tag(&mut self.tag_buffer, &normalized, seq, true);
+                    self.video_sequence_header_sent = true;
                 }
                 let avcc_data = annex_b_to_avcc(&normalized.data);
                 write_h264_video_tag(&mut self.tag_buffer, &normalized, &avcc_data, false);
             }
             Codec::H265 => {
-                if !self.video_sequence_header_sent {
-                    if let Some(ref seq) = self.video_sequence_header {
-                        write_h265_video_tag(&mut self.tag_buffer, &normalized, seq, true);
-                        self.video_sequence_header_sent = true;
-                    }
+                if !self.video_sequence_header_sent
+                    && let Some(ref seq) = self.video_sequence_header
+                {
+                    write_h265_video_tag(&mut self.tag_buffer, &normalized, seq, true);
+                    self.video_sequence_header_sent = true;
                 }
                 let hvcc_data = annex_b_to_avcc(&normalized.data);
                 write_h265_video_tag(&mut self.tag_buffer, &normalized, &hvcc_data, false);
             }
             Codec::Aac => {
-                if !self.audio_sequence_header_sent {
-                    if let Some(ref seq) = self.aac_sequence_header {
-                        write_audio_tag(&mut self.tag_buffer, &normalized, seq, true);
-                        self.audio_sequence_header_sent = true;
-                    }
+                if !self.audio_sequence_header_sent
+                    && let Some(ref seq) = self.aac_sequence_header
+                {
+                    write_audio_tag(&mut self.tag_buffer, &normalized, seq, true);
+                    self.audio_sequence_header_sent = true;
                 }
                 write_audio_tag(&mut self.tag_buffer, &normalized, &normalized.data, false);
             }
@@ -345,9 +357,7 @@ impl FlvMuxer {
     }
 
     /// Parse H.265 sprop-vps/sprop-sps/sprop-pps from an fmtp string.
-    pub fn parse_h265_sprop_from_fmtp(
-        fmtp: &str,
-    ) -> (Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>) {
+    pub fn parse_h265_sprop_from_fmtp(fmtp: &str) -> H265Sprop {
         let b64_decode = |key: &str| -> Option<Vec<u8>> {
             let val = fmtp
                 .split(';')

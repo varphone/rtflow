@@ -78,7 +78,12 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
             match receiver.recv().await {
                 Ok(unit) => unit,
                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::debug!("http-flv lagged {n}");
+                    tracing::debug!("http-flv lagged {n}; waiting for a keyframe");
+                    muxer.reset_after_discontinuity();
+                    video_seq_pending = video_codec.is_some();
+                    audio_seq_pending = description.tracks.iter().any(|t| t.codec == Codec::Aac);
+                    awaiting_video_keyframe = video_codec.is_some();
+                    dropping_h265_cra_leading_pictures = false;
                     continue;
                 }
                 Err(broadcast::error::RecvError::Closed) => break,

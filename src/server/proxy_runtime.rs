@@ -67,10 +67,7 @@ fn spawn_proxy(
     let task_name = format!("proxy-{}", mount.id);
     supervisor.spawn(
         TaskSpec::new(task_name, Operation::ProxyConnect),
-        async move {
-            run_proxy(mount, upstream, server_cancel, no_subscriber_grace).await;
-            Ok(())
-        },
+        async move { run_proxy(mount, upstream, server_cancel, no_subscriber_grace).await },
     );
 }
 
@@ -79,19 +76,19 @@ async fn run_proxy(
     upstream: UpstreamConfig,
     server_cancel: CancellationToken,
     no_subscriber_grace: Duration,
-) {
+) -> crate::Result<()> {
     let _guard = ProxyRunGuard {
         mount: mount.clone(),
         upstream: upstream.clone(),
     };
     let Some(expected_description) = upstream.cached_description.clone() else {
         finish_proxy(&mount, &upstream, ProxyState::Stopped);
-        return;
+        return Ok(());
     };
     let Ok(mut timeline) = TimelineNormalizer::new(&expected_description, upstream.continuity)
     else {
         finish_proxy(&mount, &upstream, ProxyState::Stopped);
-        return;
+        return Ok(());
     };
     let endpoints = upstream.endpoints();
     let mut health = vec![UpstreamHealth::default(); endpoints.len()];
@@ -105,18 +102,18 @@ async fn run_proxy(
             while mount.frames.receiver_count() == 0 {
                 if idle_since.elapsed() >= no_subscriber_grace {
                     finish_proxy(&mount, &upstream, ProxyState::Idle);
-                    return;
+                    return Ok(());
                 }
                 tokio::select! {
                     _ = server_cancel.cancelled() => {
                         finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                        return;
+                        return Ok(());
                     }
                     _ = mount.cancel.cancelled() => {
                         finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                        return;
+                        return Ok(());
                     }
-                    _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+                    _ = tokio::time::sleep(Duration::from_millis(250)) => {}
                 }
             }
         }
@@ -146,11 +143,11 @@ async fn run_proxy(
             tokio::select! {
                 _ = server_cancel.cancelled() => {
                     finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                    return;
+                    return Ok(());
                 }
                 _ = mount.cancel.cancelled() => {
                     finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                    return;
+                    return Ok(());
                 }
                 _ = tokio::time::sleep(delay) => {}
             }
@@ -176,11 +173,11 @@ async fn run_proxy(
         let connected = tokio::select! {
             _ = server_cancel.cancelled() => {
                 finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                return;
+                return Ok(());
             }
             _ = mount.cancel.cancelled() => {
                 finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                return;
+                return Ok(());
             }
             result = RtspClient::connect(endpoint.url.clone(), options) => result,
         };
@@ -218,18 +215,18 @@ async fn run_proxy(
                         tokio::select! {
                             _ = server_cancel.cancelled() => {
                                 finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                                return;
+                                return Ok(());
                             }
                             _ = mount.cancel.cancelled() => {
                                 finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                                return;
+                                return Ok(());
                             }
                             _ = idle_check.tick() => {
                                 if mount.frames.receiver_count() == 0 {
                                     let since = idle_since.get_or_insert_with(std::time::Instant::now);
                                     if since.elapsed() >= no_subscriber_grace {
                                         finish_proxy(&mount, &upstream, ProxyState::Idle);
-                                        return;
+                                        return Ok(());
                                     }
                                 } else {
                                     idle_since = None;
@@ -301,11 +298,11 @@ async fn run_proxy(
         tokio::select! {
             _ = server_cancel.cancelled() => {
                 finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                return;
+                return Ok(());
             }
             _ = mount.cancel.cancelled() => {
                 finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                return;
+                return Ok(());
             }
             _ = tokio::time::sleep(delay) => {}
         }

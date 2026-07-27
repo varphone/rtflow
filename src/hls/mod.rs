@@ -60,6 +60,11 @@ pub fn create_hls_handlers(
         let mut segmenter = Segmenter::new(seg_config, &description);
         let mut segments = segmenter.subscribe();
         let mut startup = VecDeque::from(startup);
+        let has_video = description
+            .tracks
+            .iter()
+            .any(|track| track.kind == crate::media::MediaKind::Video);
+        let mut awaiting_keyframe = has_video;
         loop {
             let unit = if let Some(unit) = startup.pop_front() {
                 unit
@@ -68,11 +73,26 @@ pub fn create_hls_handlers(
                     _ = cancel.cancelled() => break,
                     result = receiver.recv() => match result {
                         Ok(unit) => unit,
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Lagged(count)) => {
+                            tracing::debug!(count, "HLS input lagged; waiting for a keyframe");
+                            segmenter.reset_after_discontinuity();
+                            awaiting_keyframe = has_video;
+                            continue;
+                        }
                         Err(broadcast::error::RecvError::Closed) => break,
                     },
                 }
             };
+            if awaiting_keyframe {
+                if !matches!(
+                    unit.codec,
+                    crate::media::Codec::H264 | crate::media::Codec::H265
+                ) || !unit.is_keyframe
+                {
+                    continue;
+                }
+                awaiting_keyframe = false;
+            }
             segmenter.push(unit);
             while let Ok(segment) = segments.try_recv() {
                 ring_clone.push(segment);

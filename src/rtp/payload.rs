@@ -242,7 +242,7 @@ impl Depacketizer {
             Codec::Aac => {
                 if p.payload.len() < 4 { return Err(Error::Media("short AAC AU header".into())); }
                 let header_bits = u16::from_be_bytes([p.payload[0],p.payload[1]]) as usize;
-                if header_bits % 16 != 0 || header_bits == 0 { return Err(Error::Media("invalid AAC AU-headers-length".into())); }
+                if !header_bits.is_multiple_of(16) || header_bits == 0 { return Err(Error::Media("invalid AAC AU-headers-length".into())); }
                 let au_count = header_bits / 16;
                 let header_end = 2 + au_count * 2;
                 if p.payload.len() < header_end { return Err(Error::Media("AAC AU headers exceed payload".into())); }
@@ -256,11 +256,11 @@ impl Depacketizer {
                     units.push(AccessUnit { track_id: self.track_id, codec: self.codec, pts, dts: None, rtp_timestamp: timestamp, is_keyframe: true, data: p.payload.slice(data_offset..data_offset+size) });
                     data_offset += size;
                 }
-                return Ok(units);
+                Ok(units)
             }
             Codec::Pcma|Codec::Pcmu => {
                 let pts = self.pts_from_timestamp(timestamp);
-                return Ok(vec![AccessUnit { track_id: self.track_id, codec: self.codec, pts, dts: None, rtp_timestamp: timestamp, is_keyframe: true, data: p.payload }]);
+                Ok(vec![AccessUnit { track_id: self.track_id, codec: self.codec, pts, dts: None, rtp_timestamp: timestamp, is_keyframe: true, data: p.payload }])
             }
             _ => unreachable!(),
         }
@@ -300,6 +300,9 @@ impl Depacketizer {
             let mut b = BytesMut::with_capacity(p.len());
             b.extend_from_slice(&[(p[0] & 0xe0) | (p[1] & 0x1f)]);
             b.extend_from_slice(&p[2..]);
+            if end {
+                return Ok(Some(b.freeze()));
+            }
             self.assembling = Some(b);
             return Ok(None);
         }
@@ -349,6 +352,9 @@ impl Depacketizer {
             let mut b = BytesMut::with_capacity(p.len());
             b.extend_from_slice(&[(p[0] & 0x81) | ((p[2] & 0x3f) << 1), p[1]]);
             b.extend_from_slice(&p[3..]);
+            if end {
+                return Ok(Some(b.freeze()));
+            }
             self.assembling = Some(b);
             return Ok(None);
         }
@@ -413,6 +419,29 @@ mod tests {
         };
         assert_eq!(RtpPacket::parse(p.encode()).unwrap().payload, b"x"[..]);
     }
+    #[test]
+    fn single_packet_fus_emit_an_access_unit() {
+        let packet = |payload: &'static [u8]| RtpPacket {
+            header: RtpHeader {
+                marker: true,
+                payload_type: 96,
+                sequence: 1,
+                timestamp: 2,
+                ssrc: 3,
+            },
+            payload: Bytes::from_static(payload),
+        };
+        let mut h264 = Depacketizer::new(Codec::H264, 0, 90_000);
+        let h264_out = h264.push(packet(&[28, 0xc5, 1, 2, 3])).unwrap();
+        assert_eq!(h264_out.len(), 1);
+        assert_eq!(h264_out[0].data, Bytes::from_static(&[0, 0, 0, 1, 0x05, 1, 2, 3]));
+
+        let mut h265 = Depacketizer::new(Codec::H265, 0, 90_000);
+        let h265_out = h265.push(packet(&[49 << 1, 1, 0xc2, 3, 4])).unwrap();
+        assert_eq!(h265_out.len(), 1);
+        assert_eq!(h265_out[0].data, Bytes::from_static(&[0, 0, 0, 1, 4, 1, 3, 4]));
+    }
+
     #[test]
     fn h264_fu_roundtrip() {
         let f = frame(Codec::H264, &[0x65; 300]);
@@ -549,12 +578,10 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert!(
-            depacketizer
-                .push(packet(4, 11, true, Bytes::from_static(&[0x65, 3])))
-                .unwrap()
-                .len() > 0
-        );
+        assert!(!depacketizer
+            .push(packet(4, 11, true, Bytes::from_static(&[0x65, 3])))
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

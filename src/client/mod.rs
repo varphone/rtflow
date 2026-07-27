@@ -385,10 +385,22 @@ impl RtspClient {
 
         let mut udp_options = options.clone();
         udp_options.transport = UpstreamTransport::Udp;
-        let (stream, uri, setup_base, description) = open_and_describe(&url, &udp_options).await?;
+        let udp_open = open_and_describe(&url, &udp_options).await;
+        let (stream, uri, setup_base, description) = match udp_open {
+            Ok(value) => value,
+            Err(error) if should_fallback_to_tcp(&error) => {
+                tracing::debug!(error = %error, "UDP RTSP connection failed; retrying with TCP interleaving");
+                let mut tcp_options = options.clone();
+                tcp_options.transport = UpstreamTransport::TcpInterleaved;
+                let (stream, uri, setup_base, description) =
+                    open_and_describe(&url, &tcp_options).await?;
+                return setup::connect(stream, uri, setup_base, description, tcp_options).await;
+            }
+            Err(error) => return Err(error),
+        };
         match setup::connect(stream, uri, setup_base, description, udp_options).await {
             Ok(session) => Ok(session),
-            Err(udp_error) => {
+            Err(udp_error) if should_fallback_to_tcp(&udp_error) => {
                 tracing::debug!(error = %udp_error, "UDP RTSP SETUP failed; retrying with TCP interleaving");
                 let mut tcp_options = options;
                 tcp_options.transport = UpstreamTransport::TcpInterleaved;
@@ -396,6 +408,7 @@ impl RtspClient {
                     open_and_describe(&url, &tcp_options).await?;
                 setup::connect(stream, uri, setup_base, description, tcp_options).await
             }
+            Err(error) => Err(error),
         }
     }
 
@@ -670,6 +683,26 @@ async fn request(
         }
     }
     Ok(response)
+}
+
+fn should_fallback_to_tcp(error: &Error) -> bool {
+    match error {
+        Error::Closed => true,
+        Error::Io(error) => matches!(
+            error.kind(),
+            std::io::ErrorKind::TimedOut
+                | std::io::ErrorKind::ConnectionRefused
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+        ),
+        Error::Rtsp(message) => {
+            let lower = message.to_ascii_lowercase();
+            lower.contains("461")
+                || lower.contains("unsupported transport")
+                || lower.contains("udp") && lower.contains("timeout")
+        }
+        _ => false,
+    }
 }
 
 fn validate_response_cseq(response: &Response, cseq: u32) -> Result<()> {

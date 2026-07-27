@@ -50,6 +50,9 @@ pub fn write_live_playlist_at(
     ));
 
     for segment in segments {
+        if segment.discontinuity {
+            playlist.push_str("#EXT-X-DISCONTINUITY\n");
+        }
         let duration = segment.duration.as_secs_f64();
         playlist.push_str(&format!("#EXTINF:{:.3},\n", duration));
         playlist.push_str(&format!(
@@ -92,6 +95,9 @@ pub fn write_vod_playlist_at(segments: &[Segment], asset_prefix: &str) -> String
     ));
 
     for segment in segments {
+        if segment.discontinuity {
+            playlist.push_str("#EXT-X-DISCONTINUITY\n");
+        }
         let duration = segment.duration.as_secs_f64();
         playlist.push_str(&format!("#EXTINF:{:.3},\n", duration));
         playlist.push_str(&format!(
@@ -116,6 +122,7 @@ mod tests {
             init: Bytes::new(),
             data: Bytes::new(),
             starts_with_keyframe: true,
+            discontinuity: false,
             timestamp: Duration::from_millis(sequence * 2000),
         }
     }

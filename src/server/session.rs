@@ -67,6 +67,7 @@ pub(super) async fn serve_connection(
     let mut has_announced = false;
     let mut selected_mount: Option<String> = None;
     let mut interleaved_depacketizers: HashMap<u8, Depacketizer> = HashMap::new();
+    let mut interleaved_ssrcs: HashMap<u8, u32> = HashMap::new();
     let mut vod_cursor = std::time::Duration::ZERO;
     let mut rtp_sequences: HashMap<u8, Arc<AtomicU16>> = HashMap::new();
     loop {
@@ -110,9 +111,36 @@ pub(super) async fn serve_connection(
                             .or_insert_with(|| {
                                 Depacketizer::new(track.codec, track.id, track.clock_rate)
                             });
-                        match RtpPacket::parse(frame.payload)
-                            .and_then(|packet| depacketizer.push(packet))
-                        {
+                        let packet = match RtpPacket::parse(frame.payload) {
+                            Ok(packet) => packet,
+                            Err(error) => {
+                                tracing::warn!(channel=frame.channel, error=%error, "invalid interleaved RTP");
+                                continue;
+                            }
+                        };
+                        if packet.header.payload_type != track.payload_type {
+                            tracing::debug!(
+                                channel = frame.channel,
+                                payload_type = packet.header.payload_type,
+                                expected = track.payload_type,
+                                "dropping RTP payload type mismatch"
+                            );
+                            continue;
+                        }
+                        if let Some(expected) = interleaved_ssrcs.get(&frame.channel) {
+                            if *expected != packet.header.ssrc {
+                                tracing::debug!(
+                                    channel = frame.channel,
+                                    ssrc = packet.header.ssrc,
+                                    expected_ssrc = *expected,
+                                    "dropping RTP SSRC mismatch"
+                                );
+                                continue;
+                            }
+                        } else {
+                            interleaved_ssrcs.insert(frame.channel, packet.header.ssrc);
+                        }
+                        match depacketizer.push(packet) {
                             Ok(units) => {
                                 for unit in units {
                                     if mount.publish_cached(unit).is_ok() {
@@ -689,12 +717,16 @@ pub(super) async fn serve_connection(
                 }
                 for (mount, socket, _rtp_target, _rtcp_target, track) in setups.iter().cloned() {
                     if matches!(mount.config, MountConfig::Publisher { .. }) {
-                        resources
-                            .senders
-                            .push(spawn_udp_receiver(mount, socket, track));
+                        resources.senders.push(spawn_udp_receiver(
+                            mount,
+                            socket,
+                            _rtp_target,
+                            track,
+                        ));
                     }
                 }
                 let mut has_interleaved_receiver = false;
+                interleaved_ssrcs.clear();
                 for (mount, rtp_channel, _rtcp_channel, track) in interleaved.iter().cloned() {
                     if matches!(mount.config, MountConfig::Publisher { .. }) {
                         has_interleaved_receiver = true;

@@ -36,6 +36,8 @@ pub struct Segment {
     pub data: Bytes,
     /// Whether this segment starts with a keyframe.
     pub starts_with_keyframe: bool,
+    /// Whether a decoder discontinuity precedes this segment.
+    pub discontinuity: bool,
     /// Timestamp of the first sample in the segment.
     pub timestamp: Duration,
 }
@@ -65,6 +67,7 @@ pub struct Segmenter {
     sequence: u64,
     tx: broadcast::Sender<Segment>,
     init_segment: Option<Bytes>,
+    next_discontinuity: bool,
 }
 
 impl Segmenter {
@@ -97,6 +100,7 @@ impl Segmenter {
             sequence: 0,
             tx,
             init_segment: None,
+            next_discontinuity: false,
         }
     }
 
@@ -184,6 +188,7 @@ impl Segmenter {
             init: self.init_segment.clone().unwrap_or_default(),
             data: segment_data,
             starts_with_keyframe,
+            discontinuity: std::mem::take(&mut self.next_discontinuity),
             timestamp: segment_pts,
         };
 
@@ -196,6 +201,18 @@ impl Segmenter {
         for track in &mut self.tracks {
             track.samples.clear();
         }
+    }
+
+    /// Drop incomplete samples after a transport gap and mark the next segment.
+    pub fn reset_after_discontinuity(&mut self) {
+        for track in &mut self.tracks {
+            track.samples.clear();
+            track.last_dts = None;
+            track.codec_config = None;
+        }
+        self.current_segment_pts = None;
+        self.init_segment = None;
+        self.next_discontinuity = true;
     }
 
     /// Flush any remaining samples as a final segment.
@@ -231,6 +248,7 @@ impl Segmenter {
                         .first()
                         .is_some_and(|sample| sample.is_keyframe)
             }),
+            discontinuity: std::mem::take(&mut self.next_discontinuity),
             timestamp: segment_pts,
         };
 
@@ -662,7 +680,7 @@ fn write_dinf(buf: &mut BytesMut) {
 
     buf.put_u32(dinf_size);
     buf.put_slice(b"dinf");
-    buf.put_u32(dref_size as u32);
+    buf.put_u32(dref_size);
     buf.put_slice(b"dref");
     buf.put_u32(0); // version + flags
     buf.put_u32(1); // entry count

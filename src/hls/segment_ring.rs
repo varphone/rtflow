@@ -10,6 +10,10 @@ pub struct SegmentRing {
 
 impl SegmentRing {
     pub fn new(max_segments: usize) -> Self {
+        assert!(
+            max_segments > 0,
+            "HLS segment ring capacity must be non-zero"
+        );
         Self {
             segments: RwLock::new(VecDeque::with_capacity(max_segments)),
             max_segments,
