@@ -5,8 +5,7 @@ use super::{
     ConnectionPhase, Mount, MountConfig, State, description_for,
     proxy_runtime::start_proxy_if_idle,
     tasks::{
-        SenderInput, spawn_interleaved_sender, spawn_interleaved_sender_from, spawn_udp_receiver,
-        spawn_udp_sender, spawn_udp_sender_from,
+        SenderInput, spawn_interleaved_sender_from, spawn_udp_receiver, spawn_udp_sender_from,
     },
 };
 use crate::{
@@ -575,6 +574,33 @@ pub(super) async fn serve_connection(
                 let vod_output = vod_source.as_ref().map(|_| {
                     tokio::sync::broadcast::channel(state.config.consumer_queue_capacity).0
                 });
+                let mut live_interleaved_inputs = Vec::new();
+                let mut live_udp_inputs = Vec::new();
+                let mut rtp_info = Vec::new();
+                if vod_output.is_none() {
+                    for (mount, _, _, track) in &interleaved {
+                        let sequence = rtp_sequences
+                            .entry(track.id)
+                            .or_insert_with(|| Arc::new(AtomicU16::new(0)))
+                            .clone();
+                        let input = live_sender_input(mount, track.id, sequence);
+                        if let Some(entry) = rtp_info_entry(&req.uri, track, &input) {
+                            rtp_info.push(entry);
+                        }
+                        live_interleaved_inputs.push(input);
+                    }
+                    for (mount, _, _, _, track) in &setups {
+                        let sequence = rtp_sequences
+                            .entry(track.id)
+                            .or_insert_with(|| Arc::new(AtomicU16::new(0)))
+                            .clone();
+                        let input = live_sender_input(mount, track.id, sequence);
+                        if let Some(entry) = rtp_info_entry(&req.uri, track, &input) {
+                            rtp_info.push(entry);
+                        }
+                        live_udp_inputs.push(input);
+                    }
+                }
                 if interleaved.is_empty() && setups.is_empty() {
                     writer
                         .lock()
@@ -601,8 +627,25 @@ pub(super) async fn serve_connection(
                             }
                             .render(),
                         );
-                    } else if let Some(range) = requested_range {
-                        response.headers.insert("range".into(), range.render());
+                    } else {
+                        // A live presentation has no finite endpoint, but PLAY still
+                        // confirms the effective Normal Play Time range. This lets
+                        // RTSP clients distinguish a live stream from a response
+                        // that omitted range semantics altogether.
+                        response.headers.insert(
+                            "range".into(),
+                            requested_range
+                                .unwrap_or(NptRange {
+                                    start: NptPosition::Now,
+                                    end: None,
+                                })
+                                .render(),
+                        );
+                    }
+                    if !rtp_info.is_empty() {
+                        response
+                            .headers
+                            .insert("rtp-info".into(), rtp_info.join(","));
                     }
                     writer
                         .lock()
@@ -628,13 +671,13 @@ pub(super) async fn serve_connection(
                                 writer.clone(),
                             )
                         } else {
-                            spawn_interleaved_sender(
+                            spawn_interleaved_sender_from(
                                 mount.clone(),
+                                live_interleaved_inputs.remove(0),
                                 rtp_channel,
                                 rtcp_channel,
                                 track,
                                 writer.clone(),
-                                sequence,
                             )
                         });
                         start_proxy_if_idle(
@@ -663,13 +706,13 @@ pub(super) async fn serve_connection(
                                 track,
                             )
                         } else {
-                            spawn_udp_sender(
+                            spawn_udp_sender_from(
                                 mount.clone(),
+                                live_udp_inputs.remove(0),
                                 socket,
                                 rtp_target,
                                 rtcp_target,
                                 track,
-                                sequence,
                             )
                         });
                         start_proxy_if_idle(
@@ -948,6 +991,33 @@ async fn authorize_request(
         AuthDecision::Deny => Some(simple_response(403, "Forbidden", cseq)),
     }
 }
+fn live_sender_input(mount: &Arc<Mount>, track_id: u8, sequence: Arc<AtomicU16>) -> SenderInput {
+    let (receiver, startup) = mount.subscribe_with_startup(track_id);
+    SenderInput {
+        receiver,
+        startup,
+        sequence,
+    }
+}
+
+fn rtp_info_entry(
+    play_uri: &str,
+    track: &crate::media::TrackDescription,
+    input: &SenderInput,
+) -> Option<String> {
+    let first = input.startup.iter().find(|unit| {
+        unit.track_id == track.id
+            && unit.codec == track.codec
+            && (track.kind != crate::media::MediaKind::Video || unit.is_keyframe)
+    })?;
+    let url = sdp::control_uri(play_uri, &track.control).ok()?;
+    Some(format!(
+        "url={url};seq={};rtptime={}",
+        input.sequence.load(Ordering::Relaxed),
+        first.rtp_timestamp
+    ))
+}
+
 fn session_header(session_id: &str, timeout: std::time::Duration) -> String {
     format!("{session_id};timeout={}", timeout.as_secs().max(1))
 }

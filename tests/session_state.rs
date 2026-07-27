@@ -1,4 +1,4 @@
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use rtflow::{
     Codec, MediaDescription, MediaKind, MountConfig, RtspServer, ServerConfig, TrackDescription,
     rtsp::{self as wire_rtsp, Message, Response},
@@ -29,7 +29,7 @@ async fn rejects_invalid_session_and_state_transitions() {
     let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
         .await
         .unwrap();
-    server
+    let mount = server
         .register_mount(
             Arc::from("/state"),
             MountConfig::Local {
@@ -51,6 +51,20 @@ async fn rejects_invalid_session_and_state_transitions() {
             },
         )
         .await
+        .unwrap();
+    let _warm_receiver = mount.subscribe();
+    mount
+        .publisher()
+        .unwrap()
+        .try_push(rtflow::AccessUnit {
+            track_id: 0,
+            codec: Codec::H264,
+            pts: Duration::ZERO,
+            dts: None,
+            rtp_timestamp: 90_000,
+            is_keyframe: true,
+            data: Bytes::from_static(&[0x65, 0x88, 0x84, 0x21]),
+        })
         .unwrap();
     let base = format!("rtsp://{}/state", server.local_addr());
     let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
@@ -87,6 +101,23 @@ async fn rejects_invalid_session_and_state_transitions() {
     )
     .await;
     assert_eq!(response.status, 455);
+
+    let response = request(
+        &mut stream,
+        &format!("PLAY {base} RTSP/1.0\r\nCSeq: 5\r\nSession: {session}\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(response.status, 200);
+    assert_eq!(
+        response.headers.get("range").map(String::as_str),
+        Some("npt=now-")
+    );
+    assert!(
+        response
+            .headers
+            .get("rtp-info")
+            .is_some_and(|value| value.contains("seq=0;rtptime=90000"))
+    );
 
     tokio::time::sleep(Duration::from_millis(5)).await;
     server.shutdown().await.unwrap();

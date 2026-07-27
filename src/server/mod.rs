@@ -314,6 +314,7 @@ struct Mount {
     frames: broadcast::Sender<AccessUnit>,
     stats: StreamCounters,
     startup_cache: Mutex<KeyframeCache>,
+    bootstrap: Mutex<HashMap<u8, AccessUnit>>,
     event_sink: Arc<dyn EventSink>,
     cancel: CancellationToken,
     proxy_running: AtomicBool,
@@ -385,6 +386,18 @@ impl Mount {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         cache.push(&frame);
+        drop(cache);
+        if frame.data.len() <= self.max_queued_bytes_per_session
+            && (!matches!(
+                frame.codec,
+                crate::media::Codec::H264 | crate::media::Codec::H265
+            ) || frame.is_keyframe)
+        {
+            self.bootstrap
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(frame.track_id, frame.clone());
+        }
         self.frames.send(frame)
     }
 
@@ -403,6 +416,16 @@ impl Mount {
         });
         if bytes > self.max_queued_bytes_per_session {
             startup.clear();
+        }
+        if startup.is_empty()
+            && let Some(frame) = self
+                .bootstrap
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&track_id)
+                .cloned()
+        {
+            startup.push(frame);
         }
         (receiver, startup)
     }
@@ -704,6 +727,7 @@ impl RtspServer {
             frames: tx,
             stats: StreamCounters::default(),
             startup_cache: Mutex::new(startup_cache),
+            bootstrap: Mutex::new(HashMap::new()),
             event_sink: self.state.config.event_sink.clone(),
             cancel: self.state.cancel.child_token(),
             proxy_running: AtomicBool::new(false),
