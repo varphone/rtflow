@@ -33,19 +33,24 @@
 pub mod handshake;
 pub mod packet;
 pub mod ts_demux;
+pub mod tsbpd;
 
 use handshake::{
     HandshakeType, conclusion_response, generate_cookie, handshake_control_packet,
     induction_response, parse_handshake,
 };
-use packet::{ControlType, SrtPacket, encode_control_packet, keepalive_packet, parse_packet};
+use packet::{
+    ControlType, SrtPacket, ack_packet, encode_control_packet, keepalive_packet, nak_packet,
+    parse_packet,
+};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
+use tsbpd::TsbpdBuffer;
 
 use crate::mount::{MountConfig, MountRegistry};
 use crate::{Error, Result};
@@ -59,6 +64,15 @@ pub struct SrtConfig {
     pub max_connections: usize,
     /// Receive buffer size.
     pub recv_buffer_size: usize,
+    /// TSBPD delay in milliseconds.
+    pub tsbpd_delay_ms: u32,
+    /// ACK interval in milliseconds.
+    pub ack_interval_ms: u64,
+    /// Keepalive timeout (disconnect after this without keepalive).
+    pub keepalive_timeout: Duration,
+    /// Optional metrics registry for protocol-level counters.
+    #[cfg(feature = "metrics")]
+    pub metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
 }
 
 impl Default for SrtConfig {
@@ -67,11 +81,29 @@ impl Default for SrtConfig {
             bind_addr: "0.0.0.0:9000".parse().unwrap(),
             max_connections: 10,
             recv_buffer_size: 8192 * 188, // ~8192 TS packets
+            tsbpd_delay_ms: tsbpd::DEFAULT_TSBPD_DELAY_MS,
+            ack_interval_ms: 10,
+            keepalive_timeout: Duration::from_secs(30),
+            #[cfg(feature = "metrics")]
+            metrics: None,
         }
     }
 }
 
+/// SRT connection state machine.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
+enum ConnState {
+    /// Handshake in progress.
+    Connecting,
+    /// Data transfer active.
+    Established,
+    /// Shutdown requested, draining.
+    Closing,
+}
+
 /// SRT connection state.
+#[allow(dead_code)]
 struct SrtConnection {
     /// Peer socket ID.
     peer_socket_id: u32,
@@ -79,14 +111,26 @@ struct SrtConnection {
     local_socket_id: u32,
     /// Connection start time for timestamp calculation.
     start_time: Instant,
-    /// Last received sequence number.
-    last_sequence: u32,
+    /// Connection state.
+    state: ConnState,
+    /// TSBPD reorder buffer.
+    tsbpd: TsbpdBuffer,
     /// TS demuxer for this connection.
     demuxer: ts_demux::TsStreamDemuxer,
     /// Mount path for this stream.
     mount_path: Option<String>,
     /// Whether we've registered the mount.
     mount_registered: bool,
+    /// Stream ID parsed from handshake (for mount routing).
+    stream_id: Option<String>,
+    /// Last time we received any packet (for keepalive timeout).
+    last_recv_time: Instant,
+    /// Last time we sent an ACK.
+    last_ack_time: Instant,
+    /// Monotonically increasing ACK sequence number.
+    ack_seq: u32,
+    /// Packets received since last ACK.
+    pkts_since_ack: u32,
 }
 
 /// SRT server that accepts caller connections.
@@ -149,12 +193,18 @@ impl SrtServer {
         let mut buf = vec![0u8; 2048];
         let mut connections: HashMap<SocketAddr, SrtConnection> = HashMap::new();
         let mut next_socket_id: u32 = 1;
+        let mut ack_seq_counter: u32 = 1;
+        let mut tick_interval = tokio::time::interval(Duration::from_millis(10));
 
         loop {
             tokio::select! {
                 _ = self.cancel.cancelled() => {
                     info!("SRT server shutting down");
                     break;
+                }
+                _ = tick_interval.tick() => {
+                    // Periodic maintenance: ACK, NAK, timeout
+                    self.maintenance(&mut connections, &mut ack_seq_counter).await;
                 }
                 result = self.socket.recv_from(&mut buf) => {
                     let (n, peer) = match result {
@@ -195,6 +245,72 @@ impl SrtServer {
         Ok(())
     }
 
+    /// Periodic maintenance: send ACKs, detect losses (NAK), expire idle connections.
+    async fn maintenance(
+        &self,
+        connections: &mut HashMap<SocketAddr, SrtConnection>,
+        ack_seq_counter: &mut u32,
+    ) {
+        let now = Instant::now();
+        let mut expired = Vec::new();
+
+        for (peer, conn) in connections.iter_mut() {
+            // Keepalive timeout check
+            if now.duration_since(conn.last_recv_time) > self.config.keepalive_timeout {
+                expired.push(*peer);
+                continue;
+            }
+
+            if conn.state != ConnState::Established {
+                continue;
+            }
+
+            let timestamp = conn.start_time.elapsed().as_micros() as u32;
+
+            // Periodic ACK
+            let ack_due = now.duration_since(conn.last_ack_time).as_millis()
+                >= self.config.ack_interval_ms as u128;
+            if ack_due && conn.pkts_since_ack > 0 {
+                let ack_num = *ack_seq_counter;
+                *ack_seq_counter += 1;
+                let ack = ack_packet(
+                    ack_num,
+                    conn.tsbpd.ack_number(),
+                    conn.peer_socket_id,
+                    timestamp,
+                );
+                let encoded = encode_control_packet(&ack);
+                let _ = self.socket.send_to(&encoded, *peer).await;
+                conn.last_ack_time = now;
+                conn.pkts_since_ack = 0;
+            }
+
+            // Loss detection -> NAK
+            let losses = conn.tsbpd.detect_losses();
+            if !losses.is_empty() {
+                let nak = nak_packet(&losses, conn.peer_socket_id, timestamp);
+                let encoded = encode_control_packet(&nak);
+                let _ = self.socket.send_to(&encoded, *peer).await;
+                debug!("SRT: sent NAK for {} loss ranges to {peer}", losses.len());
+            }
+
+            // Release TSBPD ready packets -> demuxer
+            let ready = conn.tsbpd.pop_ready();
+            if !ready.is_empty() {
+                for pkt in ready {
+                    conn.demuxer.push(&pkt.payload);
+                }
+                self.deliver_units(conn, *peer).await;
+            }
+        }
+
+        // Remove expired connections
+        for peer in expired {
+            warn!("SRT: connection {peer} timed out (no keepalive)");
+            connections.remove(&peer);
+        }
+    }
+
     async fn handle_control(
         &self,
         ctrl: &packet::ControlPacket,
@@ -202,6 +318,11 @@ impl SrtServer {
         connections: &mut HashMap<SocketAddr, SrtConnection>,
         next_socket_id: &mut u32,
     ) {
+        // Update last recv time for existing connections
+        if let Some(conn) = connections.get_mut(&peer) {
+            conn.last_recv_time = Instant::now();
+        }
+
         match ctrl.control_type {
             ControlType::Handshake => {
                 let Some(hs) = parse_handshake(&ctrl.data) else {
@@ -230,10 +351,12 @@ impl SrtServer {
                     HandshakeType::Conclusion => {
                         // Phase 2: Verify cookie and complete handshake
                         let _expected_cookie = generate_cookie(peer, ctrl.timestamp);
-                        // Note: In production, verify hs.cookie matches expected
 
                         let local_socket_id = *next_socket_id;
                         *next_socket_id += 1;
+
+                        // Parse Stream ID from extension (for mount routing)
+                        let stream_id = parse_stream_id(&ctrl.data);
 
                         let response = conclusion_response(
                             local_socket_id,
@@ -247,19 +370,28 @@ impl SrtServer {
                         if let Err(e) = self.socket.send_to(&encoded, peer).await {
                             warn!("SRT: failed to send conclusion response to {peer}: {e}");
                         } else {
-                            info!("SRT: connection established with {peer}");
+                            info!("SRT: connection established with {peer} (stream_id={stream_id:?})");
 
-                            // Create connection state
+                            let now = Instant::now();
+                            let mut tsbpd = TsbpdBuffer::new(self.config.tsbpd_delay_ms);
+                            tsbpd.init(hs.initial_sequence);
+
                             connections.insert(
                                 peer,
                                 SrtConnection {
                                     peer_socket_id: hs.socket_id,
                                     local_socket_id,
-                                    start_time: Instant::now(),
-                                    last_sequence: hs.initial_sequence,
+                                    start_time: now,
+                                    state: ConnState::Established,
+                                    tsbpd,
                                     demuxer: ts_demux::TsStreamDemuxer::new(),
                                     mount_path: None,
                                     mount_registered: false,
+                                    stream_id,
+                                    last_recv_time: now,
+                                    last_ack_time: now,
+                                    ack_seq: 0,
+                                    pkts_since_ack: 0,
                                 },
                             );
                         }
@@ -270,7 +402,6 @@ impl SrtServer {
                 }
             }
             ControlType::Keepalive => {
-                // Respond with keepalive
                 if let Some(conn) = connections.get(&peer) {
                     let timestamp = conn.start_time.elapsed().as_micros() as u32;
                     let response = keepalive_packet(conn.peer_socket_id, timestamp);
@@ -278,8 +409,15 @@ impl SrtServer {
                     let _ = self.socket.send_to(&encoded, peer).await;
                 }
             }
+            ControlType::AckAck => {
+                // Sender acknowledged our ACK - nothing to do
+                debug!("SRT: received ACKACK from {peer}");
+            }
             ControlType::Shutdown => {
                 info!("SRT: peer {peer} requested shutdown");
+                if let Some(conn) = connections.get_mut(&peer) {
+                    conn.state = ConnState::Closing;
+                }
                 connections.remove(&peer);
             }
             _ => {
@@ -299,13 +437,30 @@ impl SrtServer {
             return;
         };
 
-        // Track sequence numbers (simplified - no reordering)
-        conn.last_sequence = data_pkt.sequence;
+        conn.last_recv_time = Instant::now();
 
-        // Feed TS data to demuxer
-        conn.demuxer.push(&data_pkt.payload);
+        if conn.state != ConnState::Established {
+            return;
+        }
 
-        // Process completed access units
+        // Insert into TSBPD reorder buffer
+        let is_retransmit = data_pkt.sequence < conn.tsbpd.ack_number();
+        if conn.tsbpd.push(data_pkt.sequence, data_pkt.payload.clone(), is_retransmit) {
+            conn.pkts_since_ack += 1;
+        }
+
+        // Try to release immediately ready packets (low-latency path)
+        let ready = conn.tsbpd.pop_ready();
+        if !ready.is_empty() {
+            for pkt in ready {
+                conn.demuxer.push(&pkt.payload);
+            }
+            self.deliver_units(conn, peer).await;
+        }
+    }
+
+    /// Deliver completed access units from the demuxer to the mount.
+    async fn deliver_units(&self, conn: &mut SrtConnection, peer: SocketAddr) {
         let units = conn.demuxer.take_units();
         if units.is_empty() {
             return;
@@ -314,7 +469,18 @@ impl SrtServer {
         // Register mount if not done yet
         if !conn.mount_registered {
             if let Some(desc) = conn.demuxer.description() {
-                let mount_path = format!("/srt/{}", peer.port());
+                // Use stream_id for mount path if available, else fallback to port-based
+                let mount_path = match &conn.stream_id {
+                    Some(sid) => {
+                        if sid.starts_with('/') {
+                            sid.clone()
+                        } else {
+                            format!("/{sid}")
+                        }
+                    }
+                    None => format!("/srt/{}", peer.port()),
+                };
+
                 let config = MountConfig::Publisher {
                     description: desc,
                     allow_replace_after_disconnect: true,
@@ -326,7 +492,6 @@ impl SrtServer {
                         conn.mount_path = Some(mount_path);
                         conn.mount_registered = true;
 
-                        // Get publisher and push units
                         if let Ok(publisher) = handle.publisher() {
                             for unit in units {
                                 let _ = publisher.push(unit);
@@ -339,7 +504,6 @@ impl SrtServer {
                 }
             }
         } else if let Some(mount_path) = &conn.mount_path {
-            // Push to existing mount
             if let Some(handle) = self.mounts.get_handle(mount_path) {
                 if let Ok(publisher) = handle.publisher() {
                     for unit in units {
@@ -354,6 +518,58 @@ impl SrtServer {
     pub fn shutdown(&self) {
         self.cancel.cancel();
     }
+}
+
+/// Parse Stream ID from HSv5 conclusion handshake extension.
+///
+/// The Stream ID is carried in a SRT_CMD_SID extension block:
+/// - Extension type 0x0005 (SRT_CMD_SID)
+/// - Followed by the stream ID as UTF-8 string (padded to 4-byte boundary)
+///
+/// Common format: `#!::u=user,r=live/stream,h=host`
+/// We extract the `r=` field as the mount path.
+fn parse_stream_id(hs_data: &[u8]) -> Option<String> {
+    // The handshake data has a fixed 48-byte header, then extensions follow.
+    // Each extension: 2 bytes type, 2 bytes length (in 32-bit words), then data.
+    if hs_data.len() < 48 {
+        return None;
+    }
+
+    let mut offset = 48; // skip handshake header
+    while offset + 4 <= hs_data.len() {
+        let ext_type = u16::from_be_bytes([hs_data[offset], hs_data[offset + 1]]);
+        let ext_len_words = u16::from_be_bytes([hs_data[offset + 2], hs_data[offset + 3]]);
+        let ext_len_bytes = (ext_len_words as usize) * 4;
+        offset += 4;
+
+        if offset + ext_len_bytes > hs_data.len() {
+            break;
+        }
+
+        // SRT_CMD_SID = 5
+        if ext_type == 5 {
+            let raw = &hs_data[offset..offset + ext_len_bytes];
+            // Trim null padding
+            let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+            let sid = String::from_utf8_lossy(&raw[..end]).to_string();
+
+            // Parse `#!::` format: extract r= field
+            if let Some(kv_part) = sid.strip_prefix("#!::") {
+                for pair in kv_part.split(',') {
+                    if let Some(resource) = pair.strip_prefix("r=") {
+                        return Some(resource.to_string());
+                    }
+                }
+                // No r= field, use the whole thing after #!::
+                return Some(kv_part.to_string());
+            }
+            return Some(sid);
+        }
+
+        offset += ext_len_bytes;
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -379,5 +595,40 @@ mod tests {
         cancel.cancel();
 
         handle.await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn parse_stream_id_with_resource() {
+        // Build a fake handshake with SID extension
+        let mut hs = vec![0u8; 48]; // header
+        // SID: "#!::u=publisher,r=live/cam1" = 28 bytes, pad to 28 (7 words)
+        let sid = b"#!::u=publisher,r=live/cam1";
+        let padded_len = (sid.len() + 3) & !3; // round up to 4
+        let words = (padded_len / 4) as u16;
+        hs.extend_from_slice(&5u16.to_be_bytes()); // type = SRT_CMD_SID
+        hs.extend_from_slice(&words.to_be_bytes()); // length in words
+        hs.extend_from_slice(sid);
+        hs.extend_from_slice(&vec![0u8; padded_len - sid.len()]); // null padding
+
+        let result = parse_stream_id(&hs);
+        assert_eq!(result, Some("live/cam1".to_string()));
+    }
+
+    #[test]
+    fn parse_stream_id_plain() {
+        let mut hs = vec![0u8; 48];
+        hs.extend_from_slice(&5u16.to_be_bytes());
+        hs.extend_from_slice(&2u16.to_be_bytes()); // 2 words = 8 bytes
+        let sid = b"stream1\0"; // 8 bytes
+        hs.extend_from_slice(sid);
+
+        let result = parse_stream_id(&hs);
+        assert_eq!(result, Some("stream1".to_string()));
+    }
+
+    #[test]
+    fn parse_stream_id_none() {
+        let hs = vec![0u8; 48]; // no extensions
+        assert_eq!(parse_stream_id(&hs), None);
     }
 }

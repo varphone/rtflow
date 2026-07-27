@@ -86,6 +86,9 @@ impl TsStreamDemuxer {
                 payload_type: 96 + t.track_id,
                 fmtp: None,
                 control: format!("trackID={}", t.track_id).into(),
+                width: None,
+                height: None,
+                frame_rate: None,
                 #[cfg(feature = "srtp")]
                 crypto: None,
             })

@@ -202,6 +202,54 @@ pub fn ackack_packet(ack_number: u32, socket_id: u32, timestamp: u32) -> Control
     }
 }
 
+/// Build a NAK (loss report) control packet.
+///
+/// The loss list is encoded as pairs of (start, end) inclusive sequence ranges.
+/// Single-packet losses use start == end.
+pub fn nak_packet(losses: &[(u32, u32)], socket_id: u32, timestamp: u32) -> ControlPacket {
+    let mut data = BytesMut::with_capacity(losses.len() * 8);
+    for &(start, end) in losses {
+        if start == end {
+            // Single loss: just the sequence number (bit 31 = 0)
+            data.put_u32(start & 0x7FFF_FFFF);
+        } else {
+            // Range: start (bit 31 = 1) followed by end
+            data.put_u32(0x8000_0000 | (start & 0x7FFF_FFFF));
+            data.put_u32(end & 0x7FFF_FFFF);
+        }
+    }
+    ControlPacket {
+        control_type: ControlType::Nak,
+        type_specific: 0,
+        additional_info: 0,
+        timestamp,
+        socket_id,
+        data: data.freeze(),
+    }
+}
+
+/// Parse a NAK loss list from control data.
+pub fn parse_nak_loss_list(data: &[u8]) -> Vec<(u32, u32)> {
+    let mut losses = Vec::new();
+    let mut i = 0;
+    while i + 4 <= data.len() {
+        let word = u32::from_be_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+        i += 4;
+        if (word >> 31) & 1 == 1 {
+            // Range: next word is end
+            let start = word & 0x7FFF_FFFF;
+            if i + 4 <= data.len() {
+                let end = u32::from_be_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+                i += 4;
+                losses.push((start, end & 0x7FFF_FFFF));
+            }
+        } else {
+            losses.push((word, word));
+        }
+    }
+    losses
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
