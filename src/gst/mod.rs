@@ -6,7 +6,8 @@ pub mod buffer;
 pub mod pipeline;
 
 use crate::media::{Codec, MediaDescription, MediaKind, TrackDescription};
-use crate::server::{LocalPublisher, MountConfig, RtspServer};
+use crate::mount::{LocalPublisher, MountConfig};
+use crate::server::RtspServer;
 use crate::{Error, Result};
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -62,8 +63,8 @@ impl GstPipelineBuilder {
 
     pub fn encoder(mut self, config: EncoderConfig) -> Self {
         match config.codec {
-            Codec::H264 | Codec::H265 => self.video_encoder = Some(config),
-            Codec::Aac | Codec::Pcma | Codec::Pcmu => self.audio_encoder = Some(config),
+            Codec::H264 | Codec::H265 | Codec::Vp8 | Codec::Vp9 => self.video_encoder = Some(config),
+            Codec::Aac | Codec::Pcma | Codec::Pcmu | Codec::Opus => self.audio_encoder = Some(config),
         }
         self
     }

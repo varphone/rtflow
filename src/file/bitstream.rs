@@ -199,7 +199,7 @@ pub(crate) fn is_keyframe(codec: Codec, data: &[u8]) -> bool {
         Codec::H265 => nal
             .first()
             .is_some_and(|byte| matches!((byte >> 1) & 0x3f, 19..=21)),
-        Codec::Aac | Codec::Pcma | Codec::Pcmu => true,
+        Codec::Aac | Codec::Pcma | Codec::Pcmu | Codec::Opus | Codec::Vp8 | Codec::Vp9 => true,
     };
     let mut nals = annex_b_nals(data).peekable();
     if nals.peek().is_none() {

@@ -9,6 +9,9 @@ pub enum Codec {
     Aac,
     Pcma,
     Pcmu,
+    Opus,
+    Vp8,
+    Vp9,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MediaKind {

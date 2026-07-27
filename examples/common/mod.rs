@@ -121,6 +121,9 @@ pub fn track(id: u8, codec: Codec) -> TrackDescription {
         ),
         Codec::Pcma => (MediaKind::Audio, 8_000, Some(1), 8, None),
         Codec::Pcmu => (MediaKind::Audio, 8_000, Some(1), 0, None),
+        Codec::Opus => (MediaKind::Audio, 48_000, Some(2), 111, None),
+        Codec::Vp8 => (MediaKind::Video, 90_000, None, 99, None),
+        Codec::Vp9 => (MediaKind::Video, 90_000, None, 100, None),
     };
     TrackDescription {
         id,
@@ -142,6 +145,8 @@ pub fn sample_unit(track: &TrackDescription, frame: u64, fps: u32) -> AccessUnit
         Codec::Aac => Bytes::from_static(&[0x21, 0x10, 0x04, 0x60]),
         Codec::Pcma => Bytes::from_static(&[0xd5; 160]),
         Codec::Pcmu => Bytes::from_static(&[0xff; 160]),
+        Codec::Opus => Bytes::from_static(&[0xfc; 80]),
+        Codec::Vp8 | Codec::Vp9 => Bytes::from_static(&[0x10, 0x01, 0x02, 0x03]),
     };
     let frame_duration = Duration::from_secs_f64(1.0 / f64::from(fps));
     AccessUnit {

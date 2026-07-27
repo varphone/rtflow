@@ -276,6 +276,9 @@ pub fn encode(description: &MediaDescription) -> String {
             Codec::Aac => "MPEG4-GENERIC",
             Codec::Pcma => "PCMA",
             Codec::Pcmu => "PCMU",
+            Codec::Opus => "opus",
+            Codec::Vp8 => "VP8",
+            Codec::Vp9 => "VP9",
         };
         output.push_str(&format!(
             "m={media} 0 RTP/AVP {}\r\na=rtpmap:{} {codec}/{}{}\r\n",

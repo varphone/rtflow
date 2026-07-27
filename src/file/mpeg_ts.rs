@@ -69,6 +69,8 @@ impl MpegTsDemuxer {
                     (sample_rate, Some(channels), Some(fmtp))
                 }
                 Codec::Pcma | Codec::Pcmu => (8_000, Some(1), None),
+                Codec::Opus => (48_000, Some(2), None),
+                Codec::Vp8 | Codec::Vp9 => (90_000, None, None),
             };
             let track_id =
                 u8::try_from(tracks.len()).map_err(|_| Error::Limit("file media tracks"))?;
@@ -270,6 +272,9 @@ impl MpegTsDemuxer {
                     }),
                 });
                 Ok(())
+            }
+            Codec::Opus | Codec::Vp8 | Codec::Vp9 => {
+                Err(Error::Media("MPEG-TS does not support Opus/VP8/VP9".into()))
             }
         }
     }

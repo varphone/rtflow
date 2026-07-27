@@ -23,6 +23,7 @@ fn encoded_sample(codec: Codec) -> AccessUnit {
         Codec::H265 => "h265.mp4",
         Codec::Pcma => "pcma.wav",
         Codec::Pcmu => "pcmu.wav",
+        _ => "h264-aac.mp4",
     };
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")

@@ -79,6 +79,15 @@ pub enum Error {
     #[cfg(feature = "srtp")]
     #[error("SRTP error: {0}")]
     Srtp(String),
+    #[cfg(feature = "rtmp")]
+    #[error("RTMP error: {0}")]
+    Rtmp(String),
+    #[cfg(feature = "srt")]
+    #[error("SRT error: {0}")]
+    Srt(String),
+    #[cfg(feature = "webrtc")]
+    #[error("WebRTC error: {0}")]
+    Webrtc(String),
 }
 
 impl Error {
@@ -97,6 +106,12 @@ impl Error {
             Self::Unauthorized => ErrorCode::Unauthorized,
             #[cfg(feature = "srtp")]
             Self::Srtp(_) => ErrorCode::InvalidMedia,
+            #[cfg(feature = "rtmp")]
+            Self::Rtmp(_) => ErrorCode::InvalidProtocol,
+            #[cfg(feature = "srt")]
+            Self::Srt(_) => ErrorCode::InvalidProtocol,
+            #[cfg(feature = "webrtc")]
+            Self::Webrtc(_) => ErrorCode::InvalidProtocol,
         }
     }
 
@@ -130,6 +145,12 @@ impl Error {
             Self::Rtsp(_) | Self::Media(_) => 400,
             #[cfg(feature = "srtp")]
             Self::Srtp(_) => 400,
+            #[cfg(feature = "rtmp")]
+            Self::Rtmp(_) => 400,
+            #[cfg(feature = "srt")]
+            Self::Srt(_) => 400,
+            #[cfg(feature = "webrtc")]
+            Self::Webrtc(_) => 400,
             #[cfg(feature = "tls")]
             Self::Closed | Self::Io(_) | Self::Tls(_) => 500,
             #[cfg(not(feature = "tls"))]

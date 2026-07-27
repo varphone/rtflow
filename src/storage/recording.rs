@@ -699,6 +699,9 @@ fn codec_id(codec: Codec) -> u8 {
         Codec::Aac => 3,
         Codec::Pcma => 4,
         Codec::Pcmu => 5,
+        Codec::Opus => 6,
+        Codec::Vp8 => 7,
+        Codec::Vp9 => 8,
     }
 }
 fn codec_from_id(id: u8) -> Result<Codec> {
@@ -708,6 +711,9 @@ fn codec_from_id(id: u8) -> Result<Codec> {
         3 => Ok(Codec::Aac),
         4 => Ok(Codec::Pcma),
         5 => Ok(Codec::Pcmu),
+        6 => Ok(Codec::Opus),
+        7 => Ok(Codec::Vp8),
+        8 => Ok(Codec::Vp9),
         _ => Err(Error::Media("unknown recorded codec".into())),
     }
 }

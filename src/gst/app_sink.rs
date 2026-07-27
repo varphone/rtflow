@@ -6,7 +6,7 @@
 
 use super::buffer::buffer_to_bytes;
 use crate::media::{AccessUnit, Codec};
-use crate::server::LocalPublisher;
+use crate::mount::LocalPublisher;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
 use std::sync::Arc;

@@ -93,6 +93,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Codec::Aac => "aac",
                             Codec::Pcma => "pcma",
                             Codec::Pcmu => "pcmu",
+                            Codec::Opus => "opus",
+                            Codec::Vp8 => "vp8",
+                            Codec::Vp9 => "vp9",
                         };
                         let path =
                             directory.join(format!("track-{}.{}", unit.track_id, extension));

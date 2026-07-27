@@ -4,7 +4,7 @@ use super::matroska::MatroskaDemuxer;
 use super::mp4::Mp4Demuxer;
 use super::{mpeg_ts::MpegTsDemuxer, raw};
 #[cfg(feature = "server")]
-use crate::server::{LocalPublisher, PushResult};
+use crate::mount::{LocalPublisher, PushResult};
 use crate::{
     Error, Result,
     media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription},
@@ -507,7 +507,10 @@ pub(crate) fn track_description(
     let payload_type = match codec {
         Codec::Pcmu => 0,
         Codec::Pcma => 8,
-        Codec::H264 | Codec::H265 | Codec::Aac => 96u8.saturating_add(id),
+        Codec::Opus => 111,
+        Codec::H264 | Codec::H265 | Codec::Aac | Codec::Vp8 | Codec::Vp9 => {
+            96u8.saturating_add(id)
+        }
     };
     TrackDescription {
         id,

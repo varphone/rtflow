@@ -54,11 +54,14 @@ impl Packetizer {
             Codec::H264 => self.h264(frame),
             Codec::H265 => self.h265(frame),
             Codec::Aac => self.aac(frame),
-            Codec::Pcma | Codec::Pcmu => Ok(vec![self.packet(
+            Codec::Pcma | Codec::Pcmu | Codec::Opus => Ok(vec![self.packet(
                 frame.data.clone(),
                 frame.rtp_timestamp,
                 true,
             )]),
+            Codec::Vp8 | Codec::Vp9 => Err(Error::Media(
+                "VP8/VP9 packetization not yet implemented".into(),
+            )),
         }
     }
     fn h264(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
