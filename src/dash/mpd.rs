@@ -4,7 +4,7 @@
 //! substitution, conforming to the DASH-IF IOP live profile.
 use crate::hls::segmenter::Segment;
 use crate::media::{MediaDescription, MediaKind};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 /// DASH MPD configuration.
 #[derive(Clone, Debug)]
@@ -17,6 +17,8 @@ pub struct MpdConfig {
     pub segment_duration: Duration,
     /// Timescale for SegmentTemplate (ticks per second).
     pub timescale: u32,
+    /// Suggested presentation delay (live edge offset).
+    pub suggested_presentation_delay: Option<Duration>,
 }
 
 impl Default for MpdConfig {
@@ -26,6 +28,7 @@ impl Default for MpdConfig {
             time_shift_buffer_depth: Duration::from_secs(30),
             segment_duration: Duration::from_secs(2),
             timescale: 90000,
+            suggested_presentation_delay: None,
         }
     }
 }
@@ -39,6 +42,27 @@ pub fn generate_mpd(
 ) -> String {
     let mut xml = String::with_capacity(4096);
 
+    // Calculate availability start time (actual server start)
+    let availability_start = iso8601_now();
+
+    // Calculate publish time (latest segment time)
+    let publish_time = segments
+        .last()
+        .map(|s| iso8601_from_duration(s.timestamp))
+        .unwrap_or_else(|| availability_start.clone());
+
+    // Suggested presentation delay
+    let suggested_delay = config
+        .suggested_presentation_delay
+        .unwrap_or(config.segment_duration * 3);
+
+    // Maximum segment duration
+    let max_segment_duration = segments
+        .iter()
+        .map(|s| s.duration)
+        .max()
+        .unwrap_or(config.segment_duration);
+
     xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     xml.push_str(&format!(
         "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" \
@@ -46,9 +70,16 @@ pub fn generate_mpd(
          profiles=\"urn:mpeg:dash:profile:isoff-live:2011\" \
          minBufferTime=\"{}\" \
          timeShiftBufferDepth=\"{}\" \
-         availabilityStartTime=\"1970-01-01T00:00:00Z\">\n",
+         suggestedPresentationDelay=\"{}\" \
+         maximumSegmentDuration=\"{}\" \
+         availabilityStartTime=\"{}\" \
+         publishTime=\"{}\">\n",
         format_duration(config.min_buffer_time),
         format_duration(config.time_shift_buffer_depth),
+        format_duration(suggested_delay),
+        format_duration(max_segment_duration),
+        availability_start,
+        publish_time,
     ));
 
     xml.push_str("  <Period id=\"0\">\n");
@@ -96,9 +127,18 @@ pub fn generate_mpd(
             asset_prefix,
         ));
 
+        // Dynamic Representation attributes
+        let width = video_track.width.unwrap_or(1920);
+        let height = video_track.height.unwrap_or(1080);
+        let frame_rate = video_track
+            .frame_rate
+            .map(|(n, d)| format!("{n}/{d}"))
+            .unwrap_or_else(|| "30".to_string());
+
         xml.push_str(&format!(
             "      <Representation id=\"video\" bandwidth=\"2000000\" \
-             width=\"1920\" height=\"1080\" frameRate=\"30\"/>\n",
+             width=\"{}\" height=\"{}\" frameRate=\"{}\"/>\n",
+            width, height, frame_rate,
         ));
 
         xml.push_str("    </AdaptationSet>\n");
@@ -167,6 +207,48 @@ fn format_duration(d: Duration) -> String {
     format!("PT{}.{:03}S", secs, frac)
 }
 
+/// Format current time as ISO 8601 UTC.
+fn iso8601_now() -> String {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    iso8601_from_duration(now)
+}
+
+/// Format a duration since epoch as ISO 8601 UTC.
+fn iso8601_from_duration(d: Duration) -> String {
+    let total_secs = d.as_secs();
+    let days = total_secs / 86400;
+    let time_secs = total_secs % 86400;
+    let hours = time_secs / 3600;
+    let minutes = (time_secs % 3600) / 60;
+    let seconds = time_secs % 60;
+
+    // Days since 1970-01-01 -> approximate Y/M/D
+    let (year, month, day) = days_to_ymd(days);
+
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, hours, minutes, seconds
+    )
+}
+
+/// Convert days since epoch to (year, month, day).
+fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+    // Algorithm from http://howardhinnant.github.io/date_algorithms.html
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
 fn video_codec_string(codec: crate::media::Codec) -> &'static str {
     match codec {
         crate::media::Codec::H264 => "avc1.42E01E",
@@ -202,6 +284,9 @@ mod tests {
                     payload_type: 96,
                     fmtp: None,
                     control: "trackID=0".into(),
+                    width: Some(1280),
+                    height: Some(720),
+                    frame_rate: Some((30, 1)),
                     #[cfg(feature = "srtp")]
                     crypto: None,
                 },
@@ -214,6 +299,9 @@ mod tests {
                     payload_type: 97,
                     fmtp: None,
                     control: "trackID=1".into(),
+                    width: None,
+                    height: None,
+                    frame_rate: None,
                     #[cfg(feature = "srtp")]
                     crypto: None,
                 },
@@ -258,6 +346,14 @@ mod tests {
         assert!(mpd.contains("/live/stream/segment_$Number$.m4s"));
         assert!(mpd.contains("avc1.42E01E"));
         assert!(mpd.contains("mp4a.40.2"));
+        // New dynamic attributes
+        assert!(mpd.contains("suggestedPresentationDelay="));
+        assert!(mpd.contains("maximumSegmentDuration="));
+        assert!(mpd.contains("publishTime="));
+        // Dynamic Representation from TrackDescription
+        assert!(mpd.contains("width=\"1280\""));
+        assert!(mpd.contains("height=\"720\""));
+        assert!(mpd.contains("frameRate=\"30/1\""));
     }
 
     #[test]
