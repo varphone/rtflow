@@ -5,6 +5,7 @@
 //!
 //! See: https://datatracker.ietf.org/doc/html/draft-murillo-whep
 use super::sdp_ext::{IceCandidate, WebRtcSdpAttributes, generate_whep_answer};
+use super::session::{SessionRegistry, SessionType};
 use crate::http::{HttpRequest, ResponseWriter};
 use crate::mount::MountRegistry;
 use crate::Result;
@@ -49,6 +50,7 @@ pub async fn handle_whep_post<W: AsyncWrite + Unpin>(
     body: &[u8],
     mounts: Arc<MountRegistry>,
     config: &WhepConfig,
+    sessions: Arc<SessionRegistry>,
 ) -> Result<ResponseWriter<W>> {
     let offer_sdp = String::from_utf8_lossy(body);
     debug!("WHEP: received SDP offer ({} bytes)", offer_sdp.len());
@@ -77,9 +79,17 @@ pub async fn handle_whep_post<W: AsyncWrite + Unpin>(
     let offer_lines: Vec<&str> = offer_sdp.lines().collect();
     let _offer_attrs = WebRtcSdpAttributes::from_sdp_lines(&offer_lines);
 
+    // Create session
+    let session = sessions.create_session(SessionType::Play, mount_path.clone()).await?;
+    let session_id = session.read().await.id.clone();
+
     // Generate our ICE credentials
     let ice_ufrag = generate_ufrag();
     let ice_pwd = generate_pwd();
+
+    // Get DTLS fingerprint from session registry
+    let dtls_config = sessions.dtls_config();
+    let fingerprint = dtls_config.fingerprint().to_string();
 
     // Create host candidate
     let host_candidate = IceCandidate {
@@ -98,7 +108,7 @@ pub async fn handle_whep_post<W: AsyncWrite + Unpin>(
         &session_name,
         &ice_ufrag,
         &ice_pwd,
-        &config.fingerprint,
+        &fingerprint,
         &host_candidate,
         config.video_payload_type,
         config.audio_payload_type,
@@ -106,7 +116,7 @@ pub async fn handle_whep_post<W: AsyncWrite + Unpin>(
 
     // Return 201 Created with SDP answer
     let content_length = answer_sdp.len().to_string();
-    let location = format!("/whep{mount_path}/session");
+    let location = format!("/whep{mount_path}/{session_id}");
     let headers = [
         ("Content-Type", "application/sdp"),
         ("Content-Length", content_length.as_str()),
@@ -117,7 +127,7 @@ pub async fn handle_whep_post<W: AsyncWrite + Unpin>(
     writer.write_raw(answer_sdp.as_bytes()).await?;
     writer.flush().await?;
 
-    info!("WHEP: session created for {mount_path}");
+    info!("WHEP: session {session_id} created for {mount_path}");
     Ok(writer)
 }
 
@@ -125,9 +135,17 @@ pub async fn handle_whep_post<W: AsyncWrite + Unpin>(
 pub async fn handle_whep_delete<W: AsyncWrite + Unpin>(
     req: HttpRequest,
     mut writer: ResponseWriter<W>,
+    sessions: Arc<SessionRegistry>,
 ) -> Result<ResponseWriter<W>> {
-    info!("WHEP: session teardown for {}", req.path);
-    writer.write_body(200, "text/plain", b"OK").await?;
+    // Extract session ID from path
+    let session_id = req.path.rsplit('/').next().unwrap_or("");
+    info!("WHEP: session teardown for {session_id}");
+
+    if sessions.remove_session(session_id).await.is_some() {
+        writer.write_body(200, "text/plain", b"OK").await?;
+    } else {
+        writer.write_body(404, "text/plain", b"Session not found").await?;
+    }
     Ok(writer)
 }
 
