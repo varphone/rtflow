@@ -47,6 +47,26 @@ harness = false
 name = "throughput"
 harness = false
 
+[[example]]
+name = "rtmp_server"
+required-features = ["rtmp", "server"]
+
+[[example]]
+name = "srt_server"
+required-features = ["srt", "server"]
+
+[[example]]
+name = "dash_server"
+required-features = ["dash", "server"]
+
+[[example]]
+name = "webrtc_server"
+required-features = ["webrtc", "http", "server"]
+
+[[example]]
+name = "multi_protocol_gateway"
+required-features = ["rtmp", "srt", "dash", "webrtc", "server", "hls", "http-flv"]
+
 [dependencies]
 aes = { version = "0.9", optional = true }
 base64 = "0.23"
