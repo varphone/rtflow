@@ -21,33 +21,33 @@ use tokio::{
     task::JoinHandle,
 };
 
+#[derive(Clone, Copy)]
+pub(super) struct RtpNtpClock {
+    anchor_ntp: u64,
+    anchor_rtp_timestamp: u32,
+    clock_rate: u32,
+}
+
+impl RtpNtpClock {
+    fn new(anchor_rtp_timestamp: u32, clock_rate: u32) -> Option<Self> {
+        (clock_rate != 0).then(|| Self {
+            anchor_ntp: ntp_now(),
+            anchor_rtp_timestamp,
+            clock_rate,
+        })
+    }
+
+    fn ntp_for(self, rtp_timestamp: u32) -> u64 {
+        let delta_ticks = rtp_timestamp.wrapping_sub(self.anchor_rtp_timestamp) as i32 as i128;
+        let delta_ntp = delta_ticks * (1i128 << 32) / i128::from(self.clock_rate);
+        self.anchor_ntp.wrapping_add_signed(delta_ntp as i64)
+    }
+}
+
 pub(super) struct SenderInput {
     pub receiver: broadcast::Receiver<crate::media::AccessUnit>,
     pub startup: Vec<crate::media::AccessUnit>,
     pub sequence: Arc<AtomicU16>,
-}
-
-pub(super) fn spawn_interleaved_sender(
-    mount: Arc<Mount>,
-    rtp_channel: u8,
-    rtcp_channel: u8,
-    track: TrackDescription,
-    writer: Arc<Mutex<ControlWriteHalf>>,
-    sequence: Arc<AtomicU16>,
-) -> JoinHandle<()> {
-    let (receiver, startup) = mount.subscribe_with_startup(track.id);
-    spawn_interleaved_sender_from(
-        mount,
-        SenderInput {
-            receiver,
-            startup,
-            sequence,
-        },
-        rtp_channel,
-        rtcp_channel,
-        track,
-        writer,
-    )
 }
 
 pub(super) fn spawn_interleaved_sender_from(
@@ -74,6 +74,7 @@ pub(super) fn spawn_interleaved_sender_from(
         let mut sent_packets = 0u32;
         let mut sent_octets = 0u32;
         let mut last_rtp_timestamp = 0u32;
+        let mut ntp_clock: Option<RtpNtpClock> = None;
         let mut report_tick = tokio::time::interval(std::time::Duration::from_secs(5));
         report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         report_tick.tick().await;
@@ -84,8 +85,10 @@ pub(super) fn spawn_interleaved_sender_from(
                 tokio::select! {
                     _ = report_tick.tick() => {
                         if sent_packets > 0
+                            && let Some(clock) = ntp_clock
                             && let Ok(report) = encode_sender_report(
                                 ssrc,
+                                clock.ntp_for(last_rtp_timestamp),
                                 last_rtp_timestamp,
                                 sent_packets,
                                 sent_octets,
@@ -141,10 +144,15 @@ pub(super) fn spawn_interleaved_sender_from(
                     sent_packets = sent_packets.wrapping_add(1);
                     sent_octets = sent_octets.wrapping_add(payload_len);
                     last_rtp_timestamp = packet.header.timestamp;
+                    if ntp_clock.is_none() {
+                        ntp_clock = RtpNtpClock::new(last_rtp_timestamp, track.clock_rate);
+                    }
                     mount.stats.add_rtp(1, u64::from(payload_len));
                     if sent_packets == 1
+                        && let Some(clock) = ntp_clock
                         && let Ok(report) = encode_sender_report(
                             ssrc,
+                            clock.ntp_for(last_rtp_timestamp),
                             last_rtp_timestamp,
                             sent_packets,
                             sent_octets,
@@ -164,29 +172,6 @@ pub(super) fn spawn_interleaved_sender_from(
             }
         }
     })
-}
-
-pub(super) fn spawn_udp_sender(
-    mount: Arc<Mount>,
-    pair: UdpPair,
-    rtp_target: SocketAddr,
-    rtcp_target: SocketAddr,
-    track: TrackDescription,
-    sequence: Arc<AtomicU16>,
-) -> JoinHandle<()> {
-    let (receiver, startup) = mount.subscribe_with_startup(track.id);
-    spawn_udp_sender_from(
-        mount,
-        SenderInput {
-            receiver,
-            startup,
-            sequence,
-        },
-        pair,
-        rtp_target,
-        rtcp_target,
-        track,
-    )
 }
 
 pub(super) fn spawn_udp_sender_from(
@@ -213,6 +198,7 @@ pub(super) fn spawn_udp_sender_from(
         let mut sent_packets = 0u32;
         let mut sent_octets = 0u32;
         let mut last_rtp_timestamp = 0u32;
+        let mut ntp_clock: Option<RtpNtpClock> = None;
         let mut rtcp_buffer = [0u8; 2048];
         let mut report_tick = tokio::time::interval(std::time::Duration::from_secs(5));
         report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -221,8 +207,16 @@ pub(super) fn spawn_udp_sender_from(
             tokio::select! {
                 _ = report_tick.tick() => {
                     if sent_packets > 0 {
-                        let report = encode_sender_report(ssrc, last_rtp_timestamp, sent_packets, sent_octets);
-                        if let Ok(report) = report
+                        let report = ntp_clock.map(|clock| {
+                            encode_sender_report(
+                                ssrc,
+                                clock.ntp_for(last_rtp_timestamp),
+                                last_rtp_timestamp,
+                                sent_packets,
+                                sent_octets,
+                            )
+                        });
+                        if let Some(Ok(report)) = report
                             && pair.rtcp.send_to(&report, rtcp_target).await.is_ok()
                         {
                             mount.stats.add_sender_reports(1);
@@ -283,10 +277,15 @@ pub(super) fn spawn_udp_sender_from(
                             sent_packets = sent_packets.wrapping_add(1);
                             sent_octets = sent_octets.wrapping_add(packet.payload.len() as u32);
                             last_rtp_timestamp = packet.header.timestamp;
+                            if ntp_clock.is_none() {
+                                ntp_clock = RtpNtpClock::new(last_rtp_timestamp, track.clock_rate);
+                            }
                             mount.stats.add_rtp(1, packet.payload.len() as u64);
                             if sent_packets == 1
+                                && let Some(clock) = ntp_clock
                                 && let Ok(report) = encode_sender_report(
                                     ssrc,
+                                    clock.ntp_for(last_rtp_timestamp),
                                     last_rtp_timestamp,
                                     sent_packets,
                                     sent_octets,
@@ -368,6 +367,7 @@ pub(super) fn spawn_udp_receiver(
 
 fn encode_sender_report(
     ssrc: u32,
+    ntp: u64,
     rtp_timestamp: u32,
     packets: u32,
     octets: u32,
@@ -375,7 +375,7 @@ fn encode_sender_report(
     CompoundPacket::new(vec![
         RtcpPacket::SenderReport {
             ssrc,
-            ntp: ntp_now(),
+            ntp,
             rtp_timestamp,
             packets,
             octets,
@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn sender_reports_are_compound_and_include_cname() {
-        let wire = encode_sender_report(7, 8, 9, 10).unwrap();
+        let wire = encode_sender_report(7, 8, 9, 10, 11).unwrap();
         let packets = RtcpPacket::parse(wire).unwrap();
         assert!(matches!(
             packets.first(),
@@ -423,6 +423,23 @@ mod tests {
             packets.get(1),
             Some(RtcpPacket::SourceDescription { .. })
         ));
+    }
+
+    #[test]
+    fn rtp_ntp_clock_advances_at_the_media_clock_rate() {
+        let clock = RtpNtpClock {
+            anchor_ntp: NTP_UNIX_EPOCH_OFFSET_SECS << 32,
+            anchor_rtp_timestamp: 90_000,
+            clock_rate: 90_000,
+        };
+        assert_eq!(
+            clock.ntp_for(180_000),
+            (NTP_UNIX_EPOCH_OFFSET_SECS + 1) << 32
+        );
+        assert_eq!(
+            clock.ntp_for(45_000),
+            (NTP_UNIX_EPOCH_OFFSET_SECS << 32) - (1 << 31)
+        );
     }
 
     #[test]
