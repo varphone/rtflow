@@ -52,6 +52,9 @@ pub struct RtmpConfig {
     pub session: RtmpSessionConfig,
     /// Maximum concurrent connections.
     pub max_connections: usize,
+    /// Optional metrics registry for protocol-level counters.
+    #[cfg(feature = "metrics")]
+    pub metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
 }
 
 impl Default for RtmpConfig {
@@ -60,6 +63,8 @@ impl Default for RtmpConfig {
             bind_addr: "0.0.0.0:1935".parse().unwrap(),
             session: RtmpSessionConfig::default(),
             max_connections: 100,
+            #[cfg(feature = "metrics")]
+            metrics: None,
         }
     }
 }
@@ -152,9 +157,16 @@ impl RtmpServer {
                     let mounts = self.mounts.clone();
                     let config = self.config.session.clone();
                     let cancel = self.cancel.clone();
+                    #[cfg(feature = "metrics")]
+                    let metrics = self.config.metrics.clone();
 
                     tokio::spawn(async move {
                         let _permit = permit;
+                        #[cfg(feature = "metrics")]
+                        if let Some(ref m) = metrics {
+                            use std::sync::atomic::Ordering;
+                            m.rtmp_connections_total.fetch_add(1, Ordering::Relaxed);
+                        }
                         if let Err(e) = serve_rtmp_session(stream, mounts, config, cancel).await {
                             debug!("RTMP session error from {peer}: {e}");
                         }

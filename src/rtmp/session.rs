@@ -14,12 +14,57 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::media::{AccessUnit, Codec, MediaDescription};
+use crate::media::{AccessUnit, Codec, MediaDescription, MediaKind};
 use crate::mount::{LocalPublisher, MountConfig, MountHandle, MountRegistry};
 use crate::{Error, Result};
+
+/// Trait for RTMP publish authentication.
+///
+/// Implementations decide whether a given publish request (app + stream name)
+/// is allowed. This enables stream-key validation, IP whitelisting, etc.
+pub trait PublishAuthenticator: Send + Sync + std::fmt::Debug {
+    /// Check if publishing `stream_name` on `app` is allowed.
+    ///
+    /// Returns `true` if the publish is authorized.
+    fn authorize_publish(&self, app: &str, stream_name: &str) -> bool;
+}
+
+/// A simple authenticator that validates stream keys against a static list.
+///
+/// The key format is `app/stream_name`. If the list is empty, all publishes
+/// are allowed (open mode).
+#[derive(Clone, Debug, Default)]
+pub struct StreamKeyAuthenticator {
+    /// Allowed stream keys in the form "app/stream_name".
+    /// If empty, all publishes are allowed.
+    allowed_keys: Vec<String>,
+}
+
+impl StreamKeyAuthenticator {
+    /// Create a new authenticator with the given allowed stream keys.
+    pub fn new(allowed_keys: Vec<String>) -> Self {
+        Self { allowed_keys }
+    }
+
+    /// Add an allowed stream key.
+    pub fn allow(&mut self, key: impl Into<String>) {
+        self.allowed_keys.push(key.into());
+    }
+}
+
+impl PublishAuthenticator for StreamKeyAuthenticator {
+    fn authorize_publish(&self, app: &str, stream_name: &str) -> bool {
+        if self.allowed_keys.is_empty() {
+            return true; // Open mode
+        }
+        let key = format!("{app}/{stream_name}");
+        self.allowed_keys.iter().any(|k| *k == key)
+    }
+}
 
 /// RTMP session configuration.
 #[derive(Clone, Debug)]
@@ -30,6 +75,8 @@ pub struct RtmpSessionConfig {
     pub chunk_size: u32,
     /// Window acknowledgement size.
     pub window_ack_size: u32,
+    /// Optional publish authenticator. If `None`, all publishes are allowed.
+    pub authenticator: Option<Arc<dyn PublishAuthenticator>>,
 }
 
 impl Default for RtmpSessionConfig {
@@ -38,6 +85,7 @@ impl Default for RtmpSessionConfig {
             default_app: "live".to_string(),
             chunk_size: 4096,
             window_ack_size: 2_500_000,
+            authenticator: None,
         }
     }
 }
@@ -86,12 +134,42 @@ pub async fn serve_rtmp_session(
     }
     debug!(?peer, "RTMP: handshake complete");
 
+    // Split the stream: read half stays here, write half goes to writer task
+    let (mut read_half, write_half) = stream.into_split();
+
+    // Channel for outgoing messages (command responses + media frames)
+    let (tx, mut rx) = mpsc::channel::<RtmpMessage>(256);
+
+    // Writer task: encodes messages with Chunker and writes to socket
+    let writer_cancel = cancel.clone();
+    let writer_task = tokio::spawn(async move {
+        let mut write_stream = write_half;
+        let mut chunker = Chunker::new();
+        chunker.set_chunk_size(config.chunk_size);
+
+        loop {
+            tokio::select! {
+                _ = writer_cancel.cancelled() => break,
+                msg = rx.recv() => {
+                    let Some(msg) = msg else { break };
+                    let encoded = chunker.encode(&msg);
+                    if write_stream.write_all(&encoded).await.is_err() {
+                        break;
+                    }
+                    let _ = write_stream.flush().await;
+                }
+            }
+        }
+    });
+
     let mut dechunker = Dechunker::new();
-    let mut chunker = Chunker::new();
     let mut state = SessionState::Init;
     let mut msg_stream_id: u32 = 1;
     let mut read_buf = vec![0u8; 8192];
     let mut subscriber_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut bytes_received: u64 = 0;
+    let mut last_ack_sent: u64 = 0;
+    let idle_timeout = Duration::from_secs(30);
 
     loop {
         tokio::select! {
@@ -99,19 +177,38 @@ pub async fn serve_rtmp_session(
                 debug!(?peer, "RTMP: server shutdown");
                 break;
             }
-            result = stream.read(&mut read_buf) => {
+            result = tokio::time::timeout(idle_timeout, read_half.read(&mut read_buf)) => {
                 let n = match result {
-                    Ok(0) => {
-                        debug!(?peer, "RTMP: connection closed by peer");
+                    Err(_) => {
+                        debug!(?peer, "RTMP: idle timeout");
                         break;
                     }
-                    Ok(n) => n,
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         debug!(?peer, "RTMP: read error: {e}");
                         break;
                     }
+                    Ok(Ok(0)) => {
+                        debug!(?peer, "RTMP: connection closed by peer");
+                        break;
+                    }
+                    Ok(Ok(n)) => n,
                 };
+                bytes_received += n as u64;
                 dechunker.feed(&read_buf[..n]);
+
+                // Send ACK if we've received enough data
+                if bytes_received - last_ack_sent >= config.window_ack_size as u64 {
+                    last_ack_sent = bytes_received;
+                    let mut ack_payload = bytes::BytesMut::with_capacity(4);
+                    ack_payload.extend_from_slice(&(bytes_received as u32).to_be_bytes());
+                    let _ = tx.send(RtmpMessage {
+                        chunk_stream_id: 2,
+                        timestamp: 0,
+                        msg_type: MessageType::Acknowledgement as u8,
+                        msg_stream_id: 0,
+                        payload: ack_payload.freeze(),
+                    }).await;
+                }
             }
         }
 
@@ -144,7 +241,6 @@ pub async fn serve_rtmp_session(
                 {
                     let payload = if t == MessageType::CommandAmf3 as u8 && !msg.payload.is_empty()
                     {
-                        // AMF3 command: skip first byte (0x00)
                         &msg.payload[1..]
                     } else {
                         &msg.payload[..]
@@ -157,7 +253,7 @@ pub async fn serve_rtmp_session(
                             &mounts,
                             &config,
                             &mut msg_stream_id,
-                            &mut chunker,
+                            &tx,
                             &mut subscriber_task,
                             &cancel,
                         )
@@ -165,12 +261,10 @@ pub async fn serve_rtmp_session(
 
                         if let Some(response_msgs) = response {
                             for resp in response_msgs {
-                                let encoded = chunker.encode(&resp);
-                                if stream.write_all(&encoded).await.is_err() {
+                                if tx.send(resp).await.is_err() {
                                     return Ok(());
                                 }
                             }
-                            let _ = stream.flush().await;
                         }
                     }
                 }
@@ -279,7 +373,6 @@ pub async fn serve_rtmp_session(
                     }
                 }
                 t if t == MessageType::DataAmf0 as u8 || t == MessageType::DataAmf3 as u8 => {
-                    // onMetaData - we can extract width/height/framerate but it's optional
                     debug!(?peer, "RTMP: received metadata");
                 }
                 _ => {}
@@ -291,6 +384,8 @@ pub async fn serve_rtmp_session(
     if let Some(task) = subscriber_task {
         task.abort();
     }
+    drop(tx); // close channel so writer task exits
+    let _ = writer_task.await;
 
     Ok(())
 }
@@ -302,7 +397,7 @@ async fn handle_command(
     mounts: &Arc<MountRegistry>,
     config: &RtmpSessionConfig,
     msg_stream_id: &mut u32,
-    chunker: &mut Chunker,
+    tx: &mpsc::Sender<RtmpMessage>,
     subscriber_task: &mut Option<tokio::task::JoinHandle<()>>,
     cancel: &CancellationToken,
 ) -> Option<Vec<RtmpMessage>> {
@@ -324,7 +419,6 @@ async fn handle_command(
             let mut responses = Vec::new();
 
             // Set chunk size
-            chunker.set_chunk_size(config.chunk_size);
             responses.push(set_chunk_size_message(config.chunk_size));
 
             // Window ack size
@@ -375,6 +469,25 @@ async fn handle_command(
                 SessionState::Connected { app } => app.clone(),
                 _ => String::new(),
             };
+
+            // Authenticate publish request
+            if let Some(ref auth) = config.authenticator {
+                if !auth.authorize_publish(&app, stream_name) {
+                    warn!("RTMP: publish denied for /{app}/{stream_name}");
+                    let error_payload = command::error_response(
+                        *transaction_id,
+                        "NetStream.Publish.Denied",
+                        "Authentication failed: publish not authorized.",
+                    );
+                    return Some(vec![RtmpMessage {
+                        chunk_stream_id: 5,
+                        timestamp: 0,
+                        msg_type: MessageType::CommandAmf0 as u8,
+                        msg_stream_id: 1,
+                        payload: error_payload,
+                    }]);
+                }
+            }
 
             let mount_path = format!("/{app}/{stream_name}");
             info!("RTMP: publish {mount_path}");
@@ -540,20 +653,83 @@ async fn handle_command(
                 payload: start_payload,
             });
 
-            // Spawn subscriber task to forward frames
-            // Note: actual frame forwarding would need access to the write side
-            // This is a simplified version - in production you'd use a channel
+            // Spawn subscriber task that forwards frames as FLV tags
             let cancel_clone = cancel.clone();
+            let tx_clone = tx.clone();
             let handle = mount_handle.clone();
+            let description = mount_handle.description.clone();
+
+            let has_video = description.tracks.iter().any(|t| t.kind == MediaKind::Video);
+            let has_audio = description.tracks.iter().any(|t| t.kind == MediaKind::Audio);
+
             let task = tokio::spawn(async move {
-                let mut rx = handle.subscribe();
+                // Send onMetaData
+                let meta_payload = command::on_metadata(has_video, has_audio, 0.0);
+                let _ = tx_clone.send(RtmpMessage {
+                    chunk_stream_id: 4,
+                    timestamp: 0,
+                    msg_type: MessageType::DataAmf0 as u8,
+                    msg_stream_id: 1,
+                    payload: meta_payload,
+                }).await;
+
+                // Subscribe with startup cache (GOP cache for fast start)
+                let (mut rx, startup) = handle.subscribe_with_startup();
+
+                // Send startup frames (sequence headers + cached GOP)
+                let mut base_ts: Option<u32> = None;
+                for unit in &startup {
+                    let ts = unit.pts.as_millis() as u32;
+                    let base = *base_ts.get_or_insert(ts);
+                    let rel_ts = ts.wrapping_sub(base);
+
+                    let (msg_type, payload) = if unit.kind() == MediaKind::Video {
+                        (MessageType::Video as u8, flv::build_video_tag(unit, false))
+                    } else {
+                        (MessageType::Audio as u8, flv::build_audio_tag(unit, false))
+                    };
+
+                    if payload.is_empty() {
+                        continue;
+                    }
+                    let _ = tx_clone.send(RtmpMessage {
+                        chunk_stream_id: if unit.kind() == MediaKind::Video { 6 } else { 7 },
+                        timestamp: rel_ts,
+                        msg_type,
+                        msg_stream_id: 1,
+                        payload,
+                    }).await;
+                }
+
+                // Forward live frames
                 loop {
                     tokio::select! {
                         _ = cancel_clone.cancelled() => break,
                         result = rx.recv() => {
                             match result {
-                                Ok(_unit) => {
-                                    // Frame forwarding handled elsewhere
+                                Ok(unit) => {
+                                    let ts = unit.pts.as_millis() as u32;
+                                    let base = *base_ts.get_or_insert(ts);
+                                    let rel_ts = ts.wrapping_sub(base);
+
+                                    let (msg_type, payload) = if unit.kind() == MediaKind::Video {
+                                        (MessageType::Video as u8, flv::build_video_tag(&unit, false))
+                                    } else {
+                                        (MessageType::Audio as u8, flv::build_audio_tag(&unit, false))
+                                    };
+
+                                    if payload.is_empty() {
+                                        continue;
+                                    }
+                                    if tx_clone.send(RtmpMessage {
+                                        chunk_stream_id: if unit.kind() == MediaKind::Video { 6 } else { 7 },
+                                        timestamp: rel_ts,
+                                        msg_type,
+                                        msg_stream_id: 1,
+                                        payload,
+                                    }).await.is_err() {
+                                        break; // client disconnected
+                                    }
                                 }
                                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                                 Err(_) => break,
@@ -590,5 +766,38 @@ async fn handle_command(
             debug!("RTMP: unhandled command: {name}");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_key_auth_open_mode() {
+        let auth = StreamKeyAuthenticator::default();
+        // Empty list = allow all
+        assert!(auth.authorize_publish("live", "stream1"));
+        assert!(auth.authorize_publish("any", "thing"));
+    }
+
+    #[test]
+    fn stream_key_auth_restricts() {
+        let auth = StreamKeyAuthenticator::new(vec![
+            "live/stream1".to_string(),
+            "live/cam2".to_string(),
+        ]);
+        assert!(auth.authorize_publish("live", "stream1"));
+        assert!(auth.authorize_publish("live", "cam2"));
+        assert!(!auth.authorize_publish("live", "unknown"));
+        assert!(!auth.authorize_publish("other", "stream1"));
+    }
+
+    #[test]
+    fn stream_key_auth_allow_method() {
+        let mut auth = StreamKeyAuthenticator::default();
+        auth.allow("live/test");
+        assert!(auth.authorize_publish("live", "test"));
+        assert!(!auth.authorize_publish("live", "other"));
     }
 }

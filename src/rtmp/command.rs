@@ -269,6 +269,29 @@ pub fn null_result(transaction_id: f64) -> Bytes {
     encode_values(&values)
 }
 
+/// Build an onMetaData message for play output.
+pub fn on_metadata(has_video: bool, has_audio: bool, duration: f64) -> Bytes {
+    let mut props = vec![
+        ("duration".to_string(), AmfValue::Number(duration)),
+        ("server".to_string(), AmfValue::Str("rtflow".to_string())),
+    ];
+    if has_video {
+        props.push(("videocodecid".to_string(), AmfValue::Number(7.0)));
+        props.push(("framerate".to_string(), AmfValue::Number(30.0)));
+    }
+    if has_audio {
+        props.push(("audiocodecid".to_string(), AmfValue::Number(10.0)));
+        props.push(("audiosamplerate".to_string(), AmfValue::Number(44100.0)));
+        props.push(("audiosamplesize".to_string(), AmfValue::Number(16.0)));
+        props.push(("stereo".to_string(), AmfValue::Boolean(true)));
+    }
+    let values = vec![
+        AmfValue::Str("onMetaData".to_string()),
+        AmfValue::EcmaArray(props),
+    ];
+    encode_values(&values)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

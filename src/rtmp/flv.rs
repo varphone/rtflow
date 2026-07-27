@@ -13,6 +13,20 @@ use crate::media::{AccessUnit, Codec, MediaKind, TrackDescription};
 const FLV_VIDEO_H264: u8 = 7;
 const FLV_VIDEO_H265: u8 = 12; // Enhanced RTMP / non-standard extension
 
+/// Enhanced RTMP: bit 7 of first byte set indicates enhanced format
+const ENHANCED_RTMP_FLAG: u8 = 0x80;
+
+/// Enhanced RTMP packet types (bits 3-0 when enhanced flag is set)
+const ENHANCED_PACKET_SEQUENCE_START: u8 = 0;
+const ENHANCED_PACKET_CODED_FRAMES: u8 = 1;
+const ENHANCED_PACKET_SEQUENCE_END: u8 = 2;
+const ENHANCED_PACKET_CODED_FRAMES_X: u8 = 3; // no composition time
+
+/// Enhanced RTMP FourCC codes
+const FOURCC_HEVC: &[u8; 4] = b"hvc1";
+const FOURCC_AV1: &[u8; 4] = b"av01";
+const FOURCC_VP9: &[u8; 4] = b"vp09";
+
 /// FLV audio codec IDs
 const FLV_AUDIO_AAC: u8 = 10;
 
@@ -63,6 +77,12 @@ pub fn parse_video_tag(data: &[u8]) -> Option<VideoData> {
     if data.len() < 5 {
         return None;
     }
+
+    // Check for Enhanced RTMP format (bit 7 set)
+    if data[0] & ENHANCED_RTMP_FLAG != 0 {
+        return parse_enhanced_video_tag(data);
+    }
+
     let frame_type = (data[0] >> 4) & 0x0F;
     let codec_id = data[0] & 0x0F;
     let is_keyframe = frame_type == FLV_KEYFRAME;
@@ -112,6 +132,64 @@ pub fn parse_video_tag(data: &[u8]) -> Option<VideoData> {
             }
         }
         _ => None,
+    }
+}
+
+/// Parse Enhanced RTMP video tag (OBS 29+, FFmpeg 6+).
+///
+/// Format: [enhanced_byte][FourCC(4)][packet_data...]
+/// enhanced_byte: bit7=1, bits6-4=frame_type, bits3-0=packet_type
+fn parse_enhanced_video_tag(data: &[u8]) -> Option<VideoData> {
+    if data.len() < 5 {
+        return None;
+    }
+
+    let frame_type = (data[0] >> 4) & 0x07;
+    let packet_type = data[0] & 0x0F;
+    let is_keyframe = frame_type == FLV_KEYFRAME;
+    let fourcc = &data[1..5];
+
+    if fourcc == FOURCC_HEVC {
+        match packet_type {
+            ENHANCED_PACKET_SEQUENCE_START => {
+                // HEVC decoder configuration record
+                if data.len() > 5 {
+                    Some(VideoData::HevcSequenceHeader(Bytes::copy_from_slice(&data[5..])))
+                } else {
+                    None
+                }
+            }
+            ENHANCED_PACKET_CODED_FRAMES => {
+                // 3 bytes composition time + coded data
+                if data.len() < 8 {
+                    return None;
+                }
+                let composition_time = ((data[5] as i32) << 16)
+                    | ((data[6] as i32) << 8)
+                    | (data[7] as i32);
+                let composition_time = if composition_time & 0x800000 != 0 {
+                    composition_time | !0xFFFFFF
+                } else {
+                    composition_time
+                };
+                Some(VideoData::HevcNalu {
+                    composition_time,
+                    data: Bytes::copy_from_slice(&data[8..]),
+                    is_keyframe,
+                })
+            }
+            ENHANCED_PACKET_CODED_FRAMES_X => {
+                // No composition time (CTS=0)
+                Some(VideoData::HevcNalu {
+                    composition_time: 0,
+                    data: Bytes::copy_from_slice(&data[5..]),
+                    is_keyframe,
+                })
+            }
+            _ => None,
+        }
+    } else {
+        None // AV1/VP9 not yet supported
     }
 }
 
@@ -411,6 +489,9 @@ pub fn tracks_from_rtmp(
             payload_type: 96,
             fmtp: None,
             control: "trackID=0".into(),
+            width: None,
+            height: None,
+            frame_rate: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         });
@@ -434,6 +515,9 @@ pub fn tracks_from_rtmp(
                 .into(),
             ),
             control: if has_video { "trackID=1" } else { "trackID=0" }.into(),
+            width: None,
+            height: None,
+            frame_rate: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         });
