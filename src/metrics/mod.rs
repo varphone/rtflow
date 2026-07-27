@@ -112,7 +112,8 @@ fn error_code_index(code: ErrorCode) -> usize {
         ErrorCode::Io => 9,
         ErrorCode::Closed => 10,
         ErrorCode::Internal => 11,
-        _ => 11, // Unknown codes map to Internal
+        #[cfg(feature = "srtp")]
+        ErrorCode::SrtpAuthenticationFailed | ErrorCode::SrtpReplayDetected => 11,
     }
 }
 
@@ -257,16 +258,27 @@ impl MetricsExporter {
 
         let listener = TcpListener::bind(self.listen).await?;
         let registry = self.registry;
+        let connections = Arc::new(tokio::sync::Semaphore::new(16));
 
         let handle = tokio::spawn(async move {
             loop {
                 let Ok((mut stream, _)) = listener.accept().await else {
                     continue;
                 };
+                let Ok(permit) = connections.clone().try_acquire_owned() else {
+                    let _ = stream.shutdown().await;
+                    continue;
+                };
                 let registry = registry.clone();
                 tokio::spawn(async move {
+                    let _permit = permit;
                     let mut buf = [0u8; 1024];
-                    let Ok(n) = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await else {
+                    let Ok(Ok(n)) = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        tokio::io::AsyncReadExt::read(&mut stream, &mut buf),
+                    )
+                    .await
+                    else {
                         return;
                     };
                     let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
@@ -275,7 +287,8 @@ impl MetricsExporter {
                     } else if request.starts_with("GET /metrics") {
                         metrics_response(&registry)
                     } else {
-                        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_string()
+                        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .to_string()
                     };
                     let _ = stream.write_all(response.as_bytes()).await;
                 });

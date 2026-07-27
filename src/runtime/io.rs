@@ -6,6 +6,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+#[cfg(feature = "client")]
 use tokio::io::AsyncReadExt;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
@@ -40,10 +41,12 @@ impl ControlConnection {
         self.peer_addr
     }
 
+    #[cfg(feature = "client")]
     pub(crate) fn read_ahead_mut(&mut self) -> &mut BytesMut {
         &mut self.read_ahead
     }
 
+    #[cfg(feature = "client")]
     pub(crate) async fn read_transport(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         self.io.read(buffer).await
     }

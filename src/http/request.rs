@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use std::collections::HashMap;
 
-const MAX_HEADER_BYTES: usize = 8 * 1024;
 const MAX_HEADERS: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,6 +36,8 @@ pub struct HttpRequest {
     pub query: HashMap<String, String>,
     pub headers: Vec<(String, String)>,
     pub body: Bytes,
+    /// Values captured by `{name}` route segments, in declaration order.
+    pub path_params: Vec<String>,
 }
 
 impl HttpRequest {
@@ -55,18 +56,21 @@ pub(crate) enum ParseError {
     Invalid,
 }
 
-pub(crate) fn parse_request(buf: &[u8]) -> Result<Option<(HttpRequest, usize)>, ParseError> {
+pub(crate) fn parse_request(
+    buf: &[u8],
+    max_header_bytes: usize,
+    max_body_bytes: usize,
+) -> Result<Option<(HttpRequest, usize)>, ParseError> {
     // Find end of headers
-    let header_end = find_header_end(buf).ok_or_else(|| {
-        if buf.len() > MAX_HEADER_BYTES {
+    let header_end = find_header_end(buf).ok_or({
+        if buf.len() > max_header_bytes {
             ParseError::TooLarge
         } else {
             ParseError::Incomplete
         }
     })?;
 
-    let header_str =
-        std::str::from_utf8(&buf[..header_end]).map_err(|_| ParseError::Invalid)?;
+    let header_str = std::str::from_utf8(&buf[..header_end]).map_err(|_| ParseError::Invalid)?;
     let mut lines = header_str.split("\r\n");
 
     // Request line
@@ -74,7 +78,10 @@ pub(crate) fn parse_request(buf: &[u8]) -> Result<Option<(HttpRequest, usize)>, 
     let mut parts = request_line.splitn(3, ' ');
     let method_str = parts.next().ok_or(ParseError::Invalid)?;
     let path_str = parts.next().ok_or(ParseError::Invalid)?;
-    let _version = parts.next().ok_or(ParseError::Invalid)?;
+    let version = parts.next().ok_or(ParseError::Invalid)?;
+    if version != "HTTP/1.1" {
+        return Err(ParseError::Invalid);
+    }
 
     let method = Method::parse(method_str).ok_or(ParseError::Invalid)?;
 
@@ -90,15 +97,37 @@ pub(crate) fn parse_request(buf: &[u8]) -> Result<Option<(HttpRequest, usize)>, 
         if headers.len() >= MAX_HEADERS {
             return Err(ParseError::TooLarge);
         }
-        if let Some((key, value)) = line.split_once(':') {
-            headers.push((key.trim().to_string(), value.trim().to_string()));
+        let Some((key, value)) = line.split_once(':') else {
+            return Err(ParseError::Invalid);
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if key.is_empty() || key.bytes().any(|byte| byte <= 0x20 || byte >= 0x7f) {
+            return Err(ParseError::Invalid);
         }
+        headers.push((key.to_string(), value.to_string()));
     }
 
-    // Content-Length for body
-    let content_length = header_value(&headers, "content-length")
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(0);
+    let content_lengths: Vec<_> = headers
+        .iter()
+        .filter(|(key, _)| key.eq_ignore_ascii_case("content-length"))
+        .map(|(_, value)| value.parse::<usize>().map_err(|_| ParseError::Invalid))
+        .collect::<Result<_, _>>()?;
+    if content_lengths
+        .windows(2)
+        .any(|values| values[0] != values[1])
+    {
+        return Err(ParseError::Invalid);
+    }
+    let content_length = content_lengths.first().copied().unwrap_or(0);
+    if content_length > max_body_bytes {
+        return Err(ParseError::TooLarge);
+    }
+    if headers.iter().any(|(key, value)| {
+        key.eq_ignore_ascii_case("transfer-encoding") && !value.eq_ignore_ascii_case("identity")
+    }) {
+        return Err(ParseError::Invalid);
+    }
 
     let total = header_end + 4 + content_length; // +4 for \r\n\r\n
     if buf.len() < total {
@@ -118,6 +147,7 @@ pub(crate) fn parse_request(buf: &[u8]) -> Result<Option<(HttpRequest, usize)>, 
             query,
             headers,
             body,
+            path_params: Vec::new(),
         },
         total,
     )))
@@ -145,10 +175,30 @@ fn parse_path_query(raw: &str) -> (String, HashMap<String, String>) {
     }
 }
 
-fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
-    let lower = name.to_ascii_lowercase();
-    headers
-        .iter()
-        .find(|(k, _)| k.to_ascii_lowercase() == lower)
-        .map(|(_, v)| v.as_str())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(wire: &[u8]) -> Result<Option<(HttpRequest, usize)>, ParseError> {
+        parse_request(wire, 8 * 1024, 256)
+    }
+
+    #[test]
+    fn parser_rejects_invalid_version_and_header_lines() {
+        assert!(parse(b"GET / HTTP/1.0\r\n\r\n").is_err());
+        assert!(parse(b"GET / HTTP/1.1\r\nBroken\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn parser_rejects_conflicting_lengths_and_unsupported_transfer_encoding() {
+        assert!(
+            parse(b"POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\nx").is_err()
+        );
+        assert!(parse(b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn parser_enforces_body_limit() {
+        assert!(parse(b"POST / HTTP/1.1\r\nContent-Length: 257\r\n\r\n").is_err());
+    }
 }

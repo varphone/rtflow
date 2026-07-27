@@ -3,12 +3,12 @@
 mod tls;
 
 use crate::{Error, Result};
+#[cfg(any(feature = "server", feature = "http"))]
+use std::{collections::HashMap, sync::Mutex, time::Instant};
 use std::{
-    collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
-    sync::Mutex,
-    time::{Duration, Instant},
+    time::Duration,
 };
 #[cfg(feature = "tls")]
 pub use tls::{TlsClientConfig, TlsServerConfig};
@@ -142,21 +142,25 @@ impl Default for SecurityConfig {
     }
 }
 
+#[cfg(any(feature = "server", feature = "http"))]
 struct Bucket {
     tokens: f64,
     updated_at: Instant,
 }
 
+#[cfg(any(feature = "server", feature = "http"))]
 pub(crate) struct ConnectionRateLimiter {
     config: Option<RateLimitConfig>,
     state: Mutex<LimiterState>,
 }
 
+#[cfg(any(feature = "server", feature = "http"))]
 struct LimiterState {
     buckets: HashMap<IpAddr, Bucket>,
     last_cleanup: Instant,
 }
 
+#[cfg(any(feature = "server", feature = "http"))]
 impl ConnectionRateLimiter {
     pub(crate) fn new(config: Option<RateLimitConfig>) -> Result<Self> {
         if let Some(config) = config {

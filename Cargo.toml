@@ -16,8 +16,10 @@ publish = ["crates-io"]
 default = ["full"]
 full = [
     "srtp", "tls", "mp4", "mkv", "client", "server", "file-storage",
-    "metrics", "multicast", "http", "http-flv", "hls", "dash", "rtmp", "srt", "webrtc",
+    "metrics", "multicast", "http", "http-flv", "hls",
 ]
+embedded-gateway = ["client", "server", "tls", "metrics", "http", "http-flv", "hls"]
+experimental-protocols = ["dash", "rtmp", "srt", "webrtc"]
 srtp = ["dep:aes", "dep:cipher", "dep:hmac", "dep:sha1"]
 tls = ["dep:rustls", "dep:rustls-pemfile", "dep:tokio-rustls"]
 mp4 = ["dep:mp4box"]

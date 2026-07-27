@@ -116,7 +116,7 @@ async fn file_source_h265_to_http_flv() {
                 let data_size = ((flv_data[pos + 1] as usize) << 16)
                     | ((flv_data[pos + 2] as usize) << 8)
                     | (flv_data[pos + 3] as usize);
-                let timestamp = ((flv_data[pos + 4] as u32))
+                let timestamp = (flv_data[pos + 4] as u32)
                     | ((flv_data[pos + 5] as u32) << 8)
                     | ((flv_data[pos + 6] as u32) << 16)
                     | ((flv_data[pos + 7] as u32) << 24);

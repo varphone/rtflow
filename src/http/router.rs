@@ -9,7 +9,10 @@ use tokio::net::tcp::OwnedWriteHalf;
 type ConnWriter = OwnedWriteHalf;
 
 pub type Handler = Arc<
-    dyn Fn(HttpRequest, ResponseWriter<ConnWriter>) -> Pin<Box<dyn Future<Output = Result<ResponseWriter<ConnWriter>>> + Send>>
+    dyn Fn(
+            HttpRequest,
+            ResponseWriter<ConnWriter>,
+        ) -> Pin<Box<dyn Future<Output = Result<ResponseWriter<ConnWriter>>> + Send>>
         + Send
         + Sync,
 >;
@@ -23,6 +26,13 @@ pub struct Route {
 pub struct Router {
     routes: Vec<Route>,
     not_found: Handler,
+    method_not_allowed: Handler,
+}
+
+impl Default for Router {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Router {
@@ -32,6 +42,15 @@ impl Router {
             not_found: Arc::new(|_req, mut writer| {
                 Box::pin(async move {
                     writer.write_body(404, "text/plain", b"Not Found").await?;
+                    Ok(writer)
+                })
+            }),
+            method_not_allowed: Arc::new(|_req, mut writer| {
+                Box::pin(async move {
+                    writer
+                        .write_headers(405, &[("Allow", "GET, HEAD, OPTIONS")])
+                        .await?;
+                    writer.write_raw(b"Method Not Allowed").await?;
                     Ok(writer)
                 })
             }),
@@ -47,7 +66,11 @@ impl Router {
     }
 
     pub(crate) fn route(&self, method: &Method, path: &str) -> (&Handler, Vec<String>) {
+        let mut path_match = false;
         for route in &self.routes {
+            if route.pattern.matches(path).is_some() {
+                path_match = true;
+            }
             if &route.method != method {
                 continue;
             }
@@ -55,7 +78,11 @@ impl Router {
                 return (&route.handler, params);
             }
         }
-        (&self.not_found, Vec::new())
+        if path_match {
+            (&self.method_not_allowed, Vec::new())
+        } else {
+            (&self.not_found, Vec::new())
+        }
     }
 }
 

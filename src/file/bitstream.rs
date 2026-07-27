@@ -1,17 +1,23 @@
 use crate::{Error, Result, media::Codec};
+#[cfg(any(feature = "mp4", feature = "mkv"))]
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+#[cfg(any(feature = "mp4", feature = "mkv"))]
 use bytes::{Bytes, BytesMut};
-use std::{ops::Range, sync::Arc};
+#[cfg(any(feature = "mp4", feature = "mkv"))]
+use std::ops::Range;
+use std::sync::Arc;
 
 pub(crate) const START_CODE: &[u8] = &[0, 0, 0, 1];
 
 #[derive(Clone, Debug, Default)]
+#[cfg(any(feature = "mp4", feature = "mkv"))]
 pub(crate) struct VideoConfig {
     pub length_size: usize,
     pub parameter_sets: Vec<Bytes>,
     pub fmtp: Option<Arc<str>>,
 }
 
+#[cfg(any(feature = "mp4", feature = "mkv"))]
 pub(crate) fn avcc_config(data: &[u8]) -> Result<VideoConfig> {
     if data.len() < 7 || data[0] != 1 {
         return Err(Error::Media("invalid AVCDecoderConfigurationRecord".into()));
@@ -54,6 +60,7 @@ pub(crate) fn avcc_config(data: &[u8]) -> Result<VideoConfig> {
     })
 }
 
+#[cfg(any(feature = "mp4", feature = "mkv"))]
 pub(crate) fn hvcc_config(data: &[u8]) -> Result<VideoConfig> {
     if data.len() < 23 || data[0] != 1 {
         return Err(Error::Media(
@@ -99,6 +106,7 @@ pub(crate) fn hvcc_config(data: &[u8]) -> Result<VideoConfig> {
     })
 }
 
+#[cfg(any(feature = "mp4", feature = "mkv"))]
 fn read_config_nal(data: &[u8], position: &mut usize) -> Result<Bytes> {
     let length = read_u16(data, position)?;
     let end = position
@@ -110,6 +118,7 @@ fn read_config_nal(data: &[u8], position: &mut usize) -> Result<Bytes> {
     Ok(nal)
 }
 
+#[cfg(any(feature = "mp4", feature = "mkv"))]
 fn read_u16(data: &[u8], position: &mut usize) -> Result<usize> {
     let end = position
         .checked_add(2)
@@ -120,6 +129,7 @@ fn read_u16(data: &[u8], position: &mut usize) -> Result<usize> {
     Ok(value)
 }
 
+#[cfg(any(feature = "mp4", feature = "mkv"))]
 pub(crate) fn length_prefixed_to_annex_b(
     data: Bytes,
     length_size: usize,
@@ -199,6 +209,7 @@ pub(crate) fn is_keyframe(codec: Codec, data: &[u8]) -> bool {
     }
 }
 
+#[cfg(feature = "mkv")]
 pub(crate) fn prepend_parameter_sets(data: Bytes, parameter_sets: &[Bytes]) -> Bytes {
     if parameter_sets.is_empty() {
         return data;

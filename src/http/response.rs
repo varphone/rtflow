@@ -14,11 +14,10 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
         }
     }
 
-    pub async fn write_headers(
-        &mut self,
-        status: u16,
-        headers: &[(&str, &str)],
-    ) -> Result<()> {
+    pub async fn write_headers(&mut self, status: u16, headers: &[(&str, &str)]) -> Result<()> {
+        if self.headers_written {
+            return Err(Error::Rtsp("HTTP response headers already written".into()));
+        }
         let reason = status_reason(status);
         let mut buf = format!("HTTP/1.1 {} {}\r\n", status, reason);
         for (key, value) in headers {
@@ -51,6 +50,9 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
     }
 
     pub async fn write_chunk(&mut self, data: &[u8]) -> Result<()> {
+        if !self.headers_written {
+            return Err(Error::Rtsp("HTTP chunk written before headers".into()));
+        }
         if data.is_empty() {
             return Ok(());
         }
@@ -85,7 +87,8 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
     }
 
     pub async fn write_json(&mut self, status: u16, json: &str) -> Result<()> {
-        self.write_body(status, "application/json", json.as_bytes()).await
+        self.write_body(status, "application/json", json.as_bytes())
+            .await
     }
 
     pub async fn flush(&mut self) -> Result<()> {

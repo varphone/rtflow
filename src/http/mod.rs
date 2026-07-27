@@ -22,6 +22,9 @@ pub struct HttpConfig {
     pub listen: SocketAddr,
     pub max_connections: usize,
     pub read_timeout: Duration,
+    pub shutdown_timeout: Duration,
+    pub max_header_bytes: usize,
+    pub max_body_bytes: usize,
     pub security: SecurityConfig,
 }
 
@@ -31,6 +34,9 @@ impl HttpConfig {
             listen,
             max_connections: DEFAULT_MAX_CONNECTIONS,
             read_timeout: Duration::from_secs(30),
+            shutdown_timeout: Duration::from_secs(5),
+            max_header_bytes: 8 * 1024,
+            max_body_bytes: 256 * 1024,
             security: SecurityConfig::default(),
         }
     }
@@ -72,25 +78,47 @@ impl HttpServer {
         let cancel = self.cancel.clone();
         let security = self.config.security.clone();
         let read_timeout = self.config.read_timeout;
+        let shutdown_timeout = self.config.shutdown_timeout;
+        let max_header_bytes = self.config.max_header_bytes;
+        let max_body_bytes = self.config.max_body_bytes;
+        let connections = Arc::new(tokio::sync::Semaphore::new(self.config.max_connections));
+        let rate_limiter = Arc::new(crate::security::ConnectionRateLimiter::new(
+            self.config.security.connection_rate_limit,
+        )?);
 
         tokio::spawn(async move {
+            let mut tasks = tokio::task::JoinSet::new();
             loop {
-                let stream = tokio::select! {
-                    result = listener.accept() => match result {
-                        Ok((stream, _addr)) => stream,
-                        Err(_) => continue,
-                    },
-                    _ = cancel.cancelled() => break,
-                };
-
-                let router = router.clone();
-                let security = security.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, router, security, read_timeout).await {
-                        tracing::debug!("http connection error: {e}");
+                tokio::select! {
+                    result = listener.accept() => {
+                        let Ok((stream, addr)) = result else { continue; };
+                        if !security.ip_acl.permits(addr.ip())
+                            || !rate_limiter.admit(addr.ip(), std::time::Instant::now())
+                        {
+                            continue;
+                        }
+                        let Ok(permit) = connections.clone().try_acquire_owned() else {
+                            continue;
+                        };
+                        let router = router.clone();
+                        let security = security.clone();
+                        tasks.spawn(async move {
+                            let _permit = permit;
+                            if let Err(e) = handle_connection(
+                                stream, router, security, read_timeout, max_header_bytes, max_body_bytes,
+                            ).await {
+                                tracing::debug!("http connection error: {e}");
+                            }
+                        });
                     }
-                });
+                    _ = cancel.cancelled() => break,
+                }
             }
+            let _ = tokio::time::timeout(shutdown_timeout, async {
+                while tasks.join_next().await.is_some() {}
+            })
+            .await;
+            tasks.abort_all();
         });
 
         tracing::info!("http server listening on {}", self.local_addr);
@@ -107,14 +135,16 @@ async fn handle_connection(
     router: Arc<RwLock<Router>>,
     security: SecurityConfig,
     read_timeout: Duration,
+    max_header_bytes: usize,
+    max_body_bytes: usize,
 ) -> Result<()> {
     let peer = stream.peer_addr().ok();
 
     // ACL check
-    if let Some(peer_addr) = peer {
-        if !security.ip_acl.permits(peer_addr.ip()) {
-            return Err(Error::Unauthorized);
-        }
+    if let Some(peer_addr) = peer
+        && !security.ip_acl.permits(peer_addr.ip())
+    {
+        return Err(Error::Unauthorized);
     }
 
     let (mut read_half, write_half) = stream.into_split();
@@ -124,10 +154,13 @@ async fn handle_connection(
     loop {
         // Read request
         let mut temp = [0u8; READ_BUF_SIZE];
-        let n = tokio::time::timeout(read_timeout, tokio::io::AsyncReadExt::read(&mut read_half, &mut temp))
-            .await
-            .map_err(|_| Error::Limit("read timeout"))?
-            .map_err(Error::Io)?;
+        let n = tokio::time::timeout(
+            read_timeout,
+            tokio::io::AsyncReadExt::read(&mut read_half, &mut temp),
+        )
+        .await
+        .map_err(|_| Error::Limit("read timeout"))?
+        .map_err(Error::Io)?;
 
         if n == 0 {
             break;
@@ -135,13 +168,13 @@ async fn handle_connection(
         buf.extend_from_slice(&temp[..n]);
 
         // Try to parse request
-        let req = match request::parse_request(&buf) {
+        let req = match request::parse_request(&buf, max_header_bytes, max_body_bytes) {
             Ok(Some((req, consumed))) => {
                 buf.drain(..consumed);
                 req
             }
             Ok(None) => {
-                if buf.len() > 8192 {
+                if buf.len() > max_header_bytes {
                     return Err(Error::Limit("request headers too large"));
                 }
                 continue;
@@ -155,15 +188,16 @@ async fn handle_connection(
             }
         };
 
-        let keep_alive = req
+        let keep_alive = !req
             .header("connection")
-            .map(|v| v.to_ascii_lowercase() == "keep-alive")
-            .unwrap_or(false);
+            .is_some_and(|value| value.eq_ignore_ascii_case("close"));
 
         let w = writer.take().expect("writer should be available");
         let guard = router.read().await;
-        let (handler, _params) = guard.route(&req.method, &req.path.clone());
+        let (handler, params) = guard.route(&req.method, &req.path.clone());
         let handler = handler.clone();
+        let mut req = req;
+        req.path_params = params;
         drop(guard);
 
         match handler(req, w).await {

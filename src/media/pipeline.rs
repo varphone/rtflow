@@ -56,12 +56,15 @@ pub enum OverflowPolicy {
 pub struct QueueConfig {
     pub capacity: usize,
     pub overflow: OverflowPolicy,
+    /// Maximum time an upstream element may wait for a full blocking queue.
+    pub block_timeout: std::time::Duration,
 }
 impl Default for QueueConfig {
     fn default() -> Self {
         Self {
             capacity: 32,
             overflow: OverflowPolicy::DropNewest,
+            block_timeout: std::time::Duration::from_millis(100),
         }
     }
 }
@@ -204,12 +207,15 @@ impl PipelineBuilder {
         for node in &self.nodes {
             if let Err(error) = node.element.change_state(transition).await {
                 for element in prepared.into_iter().rev() {
-                    let _: Result<()> = element
+                    if let Err(rollback_error) = element
                         .change_state(StateTransition {
                             from: PipelineState::Ready,
                             to: PipelineState::Stopped,
                         })
-                        .await;
+                        .await
+                    {
+                        tracing::error!(error=%rollback_error, "pipeline element rollback failed");
+                    }
                 }
                 return Err(error);
             }
@@ -318,7 +324,7 @@ impl PipelineIngress {
             .inputs
             .get(target.0)
             .ok_or_else(|| Error::NotFound(format!("pipeline element {}", target.0)))?;
-        deliver(&port.sender, port.queue.overflow, unit).await
+        deliver(&port.sender, port.queue, unit).await
     }
 
     pub fn try_push(&self, target: ElementId, unit: AccessUnit) -> Result<IngressOutcome> {
@@ -394,9 +400,12 @@ impl Pipeline {
         for element in &self.elements {
             if let Err(error) = element.change_state(transition).await {
                 for element in changed.into_iter().rev() {
-                    let _: Result<()> = element
+                    if let Err(rollback_error) = element
                         .change_state(StateTransition { from: to, to: from })
-                        .await;
+                        .await
+                    {
+                        tracing::error!(error=%rollback_error, "pipeline state rollback failed");
+                    }
                 }
                 return Err(error);
             }
@@ -515,7 +524,7 @@ impl NodeRuntime {
             }
             for unit in output.into_units() {
                 for edge in &self.outgoing {
-                    match deliver(&edge.sender, edge.queue.overflow, unit.clone()).await {
+                    match deliver(&edge.sender, edge.queue, unit.clone()).await {
                         Ok(IngressOutcome::Accepted) => {}
                         Ok(IngressOutcome::DroppedQueueFull) => {
                             edge.dropped.fetch_add(1, Ordering::Relaxed);
@@ -531,13 +540,13 @@ impl NodeRuntime {
 
 async fn deliver(
     sender: &mpsc::Sender<AccessUnit>,
-    overflow: OverflowPolicy,
+    queue: QueueConfig,
     unit: AccessUnit,
 ) -> Result<IngressOutcome> {
-    match overflow {
-        OverflowPolicy::Block => sender
-            .send(unit)
+    match queue.overflow {
+        OverflowPolicy::Block => tokio::time::timeout(queue.block_timeout, sender.send(unit))
             .await
+            .map_err(|_| Error::Limit("pipeline blocking queue"))?
             .map(|_| IngressOutcome::Accepted)
             .map_err(|_| Error::Closed),
         OverflowPolicy::DropNewest => match sender.try_send(unit) {
@@ -551,6 +560,8 @@ async fn deliver(
 fn validate_queue(queue: QueueConfig) -> Result<()> {
     if queue.capacity == 0 {
         Err(Error::Limit("pipeline queue capacity"))
+    } else if queue.block_timeout == std::time::Duration::ZERO {
+        Err(Error::Limit("pipeline block timeout"))
     } else {
         Ok(())
     }
@@ -675,11 +686,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blocking_queue_has_a_deadline() {
+        let (sender, _receiver) = mpsc::channel(1);
+        sender.send(frame()).await.unwrap();
+        let result = deliver(
+            &sender,
+            QueueConfig {
+                capacity: 1,
+                overflow: OverflowPolicy::Block,
+                block_timeout: Duration::from_millis(1),
+            },
+            frame(),
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(Error::Limit("pipeline blocking queue"))
+        ));
+    }
+
+    #[tokio::test]
     async fn rejects_cycles_and_bounded_ingress_drops() {
         let mut builder = PipelineBuilder::new();
         let queue = QueueConfig {
             capacity: 1,
             overflow: OverflowPolicy::DropNewest,
+            block_timeout: Duration::from_millis(100),
         };
         let first = builder
             .add_element(Arc::new(IdentityElement::new("a")), queue)

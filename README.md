@@ -6,7 +6,7 @@
 
 - RTSP 客户端：OPTIONS、DESCRIBE、多轨 SETUP、PLAY、PAUSE、TEARDOWN、GET_PARAMETER 自动保活。
 - RTSP 服务端：本地源、外部发布源、自动 SDP 探测的按需拉流代理；会话状态和超时、连接数上限、鉴权、UDP 端口范围。
-- 传输：RTP/RTCP over UDP，以及 RTSP TCP interleaved；客户端默认 UDP SETUP 失败后自动回退 TCP interleaved，也可显式锁定任一种传输；服务端支持多轨播放与 TCP/UDP RECORD 接收。
+- 传输：RTP/RTCP over UDP，以及 RTSP TCP interleaved；客户端默认仅在传输能力/网络失败时从 UDP 回退 TCP interleaved；服务端发布端严格校验来源地址、Payload Type 和 SSRC，并按时间调度 compound RTCP SR/SDES。
 - 客户端重连：`RtspClient::connect_reconnecting` 配合 `ClientReconnectPolicy` 提供显式启用的断线退避重连；普通 `connect` 保持一次性连接和直接报错语义。
 - 编码载荷：H.264 RFC 6184、H.265 RFC 7798、AAC MPEG4-GENERIC、G.711 PCMA/PCMU。
 - 文件源：MP4/MOV/M4A、Matroska/MKV、MPEG-TS/M2TS、G.711 WAV，以及裸 H.264/H.265/ADTS AAC/PCMA/PCMU；支持实时节流、起播位置、有限/无限循环、空闲暂停与有界预取。
@@ -14,13 +14,13 @@
 - 可靠性：完整 RTCP 质量统计、多上游故障转移与时间线连续、关键帧启动缓存、统一任务监督和有期限 shutdown。
 - 安全：RTSPS/Rustls、IPv4/IPv6 ACL、有界连接限流、Basic/Digest、签名 nonce 和防重放。
 - 录制/VOD：崩溃安全分段、容量保留和恢复索引；每客户端独立 `Range: npt=`、PAUSE/续播及 UDP/TCP 输出。
-- HTTP 分发：HTTP-FLV（H.264/H.265 + AAC）和基于 fMP4 的 HLS live playlist；HLS 分段在随机访问点切换，并提供独立 init segment。
+- HTTP 分发：HTTP-FLV（H.264/H.265 + AAC）和基于 fMP4 的 HLS live playlist；HLS 分段在随机访问点切换，并提供独立 init segment；HTTP 连接、请求头和请求体均有界，lag 后等待关键帧/生成 discontinuity。
 
 ## 分发能力边界
 
 HTTP-FLV 与 HLS 是当前优先维护的 RTSP 输出协议。HLS 仍是 live 基线：实际分段长度取决于下一个视频随机访问点，因此要达到 1–3 秒端到端延迟，编码器 GOP/关键帧间隔必须不大于目标分段时长。
 
-`dash`、`rtmp`、`srt`、`webrtc` feature 目前仅保留模块占位，不能视为可用协议实现；生产部署不应启用或对外承诺这些能力。
+`dash`、`rtmp`、`srt`、`webrtc` feature 目前仅保留模块占位，不能视为可用协议实现；它们只通过 `experimental-protocols` 聚合 feature 开启，生产部署不应启用或对外承诺这些能力。嵌入式 Linux/Yocto 网关建议使用 `embedded-gateway` profile；默认 `full` 为兼容现有 0.2 使用方式，后续主版本再迁移默认 profile。
 
 ## 最小服务端示例
 
@@ -102,6 +102,10 @@ server.shutdown().await
 ```
 
 普通文件 mount 是多客户端共享时间线；录制目录可通过 `RecordingVodSource` 注册为 `MountConfig::Vod`，为每个 RTSP session 提供独立 seek 和播放游标。
+
+## Feature profile
+
+嵌入式网关可使用 `--no-default-features --features embedded-gateway`，只启用 RTSP client/server、TLS、metrics、HTTP-FLV 和 HLS 等生产模块。`full` 保留已实现的完整能力；实验协议必须显式启用 `experimental-protocols`。
 
 ## 验证
 
