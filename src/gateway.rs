@@ -1,14 +1,19 @@
 //! Multi-protocol gateway orchestration.
 //!
-//! The [`Gateway`] binds multiple protocol servers (RTSP, HTTP, RTMP, etc.)
+//! The [`Gateway`] binds multiple protocol servers (RTSP, HTTP, RTMP, SRT, etc.)
 //! to a shared [`MountRegistry`], enabling cross-protocol stream relay.
 use crate::mount::MountRegistry;
 use crate::{Result, mount::MountHandle};
 #[cfg(feature = "http")]
 use crate::http::{HttpConfig, HttpServer};
+#[cfg(feature = "rtmp")]
+use crate::rtmp::RtmpServer;
 #[cfg(feature = "server")]
 use crate::server::{RtspServer, ServerConfig};
+#[cfg(feature = "srt")]
+use crate::srt::SrtServer;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 /// Unified multi-protocol streaming gateway.
 ///
@@ -21,6 +26,10 @@ pub struct Gateway {
     rtsp: Option<RtspServer>,
     #[cfg(feature = "http")]
     http: Option<HttpServer>,
+    #[cfg(feature = "rtmp")]
+    rtmp_cancel: Option<CancellationToken>,
+    #[cfg(feature = "srt")]
+    srt_cancel: Option<CancellationToken>,
 }
 
 impl Gateway {
@@ -32,6 +41,10 @@ impl Gateway {
             rtsp: None,
             #[cfg(feature = "http")]
             http: None,
+            #[cfg(feature = "rtmp")]
+            rtmp_cancel: None,
+            #[cfg(feature = "srt")]
+            srt_cancel: None,
         }
     }
 
@@ -55,6 +68,36 @@ impl Gateway {
         let server = HttpServer::bind(config).await?;
         self.http = Some(server);
         Ok(())
+    }
+
+    /// Start an RTMP server sharing this gateway's mount registry.
+    #[cfg(feature = "rtmp")]
+    pub async fn start_rtmp(&mut self, addr: impl tokio::net::ToSocketAddrs) -> Result<std::net::SocketAddr> {
+        let server = RtmpServer::bind(addr, self.mounts.clone()).await?;
+        let local = server.local_addr().map_err(|e| crate::Error::Rtmp(e.to_string()))?;
+        self.rtmp_cancel = Some(server.cancellation_token());
+        tokio::spawn(server.run());
+        Ok(local)
+    }
+
+    /// Start an RTMP server with full configuration.
+    #[cfg(feature = "rtmp")]
+    pub async fn start_rtmp_with_config(&mut self, config: crate::rtmp::RtmpConfig) -> Result<std::net::SocketAddr> {
+        let server = RtmpServer::with_config(config, self.mounts.clone()).await?;
+        let local = server.local_addr().map_err(|e| crate::Error::Rtmp(e.to_string()))?;
+        self.rtmp_cancel = Some(server.cancellation_token());
+        tokio::spawn(server.run());
+        Ok(local)
+    }
+
+    /// Start an SRT server sharing this gateway's mount registry.
+    #[cfg(feature = "srt")]
+    pub async fn start_srt(&mut self, addr: impl tokio::net::ToSocketAddrs) -> Result<std::net::SocketAddr> {
+        let server = SrtServer::bind(addr, self.mounts.clone()).await?;
+        let local = server.local_addr().map_err(|e| crate::Error::Srt(e.to_string()))?;
+        self.srt_cancel = Some(server.cancellation_token());
+        tokio::spawn(server.run());
+        Ok(local)
     }
 
     /// Get a reference to the running RTSP server, if any.
@@ -122,6 +165,14 @@ impl Gateway {
 
     /// Shutdown all running protocol servers.
     pub async fn shutdown(mut self) -> Result<()> {
+        #[cfg(feature = "rtmp")]
+        if let Some(cancel) = self.rtmp_cancel.take() {
+            cancel.cancel();
+        }
+        #[cfg(feature = "srt")]
+        if let Some(cancel) = self.srt_cancel.take() {
+            cancel.cancel();
+        }
         #[cfg(feature = "server")]
         if let Some(rtsp) = self.rtsp.take() {
             rtsp.shutdown().await?;
