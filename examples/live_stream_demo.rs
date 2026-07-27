@@ -10,7 +10,7 @@ use common::{
     mount_path, publisher_description,
 };
 use rtflow::{MountConfig, RtspServer, ServerConfig};
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, num::NonZeroU64, path::PathBuf, time::Duration};
 use url::Url;
 
 /// Run an FFmpeg -> Rust RTSP server -> GStreamer live streaming demo.
@@ -45,6 +45,9 @@ struct Args {
     /// Stop after this many seconds; zero runs until Ctrl-C.
     #[arg(long, default_value_t = 0)]
     duration: u64,
+    /// RTSP control-session lease advertised to players that do not send keep-alives.
+    #[arg(long, default_value = "86400")]
+    session_timeout_secs: NonZeroU64,
     #[arg(long, default_value_t = 10)]
     startup_timeout: u64,
     #[arg(long, default_value = "ffmpeg")]
@@ -87,7 +90,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("--startup-timeout must be greater than zero".into());
     }
     let mount_path = mount_path(&args.mount)?;
-    let server = RtspServer::bind(ServerConfig::new(args.listen)).await?;
+    let session_timeout = Duration::from_secs(args.session_timeout_secs.get());
+    let server = RtspServer::bind(
+        ServerConfig::builder(args.listen)
+            .session_timeout(session_timeout)
+            .build()?,
+    )
+    .await?;
     let codecs = if args.audio {
         vec![CodecArg::H264, CodecArg::Aac]
     } else {
@@ -126,7 +135,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     require_ffmpeg(&ffmpeg_config.executable, args.audio)?;
     require_gstreamer(&gstreamer_config)?;
 
-    tracing::info!(%url, "RTSP publisher mount ready");
+    tracing::info!(
+        %url,
+        session_timeout_secs = args.session_timeout_secs.get(),
+        "RTSP publisher mount ready"
+    );
     let mut ffmpeg_command = ffmpeg_config.command()?;
     let mut ffmpeg = ManagedChild::spawn("ffmpeg", &mut ffmpeg_command)?;
     let timeout = Duration::from_secs(args.startup_timeout);
@@ -207,4 +220,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ffmpeg.terminate().await;
     server.shutdown().await?;
     outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_timeout_defaults_to_one_day() {
+        let args = Args::try_parse_from(["live_stream_demo"]).unwrap();
+        assert_eq!(args.session_timeout_secs.get(), 86_400);
+    }
+
+    #[test]
+    fn session_timeout_rejects_zero() {
+        assert!(Args::try_parse_from(["live_stream_demo", "--session-timeout-secs", "0"]).is_err());
+    }
 }
