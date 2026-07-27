@@ -132,7 +132,9 @@ async fn http_flv_e2e_stream() {
 
     // Create FLV handler using frame_sender for per-request subscribe()
     let handler = create_flv_handler(&mount);
-    http_server.add_route(Method::Get, "/live/test.flv", handler).await;
+    http_server
+        .add_route(Method::Get, "/live/test.flv", handler)
+        .await;
     http_server.run().await.unwrap();
 
     // Publish frames continuously in background (simulates live encoder)
@@ -180,8 +182,16 @@ async fn http_flv_e2e_stream() {
 
     // Verify we got HTTP response with FLV data
     let response = String::from_utf8_lossy(&total);
-    eprintln!("HTTP response received: {:?} ({} bytes)", &response[..response.len().min(200)], total.len());
-    assert!(response.contains("200 OK") || response.starts_with("HTTP/1.1"), "expected 200 OK, got: {:.200}", response);
+    eprintln!(
+        "HTTP response received: {:?} ({} bytes)",
+        &response[..response.len().min(200)],
+        total.len()
+    );
+    assert!(
+        response.contains("200 OK") || response.starts_with("HTTP/1.1"),
+        "expected 200 OK, got: {:.200}",
+        response
+    );
     assert!(response.contains("video/x-flv"));
     // The response body should contain FLV data
     let has_flv = total.windows(3).any(|w| w == b"FLV");
@@ -214,10 +224,14 @@ async fn http_flv_concurrent_subscribers() {
 
     // Register two FLV handlers for different paths
     let handler1 = create_flv_handler(&mount);
-    http_server.add_route(Method::Get, "/live/stream1.flv", handler1).await;
+    http_server
+        .add_route(Method::Get, "/live/stream1.flv", handler1)
+        .await;
 
     let handler2 = create_flv_handler(&mount);
-    http_server.add_route(Method::Get, "/live/stream2.flv", handler2).await;
+    http_server
+        .add_route(Method::Get, "/live/stream2.flv", handler2)
+        .await;
 
     http_server.run().await.unwrap();
 

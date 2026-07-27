@@ -94,6 +94,9 @@ async fn credentials_protect_describe_setup_and_play() {
         .unwrap()
         .unwrap()
         .unwrap();
-    assert_eq!(frame.data, bytes::Bytes::from_static(&[0, 0, 0, 1, 0x65, 1]));
+    assert_eq!(
+        frame.data,
+        bytes::Bytes::from_static(&[0, 0, 0, 1, 0x65, 1])
+    );
     server.shutdown().await.unwrap();
 }

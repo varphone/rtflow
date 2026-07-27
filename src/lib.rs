@@ -7,9 +7,19 @@
 pub mod auth;
 #[cfg(feature = "client")]
 pub mod client;
+#[cfg(feature = "dash")]
+pub mod dash;
 mod error;
 #[cfg(feature = "file-storage")]
 pub mod file;
+#[cfg(feature = "gstreamer")]
+pub mod gst;
+#[cfg(feature = "hls")]
+pub mod hls;
+#[cfg(feature = "http")]
+pub mod http;
+#[cfg(feature = "http-flv")]
+pub mod http_flv;
 pub mod identity;
 #[path = "media/types.rs"]
 pub mod media;
@@ -23,31 +33,21 @@ pub mod pipeline;
 #[cfg(feature = "server")]
 pub mod proxy;
 pub mod rtcp;
+#[cfg(feature = "rtmp")]
+pub mod rtmp;
 pub mod rtp;
 #[path = "protocol/rtsp.rs"]
 pub mod rtsp;
 pub mod runtime;
 pub mod security;
-#[cfg(feature = "srtp")]
-pub mod srtp;
-#[cfg(feature = "gstreamer")]
-pub mod gst;
-#[cfg(feature = "http")]
-pub mod http;
-#[cfg(feature = "http-flv")]
-pub mod http_flv;
-#[cfg(feature = "hls")]
-pub mod hls;
-#[cfg(feature = "dash")]
-pub mod dash;
-#[cfg(feature = "rtmp")]
-pub mod rtmp;
 #[cfg(feature = "srt")]
 pub mod srt;
-#[cfg(feature = "webrtc")]
-pub mod webrtc;
+#[cfg(feature = "srtp")]
+pub mod srtp;
 #[cfg(feature = "file-storage")]
 pub mod storage;
+#[cfg(feature = "webrtc")]
+pub mod webrtc;
 /// Backward-compatible recording facade. New code may use [`storage`].
 #[cfg(feature = "file-storage")]
 #[deprecated(since = "0.2.0", note = "use `storage` module instead")]

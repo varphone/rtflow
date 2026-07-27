@@ -96,8 +96,14 @@ async fn late_proxy_subscriber_receives_cached_keyframe_and_gop() {
         .unwrap()
         .unwrap();
     assert!(cached_keyframe.is_keyframe);
-    assert_eq!(cached_keyframe.data, Bytes::from_static(&[0, 0, 0, 1, 0x65, 1]));
-    assert_eq!(cached_delta.data, Bytes::from_static(&[0, 0, 0, 1, 0x41, 2]));
+    assert_eq!(
+        cached_keyframe.data,
+        Bytes::from_static(&[0, 0, 0, 1, 0x65, 1])
+    );
+    assert_eq!(
+        cached_delta.data,
+        Bytes::from_static(&[0, 0, 0, 1, 0x41, 2])
+    );
 
     drop((first, late));
     proxy.shutdown().await.unwrap();

@@ -1,8 +1,8 @@
 //! GStreamer pipeline builder for media capture and encoding.
 
 use crate::media::{Codec, MediaKind};
-use gstreamer::prelude::*;
 use gstreamer as gst;
+use gstreamer::prelude::*;
 
 /// Video source configuration.
 #[derive(Clone, Debug)]
@@ -31,16 +31,32 @@ pub struct EncoderConfig {
 
 impl EncoderConfig {
     pub fn h264_hardware() -> Self {
-        Self { codec: Codec::H264, bitrate: None, hardware: true }
+        Self {
+            codec: Codec::H264,
+            bitrate: None,
+            hardware: true,
+        }
     }
     pub fn h264_software(bitrate: u32) -> Self {
-        Self { codec: Codec::H264, bitrate: Some(bitrate), hardware: false }
+        Self {
+            codec: Codec::H264,
+            bitrate: Some(bitrate),
+            hardware: false,
+        }
     }
     pub fn h265_hardware() -> Self {
-        Self { codec: Codec::H265, bitrate: None, hardware: true }
+        Self {
+            codec: Codec::H265,
+            bitrate: None,
+            hardware: true,
+        }
     }
     pub fn aac() -> Self {
-        Self { codec: Codec::Aac, bitrate: None, hardware: false }
+        Self {
+            codec: Codec::Aac,
+            bitrate: None,
+            hardware: false,
+        }
     }
 }
 
@@ -127,26 +143,33 @@ pub(super) fn build_audio_chain(
 ) -> Result<ChainElements, PipelineError> {
     let src = try_element("pulsesrc")
         .or_else(|| try_element("alsasrc"))
-        .ok_or_else(|| gstreamer::glib::Error::new(
-            gst::CoreError::MissingPlugin,
-            "no audio source element available (need pulsesrc or alsasrc)",
-        ))?;
+        .ok_or_else(|| {
+            gstreamer::glib::Error::new(
+                gst::CoreError::MissingPlugin,
+                "no audio source element available (need pulsesrc or alsasrc)",
+            )
+        })?;
 
     let convert = gst::ElementFactory::make("audioconvert").build()?;
 
     let encoder = match enc.codec {
         Codec::Aac => try_element("avenc_aac")
             .or_else(|| try_element("faac"))
-            .ok_or_else(|| gstreamer::glib::Error::new(
-                gst::CoreError::MissingPlugin,
-                "no AAC encoder available",
-            ))?,
+            .ok_or_else(|| {
+                gstreamer::glib::Error::new(
+                    gst::CoreError::MissingPlugin,
+                    "no AAC encoder available",
+                )
+            })?,
         Codec::Pcma => gst::ElementFactory::make("alawenc").build()?,
         Codec::Pcmu => gst::ElementFactory::make("mulawenc").build()?,
-        _ => return Err(gstreamer::glib::Error::new(
-            gst::CoreError::Negotiation,
-            &format!("unsupported audio codec: {:?}", enc.codec),
-        ).into()),
+        _ => {
+            return Err(gstreamer::glib::Error::new(
+                gst::CoreError::Negotiation,
+                &format!("unsupported audio codec: {:?}", enc.codec),
+            )
+            .into());
+        }
     };
 
     let sink = gst::ElementFactory::make("appsink")

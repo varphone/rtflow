@@ -2,8 +2,8 @@
 
 use gstreamer as gst;
 use gstreamer_app as gst_app;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 /// Pull-mode flow controller.
@@ -32,7 +32,10 @@ impl PullController {
                 .build(),
         );
 
-        Self { app_src, needs_data }
+        Self {
+            app_src,
+            needs_data,
+        }
     }
 
     /// Returns true if the AppSrc is requesting data.
@@ -47,8 +50,7 @@ impl PullController {
         pts: Duration,
         is_keyframe: bool,
     ) -> Result<(), gst::FlowError> {
-        let mut buffer = gst::Buffer::with_size(data.len())
-            .map_err(|_| gst::FlowError::Error)?;
+        let mut buffer = gst::Buffer::with_size(data.len()).map_err(|_| gst::FlowError::Error)?;
 
         {
             let buf_ref = buffer.get_mut().ok_or(gst::FlowError::Error)?;

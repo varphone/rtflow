@@ -22,7 +22,6 @@ pub fn setup_push_callback(
     codec: Codec,
     clock_rate: u32,
 ) {
-
     appsink.set_callbacks(
         gst_app::AppSinkCallbacks::builder()
             .new_sample(move |sink| {

@@ -52,7 +52,9 @@ async fn file_source_h265_to_http_flv() {
     let http_addr = http_server.local_addr();
 
     let handler = create_flv_handler(&mount);
-    http_server.add_route(Method::Get, "/live/test.flv", handler).await;
+    http_server
+        .add_route(Method::Get, "/live/test.flv", handler)
+        .await;
     http_server.run().await.unwrap();
 
     // Start file playback in background
@@ -88,7 +90,11 @@ async fn file_source_h265_to_http_flv() {
                 break;
             }
             Err(_) => {
-                println!("Read timeout after {} reads, {} total bytes", read_count, total.len());
+                println!(
+                    "Read timeout after {} reads, {} total bytes",
+                    read_count,
+                    total.len()
+                );
                 break;
             }
         }
@@ -100,13 +106,20 @@ async fn file_source_h265_to_http_flv() {
     if let Some(body_start) = total.windows(4).position(|w| w == b"\r\n\r\n") {
         let body_start = body_start + 4;
         let flv_data = &total[body_start..];
-        println!("FLV data starts at offset {body_start}, length {}", flv_data.len());
+        println!(
+            "FLV data starts at offset {body_start}, length {}",
+            flv_data.len()
+        );
 
         // Check FLV header
         if flv_data.len() >= 13 {
             assert_eq!(&flv_data[..3], b"FLV", "FLV signature");
             let flags = flv_data[4];
-            println!("FLV flags: {flags:#04b} (video={}, audio={})", flags & 1 != 0, flags & 4 != 0);
+            println!(
+                "FLV flags: {flags:#04b} (video={}, audio={})",
+                flags & 1 != 0,
+                flags & 4 != 0
+            );
 
             // Parse first few tags
             let mut pos = 13; // after FLV header + PreviousTagSize0
@@ -148,9 +161,8 @@ async fn file_source_h265_to_http_flv() {
                     } else {
                         // Traditional AVC
                         let avc_packet_type = body[1];
-                        let composition_time = ((body[2] as i32) << 16)
-                            | ((body[3] as i32) << 8)
-                            | (body[4] as i32);
+                        let composition_time =
+                            ((body[2] as i32) << 16) | ((body[3] as i32) << 8) | (body[4] as i32);
                         println!(
                             "  Tag #{tag_count}: {tag_name}, size={data_size}, ts={timestamp}, "
                         );
@@ -169,7 +181,10 @@ async fn file_source_h265_to_http_flv() {
         }
     } else {
         println!("No HTTP body found in response!");
-        println!("Response:\n{}", String::from_utf8_lossy(&total[..total.len().min(500)]));
+        println!(
+            "Response:\n{}",
+            String::from_utf8_lossy(&total[..total.len().min(500)])
+        );
     }
 
     http_server.shutdown();

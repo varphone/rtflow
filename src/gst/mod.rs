@@ -8,8 +8,8 @@ pub mod pipeline;
 use crate::media::{Codec, MediaDescription, MediaKind, TrackDescription};
 use crate::server::{LocalPublisher, MountConfig, RtspServer};
 use crate::{Error, Result};
-use gstreamer::prelude::*;
 use gstreamer as gst;
+use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use pipeline::{AudioSourceConfig, EncoderConfig, TrackInfo, VideoSourceConfig};
 use std::mem::ManuallyDrop;
@@ -125,7 +125,11 @@ impl GstPipelineBuilder {
         Ok(GStreamerSource {
             pipeline,
             tracks,
-            _mode: if self.pull_mode { StreamMode::Pull } else { StreamMode::Push },
+            _mode: if self.pull_mode {
+                StreamMode::Pull
+            } else {
+                StreamMode::Push
+            },
         })
     }
 }
