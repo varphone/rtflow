@@ -1,5 +1,8 @@
 pub mod handler;
 pub mod mux;
+pub mod web;
+#[cfg(feature = "ws-flv")]
+pub mod ws;
 
 use crate::http::Handler;
 use std::sync::Arc;
@@ -27,7 +30,8 @@ pub fn create_flv_handler(mount: &crate::server::MountHandle) -> Handler {
                 use std::sync::atomic::Ordering;
                 metrics.flv_streams_active.fetch_add(1, Ordering::Relaxed);
             }
-            let result = handler::serve_flv_stream(_req, writer, desc, rx, startup, fmtp_source).await;
+            let result =
+                handler::serve_flv_stream(_req, writer, desc, rx, startup, fmtp_source).await;
             #[cfg(feature = "metrics")]
             if let Some(metrics) = &metrics {
                 use std::sync::atomic::Ordering;

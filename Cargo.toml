@@ -16,9 +16,9 @@ publish = ["crates-io"]
 default = ["full"]
 full = [
     "srtp", "tls", "mp4", "mkv", "client", "server", "file-storage",
-    "metrics", "multicast", "http", "http-flv", "hls",
+    "metrics", "multicast", "http", "http-flv", "hls", "ws-flv",
 ]
-embedded-gateway = ["client", "server", "tls", "metrics", "http", "http-flv", "hls"]
+embedded-gateway = ["client", "server", "tls", "metrics", "http", "http-flv", "hls", "ws-flv"]
 experimental-protocols = ["dash", "rtmp", "srt", "webrtc"]
 srtp = ["dep:aes", "dep:cipher", "dep:hmac", "dep:sha1"]
 tls = ["dep:rustls", "dep:rustls-pemfile", "dep:tokio-rustls"]
@@ -32,6 +32,7 @@ multicast = []
 gstreamer = ["dep:gstreamer", "dep:gstreamer-app"]
 http = ["dep:http-crate"]
 http-flv = ["http"]
+ws-flv = ["http-flv", "dep:sha1"]
 hls = ["http", "mp4"]
 dash = ["http", "mp4"]
 rtmp = []
@@ -74,7 +75,7 @@ cipher = { version = "0.5", optional = true }
 futures = "0.3"
 hmac = { version = "0.13", optional = true }
 md-5 = "0.11"
-sha1 = { version = "0.11", optional = true }
+sha1 = { version = "0.11", optional = true }  # srtp + ws-flv（RFC 6455 握手）
 sha2 = "0.11"
 socket2 = "0.6"
 subtle = "2.6"

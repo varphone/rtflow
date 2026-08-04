@@ -508,6 +508,12 @@ impl RtspServer {
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
+
+    /// The shared mount registry (for HTTP-FLV / WS-FLV / HLS servers that
+    /// serve the same mounts).
+    pub fn registry(&self) -> Arc<MountRegistry> {
+        self.state.mounts.clone()
+    }
     pub async fn register_mount(
         &self,
         path: impl Into<Arc<str>>,
@@ -560,9 +566,7 @@ impl RtspServer {
         let (tx, _) = tokio::sync::broadcast::channel(self.state.config.consumer_queue_capacity);
         let mut counters = crate::mount::StreamCounters::default();
         #[cfg(feature = "metrics")]
-        if let Some(registry) =
-            crate::metrics::registry_from_sink(&self.state.config.event_sink)
-        {
+        if let Some(registry) = crate::metrics::registry_from_sink(&self.state.config.event_sink) {
             counters.attach_global(registry);
         }
         let mount = Arc::new(Mount {
@@ -689,7 +693,6 @@ mod tests {
                 crypto: None,
             }],
             connection: None,
-
         };
         server
             .register_mount(Arc::from("/stream"), MountConfig::Local { description })
