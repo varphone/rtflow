@@ -14,13 +14,13 @@
 - 可靠性：完整 RTCP 质量统计、多上游故障转移与时间线连续、关键帧启动缓存、统一任务监督和有期限 shutdown。
 - 安全：RTSPS/Rustls、IPv4/IPv6 ACL、有界连接限流、Basic/Digest、签名 nonce 和防重放。
 - 录制/VOD：崩溃安全分段、容量保留和恢复索引；每客户端独立 `Range: npt=`、PAUSE/续播及 UDP/TCP 输出。
-- HTTP 分发：HTTP-FLV（H.264/H.265 + AAC）和基于 fMP4 的 HLS live playlist；HLS 分段在随机访问点切换，并提供独立 init segment；HTTP 连接、请求头和请求体均有界，lag 后等待关键帧/生成 discontinuity。
+- HTTP 分发：HTTP-FLV（H.264/H.265 + AAC，含 onMetaData）和基于 fMP4 的 HLS live playlist；HLS 分段在随机访问点切换，并提供独立 init segment；HTTP 连接、请求头和请求体均有界，lag 后等待关键帧/生成 discontinuity。注意：HTTP-FLV 的 H.265 使用 enhanced-RTMP 封装（codec id 12），需要 FFmpeg ≥ 6.1 或支持 enhanced-RTMP 的播放器；老版本播放器无法解码。
 
 ## 分发能力边界
 
 HTTP-FLV 与 HLS 是当前优先维护的 RTSP 输出协议。HLS 仍是 live 基线：实际分段长度取决于下一个视频随机访问点，因此要达到 1–3 秒端到端延迟，编码器 GOP/关键帧间隔必须不大于目标分段时长。
 
-`dash`、`rtmp`、`srt`、`webrtc` feature 目前仅保留模块占位，不能视为可用协议实现；它们只通过 `experimental-protocols` 聚合 feature 开启，生产部署不应启用或对外承诺这些能力。嵌入式 Linux/Yocto 网关建议使用 `embedded-gateway` profile；默认 `full` 为兼容现有 0.2 使用方式，后续主版本再迁移默认 profile。
+`dash`、`rtmp`、`srt`、`webrtc` feature 目前仅保留模块占位，不能视为可用协议实现；它们只通过 `experimental-protocols` 聚合 feature 开启，生产部署不应启用或对外承诺这些能力。其中 `webrtc`（WHIP/WHEP）的 ICE/DTLS/SRTP 媒体管线未实现：信令握手可完成，但浏览器协商后不会有媒体流——**WHIP/WHEP 对外声明为不可用占位**，不要用 `Location` 响应头引导客户端接入。嵌入式 Linux/Yocto 网关建议使用 `embedded-gateway` profile；默认 `full` 为兼容现有 0.2 使用方式，后续主版本再迁移默认 profile。
 
 ## 最小服务端示例
 
