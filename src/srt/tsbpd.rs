@@ -26,6 +26,9 @@ pub struct BufferedPacket {
     pub payload: Bytes,
     /// When this packet was received from the network.
     pub arrival_time: Instant,
+    /// When this packet becomes eligible for delivery (sender-clock
+    /// timestamp + TSBPD delay, mapped onto the local clock).
+    pub deliver_at: Instant,
     /// Whether this is a retransmitted packet.
     pub retransmitted: bool,
 }
@@ -42,6 +45,14 @@ pub struct TsbpdBuffer {
     highest_received: u32,
     /// Whether we've been initialized with a starting sequence.
     initialized: bool,
+    /// Local clock anchor for sender-timestamp scheduling.
+    base_local: Option<Instant>,
+    /// Extended sender timestamp (µs, wrap-extended to 64 bits) anchor.
+    base_extended_ts: Option<u64>,
+    /// Last raw sender timestamp (µs).
+    last_timestamp: u32,
+    /// Extended (wrap-free) sender clock in microseconds.
+    extended_timestamp: u64,
     /// Count of packets delivered in order.
     delivered_count: u64,
     /// Count of packets dropped (too late).
@@ -59,6 +70,10 @@ impl TsbpdBuffer {
             next_deliver_seq: 0,
             highest_received: 0,
             initialized: false,
+            base_local: None,
+            base_extended_ts: None,
+            last_timestamp: 0,
+            extended_timestamp: 0,
             delivered_count: 0,
             dropped_count: 0,
             loss_events: 0,
@@ -79,9 +94,20 @@ impl TsbpdBuffer {
 
     /// Insert a packet into the reorder buffer.
     ///
+    /// `timestamp` is the sender-clock timestamp in microseconds relative to
+    /// connection start (SRT data packet header). Scheduling delivery from
+    /// the sender clock — instead of the local arrival time — makes the
+    /// buffer absorb network jitter instead of reflecting it 1:1.
+    ///
     /// Returns `true` if the packet was accepted, `false` if it's a
     /// duplicate or too old (already delivered).
-    pub fn push(&mut self, seq: u32, payload: Bytes, retransmitted: bool) -> bool {
+    pub fn push(
+        &mut self,
+        seq: u32,
+        payload: Bytes,
+        timestamp: u32,
+        retransmitted: bool,
+    ) -> bool {
         if !self.initialized {
             self.init(seq);
         }
@@ -112,12 +138,37 @@ impl TsbpdBuffer {
             self.highest_received = seq;
         }
 
+        let arrival_time = Instant::now();
+        // Delivery scheduling: sender-clock timestamp when trustworthy,
+        // local arrival time otherwise (e.g. peers that send 0).
+        let deliver_at = if timestamp == 0 && self.last_timestamp == 0 {
+            arrival_time + self.delay
+        } else {
+            // Extend the 32-bit µs timestamp (wraps every ~71 min) into a
+            // monotonic 64-bit clock. The delta is interpreted as a signed
+            // 32-bit difference so out-of-order arrivals (negative deltas)
+            // and wrap-arounds both extend correctly.
+            let delta = timestamp.wrapping_sub(self.last_timestamp) as i32 as i64;
+            self.extended_timestamp = self.extended_timestamp.wrapping_add(delta as u64);
+            self.last_timestamp = timestamp;
+            if self.base_local.is_none() {
+                self.base_local = Some(arrival_time);
+                self.base_extended_ts = Some(self.extended_timestamp);
+            }
+            let base_local = self.base_local.unwrap_or(arrival_time);
+            let base_ts = self.base_extended_ts.unwrap_or(self.extended_timestamp);
+            let elapsed =
+                Duration::from_micros(self.extended_timestamp.saturating_sub(base_ts));
+            base_local + elapsed + self.delay
+        };
+
         self.buffer.insert(
             seq,
             BufferedPacket {
                 sequence: seq,
                 payload,
-                arrival_time: Instant::now(),
+                arrival_time,
+                deliver_at,
                 retransmitted,
             },
         );
@@ -143,11 +194,10 @@ impl TsbpdBuffer {
                 None => break,
             };
 
-            let age = now.duration_since(packet.arrival_time);
-
             if seq == self.next_deliver_seq {
-                // In-order: release after TSBPD delay
-                if age >= self.delay {
+                // In-order: release once the sender-clock delivery time is
+                // reached (this absorbs network jitter).
+                if now >= packet.deliver_at {
                     let pkt = self.buffer.remove(&seq).unwrap();
                     self.next_deliver_seq = seq.wrapping_add(1);
                     self.delivered_count += 1;
@@ -157,6 +207,7 @@ impl TsbpdBuffer {
                 }
             } else if seq_after(seq, self.next_deliver_seq) {
                 // There's a gap. Check if we've waited too long (2x delay timeout)
+                let age = now.duration_since(packet.arrival_time);
                 if age >= self.delay * 2 {
                     let gap = seq_distance(self.next_deliver_seq, seq);
                     if gap > MAX_GAP_SKIP {
@@ -205,9 +256,12 @@ impl TsbpdBuffer {
         losses
     }
 
-    /// Get the ACK number: the next expected sequence (all before this are received).
+    /// Get the ACK number: the last delivered sequence. SRT peers free
+    /// their retransmission buffers for everything up to and including the
+    /// ACK number, so reporting `next_deliver_seq` here would drop one
+    /// packet's worth of retransmit coverage on a loss.
     pub fn ack_number(&self) -> u32 {
-        self.next_deliver_seq
+        self.next_deliver_seq.wrapping_sub(1)
     }
 
     /// Number of packets currently buffered.
@@ -263,18 +317,19 @@ mod tests {
         let mut buf = TsbpdBuffer::new(0); // 0ms delay for testing
         buf.init(100);
 
-        buf.push(100, Bytes::from_static(b"pkt0"), false);
-        buf.push(101, Bytes::from_static(b"pkt1"), false);
-        buf.push(102, Bytes::from_static(b"pkt2"), false);
+        buf.push(100, Bytes::from_static(b"pkt0"), 100000, false);
+        buf.push(101, Bytes::from_static(b"pkt1"), 101000, false);
+        buf.push(102, Bytes::from_static(b"pkt2"), 102000, false);
 
-        // With 0 delay, all should be immediately ready
-        std::thread::sleep(Duration::from_millis(1));
+        // With 0 delay, all should be immediately ready once their
+        // sender-clock delivery times pass (timestamps are 1ms apart).
+        std::thread::sleep(Duration::from_millis(5));
         let ready = buf.pop_ready();
         assert_eq!(ready.len(), 3);
         assert_eq!(ready[0].sequence, 100);
         assert_eq!(ready[1].sequence, 101);
         assert_eq!(ready[2].sequence, 102);
-        assert_eq!(buf.ack_number(), 103);
+        assert_eq!(buf.ack_number(), 102);
     }
 
     #[test]
@@ -283,11 +338,11 @@ mod tests {
         buf.init(0);
 
         // Arrive out of order: 2, 0, 1
-        buf.push(2, Bytes::from_static(b"pkt2"), false);
-        buf.push(0, Bytes::from_static(b"pkt0"), false);
-        buf.push(1, Bytes::from_static(b"pkt1"), false);
+        buf.push(2, Bytes::from_static(b"pkt2"), 2000, false);
+        buf.push(0, Bytes::from_static(b"pkt0"), 0, false);
+        buf.push(1, Bytes::from_static(b"pkt1"), 1000, false);
 
-        std::thread::sleep(Duration::from_millis(1));
+        std::thread::sleep(Duration::from_millis(5));
         let ready = buf.pop_ready();
         assert_eq!(ready.len(), 3);
         assert_eq!(ready[0].sequence, 0);
@@ -300,8 +355,8 @@ mod tests {
         let mut buf = TsbpdBuffer::new(0);
         buf.init(0);
 
-        assert!(buf.push(0, Bytes::from_static(b"pkt0"), false));
-        assert!(!buf.push(0, Bytes::from_static(b"dup"), false)); // duplicate
+        assert!(buf.push(0, Bytes::from_static(b"pkt0"), 0, false));
+        assert!(!buf.push(0, Bytes::from_static(b"dup"), 0, false)); // duplicate
         assert_eq!(buf.buffered_count(), 1);
     }
 
@@ -310,10 +365,10 @@ mod tests {
         let mut buf = TsbpdBuffer::new(50);
         buf.init(0);
 
-        buf.push(0, Bytes::from_static(b"pkt0"), false);
-        buf.push(1, Bytes::from_static(b"pkt1"), false);
+        buf.push(0, Bytes::from_static(b"pkt0"), 0, false);
+        buf.push(1, Bytes::from_static(b"pkt1"), 1000, false);
         // seq 2 is missing
-        buf.push(3, Bytes::from_static(b"pkt3"), false);
+        buf.push(3, Bytes::from_static(b"pkt3"), 3000, false);
 
         let losses = buf.detect_losses();
         assert_eq!(losses.len(), 1);
@@ -326,9 +381,9 @@ mod tests {
         let mut buf = TsbpdBuffer::new(1); // 1ms delay, 2ms timeout
         buf.init(0);
 
-        buf.push(0, Bytes::from_static(b"pkt0"), false);
+        buf.push(0, Bytes::from_static(b"pkt0"), 0, false);
         // seq 1 is lost
-        buf.push(2, Bytes::from_static(b"pkt2"), false);
+        buf.push(2, Bytes::from_static(b"pkt2"), 2000, false);
 
         // Wait for 2x delay timeout
         std::thread::sleep(Duration::from_millis(5));

@@ -134,6 +134,11 @@ struct SrtConnection {
     ack_seq: u32,
     /// Packets received since last ACK.
     pkts_since_ack: u32,
+    /// Last NAK send time (throttle).
+    last_nak_time: Instant,
+    /// Loss ranges already reported via NAK; unchanged gaps are not
+    /// re-reported (a peer that never retransmits must not be flooded).
+    last_nak_losses: Vec<(u32, u32)>,
 }
 
 /// SRT server that accepts caller connections.
@@ -305,13 +310,21 @@ impl SrtServer {
                 conn.pkts_since_ack = 0;
             }
 
-            // Loss detection -> NAK
+            // Loss detection -> NAK, throttled and deduplicated: an
+            // unchanged gap is only reported once, and never more often
+            // than every 20ms.
             let losses = conn.tsbpd.detect_losses();
-            if !losses.is_empty() {
-                let nak = nak_packet(&losses, conn.peer_socket_id, timestamp);
-                let encoded = encode_control_packet(&nak);
-                let _ = self.socket.send_to(&encoded, *peer).await;
-                debug!("SRT: sent NAK for {} loss ranges to {peer}", losses.len());
+            if !losses.is_empty()
+                && now.duration_since(conn.last_nak_time).as_millis() >= 20
+            {
+                if losses != conn.last_nak_losses {
+                    let nak = nak_packet(&losses, conn.peer_socket_id, timestamp);
+                    let encoded = encode_control_packet(&nak);
+                    let _ = self.socket.send_to(&encoded, *peer).await;
+                    debug!("SRT: sent NAK for {} loss ranges to {peer}", losses.len());
+                    conn.last_nak_losses = losses;
+                }
+                conn.last_nak_time = now;
             }
 
             // Release TSBPD ready packets -> demuxer
@@ -449,6 +462,8 @@ impl SrtServer {
                                     stream_id,
                                     last_recv_time: now,
                                     last_ack_time: now,
+                                    last_nak_time: now,
+                                    last_nak_losses: Vec::new(),
                                     ack_seq: 0,
                                     pkts_since_ack: 0,
                                 },
@@ -516,11 +531,17 @@ impl SrtServer {
 
         // Insert into TSBPD reorder buffer (retransmit detection is
         // wrapping-aware so a packet just before a sequence-space wrap is
-        // not mistaken for a retransmission of an old one).
+        // not mistaken for a retransmission of an old one). Delivery is
+        // scheduled from the sender-clock timestamp, absorbing jitter.
         let is_retransmit = tsbpd::seq_before(data_pkt.sequence, conn.tsbpd.ack_number());
         if conn
             .tsbpd
-            .push(data_pkt.sequence, data_pkt.payload.clone(), is_retransmit)
+            .push(
+                data_pkt.sequence,
+                data_pkt.payload.clone(),
+                data_pkt.timestamp,
+                is_retransmit,
+            )
         {
             conn.pkts_since_ack += 1;
         }

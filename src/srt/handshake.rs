@@ -176,8 +176,9 @@ pub fn encode_handshake(hs: &Handshake) -> Bytes {
 
     // Add SRT extension for HSv5
     if hs.version == SRT_VERSION_5 {
-        // SRT_CMD_HSRSP (response) or SRT_CMD_HSREQ (request)
-        buf.put_u16(0x0001); // SRT_CMD_HSREQ/HSRSP
+        // HS_EXT_HSREQ (0x0001) on requests, HS_EXT_HSRSP (0x0002) on
+        // responses; libsrt matches the extension type strictly.
+        buf.put_u16(hs.extension);
         buf.put_u16(4); // 4 x 32-bit words
         buf.put_u32(0x4A17); // SRT magic
         buf.put_u32(hs.srt_version);
@@ -189,11 +190,14 @@ pub fn encode_handshake(hs: &Handshake) -> Bytes {
 }
 
 /// Build an induction response handshake.
+///
+/// Per SRT spec, the induction exchange uses UDT version 4 with an HSREQ
+/// extension; libsrt rejects a version-5 induction response.
 pub fn induction_response(socket_id: u32, cookie: u32) -> Handshake {
     Handshake {
-        version: SRT_VERSION_5,
+        version: SRT_VERSION_4,
         encryption: 0,
-        extension: 0x0002,
+        extension: 0x0001, // HS_EXT_HSREQ
         initial_sequence: 0,
         mtu: 1500,
         flow_window: 8192,
@@ -216,7 +220,7 @@ pub fn conclusion_response(
     Handshake {
         version: SRT_VERSION_5,
         encryption: 0,
-        extension: 0x0002,
+        extension: 0x0002, // HS_EXT_HSRSP
         initial_sequence,
         mtu: 1500,
         flow_window: 8192,

@@ -178,17 +178,19 @@ pub fn keepalive_packet(socket_id: u32, timestamp: u32) -> ControlPacket {
 
 /// Build an ACK control packet.
 pub fn ack_packet(
+    ack_seq: u32,
     ack_number: u32,
-    last_ack_sequence: u32,
     socket_id: u32,
     timestamp: u32,
 ) -> ControlPacket {
     let mut data = BytesMut::with_capacity(4);
-    data.put_u32(last_ack_sequence);
+    data.put_u32(ack_number);
     ControlPacket {
         control_type: ControlType::Ack,
-        type_specific: 0,
-        additional_info: ack_number,
+        // Per SRT spec the type-specific field carries the ACK sequence
+        // counter; the confirmed sequence goes in the payload.
+        type_specific: ack_seq as u16,
+        additional_info: 0,
         timestamp,
         socket_id,
         data: data.freeze(),
