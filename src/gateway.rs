@@ -184,6 +184,7 @@ impl Gateway {
             publisher_claimed: std::sync::atomic::AtomicBool::new(false),
             max_queued_bytes_per_session: max_queued_bytes,
             announce_fmtp: Mutex::new(HashMap::new()),
+            rtmp_seq_headers: Mutex::new(HashMap::new()),
         });
         self.mounts.insert(path.clone(), mount.clone())?;
         Ok(MountHandle {

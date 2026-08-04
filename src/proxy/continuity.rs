@@ -221,14 +221,25 @@ impl KeyframeCache {
             pop_front(track);
         }
         if track.bytes > self.config.max_bytes {
+            // Roll off the oldest frames instead of dropping the whole
+            // cache: a burst of large keyframes must not wipe the startup
+            // snapshot and force new subscribers to wait for the next GOP.
+            while track.bytes > self.config.max_bytes && !track.frames.is_empty() {
+                pop_front(track);
+            }
+            // Preserve the "starts with a keyframe" invariant: a snapshot
+            // that begins with a non-keyframe cannot be decoded from cold.
             if track.kind == MediaKind::Video {
-                track.frames.clear();
-                track.bytes = 0;
-                track.starts_with_keyframe = false;
-            } else {
-                while track.bytes > self.config.max_bytes && !track.frames.is_empty() {
+                while track
+                    .frames
+                    .front()
+                    .is_some_and(|frame| !frame.is_keyframe)
+                {
                     pop_front(track);
                 }
+            }
+            if track.frames.is_empty() {
+                track.starts_with_keyframe = false;
             }
         }
     }
@@ -356,6 +367,7 @@ mod tests {
                 crypto: None,
             }],
             connection: None,
+
         }
     }
 

@@ -5,6 +5,7 @@
 //! registry, enabling cross-protocol interop.
 #[cfg(feature = "server")]
 use crate::proxy::{KeyframeCache, ProxyState, UpstreamConfig};
+use bytes::Bytes;
 #[cfg(feature = "file-storage")]
 use crate::storage::VodSource;
 use crate::{
@@ -168,6 +169,10 @@ pub(crate) struct Mount {
     pub max_queued_bytes_per_session: usize,
     /// SDP fmtp parameters received via ANNOUNCE, keyed by track_id.
     pub announce_fmtp: Mutex<HashMap<u8, Arc<str>>>,
+    /// Latest RTMP AVC/HEVC/AAC sequence headers published to this mount,
+    /// keyed by track_id — so RTMP play sessions can initialize decoders
+    /// before the first GOP arrives.
+    pub rtmp_seq_headers: Mutex<HashMap<u8, Bytes>>,
 }
 
 /// Build the fixed codec lookup table from a media description.
@@ -192,6 +197,11 @@ pub fn startup_dedup_keys(startup: &[AccessUnit]) -> std::collections::HashSet<(
         .map(|unit| (unit.track_id, unit.rtp_timestamp))
         .collect()
 }
+
+/// How far back a new subscriber may start relative to the newest cached
+/// frame. Bounding the startup window keeps the on-screen delay close to
+/// the real-time edge instead of replaying the whole cache.
+pub const STARTUP_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl Mount {
     /// Cancellation token for this mount's data plane (cancelled on
@@ -246,11 +256,31 @@ impl Mount {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let receiver = self.frames.subscribe();
             let mut startup = cache.snapshot(track_id);
-            let bytes = startup.iter().fold(0usize, |total, frame| {
+            let mut bytes = startup.iter().fold(0usize, |total, frame| {
                 total.saturating_add(frame.data.len())
             });
             if bytes > self.max_queued_bytes_per_session {
-                startup.clear();
+                // Roll off the oldest frames up to the limit instead of
+                // clearing the whole snapshot (keep a decodable start).
+                while bytes > self.max_queued_bytes_per_session && startup.len() > 1 {
+                    bytes -= startup.remove(0).data.len();
+                }
+                while startup.first().is_some_and(|f| !f.is_keyframe) && startup.len() > 1 {
+                    startup.remove(0);
+                }
+            }
+            // Bound how far back a new subscriber starts: a snapshot that
+            // reaches seconds into the past makes the on-screen delay equal
+            // to the whole cached window. Keep at most STARTUP_WINDOW of
+            // media, cutting at the nearest keyframe.
+            if let Some(last) = startup.last() {
+                let cutoff = last.pts.saturating_sub(STARTUP_WINDOW);
+                if let Some(cut) = startup
+                    .iter()
+                    .position(|frame| frame.pts >= cutoff && frame.is_keyframe)
+                {
+                    startup.drain(..cut);
+                }
             }
             if startup.is_empty()
                 && let Some(frame) = self
@@ -283,11 +313,27 @@ impl Mount {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut startup = cache.snapshot_all();
-            let bytes = startup.iter().fold(0usize, |total, frame| {
+            let mut bytes = startup.iter().fold(0usize, |total, frame| {
                 total.saturating_add(frame.data.len())
             });
             if bytes > self.max_queued_bytes_per_session {
-                startup.clear();
+                // Roll off the oldest frames instead of clearing the snapshot.
+                while bytes > self.max_queued_bytes_per_session && startup.len() > 1 {
+                    bytes = bytes.saturating_sub(startup.remove(0).data.len());
+                }
+                while startup.first().is_some_and(|f| !f.is_keyframe) && startup.len() > 1 {
+                    startup.remove(0);
+                }
+            }
+            // Bound the startup window (see STARTUP_WINDOW).
+            if let Some(last) = startup.last() {
+                let cutoff = last.pts.saturating_sub(STARTUP_WINDOW);
+                if let Some(cut) = startup
+                    .iter()
+                    .position(|frame| frame.pts >= cutoff && frame.is_keyframe)
+                {
+                    startup.drain(..cut);
+                }
             }
             (receiver, startup)
         }
@@ -591,7 +637,7 @@ impl MountRegistry {
     /// Register a new mount from a config. Returns a handle on success.
     pub fn register(&self, path: Arc<str>, config: MountConfig) -> Result<MountHandle> {
         let description = description_for(&config)?;
-        let (tx, _) = broadcast::channel(1024);
+        let (tx, _) = broadcast::channel(256);
         #[cfg(feature = "server")]
         let startup_cache =
             KeyframeCache::new(&description, crate::proxy::StartupCacheConfig::default())
@@ -602,6 +648,7 @@ impl MountRegistry {
                             tracks: Vec::new(),
                             #[cfg(feature = "multicast")]
                             connection: None,
+
                         },
                         crate::proxy::StartupCacheConfig {
                             enabled: false,
@@ -628,6 +675,7 @@ impl MountRegistry {
             publisher_claimed: AtomicBool::new(false),
             max_queued_bytes_per_session: 4 * 1024 * 1024,
             announce_fmtp: Mutex::new(HashMap::new()),
+            rtmp_seq_headers: Mutex::new(HashMap::new()),
         });
         self.insert(path.clone(), mount.clone())?;
         Ok(MountHandle {
@@ -645,6 +693,7 @@ impl MountRegistry {
                 tracks: Vec::new(),
                 #[cfg(feature = "multicast")]
                 connection: None,
+
             });
             MountHandle {
                 path: mount.id.as_str().into(),
@@ -669,6 +718,7 @@ impl MountRegistry {
                 tracks: Vec::new(),
                 #[cfg(feature = "multicast")]
                 connection: None,
+
             }),
             inner: removed,
         })
@@ -688,6 +738,7 @@ impl MountRegistry {
                         tracks: Vec::new(),
                         #[cfg(feature = "multicast")]
                         connection: None,
+
                     },
                     inner: mount.clone(),
                 };

@@ -68,7 +68,7 @@ impl ServerConfig {
             max_rtsp_body_bytes: 256 * 1024,
             max_sessions: 256,
             udp_port_range: None,
-            consumer_queue_capacity: 4096,
+            consumer_queue_capacity: 256,
             no_subscriber_grace: Duration::from_secs(5),
             shutdown_grace: Duration::from_secs(5),
             authenticator: Arc::new(AllowAll),
@@ -570,6 +570,7 @@ impl RtspServer {
                 .resource_limits
                 .max_queued_bytes_per_session,
             announce_fmtp: Mutex::new(HashMap::new()),
+            rtmp_seq_headers: Mutex::new(HashMap::new()),
         });
         self.state.mounts.insert(path.clone(), mount.clone())?;
         emit(
@@ -673,6 +674,7 @@ mod tests {
                 crypto: None,
             }],
             connection: None,
+
         };
         server
             .register_mount(Arc::from("/stream"), MountConfig::Local { description })
