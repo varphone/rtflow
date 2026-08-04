@@ -179,8 +179,7 @@ impl FlvMuxer {
                     write_h264_video_tag(&mut self.tag_buffer, &normalized, seq, true);
                     self.video_sequence_header_sent = true;
                 }
-                let avcc_data = annex_b_to_avcc(&normalized.data);
-                write_h264_video_tag(&mut self.tag_buffer, &normalized, &avcc_data, false);
+                write_h264_video_tag_inplace(&mut self.tag_buffer, &normalized, &normalized.data);
             }
             Codec::H265 => {
                 if !self.video_sequence_header_sent
@@ -189,8 +188,7 @@ impl FlvMuxer {
                     write_h265_video_tag(&mut self.tag_buffer, &normalized, seq, true);
                     self.video_sequence_header_sent = true;
                 }
-                let hvcc_data = annex_b_to_avcc(&normalized.data);
-                write_h265_video_tag(&mut self.tag_buffer, &normalized, &hvcc_data, false);
+                write_h265_video_tag_inplace(&mut self.tag_buffer, &normalized, &normalized.data);
             }
             Codec::Aac => {
                 if !self.audio_sequence_header_sent
@@ -486,6 +484,28 @@ fn write_h264_video_tag(
     buf.put_u32(tag_total_size as u32);
 }
 
+/// H.264 video tag with Annex-B → AVCC conversion performed directly into
+/// `buf`: the tag header carries the converted size, then the
+/// length-prefixed NALs are written in place. Single copy, no intermediate
+/// allocation (a ~2× reduction of the per-frame copy/alloc cost that
+/// matters on low-end IPC CPUs). Length-prefixed payloads (RTMP ingest)
+/// are copied as-is.
+fn write_h264_video_tag_inplace(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes) {
+    let converted_size = annex_b_avcc_size(data).unwrap_or(data.len());
+    write_flv_tag_header(buf, unit, converted_size + 5);
+
+    let frame_type = if unit.is_keyframe { 1u8 } else { 2u8 };
+    buf.put_u8((frame_type << 4) | 7); // 7 = AVC
+    buf.put_u8(1); // AVC packet type: NALU
+
+    write_composition_time(buf, unit);
+
+    write_annex_b_avcc(buf, data);
+
+    let tag_total_size = FLV_TAG_HEADER_SIZE + converted_size + 5;
+    buf.put_u32(tag_total_size as u32);
+}
+
 /// Write an H.265 video FLV tag (Enhanced RTMP / Veovera format).
 ///
 /// Format (Veovera Enhanced RTMP spec):
@@ -525,6 +545,26 @@ fn write_h265_video_tag(
 
     // Data: HVCC (SequenceStart) or AVCC NALUs (CodedFramesX)
     buf.put_slice(data);
+
+    let tag_total_size = FLV_TAG_HEADER_SIZE + body_size;
+    buf.put_u32(tag_total_size as u32);
+}
+
+/// H.265 video tag with Annex-B → length-prefixed conversion performed
+/// directly into `buf` (see [`write_h264_video_tag_inplace`]).
+fn write_h265_video_tag_inplace(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes) {
+    let converted_size = annex_b_avcc_size(data).unwrap_or(data.len());
+    let body_size = 1 + 4 + converted_size;
+
+    write_flv_tag_header(buf, unit, body_size);
+
+    let frame_type = if unit.is_keyframe { 1u8 } else { 2u8 };
+    // Enhanced RTMP header byte: keyframe + CodedFramesX (no CompositionTime)
+    buf.put_u8(0x80 | (frame_type << 4) | 3);
+
+    buf.put_slice(b"hvc1");
+
+    write_annex_b_avcc(buf, data);
 
     let tag_total_size = FLV_TAG_HEADER_SIZE + body_size;
     buf.put_u32(tag_total_size as u32);
@@ -632,6 +672,104 @@ fn write_g711_audio_tag(buf: &mut BytesMut, unit: &AccessUnit) {
 }
 
 /// Convert Annex-B NALUs (with start codes) to AVCC/HVCC format (4-byte length prefix).
+/// True when `data` parses as an exact chain of 4-byte length-prefixed
+/// NALs covering the whole buffer (AVCC/HVCC layout).
+///
+/// This is much more discriminative than a start-code prefix check: an
+/// AVCC NAL whose length field is `00 00 01 XX` (256–511-byte NALs, e.g.
+/// audio frames) would otherwise be mistaken for a 3-byte Annex-B start
+/// code and corrupted by conversion.
+fn is_length_prefixed_chain(data: &[u8]) -> bool {
+    let mut pos = 0usize;
+    while pos + 4 <= data.len() {
+        let len =
+            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        if len == 0 {
+            return false; // empty NAL: not a valid AVCC chain
+        }
+        pos += 4 + len;
+        if pos == data.len() {
+            return true;
+        }
+        if pos > data.len() {
+            return false;
+        }
+    }
+    false
+}
+
+/// Converted AVCC/HVCC (length-prefixed) size of `data`, or `None` when
+/// `data` is already length-prefixed (AVCC/HVCC, e.g. from RTMP ingest).
+///
+/// Detection: length-prefixed chains pass through untouched; payloads
+/// starting with an Annex-B start code are converted (single scan, no
+/// allocation); anything else (raw single NAL without framing) also
+/// passes through, matching the pre-optimization behaviour.
+fn annex_b_avcc_size(data: &Bytes) -> Option<usize> {
+    let bytes = data.as_ref();
+    if is_length_prefixed_chain(bytes) {
+        return None;
+    }
+    let starts_with_start_code = bytes.len() >= 4
+        && ((bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 1)
+            || (bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 0 && bytes[3] == 1));
+    if !starts_with_start_code {
+        return None;
+    }
+    let mut total = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        let Some(start) = find_start_code(bytes, i) else {
+            break;
+        };
+        let nal_end = find_start_code(bytes, start + 3).unwrap_or(bytes.len());
+        let nal_data_start = if start + 3 < bytes.len() && bytes[start + 2] == 0x01 {
+            start + 3
+        } else if start + 4 < bytes.len() && bytes[start + 3] == 0x01 {
+            start + 4
+        } else {
+            start + 3
+        };
+        if nal_data_start < nal_end {
+            total += 4 + (nal_end - nal_data_start);
+        }
+        i = nal_end;
+    }
+    Some(total)
+}
+
+/// Append `data` to `buf` as length-prefixed NALs (Annex-B → AVCC).
+/// Already length-prefixed payloads are copied verbatim. No allocation.
+fn write_annex_b_avcc(buf: &mut BytesMut, data: &Bytes) {
+    if annex_b_avcc_size(data).is_none() {
+        buf.put_slice(data);
+        return;
+    }
+    let bytes = data.as_ref();
+    let mut i = 0;
+    while i < bytes.len() {
+        let Some(start) = find_start_code(bytes, i) else {
+            break;
+        };
+        let nal_end = find_start_code(bytes, start + 3).unwrap_or(bytes.len());
+        let nal_data_start = if start + 3 < bytes.len() && bytes[start + 2] == 0x01 {
+            start + 3
+        } else if start + 4 < bytes.len() && bytes[start + 3] == 0x01 {
+            start + 4
+        } else {
+            start + 3
+        };
+        if nal_data_start < nal_end {
+            buf.put_u32((nal_end - nal_data_start) as u32);
+            buf.put_slice(&bytes[nal_data_start..nal_end]);
+        }
+        i = nal_end;
+    }
+}
+
+/// Reference implementation kept for tests: Annex-B → AVCC conversion
+/// returning a standalone buffer.
+#[cfg(test)]
 fn annex_b_to_avcc(data: &Bytes) -> Bytes {
     // Fast path: the payload is already AVCC/HVCC (length-prefixed), which
     // is what RTMP ingest delivers. Detecting it avoids a full-frame scan
@@ -661,6 +799,9 @@ fn annex_b_to_avcc(data: &Bytes) -> Bytes {
 
 /// Locate Annex-B NAL boundaries as offset ranges into the buffer, without
 /// copying the NAL data.
+/// NAL ranges of an Annex-B payload (test helper for the reference
+/// conversion).
+#[cfg(test)]
 fn annex_b_nal_ranges(data: &Bytes) -> Vec<(usize, usize)> {
     let bytes = data.as_ref();
     let mut nals = Vec::new();
@@ -943,5 +1084,125 @@ mod tests {
         let bytes = Bytes::from(data);
         let avcc = annex_b_to_avcc(&bytes);
         assert_eq!(avcc.len(), 14);
+    }
+
+    /// The in-place conversion used by `encode` must be byte-identical to
+    /// the reference `annex_b_to_avcc`, including mixed 3/4-byte start
+    /// codes and the already-length-prefixed fast path.
+    #[test]
+    fn inplace_conversion_matches_reference() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x67, 0x42]); // 4-byte start code
+        data.extend_from_slice(&[0x00, 0x00, 0x01, 0x68]); // 3-byte start code
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x80, 0x40]);
+        let bytes = Bytes::from(data);
+
+        let expected = annex_b_to_avcc(&bytes);
+        let mut buf = BytesMut::new();
+        write_annex_b_avcc(&mut buf, &bytes);
+        assert_eq!(buf.freeze(), expected, "Annex-B in-place conversion");
+
+        // Fast path: length-prefixed payload (single- or multi-NAL) must
+        // pass through byte-identical.
+        let mut buf = BytesMut::new();
+        write_annex_b_avcc(&mut buf, &expected);
+        assert_eq!(buf.freeze(), expected, "length-prefixed passthrough");
+        assert!(annex_b_avcc_size(&expected).is_none());
+        // Multi-NAL AVCC (RTMP ingest shape) is not mistaken for Annex-B.
+        let mut multi = Vec::new();
+        multi.extend_from_slice(&(3u32).to_be_bytes());
+        multi.extend_from_slice(&[0x67, 0x42, 0x00]);
+        multi.extend_from_slice(&(2u32).to_be_bytes());
+        multi.extend_from_slice(&[0x65, 0x88]);
+        let multi = Bytes::from(multi);
+        assert!(
+            annex_b_avcc_size(&multi).is_none(),
+            "multi-NAL AVCC is AVCC"
+        );
+        let mut buf = BytesMut::new();
+        write_annex_b_avcc(&mut buf, &multi);
+        assert_eq!(buf.freeze(), multi, "multi-NAL AVCC passthrough");
+
+        // An AVCC NAL whose length field is `00 00 01 XX` (256–511-byte
+        // NAL, e.g. an AAC frame) looks like a 3-byte start code — it must
+        // still be recognized as length-prefixed and pass through.
+        let mut audio = Vec::new();
+        audio.extend_from_slice(&0x0101u32.to_be_bytes()); // 257-byte NAL
+        audio.extend_from_slice(&[0x21, 0x10, 0x00, 0x01]);
+        audio.resize(4 + 257, 0xab);
+        let audio = Bytes::from(audio);
+        assert!(
+            annex_b_avcc_size(&audio).is_none(),
+            "00 00 01 XX AVCC NAL is not Annex-B"
+        );
+        let mut buf = BytesMut::new();
+        write_annex_b_avcc(&mut buf, &audio);
+        assert_eq!(buf.freeze(), audio, "00 00 01 XX AVCC passthrough");
+    }
+
+    /// `encode` of a multi-NAL Annex-B keyframe must produce a video tag
+    /// whose body is exactly frame-type + packet-type + CTS + AVCC NALs.
+    #[test]
+    fn encode_h264_tag_payload_is_avcc() {
+        let desc = MediaDescription {
+            session_name: Arc::from("t"),
+            tracks: vec![TrackDescription {
+                id: 0,
+                kind: MediaKind::Video,
+                codec: Codec::H264,
+                clock_rate: 90_000,
+                channels: None,
+                payload_type: 96,
+                fmtp: None,
+                control: Arc::from("trackID=0"),
+                #[cfg(feature = "srtp")]
+                crypto: None,
+                width: None,
+                height: None,
+                frame_rate: None,
+            }],
+            #[cfg(feature = "multicast")]
+            connection: None,
+        };
+        let mut muxer = FlvMuxer::new(&desc);
+        let mut data = Vec::new();
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x0a]);
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x38, 0x80]);
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x80]);
+        let unit = AccessUnit {
+            track_id: 0,
+            codec: Codec::H264,
+            pts: Duration::from_millis(40),
+            dts: None,
+            rtp_timestamp: 3600,
+            is_keyframe: true,
+            data: Bytes::from(data),
+        };
+        if let Some(seq) = FlvMuxer::build_avc_sequence_header(&unit.data) {
+            muxer.set_video_sequence_header(seq);
+        }
+        let tags = muxer.encode(&unit);
+        // Walk the FLV tags and locate the coded-frames video tag.
+        let mut pos = 0;
+        let mut frame_body: Option<&[u8]> = None;
+        while pos + 15 <= tags.len() {
+            let tag_type = tags[pos];
+            let body_size =
+                u32::from_be_bytes([0, tags[pos + 1], tags[pos + 2], tags[pos + 3]]) as usize;
+            let body = &tags[pos + 11..pos + 11 + body_size];
+            if tag_type == 9 && body.get(1) == Some(&1) {
+                frame_body = Some(body);
+            }
+            pos += 11 + body_size + 4; // header + body + previous-tag-size
+        }
+        let frame_body = frame_body.expect("coded-frames video tag");
+        assert_eq!(frame_body[0] & 0x0f, 7, "codec id AVC");
+        assert_eq!(frame_body[1], 1, "AVC packet type NALU");
+        // Body after 5 bytes of video-tag header: length-prefixed NALs.
+        assert_eq!(
+            &frame_body[5..],
+            annex_b_to_avcc(&unit.data).as_ref(),
+            "frame payload is AVCC"
+        );
     }
 }
