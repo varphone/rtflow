@@ -175,6 +175,12 @@ pub(crate) struct Mount {
     pub proxy_running: AtomicBool,
     pub publishers: AtomicUsize,
     pub publisher_claimed: AtomicBool,
+    /// Unique active play sessions (clients) on this mount. Tracked by the
+    /// RTSP session layer (one per connection, regardless of how many
+    /// tracks it subscribed); `broadcast::Receiver` count counts track
+    /// subscriptions instead and would show 2 for a single video+audio
+    /// client.
+    pub active_sessions: AtomicUsize,
     pub max_queued_bytes_per_session: usize,
     /// SDP fmtp parameters received via ANNOUNCE, keyed by track_id.
     pub announce_fmtp: Mutex<HashMap<u8, Arc<str>>>,
@@ -443,7 +449,9 @@ impl MountHandle {
     }
 
     pub fn snapshot(&self) -> MountSnapshot {
-        let subscribers = self.inner.frames.receiver_count();
+        // Unique sessions, not track subscriptions: one client with a
+        // video+audio pair counts once.
+        let subscribers = self.inner.active_sessions.load(Ordering::Relaxed);
         let s = self.inner.stats.snapshot(subscribers);
         #[cfg(feature = "server")]
         let (startup_cache_frames, startup_cache_bytes) = self
@@ -480,8 +488,9 @@ pub struct LocalPublisher {
 
 impl LocalPublisher {
     /// Number of subscribers currently attached to this local source.
+    /// Number of unique client sessions currently playing this mount.
     pub fn subscriber_count(&self) -> usize {
-        self.inner.frames.receiver_count()
+        self.inner.active_sessions.load(Ordering::Relaxed)
     }
 
     /// True after the mount is unregistered or its server begins shutdown.
@@ -698,6 +707,7 @@ impl MountRegistry {
             proxy_running: AtomicBool::new(false),
             publishers: AtomicUsize::new(0),
             publisher_claimed: AtomicBool::new(false),
+            active_sessions: AtomicUsize::new(0),
             max_queued_bytes_per_session: 4 * 1024 * 1024,
             announce_fmtp: Mutex::new(HashMap::new()),
             rtmp_seq_headers: Mutex::new(HashMap::new()),

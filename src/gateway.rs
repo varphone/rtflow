@@ -182,6 +182,7 @@ impl Gateway {
             proxy_running: std::sync::atomic::AtomicBool::new(false),
             publishers: std::sync::atomic::AtomicUsize::new(0),
             publisher_claimed: std::sync::atomic::AtomicBool::new(false),
+            active_sessions: std::sync::atomic::AtomicUsize::new(0),
             max_queued_bytes_per_session: max_queued_bytes,
             announce_fmtp: Mutex::new(HashMap::new()),
             rtmp_seq_headers: Mutex::new(HashMap::new()),

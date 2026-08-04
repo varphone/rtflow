@@ -664,6 +664,12 @@ pub(super) async fn serve_connection(
                         .await?;
                 } else {
                     phase = ConnectionPhase::Playing;
+                    resources.register_play(
+                        interleaved
+                            .iter()
+                            .map(|(mount, _, _, _)| mount)
+                            .chain(setups.iter().map(|(mount, _, _, _, _)| mount)),
+                    );
                     let mut response = simple_response(200, "OK", cseq);
                     response.headers.insert(
                         "session".into(),
@@ -922,6 +928,9 @@ struct ConnectionResources {
     recording_mounts: Vec<Arc<Mount>>,
     claims: Vec<Arc<Mount>>,
     vod: Option<VodPlayback>,
+    /// Mounts with an active PLAY in this session (deduplicated), for the
+    /// unique-client counter.
+    played_mounts: Vec<Arc<Mount>>,
 }
 impl ConnectionResources {
     fn abort_senders(&mut self) {
@@ -934,10 +943,24 @@ impl ConnectionResources {
         self.vod.take().map(VodPlayback::stop)
     }
 
+    /// Register each distinct mount as having one active play session.
+    /// Idempotent across repeated PLAY requests.
+    fn register_play<'a>(&mut self, mounts: impl Iterator<Item = &'a Arc<Mount>>) {
+        for mount in mounts {
+            if !self.played_mounts.iter().any(|seen| Arc::ptr_eq(seen, mount)) {
+                mount.active_sessions.fetch_add(1, Ordering::Relaxed);
+                self.played_mounts.push(mount.clone());
+            }
+        }
+    }
+
     fn cleanup(&mut self) {
         self.abort_senders();
         self.stop_vod();
         release_recording_mounts(&mut self.recording_mounts);
+        for mount in self.played_mounts.drain(..) {
+            mount.active_sessions.fetch_sub(1, Ordering::Relaxed);
+        }
         // Always release publisher claims when the session ends: the flag
         // guards concurrent take-over while a session is alive, it must not
         // outlive the connection (otherwise a Publisher mount with

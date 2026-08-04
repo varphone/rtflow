@@ -576,6 +576,7 @@ impl RtspServer {
             proxy_running: std::sync::atomic::AtomicBool::new(false),
             publishers: std::sync::atomic::AtomicUsize::new(0),
             publisher_claimed: std::sync::atomic::AtomicBool::new(false),
+            active_sessions: std::sync::atomic::AtomicUsize::new(0),
             max_queued_bytes_per_session: self
                 .state
                 .config
