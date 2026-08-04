@@ -706,6 +706,10 @@ pub struct MountRegistry {
     global: Option<Arc<crate::metrics::MetricsRegistry>>,
 }
 
+/// Default per-consumer buffering limit (bytes) applied to every mount
+/// unless overridden via [`MountOptions`] or the server/gateway config.
+pub const DEFAULT_MAX_QUEUED_BYTES_PER_SESSION: usize = 4 * 1024 * 1024;
+
 /// Per-mount tuning knobs for [`MountRegistry::register_with`].
 ///
 /// All fields are optional; `None` falls back to the defaults that
@@ -899,7 +903,7 @@ impl MountRegistry {
             active_sessions: AtomicUsize::new(0),
             max_queued_bytes_per_session: options
                 .max_queued_bytes_per_session
-                .unwrap_or(4 * 1024 * 1024),
+                .unwrap_or(DEFAULT_MAX_QUEUED_BYTES_PER_SESSION),
             announce_fmtp: Mutex::new(HashMap::new()),
             rtmp_seq_headers: Mutex::new(HashMap::new()),
         });
