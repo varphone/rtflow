@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::tcp::OwnedWriteHalf;
 
-type ConnWriter = OwnedWriteHalf;
+pub(crate) type ConnWriter = OwnedWriteHalf;
 
 pub type Handler = Arc<
     dyn Fn(
