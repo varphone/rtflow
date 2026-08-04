@@ -224,13 +224,13 @@ pub(super) async fn serve_connection(
                 provided_session.is_some_and(|value| value != session_id)
             } else if matches!(
                 req.method,
-                Method::Play
-                    | Method::Pause
-                    | Method::Record
-                    | Method::Teardown
-                    | Method::GetParameter
+                Method::Play | Method::Pause | Method::Record | Method::Teardown
             ) {
                 provided_session != Some(session_id.as_str())
+            } else if req.method == Method::GetParameter {
+                // RFC 2326 allows a session-less GET_PARAMETER (server
+                // capabilities query); only reject a mismatched one.
+                provided_session.is_some_and(|value| value != session_id)
             } else {
                 false
             };
@@ -443,7 +443,23 @@ pub(super) async fn serve_connection(
                     rtcp_channel,
                 } = transport
                 {
-                    let track = track_for_uri(&description_for(&mount.config)?, &req.uri)?;
+                    let Ok(track) =
+                        track_for_uri(&description_for(&mount.config)?, &req.uri)
+                    else {
+                        // Unknown control URI: reply 404 instead of dropping
+                        // the connection (strict clients treat a dropped
+                        // connection as a network failure).
+                        writer
+                            .lock()
+                            .await
+                            .write_all(&rtsp::encode_response(&simple_response(
+                                404,
+                                "Not Found",
+                                cseq,
+                            )))
+                            .await?;
+                        continue;
+                    };
                     let proxy_mount = mount.clone();
                     interleaved.push((mount, rtp_channel, rtcp_channel, track));
                     selected_mount.get_or_insert(path.clone());
@@ -502,7 +518,18 @@ pub(super) async fn serve_connection(
                 let server_rtcp = pair.rtcp_port()?;
                 let rtp_target = SocketAddr::new(peer.ip(), client_rtp);
                 let rtcp_target = SocketAddr::new(peer.ip(), client_rtcp);
-                let track = track_for_uri(&description_for(&mount.config)?, &req.uri)?;
+                let Ok(track) = track_for_uri(&description_for(&mount.config)?, &req.uri) else {
+                    writer
+                        .lock()
+                        .await
+                        .write_all(&rtsp::encode_response(&simple_response(
+                            404,
+                            "Not Found",
+                            cseq,
+                        )))
+                        .await?;
+                    continue;
+                };
                 let mut response = simple_response(200, "OK", cseq);
                 response.headers.insert(
                     "session".into(),

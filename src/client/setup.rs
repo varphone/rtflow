@@ -301,21 +301,30 @@ async fn connect_udp(
             return Err(Error::Rtsp("server changed Session during SETUP".into()));
         }
         session_id = Some(received);
-        let server_rtcp = match response
+        let transport_spec = response
             .headers
             .get("transport")
             .map(String::as_str)
             .map(TransportSpec::parse)
-            .transpose()?
-        {
+            .transpose()?;
+        let server_rtp = match &transport_spec {
+            Some(TransportSpec::Udp {
+                server_rtp: Some(port),
+                ..
+            }) => *port,
+            _ => return Err(Error::Rtsp("SETUP response has no server RTP port".into())),
+        };
+        let server_rtcp = match &transport_spec {
             Some(TransportSpec::Udp {
                 server_rtcp: Some(port),
                 ..
-            }) => port,
+            }) => *port,
             _ => return Err(Error::Rtsp("SETUP response has no server RTCP port".into())),
         };
-        let rtcp_target = std::net::SocketAddr::new(stream.peer_addr().ip(), server_rtcp);
-        receivers.push((pair, track, rtcp_target));
+        let peer_ip = stream.peer_addr().ip();
+        let rtp_target = std::net::SocketAddr::new(peer_ip, server_rtp);
+        let rtcp_target = std::net::SocketAddr::new(peer_ip, server_rtcp);
+        receivers.push((pair, track, rtp_target, rtcp_target));
     }
     let session_id = session_id.ok_or_else(|| Error::Rtsp("SDP has no tracks".into()))?;
     let mut extra = format!("Session: {session_id}\r\n");
@@ -340,7 +349,7 @@ async fn connect_udp(
     let cancel = CancellationToken::new();
     let quality = Arc::new(Mutex::new(HashMap::new()));
     let mut tasks = Vec::new();
-    for (pair, track, rtcp_target) in receivers {
+    for (pair, track, rtp_target, rtcp_target) in receivers {
         let tx = tx.clone();
         let jitter_config = options.jitter.clone();
         let jitter_poll = jitter_config
@@ -355,6 +364,10 @@ async fn connect_udp(
         let local_ssrc = client_ssrc(track_id);
         tasks.push(tokio::spawn(async move {
             let mut jitter = JitterBuffer::new(jitter_config);
+            // Server SSRC is not signaled in SETUP; anchor on the first
+            // packet and reject any later SSRC change (RFC 3550 conflict
+            // handling — a restarted server reconnects instead of mixing).
+            let mut expected_ssrc: Option<u32> = None;
             let mut depacketizer = Depacketizer::new(track.codec, track.id, track.clock_rate);
             let mut buffer = vec![0u8; 65_536];
             let mut jitter_tick = tokio::time::interval(jitter_poll);
@@ -373,7 +386,14 @@ async fn connect_udp(
                     result = pair.rtp.recv_from(&mut buffer) => result,
                 };
                 match received {
-                    Ok((size, _)) => {
+                    Ok((size, source)) => {
+                        // Reject packets from any address other than the
+                        // negotiated server RTP port: RTSP/RTCP has no
+                        // built-in authenticity, so an on-path attacker
+                        // must not be able to inject media.
+                        if source != rtp_target {
+                            continue;
+                        }
                         let packet = match RtpPacket::parse(bytes::Bytes::copy_from_slice(
                             &buffer[..size],
                         )) {
@@ -385,6 +405,17 @@ async fn connect_udp(
                                 continue;
                             }
                         };
+                        // Reject mismatched payload type or SSRC: they must
+                        // match the negotiated track (a server restart with
+                        // a new SSRC triggers a reconnect, not silent mix).
+                        if packet.header.payload_type != track.payload_type {
+                            continue;
+                        }
+                        match expected_ssrc {
+                            Some(expected) if packet.header.ssrc != expected => continue,
+                            None => expected_ssrc = Some(packet.header.ssrc),
+                            _ => {}
+                        }
                         if let Err(error) =
                             observe_quality(&rtp_quality, track_id, clock_rate, local_ssrc, &packet)
                                 .await

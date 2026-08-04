@@ -321,12 +321,23 @@ impl ClientSession {
                 Some(&extra),
                 authorization.as_deref(),
             );
-            writer.lock().await.write_all(wire.as_bytes()).await?;
-            let mut response = timeout(self.request_timeout, responses.recv())
-                .await
-                .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
-                .ok_or(Error::Closed)?;
-            validate_response_cseq(&response, cseq)?;
+            tokio::time::timeout(self.request_timeout, async {
+                writer.lock().await.write_all(wire.as_bytes()).await
+            })
+            .await
+            .map_err(|_| Error::Limit("interleaved control write timeout"))??;
+            // Pair responses by CSeq: a stale response left over from a
+            // previous exchange (e.g. a timed-out reconnect) must not be
+            // mistaken for the reply to this request.
+            let mut response = loop {
+                let candidate = timeout(self.request_timeout, responses.recv())
+                    .await
+                    .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
+                    .ok_or(Error::Closed)?;
+                if candidate_headers_cseq(&candidate) == Some(cseq) {
+                    break candidate;
+                }
+            };
             if response.status == 401
                 && let (Some(credentials), Some(challenge)) = (
                     self.credentials.as_ref(),
@@ -346,12 +357,20 @@ impl ClientSession {
                     Some(&extra),
                     authorization.as_deref(),
                 );
-                writer.lock().await.write_all(wire.as_bytes()).await?;
-                response = timeout(self.request_timeout, responses.recv())
-                    .await
-                    .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
-                    .ok_or(Error::Closed)?;
-                validate_response_cseq(&response, cseq)?;
+                tokio::time::timeout(self.request_timeout, async {
+                writer.lock().await.write_all(wire.as_bytes()).await
+            })
+            .await
+            .map_err(|_| Error::Limit("interleaved control write timeout"))??;
+                response = loop {
+                    let candidate = timeout(self.request_timeout, responses.recv())
+                        .await
+                        .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
+                        .ok_or(Error::Closed)?;
+                    if candidate_headers_cseq(&candidate) == Some(cseq) {
+                        break candidate;
+                    }
+                };
             }
             if response.status != 200 {
                 return Err(status_error(method, response.status));
@@ -727,6 +746,15 @@ fn should_fallback_to_tcp(error: &Error) -> bool {
         }
         _ => false,
     }
+}
+
+/// Read the CSeq header of a response (if present) for pairing.
+fn candidate_headers_cseq(response: &Response) -> Option<u32> {
+    response
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("cseq"))
+        .and_then(|(_, value)| value.parse().ok())
 }
 
 fn validate_response_cseq(response: &Response, cseq: u32) -> Result<()> {

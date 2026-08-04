@@ -214,6 +214,18 @@ impl ServerConfigBuilder {
         self
     }
 
+    /// Bound the maximum RTSP request header size (bytes).
+    pub fn max_rtsp_header_bytes(mut self, value: usize) -> Self {
+        self.config.max_rtsp_header_bytes = value;
+        self
+    }
+
+    /// Bound the maximum RTSP request body size (bytes).
+    pub fn max_rtsp_body_bytes(mut self, value: usize) -> Self {
+        self.config.max_rtsp_body_bytes = value;
+        self
+    }
+
     pub fn no_subscriber_grace(mut self, value: Duration) -> Self {
         self.config.no_subscriber_grace = value;
         self
