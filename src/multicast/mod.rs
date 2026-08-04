@@ -63,7 +63,9 @@ impl MulticastConfig {
             socket.join_multicast_v4(group_v4, interface_v4)?;
             socket.set_multicast_ttl_v4(u32::from(self.ttl))?;
         } else {
-            return Err(Error::Rtsp("IPv6 multicast not yet supported".into()));
+            return Err(Error::Unsupported(
+                "IPv6 multicast not yet supported".into(),
+            ));
         }
 
         Ok(socket)

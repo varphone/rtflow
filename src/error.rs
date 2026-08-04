@@ -61,6 +61,12 @@ pub enum Error {
     Rtsp(String),
     #[error("invalid media payload: {0}")]
     Media(String),
+    #[error("HTTP/WebSocket error: {0}")]
+    Http(String),
+    #[error("invalid configuration: {0}")]
+    InvalidConfig(String),
+    #[error("unsupported: {0}")]
+    Unsupported(String),
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
     #[cfg(feature = "tls")]
@@ -95,6 +101,9 @@ impl Error {
         match self {
             Self::Rtsp(_) => ErrorCode::InvalidProtocol,
             Self::Media(_) => ErrorCode::InvalidMedia,
+            Self::Http(_) => ErrorCode::InvalidProtocol,
+            Self::InvalidConfig(_) => ErrorCode::InvalidState,
+            Self::Unsupported(_) => ErrorCode::Unsupported,
             Self::Io(error) if error.kind() == io::ErrorKind::TimedOut => ErrorCode::Timeout,
             #[cfg(feature = "tls")]
             Self::Io(_) | Self::Tls(_) => ErrorCode::Io,
@@ -143,6 +152,8 @@ impl Error {
             Self::Conflict(_) => 455,
             Self::Limit(_) => 453,
             Self::Rtsp(_) | Self::Media(_) => 400,
+            Self::Http(_) | Self::InvalidConfig(_) => 500,
+            Self::Unsupported(_) => 501,
             #[cfg(feature = "srtp")]
             Self::Srtp(_) => 400,
             #[cfg(feature = "rtmp")]
@@ -173,5 +184,23 @@ mod tests {
         let reset = Error::Io(io::Error::new(io::ErrorKind::ConnectionReset, "reset"));
         assert_eq!(reset.code(), ErrorCode::Io);
         assert_eq!(reset.retry_class(), RetryClass::Backoff);
+        // Domain-specific variants map to their own codes/statuses.
+        assert_eq!(
+            Error::Http("bad request".into()).code(),
+            ErrorCode::InvalidProtocol
+        );
+        assert_eq!(Error::Http("bad request".into()).rtsp_status(), 500);
+        assert_eq!(
+            Error::InvalidConfig("bad CIDR".into()).code(),
+            ErrorCode::InvalidState
+        );
+        assert_eq!(
+            Error::Unsupported("ipv6 multicast".into()).code(),
+            ErrorCode::Unsupported
+        );
+        assert_eq!(
+            Error::Unsupported("ipv6 multicast".into()).rtsp_status(),
+            501
+        );
     }
 }

@@ -39,12 +39,12 @@ impl FromStr for IpCidr {
     fn from_str(value: &str) -> Result<Self> {
         let (address, prefix) = value
             .split_once('/')
-            .ok_or_else(|| Error::Rtsp("CIDR prefix is missing".into()))?;
-        let address =
-            IpAddr::from_str(address).map_err(|_| Error::Rtsp("invalid CIDR address".into()))?;
+            .ok_or_else(|| Error::InvalidConfig("CIDR prefix is missing".into()))?;
+        let address = IpAddr::from_str(address)
+            .map_err(|_| Error::InvalidConfig("invalid CIDR address".into()))?;
         let prefix = prefix
             .parse::<u8>()
-            .map_err(|_| Error::Rtsp("invalid CIDR prefix".into()))?;
+            .map_err(|_| Error::InvalidConfig("invalid CIDR prefix".into()))?;
         match address {
             IpAddr::V4(address) if prefix <= 32 => Ok(Self::V4 {
                 network: masked_v4(u32::from(address), prefix),
@@ -54,7 +54,7 @@ impl FromStr for IpCidr {
                 network: masked_v6(u128::from(address), prefix),
                 prefix,
             }),
-            _ => Err(Error::Rtsp("CIDR prefix is out of range".into())),
+            _ => Err(Error::InvalidConfig("CIDR prefix is out of range".into())),
         }
     }
 }
