@@ -50,11 +50,7 @@ pub fn timestamp_to_duration(ts: u32) -> Duration {
 }
 
 /// Build an Opus AccessUnit from raw Opus packet data.
-pub fn build_access_unit(
-    data: Bytes,
-    timestamp: u32,
-    track_id: u8,
-) -> AccessUnit {
+pub fn build_access_unit(data: Bytes, timestamp: u32, track_id: u8) -> AccessUnit {
     let pts = timestamp_to_duration(timestamp);
     AccessUnit {
         track_id,

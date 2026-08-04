@@ -6,8 +6,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tracing::{debug, info};
-use webrtc_ice::agent::agent_config::AgentConfig;
 use webrtc_ice::agent::Agent;
+use webrtc_ice::agent::agent_config::AgentConfig;
 
 use crate::Result;
 use crate::error::Error;
@@ -28,17 +28,14 @@ pub struct IceAgent {
 
 impl IceAgent {
     /// Create a new ICE agent with host candidates only.
-    pub async fn new(
-        bind_addr: SocketAddr,
-        ufrag: &str,
-        pwd: &str,
-    ) -> Result<Self> {
+    pub async fn new(bind_addr: SocketAddr, ufrag: &str, pwd: &str) -> Result<Self> {
         // Create UDP socket
         let socket = UdpSocket::bind(bind_addr)
             .await
             .map_err(|e| Error::Webrtc(format!("ICE bind {bind_addr}: {e}")))?;
 
-        let local_addr = socket.local_addr()
+        let local_addr = socket
+            .local_addr()
             .map_err(|e| Error::Webrtc(format!("ICE local_addr: {e}")))?;
 
         info!("ICE: bound to {local_addr}");
@@ -81,10 +78,13 @@ impl IceAgent {
 
     /// Gather local candidates (host only).
     pub async fn gather_candidates(&mut self) -> Result<Vec<String>> {
-        let socket = self.socket.as_ref()
+        let socket = self
+            .socket
+            .as_ref()
             .ok_or_else(|| Error::Webrtc("ICE: no socket".into()))?;
 
-        let local_addr = socket.local_addr()
+        let local_addr = socket
+            .local_addr()
             .map_err(|e| Error::Webrtc(format!("ICE: {e}")))?;
 
         // Create host candidate SDP string
@@ -129,7 +129,8 @@ impl IceAgent {
 
     /// Close the ICE agent.
     pub async fn close(&self) -> Result<()> {
-        self.agent.close()
+        self.agent
+            .close()
             .await
             .map_err(|e| Error::Webrtc(format!("ICE close: {e}")))?;
         Ok(())
@@ -146,7 +147,9 @@ mod tests {
             "127.0.0.1:0".parse().unwrap(),
             "testufrag",
             "testpwd123456789012345",
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(agent.ufrag(), "testufrag");
         assert_eq!(agent.pwd(), "testpwd123456789012345");
@@ -159,7 +162,9 @@ mod tests {
             "127.0.0.1:0".parse().unwrap(),
             "ufrag",
             "pwd12345678901234567890",
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let candidates = agent.gather_candidates().await.unwrap();
         assert!(!candidates.is_empty());

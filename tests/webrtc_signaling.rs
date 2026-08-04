@@ -7,7 +7,7 @@
 
 use rtflow::http::{HttpConfig, HttpServer, Method};
 use rtflow::mount::MountRegistry;
-use rtflow::webrtc::{create_webrtc_handlers, WebRtcConfig};
+use rtflow::webrtc::{WebRtcConfig, create_webrtc_handlers};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -52,9 +52,8 @@ async fn http_request(
 ) -> (u16, String, String) {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let body_bytes = body.unwrap_or("");
-    let mut request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n"
-    );
+    let mut request =
+        format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n");
     if let Some(ct) = content_type {
         request.push_str(&format!("Content-Type: {ct}\r\n"));
     }

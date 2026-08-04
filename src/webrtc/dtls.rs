@@ -26,7 +26,9 @@ impl DtlsConfig {
             .map_err(|e| Error::Webrtc(format!("DTLS cert generation: {e}")))?;
 
         // Compute fingerprint from certificate DER
-        let der = cert.certificate.first()
+        let der = cert
+            .certificate
+            .first()
             .ok_or_else(|| Error::Webrtc("DTLS: no certificate".into()))?;
         let fingerprint = compute_fingerprint(der);
 
@@ -70,7 +72,7 @@ impl DtlsConfig {
 
 /// Compute SHA-256 fingerprint of a DER-encoded certificate.
 fn compute_fingerprint(der: &[u8]) -> String {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let hash = Sha256::digest(der);
     let hex: Vec<String> = hash.iter().map(|b| format!("{b:02X}")).collect();
     format!("sha-256 {}", hex.join(":"))

@@ -6,9 +6,9 @@
 //! See: https://datatracker.ietf.org/doc/html/draft-ietf-wish-whip
 use super::sdp_ext::{IceCandidate, WebRtcSdpAttributes, generate_whip_answer};
 use super::session::{SessionRegistry, SessionType};
+use crate::Result;
 use crate::http::{HttpRequest, ResponseWriter};
 use crate::mount::MountRegistry;
-use crate::Result;
 use std::sync::Arc;
 use tokio::io::AsyncWrite;
 use tracing::{debug, info};
@@ -63,7 +63,9 @@ pub async fn handle_whip_post<W: AsyncWrite + Unpin>(
     let _offer_attrs = WebRtcSdpAttributes::from_sdp_lines(&offer_lines);
 
     // Create session
-    let session = sessions.create_session(SessionType::Publish, mount_path.clone()).await?;
+    let session = sessions
+        .create_session(SessionType::Publish, mount_path.clone())
+        .await?;
     let session_id = session.read().await.id.clone();
 
     // Generate our ICE credentials
@@ -124,7 +126,9 @@ pub async fn handle_whip_delete<W: AsyncWrite + Unpin>(
     if sessions.remove_session(session_id).await.is_some() {
         writer.write_body(200, "text/plain", b"OK").await?;
     } else {
-        writer.write_body(404, "text/plain", b"Session not found").await?;
+        writer
+            .write_body(404, "text/plain", b"Session not found")
+            .await?;
     }
     Ok(writer)
 }
@@ -137,7 +141,10 @@ pub async fn handle_whip_options<W: AsyncWrite + Unpin>(
     let headers = [
         ("Access-Control-Allow-Origin", "*"),
         ("Access-Control-Allow-Methods", "POST, DELETE, OPTIONS"),
-        ("Access-Control-Allow-Headers", "Content-Type, Authorization"),
+        (
+            "Access-Control-Allow-Headers",
+            "Content-Type, Authorization",
+        ),
         ("Access-Control-Max-Age", "86400"),
     ];
     writer.write_headers(204, &headers).await?;

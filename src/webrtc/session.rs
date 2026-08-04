@@ -137,7 +137,10 @@ impl SessionRegistry {
         let session = WebrtcSession::new(id.clone(), session_type, mount_path);
 
         let session = Arc::new(RwLock::new(session));
-        self.sessions.write().await.insert(id.clone(), session.clone());
+        self.sessions
+            .write()
+            .await
+            .insert(id.clone(), session.clone());
 
         info!("WebRTC session created: {id} ({session_type:?})");
         Ok(session)
@@ -214,10 +217,10 @@ mod tests {
     async fn session_registry_create_get() {
         let registry = SessionRegistry::new(Duration::from_secs(60)).unwrap();
 
-        let session = registry.create_session(
-            SessionType::Play,
-            "/live/stream".to_string(),
-        ).await.unwrap();
+        let session = registry
+            .create_session(SessionType::Play, "/live/stream".to_string())
+            .await
+            .unwrap();
 
         let id = session.read().await.id.clone();
         assert_eq!(registry.session_count().await, 1);
@@ -230,10 +233,10 @@ mod tests {
     async fn session_registry_remove() {
         let registry = SessionRegistry::new(Duration::from_secs(60)).unwrap();
 
-        let session = registry.create_session(
-            SessionType::Publish,
-            "/live/cam".to_string(),
-        ).await.unwrap();
+        let session = registry
+            .create_session(SessionType::Publish, "/live/cam".to_string())
+            .await
+            .unwrap();
 
         let id = session.read().await.id.clone();
         registry.remove_session(&id).await;

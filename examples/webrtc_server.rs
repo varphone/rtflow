@@ -3,7 +3,7 @@ mod common;
 use clap::Parser;
 use common::{CodecArg, init_tracing, mount_path, publisher_description};
 use rtflow::http::{HttpConfig, HttpServer, Method};
-use rtflow::webrtc::{create_webrtc_handlers, WebRtcConfig};
+use rtflow::webrtc::{WebRtcConfig, create_webrtc_handlers};
 use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 
@@ -68,7 +68,8 @@ fn whep_player_html(whep_url: &str) -> String {
 <div class="info">
   <p>WHEP endpoint: <code>"#);
     html.push_str(whep_url);
-    html.push_str(r#"</code></p>
+    html.push_str(
+        r#"</code></p>
   <div id="status" class="waiting">Connecting...</div>
 </div>
 <script>
@@ -96,9 +97,11 @@ async function startPlayback() {
   await pc.setLocalDescription(offer);
 
   try {
-    const resp = await fetch('"#);
+    const resp = await fetch('"#,
+    );
     html.push_str(whep_url);
-    html.push_str(r#"', {
+    html.push_str(
+        r#"', {
       method: 'POST',
       headers: { 'Content-Type': 'application/sdp' },
       body: offer.sdp,
@@ -115,7 +118,8 @@ async function startPlayback() {
 startPlayback();
 </script>
 </body>
-</html>"#);
+</html>"#,
+    );
     html
 }
 
@@ -144,7 +148,8 @@ fn whip_publisher_html(whip_url: &str) -> String {
 <div class="info">
   <p>WHIP endpoint: <code>"#);
     html.push_str(whip_url);
-    html.push_str(r#"</code></p>
+    html.push_str(
+        r#"</code></p>
   <p id="status">Click "Start Publishing" to begin.</p>
 </div>
 <script>
@@ -164,9 +169,11 @@ async function startPublish() {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    const resp = await fetch('"#);
+    const resp = await fetch('"#,
+    );
     html.push_str(whip_url);
-    html.push_str(r#"', {
+    html.push_str(
+        r#"', {
       method: 'POST',
       headers: { 'Content-Type': 'application/sdp' },
       body: offer.sdp,
@@ -182,7 +189,8 @@ async function startPublish() {
 }
 </script>
 </body>
-</html>"#);
+</html>"#,
+    );
     html
 }
 
@@ -225,9 +233,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Register WHIP/WHEP routes
     let whip_path = format!("/whip{}", args.mount);
     let whep_path = format!("/whep{}", args.mount);
-    http_server.add_route(Method::Post, &whip_path, whip_handler.clone()).await;
-    http_server.add_route(Method::Delete, &whip_path, whip_handler).await;
-    http_server.add_route(Method::Post, &whep_path, whep_handler).await;
+    http_server
+        .add_route(Method::Post, &whip_path, whip_handler.clone())
+        .await;
+    http_server
+        .add_route(Method::Delete, &whip_path, whip_handler)
+        .await;
+    http_server
+        .add_route(Method::Post, &whep_path, whep_handler)
+        .await;
 
     // Player pages
     let whep_url = format!("http://{}:{}/whep{}", args.public_ip, http_port, args.mount);
@@ -237,21 +251,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let player_handler: rtflow::http::Handler = Arc::new(move |_req, mut writer| {
         let html = player_html.clone();
         Box::pin(async move {
-            writer.write_body(200, "text/html; charset=utf-8", html.as_bytes()).await?;
+            writer
+                .write_body(200, "text/html; charset=utf-8", html.as_bytes())
+                .await?;
             Ok(writer)
         })
     });
-    http_server.add_route(Method::Get, "/player", player_handler).await;
+    http_server
+        .add_route(Method::Get, "/player", player_handler)
+        .await;
 
     let publisher_html = whip_publisher_html(&whip_url);
     let publisher_handler: rtflow::http::Handler = Arc::new(move |_req, mut writer| {
         let html = publisher_html.clone();
         Box::pin(async move {
-            writer.write_body(200, "text/html; charset=utf-8", html.as_bytes()).await?;
+            writer
+                .write_body(200, "text/html; charset=utf-8", html.as_bytes())
+                .await?;
             Ok(writer)
         })
     });
-    http_server.add_route(Method::Get, "/publisher", publisher_handler).await;
+    http_server
+        .add_route(Method::Get, "/publisher", publisher_handler)
+        .await;
 
     http_server.run().await?;
 

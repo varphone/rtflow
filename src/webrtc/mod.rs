@@ -84,13 +84,32 @@ pub fn create_webrtc_handlers(
             // Return dummy handlers that return 500
             let error_handler: Handler = Arc::new(|_req, mut writer| {
                 Box::pin(async move {
-                    writer.write_body(500, "text/plain", b"WebRTC initialization failed").await?;
+                    writer
+                        .write_body(500, "text/plain", b"WebRTC initialization failed")
+                        .await?;
                     Ok(writer)
                 })
             });
             return (error_handler.clone(), error_handler);
         }
     };
+
+    // Periodically reap expired sessions so abandoned WHIP/WHEP sessions
+    // cannot accumulate in the registry.
+    {
+        let cleanup_sessions = sessions.clone();
+        let cleanup_interval = (config.session_timeout / 2).max(Duration::from_secs(1));
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(cleanup_interval);
+            loop {
+                ticker.tick().await;
+                let removed = cleanup_sessions.cleanup_expired().await;
+                if removed > 0 {
+                    tracing::info!("WebRTC: reaped {removed} expired session(s)");
+                }
+            }
+        });
+    }
 
     // WHIP handler
     let whip_config = config.whip.clone();
@@ -109,9 +128,7 @@ pub fn create_webrtc_handlers(
                 crate::http::Method::Delete => {
                     whip::handle_whip_delete(req, writer, sessions).await
                 }
-                _ => {
-                    whip::handle_whip_options(req, writer).await
-                }
+                _ => whip::handle_whip_options(req, writer).await,
             }
         })
     });
@@ -133,9 +150,7 @@ pub fn create_webrtc_handlers(
                 crate::http::Method::Delete => {
                     whep::handle_whep_delete(req, writer, sessions).await
                 }
-                _ => {
-                    whep::handle_whep_options(req, writer).await
-                }
+                _ => whep::handle_whep_options(req, writer).await,
             }
         })
     });
