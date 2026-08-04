@@ -4,6 +4,7 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 pub struct ResponseWriter<W: AsyncWrite + Unpin> {
     inner: W,
     headers_written: bool,
+    connection_close: bool,
 }
 
 impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
@@ -11,7 +12,13 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
         Self {
             inner: writer,
             headers_written: false,
+            connection_close: false,
         }
+    }
+
+    /// Whether the response indicated the connection should be closed.
+    pub fn should_close(&self) -> bool {
+        self.connection_close
     }
 
     pub async fn write_headers(&mut self, status: u16, headers: &[(&str, &str)]) -> Result<()> {
@@ -21,6 +28,9 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
         let reason = status_reason(status);
         let mut buf = format!("HTTP/1.1 {} {}\r\n", status, reason);
         for (key, value) in headers {
+            if key.eq_ignore_ascii_case("connection") && value.eq_ignore_ascii_case("close") {
+                self.connection_close = true;
+            }
             buf.push_str(key);
             buf.push_str(": ");
             buf.push_str(value);

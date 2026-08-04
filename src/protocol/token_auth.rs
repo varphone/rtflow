@@ -16,7 +16,7 @@
 //! ```
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use hmac::{Hmac, Mac, KeyInit};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
@@ -111,8 +111,7 @@ pub fn extract_token_from_query<'a>(config: &TokenConfig, query: &'a str) -> Opt
 
 fn compute_signature(secret: &[u8], path: &str, expires: u64) -> String {
     let message = format!("{path}.{expires}");
-    let mut mac =
-        HmacSha256::new_from_slice(secret).expect("HMAC accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(message.as_bytes());
     let result = mac.finalize();
     URL_SAFE_NO_PAD.encode(result.into_bytes())

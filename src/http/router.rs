@@ -94,6 +94,11 @@ enum PatternSegment {
     Literal(String),
     #[allow(dead_code)]
     Param(String),
+    /// A segment with a prefix and suffix around a parameter, e.g. `segment_{seq}.m4s`.
+    ParamWithAffixes {
+        prefix: String,
+        suffix: String,
+    },
     Wildcard,
 }
 
@@ -107,6 +112,14 @@ impl PathPattern {
                     PatternSegment::Wildcard
                 } else if s.starts_with('{') && s.ends_with('}') {
                     PatternSegment::Param(s[1..s.len() - 1].to_string())
+                } else if let Some(brace_start) = s.find('{') {
+                    if let Some(brace_end) = s[brace_start..].find('}') {
+                        let prefix = s[..brace_start].to_string();
+                        let suffix = s[brace_start + brace_end + 1..].to_string();
+                        PatternSegment::ParamWithAffixes { prefix, suffix }
+                    } else {
+                        PatternSegment::Literal(s.to_string())
+                    }
                 } else {
                     PatternSegment::Literal(s.to_string())
                 }
@@ -140,6 +153,17 @@ impl PathPattern {
                         return None;
                     }
                     params.push(parts[i].to_string());
+                }
+                PatternSegment::ParamWithAffixes { prefix, suffix } => {
+                    if i >= parts.len() {
+                        return None;
+                    }
+                    let part = parts[i];
+                    if !part.starts_with(prefix.as_str()) || !part.ends_with(suffix.as_str()) {
+                        return None;
+                    }
+                    let value = &part[prefix.len()..part.len() - suffix.len()];
+                    params.push(value.to_string());
                 }
                 PatternSegment::Wildcard => {
                     break;

@@ -2,8 +2,8 @@
 //!
 //! Wraps an existing [`Handler`] to enforce HMAC token verification
 //! before delegating to the inner handler.
-use super::router::Handler;
 use super::response::ResponseWriter;
+use super::router::Handler;
 use crate::token_auth::TokenConfig;
 use std::sync::Arc;
 
@@ -27,9 +27,7 @@ pub fn with_token_auth(handler: Handler, config: TokenConfig) -> Handler {
                 Some(token) if crate::token_auth::verify_token(&config, path, token) => {
                     handler(req, writer).await
                 }
-                _ => {
-                    write_forbidden(writer).await
-                }
+                _ => write_forbidden(writer).await,
             }
         })
     })
@@ -38,7 +36,11 @@ pub fn with_token_auth(handler: Handler, config: TokenConfig) -> Handler {
 /// Wrap a handler with token auth, but bypass authentication for specific paths.
 ///
 /// Useful for exempting `/health`, `/metrics`, or player pages from auth.
-pub fn with_token_auth_bypass(handler: Handler, config: TokenConfig, bypass: Vec<String>) -> Handler {
+pub fn with_token_auth_bypass(
+    handler: Handler,
+    config: TokenConfig,
+    bypass: Vec<String>,
+) -> Handler {
     Arc::new(move |req, writer| {
         let handler = handler.clone();
         let config = config.clone();
@@ -56,9 +58,7 @@ pub fn with_token_auth_bypass(handler: Handler, config: TokenConfig, bypass: Vec
                 Some(token) if crate::token_auth::verify_token(&config, path, token) => {
                     handler(req, writer).await
                 }
-                _ => {
-                    write_forbidden(writer).await
-                }
+                _ => write_forbidden(writer).await,
             }
         })
     })
@@ -97,12 +97,14 @@ mod tests {
     }
 
     fn ok_handler() -> Handler {
-        Arc::new(|_req, mut writer: ResponseWriter<tokio::net::tcp::OwnedWriteHalf>| {
-            Box::pin(async move {
-                writer.write_body(200, "text/plain", b"OK").await?;
-                Ok(writer)
-            })
-        })
+        Arc::new(
+            |_req, mut writer: ResponseWriter<tokio::net::tcp::OwnedWriteHalf>| {
+                Box::pin(async move {
+                    writer.write_body(200, "text/plain", b"OK").await?;
+                    Ok(writer)
+                })
+            },
+        )
     }
 
     #[test]

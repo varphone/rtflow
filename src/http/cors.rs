@@ -2,8 +2,8 @@
 //!
 //! Wraps an existing [`Handler`] to add CORS headers and handle
 //! preflight OPTIONS requests.
-use super::router::Handler;
 use super::response::ResponseWriter;
+use super::router::Handler;
 use std::sync::Arc;
 
 /// CORS configuration.
@@ -29,10 +29,7 @@ impl Default for CorsConfig {
                 "DELETE".to_string(),
                 "OPTIONS".to_string(),
             ],
-            allowed_headers: vec![
-                "Content-Type".to_string(),
-                "Authorization".to_string(),
-            ],
+            allowed_headers: vec!["Content-Type".to_string(), "Authorization".to_string()],
             max_age: 86400,
         }
     }
@@ -62,10 +59,7 @@ pub fn with_cors(handler: Handler, config: CorsConfig) -> Handler {
         let handler = handler.clone();
         let config = config.clone();
         Box::pin(async move {
-            let origin = req
-                .header("origin")
-                .unwrap_or("*")
-                .to_string();
+            let origin = req.header("origin").unwrap_or("*").to_string();
 
             let allow_origin = resolve_origin(&config.allowed_origins, &origin);
 
@@ -102,10 +96,7 @@ pub fn cors_preflight_handler(config: CorsConfig) -> Handler {
     Arc::new(move |req, writer| {
         let config = config.clone();
         Box::pin(async move {
-            let origin = req
-                .header("origin")
-                .unwrap_or("*")
-                .to_string();
+            let origin = req.header("origin").unwrap_or("*").to_string();
             let allow_origin = resolve_origin(&config.allowed_origins, &origin);
             write_preflight(writer, &config, &allow_origin).await
         })

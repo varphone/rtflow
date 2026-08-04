@@ -204,7 +204,11 @@ async fn handle_connection(
 
         match handler(req, w).await {
             Ok(returned_writer) => {
+                let close = returned_writer.should_close();
                 writer = Some(returned_writer);
+                if close {
+                    break;
+                }
             }
             Err(e) => {
                 tracing::debug!("http handler error: {e}");
