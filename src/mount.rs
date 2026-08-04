@@ -8,7 +8,7 @@ use crate::proxy::{KeyframeCache, ProxyState, UpstreamConfig};
 #[cfg(feature = "file-storage")]
 use crate::storage::VodSource;
 use crate::{
-    Error, Result,
+    Codec, Error, Result,
     identity::MountId,
     media::{AccessUnit, MediaDescription},
     observe::EventSink,
@@ -91,14 +91,32 @@ pub(crate) struct StreamCounters {
     pub rtp_octets: AtomicU64,
     pub rtcp_sender_reports: AtomicU64,
     pub rtcp_receiver_reports: AtomicU64,
+    /// Optional global registry to mirror frame counters into
+    /// (`rtflow_frames_accepted_total` / `rtflow_frames_dropped_total`).
+    #[cfg(feature = "metrics")]
+    global: Option<Arc<crate::metrics::MetricsRegistry>>,
 }
 
 impl StreamCounters {
+    /// Mirror frame counters into a global metrics registry (once per mount).
+    #[cfg(feature = "metrics")]
+    pub fn attach_global(&mut self, registry: Arc<crate::metrics::MetricsRegistry>) {
+        self.global = Some(registry);
+    }
+
     pub fn add_accepted(&self, value: u64) {
         self.accepted_frames.fetch_add(value, Ordering::Relaxed);
+        #[cfg(feature = "metrics")]
+        if let Some(global) = &self.global {
+            global.frames_accepted.fetch_add(value, Ordering::Relaxed);
+        }
     }
     pub fn add_dropped(&self, value: u64) {
         self.dropped_frames.fetch_add(value, Ordering::Relaxed);
+        #[cfg(feature = "metrics")]
+        if let Some(global) = &self.global {
+            global.frames_dropped.fetch_add(value, Ordering::Relaxed);
+        }
     }
     pub fn add_rtp(&self, packets: u64, octets: u64) {
         self.rtp_packets.fetch_add(packets, Ordering::Relaxed);
@@ -135,7 +153,12 @@ pub(crate) struct Mount {
     pub stats: StreamCounters,
     #[cfg(feature = "server")]
     pub startup_cache: Mutex<KeyframeCache>,
-    pub bootstrap: Mutex<HashMap<u8, AccessUnit>>,
+    /// Per-track bootstrap frame: fixed slots indexed by track_id (avoids
+    /// hashing + allocating on every pushed frame).
+    pub bootstrap: Mutex<[Option<AccessUnit>; 256]>,
+    /// Expected codec per track id, for O(1) push validation without
+    /// cloning the whole MediaDescription on every frame.
+    pub codec_by_track: [Option<Codec>; 256],
     pub event_sink: Arc<dyn EventSink>,
     pub cancel: CancellationToken,
     #[cfg(feature = "server")]
@@ -147,30 +170,66 @@ pub(crate) struct Mount {
     pub announce_fmtp: Mutex<HashMap<u8, Arc<str>>>,
 }
 
+/// Build the fixed codec lookup table from a media description.
+pub(crate) fn codec_lookup_table(description: &MediaDescription) -> [Option<Codec>; 256] {
+    let mut table = [None; 256];
+    for track in &description.tracks {
+        table[track.id as usize] = Some(track.codec);
+    }
+    table
+}
+
+/// Keys of frames covered by a startup snapshot.
+///
+/// Consumers that first drain the `startup` frames returned by
+/// [`Mount::subscribe_with_startup`] and then read the broadcast receiver
+/// will receive the same frames twice: the broadcast ring replays frames
+/// that were sent before subscription. Skip any receiver frame whose
+/// `(track_id, rtp_timestamp)` matches one of these keys.
+pub fn startup_dedup_keys(startup: &[AccessUnit]) -> std::collections::HashSet<(u8, u32)> {
+    startup
+        .iter()
+        .map(|unit| (unit.track_id, unit.rtp_timestamp))
+        .collect()
+}
+
 impl Mount {
+    /// Cancellation token for this mount's data plane (cancelled on
+    /// unregister or server shutdown).
+    pub(crate) fn cancel_token(&self) -> CancellationToken {
+        self.cancel.clone()
+    }
+
+    /// Publish a frame while maintaining the startup keyframe cache and the
+    /// per-track bootstrap frame for new subscribers.
     pub fn publish_cached(
         &self,
         frame: AccessUnit,
     ) -> std::result::Result<usize, broadcast::error::SendError<AccessUnit>> {
+        // A cancelled mount (unregistered, or its server shutting down) must
+        // not keep accepting data: publishers would silently write into a
+        // detached mount while new registrations of the same path split the
+        // stream.
+        if self.cancel.is_cancelled() {
+            return Err(broadcast::error::SendError(frame));
+        }
         #[cfg(feature = "server")]
         {
-            let mut cache = self
-                .startup_cache
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            cache.push(&frame);
-            drop(cache);
+            // Cache updates are best-effort: a concurrent subscriber holding
+            // the lock must not block the publisher hot path, and dropping
+            // one frame from the cache is harmless.
+            if let Ok(mut cache) = self.startup_cache.try_lock() {
+                cache.push(&frame);
+            }
         }
         if frame.data.len() <= self.max_queued_bytes_per_session
             && (!matches!(
                 frame.codec,
                 crate::media::Codec::H264 | crate::media::Codec::H265
             ) || frame.is_keyframe)
+            && let Ok(mut bootstrap) = self.bootstrap.try_lock()
         {
-            self.bootstrap
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(frame.track_id, frame.clone());
+            bootstrap[frame.track_id as usize] = Some(frame.clone());
         }
         self.frames.send(frame)
     }
@@ -198,8 +257,9 @@ impl Mount {
                     .bootstrap
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .get(&track_id)
-                    .cloned()
+                    .as_ref()
+                    .get(track_id as usize)
+                    .and_then(Clone::clone)
             {
                 startup.push(frame);
             }
@@ -252,7 +312,22 @@ pub struct MountHandle {
 impl MountHandle {
     pub fn publisher(&self) -> Result<LocalPublisher> {
         match &self.inner.config {
-            MountConfig::Local { .. } | MountConfig::Publisher { .. } => {
+            MountConfig::Local { .. } => {
+                self.inner.publishers.fetch_add(1, Ordering::AcqRel);
+                Ok(LocalPublisher {
+                    inner: self.inner.clone(),
+                    active: true,
+                })
+            }
+            MountConfig::Publisher { .. } => {
+                // A claimed Publisher mount is exclusively owned by the
+                // RTSP RECORD session: refuse extra publishers instead of
+                // silently creating a second, interleaved stream.
+                if self.inner.publisher_claimed.load(Ordering::Acquire) {
+                    return Err(Error::Conflict(
+                        "publisher is already claimed by an RTSP session".into(),
+                    ));
+                }
                 self.inner.publishers.fetch_add(1, Ordering::AcqRel);
                 Ok(LocalPublisher {
                     inner: self.inner.clone(),
@@ -284,6 +359,14 @@ impl MountHandle {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    /// Get a shared reference to the live announce_fmtp source.
+    ///
+    /// Unlike `announce_fmtp()` which returns a snapshot, this allows
+    /// long-lived tasks to poll for updates as publishers ANNOUNCE.
+    pub fn announce_fmtp_source(&self) -> Arc<Mount> {
+        self.inner.clone()
     }
 
     /// Cancellation token tied to the mount lifetime.
@@ -363,17 +446,18 @@ impl LocalPublisher {
     }
 
     pub fn try_push(&self, frame: AccessUnit) -> Result<PushResult> {
-        let description = description_for(&self.inner.config)?;
-        let Some(track) = description.track(frame.track_id) else {
+        // O(1) codec validation via the fixed lookup table; no per-frame
+        // MediaDescription clone + linear track search.
+        let Some(expected) = self.inner.codec_by_track[frame.track_id as usize] else {
             return Err(Error::Media(format!(
                 "mount has no track {}",
                 frame.track_id
             )));
         };
-        if track.codec != frame.codec {
+        if expected != frame.codec {
             return Err(Error::Media(format!(
                 "track {} expects {:?}, got {:?}",
-                frame.track_id, track.codec, frame.codec
+                frame.track_id, expected, frame.codec
             )));
         }
         if self.inner.frames.receiver_count() == 0 {
@@ -484,15 +568,21 @@ impl MountRegistry {
 
     /// Find the mount whose path is the longest prefix of `requested`.
     pub(crate) fn find_longest_prefix(&self, requested: &str) -> Option<(Arc<str>, Arc<Mount>)> {
-        self.mounts
+        let mounts = self
+            .mounts
             .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Exact match is the overwhelmingly common case: O(1) hash lookup
+        // instead of a linear prefix scan over every registered mount.
+        if let Some((path, mount)) = mounts.get_key_value(requested) {
+            return Some((path.clone(), mount.clone()));
+        }
+        mounts
             .iter()
             .filter(|(path, _)| {
-                requested == path.as_ref()
-                    || requested
-                        .strip_prefix(path.as_ref())
-                        .is_some_and(|suffix| suffix.starts_with('/'))
+                requested
+                    .strip_prefix(path.as_ref())
+                    .is_some_and(|suffix| suffix.starts_with('/'))
             })
             .max_by_key(|(path, _)| path.len())
             .map(|(path, mount)| (path.clone(), mount.clone()))
@@ -503,26 +593,24 @@ impl MountRegistry {
         let description = description_for(&config)?;
         let (tx, _) = broadcast::channel(1024);
         #[cfg(feature = "server")]
-        let startup_cache = KeyframeCache::new(
-            &description,
-            crate::proxy::StartupCacheConfig::default(),
-        )
-        .unwrap_or_else(|_| {
-            KeyframeCache::new(
-                &MediaDescription {
-                    session_name: "".into(),
-                    tracks: Vec::new(),
-                    #[cfg(feature = "multicast")]
-                    connection: None,
-                },
-                crate::proxy::StartupCacheConfig {
-                    enabled: false,
-                    max_bytes: 0,
-                    max_frames_per_track: 0,
-                },
-            )
-            .expect("disabled cache always succeeds")
-        });
+        let startup_cache =
+            KeyframeCache::new(&description, crate::proxy::StartupCacheConfig::default())
+                .unwrap_or_else(|_| {
+                    KeyframeCache::new(
+                        &MediaDescription {
+                            session_name: "".into(),
+                            tracks: Vec::new(),
+                            #[cfg(feature = "multicast")]
+                            connection: None,
+                        },
+                        crate::proxy::StartupCacheConfig {
+                            enabled: false,
+                            max_bytes: 0,
+                            max_frames_per_track: 0,
+                        },
+                    )
+                    .expect("disabled cache always succeeds")
+                });
         let mount = Arc::new(Mount {
             id: MountId::from(path.clone()),
             config,
@@ -530,7 +618,8 @@ impl MountRegistry {
             stats: StreamCounters::default(),
             #[cfg(feature = "server")]
             startup_cache: Mutex::new(startup_cache),
-            bootstrap: Mutex::new(HashMap::new()),
+            bootstrap: Mutex::new(std::array::from_fn(|_| None)),
+            codec_by_track: codec_lookup_table(&description),
             event_sink: Arc::new(crate::observe::NoopEventSink),
             cancel: CancellationToken::new(),
             #[cfg(feature = "server")]
@@ -562,6 +651,26 @@ impl MountRegistry {
                 description,
                 inner: mount,
             }
+        })
+    }
+
+    /// Remove a mount from the registry and cancel its data plane.
+    ///
+    /// Protocol servers (RTMP/SRT) must call this when the publishing
+    /// session that created the mount ends, otherwise every distinct
+    /// stream path permanently consumes one of the `max_mounts` slots.
+    pub fn unregister(&self, path: &str) -> Option<MountHandle> {
+        let removed = self.remove(path)?;
+        removed.cancel.cancel();
+        Some(MountHandle {
+            path: removed.id.as_str().into(),
+            description: description_for(&removed.config).unwrap_or_else(|_| MediaDescription {
+                session_name: path.into(),
+                tracks: Vec::new(),
+                #[cfg(feature = "multicast")]
+                connection: None,
+            }),
+            inner: removed,
         })
     }
 

@@ -232,8 +232,26 @@ async fn run_proxy(
                                     idle_since = None;
                                 }
                             }
-                            frame = session.next() => match frame {
-                                Some(Ok(mut frame)) => {
+                            // A half-open upstream (peer died without FIN)
+                            // leaves `session.next()` pending forever; a
+                            // media idle timeout turns that into a stream
+                            // failure so the retry/failover path runs.
+                            frame = tokio::time::timeout(
+                                endpoint.request_timeout.saturating_mul(2).max(Duration::from_secs(10)),
+                                session.next(),
+                            ) => match frame {
+                                Err(_) => {
+                                    failure_code = crate::ErrorCode::UpstreamUnavailable;
+                                    emit(
+                                        &mount.event_sink,
+                                        FrameworkEvent::Proxy(ProxyEvent::Failed {
+                                            mount: mount.id.clone(),
+                                            code: crate::ErrorCode::UpstreamUnavailable,
+                                        }),
+                                    );
+                                    break;
+                                }
+                                Ok(Some(Ok(mut frame))) => {
                                     if timeline.normalize(&mut frame).is_err() {
                                         mount.stats.add_dropped(1);
                                         break;
@@ -244,7 +262,7 @@ async fn run_proxy(
                                         mount.stats.add_dropped(1);
                                     }
                                 }
-                                Some(Err(error)) => {
+                                Ok(Some(Err(error))) => {
                                     failure_code = error.code();
                                     emit(
                                         &mount.event_sink,
@@ -255,7 +273,7 @@ async fn run_proxy(
                                     );
                                     break;
                                 }
-                                None => break,
+                                Ok(None) => break,
                             }
                         }
                     }

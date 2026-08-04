@@ -167,6 +167,14 @@ impl TaskSupervisor {
         self.inner.cancel.cancel();
         while self.active_tasks() > 0 {
             let notified = self.inner.notify.notified();
+            // Re-check after registering the waiter: a task may have
+            // finished between the loop condition and waiter registration.
+            // Combined with `notify_one` in `finish_task` (which retains a
+            // permit when no waiter is present), this closes the lost-wakeup
+            // window that previously made shutdown wait out the full grace.
+            if self.active_tasks() == 0 {
+                break;
+            }
             if tokio::time::timeout_at(deadline, notified).await.is_err() {
                 break;
             }
@@ -253,7 +261,10 @@ fn finish_task(
         }
     }
     lock_active(&inner).remove(&id);
-    inner.notify.notify_waiters();
+    // notify_one retains a permit when there is no waiter yet, so a task
+    // finishing between the shutdown loop's activity check and its waiter
+    // registration cannot lose its wakeup.
+    inner.notify.notify_one();
 }
 
 #[cfg(test)]

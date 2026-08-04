@@ -38,11 +38,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{
-    net::TcpListener,
-    sync::Semaphore,
-    task::JoinHandle,
-};
+use tokio::{net::TcpListener, sync::Semaphore, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
@@ -409,10 +405,6 @@ impl RtspServer {
                             let id = SessionId::new(
                                 task_state.next_session.fetch_add(1, Ordering::Relaxed),
                             );
-                            emit(
-                                &task_state.config.event_sink,
-                                FrameworkEvent::Session(SessionEvent::Accepted { id, peer }),
-                            );
                             let state = task_state.clone();
                             let sink = state.config.event_sink.clone();
                             #[cfg(feature = "tls")]
@@ -458,6 +450,13 @@ impl RtspServer {
                                 };
                                 #[cfg(not(feature = "tls"))]
                                 let connection = ControlConnection::new(stream, local_addr, peer);
+                                // Accepted is emitted only after the TLS handshake
+                                // succeeded; a handshake failure would otherwise
+                                // leak connections_active/sessions_active gauges.
+                                emit(
+                                    &sink,
+                                    FrameworkEvent::Session(SessionEvent::Accepted { id, peer }),
+                                );
                                 let result = serve_connection(connection, peer, id, state).await;
                                 emit(
                                     &sink,
@@ -545,13 +544,21 @@ impl RtspServer {
         };
         let startup_cache = KeyframeCache::new(&description, startup_cache_config)?;
         let (tx, _) = tokio::sync::broadcast::channel(self.state.config.consumer_queue_capacity);
+        let mut counters = crate::mount::StreamCounters::default();
+        #[cfg(feature = "metrics")]
+        if let Some(registry) =
+            crate::metrics::registry_from_sink(&self.state.config.event_sink)
+        {
+            counters.attach_global(registry);
+        }
         let mount = Arc::new(Mount {
             id: MountId::from(path.clone()),
             config,
             frames: tx,
-            stats: crate::mount::StreamCounters::default(),
+            stats: counters,
             startup_cache: Mutex::new(startup_cache),
-            bootstrap: Mutex::new(HashMap::new()),
+            bootstrap: Mutex::new(std::array::from_fn(|_| None)),
+            codec_by_track: crate::mount::codec_lookup_table(&description),
             event_sink: self.state.config.event_sink.clone(),
             cancel: self.state.cancel.child_token(),
             proxy_running: std::sync::atomic::AtomicBool::new(false),
@@ -620,6 +627,19 @@ impl Drop for RtspServer {
         self.state.cancel.cancel();
         if let Some(task) = self.accept_task.take() {
             task.abort();
+        }
+        // The accept task used to own the bounded forced shutdown
+        // (supervisor.shutdown_after); aborting it would silently bypass
+        // shutdown_grace. Run the forced shutdown in the background so
+        // sessions still get a bounded grace period and are then aborted.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let state = self.state.clone();
+            handle.spawn(async move {
+                let _ = state
+                    .supervisor
+                    .shutdown_after(state.config.shutdown_grace)
+                    .await;
+            });
         }
     }
 }

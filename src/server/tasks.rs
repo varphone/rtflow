@@ -1,4 +1,4 @@
-use crate::mount::{Mount, MountConfig};
+use crate::mount::{Mount, MountConfig, startup_dedup_keys};
 use crate::{
     media::{MediaKind, TrackDescription},
     rtcp::{CompoundPacket, Packet as RtcpPacket, SdesChunk, SdesItem},
@@ -64,6 +64,9 @@ pub(super) fn spawn_interleaved_sender_from(
             startup,
             sequence,
         } = input;
+        // Frames the startup snapshot already delivered; the broadcast ring
+        // will replay the same frames, so skip them.
+        let startup_keys = startup_dedup_keys(&startup);
         let mut startup = VecDeque::from(startup);
         let ssrc = 0x5254_5350u32.wrapping_add(track.id as u32);
         let mut packetizer = match Packetizer::new(track.codec, track.payload_type, ssrc, 1200) {
@@ -78,11 +81,16 @@ pub(super) fn spawn_interleaved_sender_from(
         let mut report_tick = tokio::time::interval(std::time::Duration::from_secs(5));
         report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         report_tick.tick().await;
+        let mount_cancel = mount.cancel_token();
         loop {
             let frame = if let Some(frame) = startup.pop_front() {
                 frame
             } else {
                 tokio::select! {
+                    _ = mount_cancel.cancelled() => {
+                        // Mount unregistered or server shutting down.
+                        return;
+                    }
                     _ = report_tick.tick() => {
                         if sent_packets > 0
                             && let Some(clock) = ntp_clock
@@ -107,7 +115,12 @@ pub(super) fn spawn_interleaved_sender_from(
                         continue;
                     }
                     result = receiver.recv() => match result {
-                        Ok(frame) => frame,
+                        Ok(frame) => {
+                            if startup_keys.contains(&(frame.track_id, frame.rtp_timestamp)) {
+                                continue;
+                            }
+                            frame
+                        }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
                             mount.stats.add_dropped(count);
                             awaiting_key = track.kind == MediaKind::Video;
@@ -188,6 +201,9 @@ pub(super) fn spawn_udp_sender_from(
             startup,
             sequence,
         } = input;
+        // Frames the startup snapshot already delivered; the broadcast ring
+        // will replay the same frames, so skip them.
+        let startup_keys = startup_dedup_keys(&startup);
         let mut startup = VecDeque::from(startup);
         let ssrc = 0x5254_5350u32.wrapping_add(track.id as u32);
         let mut packetizer = match Packetizer::new(track.codec, track.payload_type, ssrc, 1200) {
@@ -203,8 +219,13 @@ pub(super) fn spawn_udp_sender_from(
         let mut report_tick = tokio::time::interval(std::time::Duration::from_secs(5));
         report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         report_tick.tick().await;
+        let mount_cancel = mount.cancel_token();
         loop {
             tokio::select! {
+                _ = mount_cancel.cancelled() => {
+                    // Mount unregistered or server shutting down.
+                    return;
+                }
                 _ = report_tick.tick() => {
                     if sent_packets > 0 {
                         let report = ntp_clock.map(|clock| {
@@ -258,6 +279,9 @@ pub(super) fn spawn_udp_sender_from(
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     };
+                    if startup_keys.contains(&(frame.track_id, frame.rtp_timestamp)) {
+                        continue;
+                    }
                     if frame.track_id != track.id || (awaiting_key && !frame.is_keyframe) {
                         continue;
                     }
@@ -267,13 +291,25 @@ pub(super) fn spawn_udp_sender_from(
                         continue;
                     }
                     awaiting_key = false;
+                    let mut consecutive_send_failures = 0u32;
                     if let Ok(packets) = packetizer.packetize(&frame) {
                         for mut packet in packets {
                             packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
                             let wire = packet.encode();
                             if pair.rtp.send_to(&wire, rtp_target).await.is_err() {
+                                // A persistently unreachable target should not
+                                // keep the sender spinning silently.
+                                consecutive_send_failures = consecutive_send_failures.saturating_add(1);
+                                if consecutive_send_failures >= 100 {
+                                    tracing::warn!(
+                                        %rtp_target,
+                                        "RTP sender giving up after 100 consecutive send failures"
+                                    );
+                                    return;
+                                }
                                 continue;
                             }
+                            consecutive_send_failures = 0;
                             sent_packets = sent_packets.wrapping_add(1);
                             sent_octets = sent_octets.wrapping_add(packet.payload.len() as u32);
                             last_rtp_timestamp = packet.header.timestamp;

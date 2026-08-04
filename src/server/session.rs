@@ -563,6 +563,9 @@ pub(super) async fn serve_connection(
                 }
                 for task in resources.senders.drain(..) {
                     task.abort();
+                    // Wait for the old sender to actually stop before a new
+                    // one starts, so the two never interleave on the wire.
+                    let _ = task.await;
                 }
                 if let Some(position) = resources.stop_vod() {
                     vod_cursor = position;
@@ -757,6 +760,9 @@ pub(super) async fn serve_connection(
                 }
                 for task in resources.senders.drain(..) {
                     task.abort();
+                    // Wait for the old sender to actually stop before a new
+                    // one starts, so the two never interleave on the wire.
+                    let _ = task.await;
                 }
                 if let Some(position) = resources.stop_vod() {
                     vod_cursor = position;
@@ -817,9 +823,16 @@ pub(super) async fn serve_connection(
             } else if req.method == Method::Pause {
                 phase = ConnectionPhase::Paused;
                 release_recording_mounts(&mut resources.recording_mounts);
+                // Release publisher claims too: a paused session is not
+                // publishing, and keeping the claim would make a later
+                // RECORD on the same session (or another) fail with 409.
+                release_remote_publishers(&mut resources.claims, true);
                 interleaved_depacketizers.clear();
                 for task in resources.senders.drain(..) {
                     task.abort();
+                    // Wait for the old sender to actually stop before a new
+                    // one starts, so the two never interleave on the wire.
+                    let _ = task.await;
                 }
                 if let Some(position) = resources.stop_vod() {
                     vod_cursor = position;
@@ -831,10 +844,13 @@ pub(super) async fn serve_connection(
                     .await?;
             } else if req.method == Method::Teardown {
                 release_recording_mounts(&mut resources.recording_mounts);
-                release_remote_publishers(&mut resources.claims, false);
+                release_remote_publishers(&mut resources.claims, true);
                 interleaved_depacketizers.clear();
                 for task in resources.senders.drain(..) {
                     task.abort();
+                    // Wait for the old sender to actually stop before a new
+                    // one starts, so the two never interleave on the wire.
+                    let _ = task.await;
                 }
                 writer
                     .lock()
@@ -877,7 +893,11 @@ impl ConnectionResources {
         self.abort_senders();
         self.stop_vod();
         release_recording_mounts(&mut self.recording_mounts);
-        release_remote_publishers(&mut self.claims, false);
+        // Always release publisher claims when the session ends: the flag
+        // guards concurrent take-over while a session is alive, it must not
+        // outlive the connection (otherwise a Publisher mount with
+        // allow_replace_after_disconnect=false is locked forever).
+        release_remote_publishers(&mut self.claims, true);
     }
 }
 impl Drop for ConnectionResources {
@@ -893,6 +913,14 @@ fn claim_remote_publishers(candidates: Vec<Arc<Mount>>) -> Result<Vec<Arc<Mount>
             || claims.iter().any(|current| Arc::ptr_eq(current, &mount))
         {
             continue;
+        }
+        // A non-RTSP publisher (RTMP/SRT via MountHandle::publisher) already
+        // holds the mount: refuse to claim on top of it.
+        if mount.publishers.load(Ordering::Acquire) > 0 {
+            release_remote_publishers(&mut claims, true);
+            return Err(Error::Conflict(
+                "publisher is already active on this mount".into(),
+            ));
         }
         if mount
             .publisher_claimed
@@ -970,7 +998,12 @@ async fn authorize_request(
         );
         let delay = state.config.security.authentication_failure_delay;
         if delay != std::time::Duration::ZERO {
-            tokio::time::sleep(delay).await;
+            // The delay must not outlive the session: server shutdown cancels
+            // the session token, so wait on both.
+            tokio::select! {
+                _ = state.cancel.cancelled() => {}
+                _ = tokio::time::sleep(delay) => {}
+            }
         }
     }
     match decision {
