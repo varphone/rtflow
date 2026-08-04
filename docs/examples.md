@@ -50,6 +50,31 @@ ffmpeg -re -i input.mp4 -c copy \
 
 其他客户端可以同时拉取同一 `/ingest`。框架本期只提供 RECORD 接收服务，不提供 Rust ANNOUNCE/RECORD 客户端 API。
 
+## IPC 摄像头 + 网页播放
+
+`ipc_camera` 模拟 HiMPP 双码流（main/sub）+ 可选音频，并默认同时启动
+浏览器播放服务：
+
+```bash
+cargo run --example ipc_camera -- --audio aac
+# 浏览器打开 http://127.0.0.1:8080/ —— 页面自动列出 /cam/main、/cam/sub
+# RTSP 播放: vlc rtsp://127.0.0.1:8554/cam/main
+```
+
+网页页面由 `http_flv::web::create_web_player_handler` 生成，三种浏览器
+直播协议一键切换（断流自动重连）：
+
+| 模式 | URL 形态 | 延迟 | 播放器 |
+| --- | --- | --- | --- |
+| WS-FLV | `ws://host:8088/cam/main.flv` | 最低 | mpegts.js |
+| HTTP-FLV | `http://host:8080/cam/main.flv` | 低 | mpegts.js |
+| HLS | `http://host:8080/cam/main.m3u8` | 1–3 s | hls.js / Safari 原生 |
+
+默认端口：RTSP `8554`、页面/HTTP-FLV/HLS `8080`、WS-FLV `8088`；
+`--no-web` 只保留 RTSP。mpegts.js/hls.js 从 CDN（jsdelivr，自动回退
+unpkg）加载；离线内网环境请把 `src/http_flv/player.html` 中的两个
+`<script>` 换成自托管文件。
+
 ## 动态实时串流
 
 一键启动 Rust Publisher、FFmpeg 动态测试源和 GStreamer 播放器：

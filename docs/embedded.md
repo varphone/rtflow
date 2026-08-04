@@ -175,6 +175,11 @@ cargo build --release --target aarch64-unknown-linux-gnu \
    `a=fmtp:96 profile-level-id=...;sprop-parameter-sets=...` 且能出帧
 4. VLC 播放主/子码流均正常；断网重连后设备自动恢复推流
    （`allow_replace_after_disconnect=true`）
+5. 网页预览：浏览器打开 `http://<ip>:8080/`（`ipc_camera` 默认
+   `--web`），页面三种模式（WS-FLV / HTTP-FLV / HLS）均应出画面；
+   拔网线重插后页面应在几秒内自动恢复（播放页内置指数退避重连）。
+   H.265 主码流在 Chrome/Firefox 可能无法软解，属浏览器能力限制，
+   可切 HLS 模式（Safari 原生支持 HEVC）或预览子码流（H.264）。
 
 ## 8. 弱核 runtime 指引（P0-3）
 
