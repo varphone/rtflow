@@ -59,7 +59,11 @@ struct Args {
     sub_height: u32,
     #[arg(long, value_enum, default_value_t = AudioMode::Aac)]
     audio: AudioMode,
-}
+    /// Per-session consumer queue capacity (frames). Memory budget per
+    /// session ≈ capacity × average frame size; e.g. 1080p@4Mbps ≈ 16KB/
+    /// frame → 128 frames ≈ 2MB. Embedded IPC: 64–128; desktop: 256.
+    #[arg(long, default_value_t = 128)]
+    queue: usize,}
 
 /// Minimal synthetic H.264 access unit. The first IDR includes SPS/PPS
 /// (NAL 7/8); later IDRs are slice-only, like separated VENC output.
@@ -179,7 +183,12 @@ async fn main() -> rtflow::Result<()> {
         .try_init()
         .ok();
     let args = Args::parse();
-    let server = RtspServer::bind(ServerConfig::builder(args.listen).build()?).await?;
+    let server = RtspServer::bind(
+        ServerConfig::builder(args.listen)
+            .consumer_queue_capacity(args.queue)
+            .build()?,
+    )
+    .await?;
 
     // Compile-time check of the bitstream helpers used by the example.
     let _ = h264_parameter_sets;
