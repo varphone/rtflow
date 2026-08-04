@@ -177,12 +177,7 @@ pub fn keepalive_packet(socket_id: u32, timestamp: u32) -> ControlPacket {
 }
 
 /// Build an ACK control packet.
-pub fn ack_packet(
-    ack_seq: u32,
-    ack_number: u32,
-    socket_id: u32,
-    timestamp: u32,
-) -> ControlPacket {
+pub fn ack_packet(ack_seq: u32, ack_number: u32, socket_id: u32, timestamp: u32) -> ControlPacket {
     let mut data = BytesMut::with_capacity(4);
     data.put_u32(ack_number);
     ControlPacket {

@@ -177,7 +177,12 @@ impl VideoDemuxer {
                     // Prepend parameter sets so a decoder that joins at
                     // this keyframe (mid-stream seek) can initialize.
                     let mut merged = BytesMut::with_capacity(
-                        output.len() + self.parameter_sets.iter().map(|p| p.len() + 4).sum::<usize>(),
+                        output.len()
+                            + self
+                                .parameter_sets
+                                .iter()
+                                .map(|p| p.len() + 4)
+                                .sum::<usize>(),
                     );
                     for parameter_set in &self.parameter_sets {
                         merged.extend_from_slice(START_CODE);
@@ -197,8 +202,8 @@ impl VideoDemuxer {
                 Codec::H265 => nal.first().map(|byte| (byte >> 1) & 0x3F),
                 _ => None,
             };
-            let is_parameter_set = matches!(nal_type, Some(7 | 8))
-                || matches!(nal_type, Some(32..=34));
+            let is_parameter_set =
+                matches!(nal_type, Some(7 | 8)) || matches!(nal_type, Some(32..=34));
             if is_parameter_set && self.parameter_sets.len() < 8 {
                 self.parameter_sets.push(nal.clone());
             }

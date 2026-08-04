@@ -46,7 +46,9 @@ fn frame(index: u64) -> AccessUnit {
 #[tokio::test]
 async fn vfr_frames_are_delivered_losslessly_with_linear_timestamps() {
     let server = RtspServer::bind(
-        ServerConfig::builder("127.0.0.1:0".parse().unwrap()).build().unwrap(),
+        ServerConfig::builder("127.0.0.1:0".parse().unwrap())
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -54,9 +56,10 @@ async fn vfr_frames_are_delivered_losslessly_with_linear_timestamps() {
         .register_mount(
             "/vfr",
             MountConfig::Publisher {
-                description: MediaDescription::from_tracks("vfr", vec![
-                    TrackDescription::h264_video(0, &[], &[], 640, 360, 30),
-                ]),
+                description: MediaDescription::from_tracks(
+                    "vfr",
+                    vec![TrackDescription::h264_video(0, &[], &[], 640, 360, 30)],
+                ),
                 allow_replace_after_disconnect: true,
             },
         )
@@ -100,8 +103,8 @@ async fn vfr_frames_are_delivered_losslessly_with_linear_timestamps() {
         }
         // Timestamps must be strictly monotonic and match the published
         // linear mapping (pts*90kHz), including across the VFR gaps.
-        let expected_ts = (frame_pts(expected_index).as_micros() as u64 * 90_000 / 1_000_000)
-            as u32;
+        let expected_ts =
+            (frame_pts(expected_index).as_micros() as u64 * 90_000 / 1_000_000) as u32;
         assert_eq!(
             unit.rtp_timestamp, expected_ts,
             "index {expected_index}: timestamp mismatch"
@@ -125,7 +128,9 @@ async fn vfr_startup_snapshot_replays_at_pts_spacing() {
     // A snapshot containing VFR frames (30fps burst + 2s gap) must replay
     // pacing by PTS deltas, not at a fixed rate.
     let server = RtspServer::bind(
-        ServerConfig::builder("127.0.0.1:0".parse().unwrap()).build().unwrap(),
+        ServerConfig::builder("127.0.0.1:0".parse().unwrap())
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -133,9 +138,10 @@ async fn vfr_startup_snapshot_replays_at_pts_spacing() {
         .register_mount(
             "/vfr2",
             MountConfig::Publisher {
-                description: MediaDescription::from_tracks("vfr2", vec![
-                    TrackDescription::h264_video(0, &[], &[], 640, 360, 30),
-                ]),
+                description: MediaDescription::from_tracks(
+                    "vfr2",
+                    vec![TrackDescription::h264_video(0, &[], &[], 640, 360, 30)],
+                ),
                 allow_replace_after_disconnect: true,
             },
         )
@@ -195,7 +201,10 @@ async fn vfr_startup_snapshot_replays_at_pts_spacing() {
     assert!(first.is_keyframe, "first delivered unit must be a keyframe");
     // The waited-for IDR is index 75: pts = 7s + 15×66666µs = 7999990µs
     // → floor(7999990 × 90000 / 1e6) = 719999 ticks.
-    assert_eq!(first.rtp_timestamp, 719_999, "expected the next IDR after the gap");
+    assert_eq!(
+        first.rtp_timestamp, 719_999,
+        "expected the next IDR after the gap"
+    );
     let _ = pusher.await;
 
     drop(client);

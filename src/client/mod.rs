@@ -358,10 +358,10 @@ impl ClientSession {
                     authorization.as_deref(),
                 );
                 tokio::time::timeout(self.request_timeout, async {
-                writer.lock().await.write_all(wire.as_bytes()).await
-            })
-            .await
-            .map_err(|_| Error::Limit("interleaved control write timeout"))??;
+                    writer.lock().await.write_all(wire.as_bytes()).await
+                })
+                .await
+                .map_err(|_| Error::Limit("interleaved control write timeout"))??;
                 response = loop {
                     let candidate = timeout(self.request_timeout, responses.recv())
                         .await

@@ -213,7 +213,9 @@ mod tests {
 
     #[test]
     fn annex_b_splitting_handles_3_and_4_byte_codes() {
-        let data: &[u8] = &[0, 0, 0, 1, 0x65, 1, 2, 0, 0, 1, 0x41, 3, 0, 0, 0, 1, 0x67, 4];
+        let data: &[u8] = &[
+            0, 0, 0, 1, 0x65, 1, 2, 0, 0, 1, 0x41, 3, 0, 0, 0, 1, 0x67, 4,
+        ];
         let nals = annex_b_nals(data);
         assert_eq!(nals.len(), 3);
         assert_eq!(nals[0], &[0x65, 1, 2]);
@@ -235,10 +237,16 @@ mod tests {
             0, 0, 0, 1, 0x65, 0x88, 0x84, //
         ];
         let sets = h264_parameter_sets(&idr);
-        assert_eq!(sets.sps.as_deref(), Some(&[0x67, 0x42, 0x00, 0x1f, 0x8c, 0x8d, 0x40][..]));
+        assert_eq!(
+            sets.sps.as_deref(),
+            Some(&[0x67, 0x42, 0x00, 0x1f, 0x8c, 0x8d, 0x40][..])
+        );
         assert_eq!(sets.pps.as_deref(), Some(&[0x68, 0xce, 0x3c, 0x80][..]));
         let fmtp = h264_fmtp(sets.sps.as_deref().unwrap(), sets.pps.as_deref().unwrap());
-        assert!(fmtp.starts_with("profile-level-id=42001f;sprop-parameter-sets="), "{fmtp}");
+        assert!(
+            fmtp.starts_with("profile-level-id=42001f;sprop-parameter-sets="),
+            "{fmtp}"
+        );
         assert!(fmtp.ends_with(";packetization-mode=1"));
         assert!(is_idr(crate::media::Codec::H264, &idr));
     }
@@ -267,10 +275,19 @@ mod tests {
     #[test]
     fn aac_config_generation() {
         // audioObjectType=2 << 11 | SFI << 7 | channelConfig << 3
-        assert_eq!(aac_audio_specific_config(48_000, 2).as_deref(), Some("1190"));
-        assert_eq!(aac_audio_specific_config(44_100, 2).as_deref(), Some("1210"));
+        assert_eq!(
+            aac_audio_specific_config(48_000, 2).as_deref(),
+            Some("1190")
+        );
+        assert_eq!(
+            aac_audio_specific_config(44_100, 2).as_deref(),
+            Some("1210")
+        );
         assert_eq!(aac_audio_specific_config(8_000, 1).as_deref(), Some("1588"));
-        assert_eq!(aac_audio_specific_config(11_025, 2).as_deref(), Some("1510"));
+        assert_eq!(
+            aac_audio_specific_config(11_025, 2).as_deref(),
+            Some("1510")
+        );
         assert!(aac_audio_specific_config(12_345, 2).is_none());
     }
 }

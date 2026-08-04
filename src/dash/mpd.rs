@@ -52,8 +52,15 @@ pub fn generate_mpd(
     video_dimensions: Option<(u16, u16)>,
 ) -> String {
     generate_mpd_q(
-        segments, description, config, asset_prefix, availability_start,
-        base_timestamp, codec_override, video_dimensions, "",
+        segments,
+        description,
+        config,
+        asset_prefix,
+        availability_start,
+        base_timestamp,
+        codec_override,
+        video_dimensions,
+        "",
     )
 }
 
@@ -171,8 +178,12 @@ pub fn generate_mpd_q(
              startNumber=\"{}\" \
              initialization=\"{}{}/init.mp4\" \
              media=\"{}{}/segment_$Number$.m4s\">\n",
-            config.timescale, start_number, asset_prefix, query_suffix(asset_prefix, query),
-            asset_prefix, query_suffix(asset_prefix, query),
+            config.timescale,
+            start_number,
+            asset_prefix,
+            query_suffix(asset_prefix, query),
+            asset_prefix,
+            query_suffix(asset_prefix, query),
         ));
 
         // SegmentTimeline: explicitly list available segments
@@ -397,7 +408,6 @@ mod tests {
             ],
             #[cfg(feature = "multicast")]
             connection: None,
-
         }
     }
 

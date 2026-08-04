@@ -44,9 +44,19 @@ fn vm_stat() -> (u64, u64) {
     if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
         for line in status.lines() {
             if let Some(v) = line.strip_prefix("VmRSS:") {
-                rss = v.trim().split_whitespace().next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                rss = v
+                    .trim()
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
             } else if let Some(v) = line.strip_prefix("VmHWM:") {
-                hwm = v.trim().split_whitespace().next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                hwm = v
+                    .trim()
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
             }
         }
     }
@@ -107,9 +117,10 @@ async fn main() -> rtflow::Result<()> {
         .register_mount(
             "/probe",
             MountConfig::Publisher {
-                description: MediaDescription::from_tracks("probe", vec![
-                    TrackDescription::h264_video(0, &[], &[], 1920, 1080, 30),
-                ]),
+                description: MediaDescription::from_tracks(
+                    "probe",
+                    vec![TrackDescription::h264_video(0, &[], &[], 1920, 1080, 30)],
+                ),
                 allow_replace_after_disconnect: true,
             },
         )

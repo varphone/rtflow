@@ -230,11 +230,7 @@ impl KeyframeCache {
             // Preserve the "starts with a keyframe" invariant: a snapshot
             // that begins with a non-keyframe cannot be decoded from cold.
             if track.kind == MediaKind::Video {
-                while track
-                    .frames
-                    .front()
-                    .is_some_and(|frame| !frame.is_keyframe)
-                {
+                while track.frames.front().is_some_and(|frame| !frame.is_keyframe) {
                     pop_front(track);
                 }
             }
@@ -367,7 +363,6 @@ mod tests {
                 crypto: None,
             }],
             connection: None,
-
         }
     }
 

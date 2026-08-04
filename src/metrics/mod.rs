@@ -181,7 +181,9 @@ impl MetricsEventSink {
 /// Extract the metrics registry from an event sink, if the sink is a
 /// [`MetricsEventSink`]. Used to wire per-mount frame counters into the
 /// global registry.
-pub fn registry_from_sink(sink: &Arc<dyn crate::observe::EventSink>) -> Option<Arc<MetricsRegistry>> {
+pub fn registry_from_sink(
+    sink: &Arc<dyn crate::observe::EventSink>,
+) -> Option<Arc<MetricsRegistry>> {
     sink.as_any()
         .downcast_ref::<MetricsEventSink>()
         .map(|sink| sink.registry.clone())

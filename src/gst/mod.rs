@@ -113,10 +113,7 @@ impl GstPipelineBuilder {
             return Err(Error::Media("no tracks configured".into()));
         }
 
-        Ok(GStreamerSource {
-            pipeline,
-            tracks,
-        })
+        Ok(GStreamerSource { pipeline, tracks })
     }
 }
 
@@ -180,7 +177,6 @@ impl GStreamerSource {
             tracks,
             #[cfg(feature = "multicast")]
             connection: None,
-
         }
     }
 

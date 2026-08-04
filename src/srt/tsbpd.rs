@@ -111,13 +111,7 @@ impl TsbpdBuffer {
     ///
     /// Returns `true` if the packet was accepted, `false` if it's a
     /// duplicate or too old (already delivered).
-    pub fn push(
-        &mut self,
-        seq: u32,
-        payload: Bytes,
-        timestamp: u32,
-        retransmitted: bool,
-    ) -> bool {
+    pub fn push(&mut self, seq: u32, payload: Bytes, timestamp: u32, retransmitted: bool) -> bool {
         if !self.initialized {
             self.init(seq);
         }
@@ -173,8 +167,7 @@ impl TsbpdBuffer {
             }
             let base_local = self.base_local.unwrap_or(arrival_time);
             let base_ts = self.base_extended_ts.unwrap_or(self.extended_timestamp);
-            let elapsed =
-                Duration::from_micros(self.extended_timestamp.saturating_sub(base_ts));
+            let elapsed = Duration::from_micros(self.extended_timestamp.saturating_sub(base_ts));
             base_local + elapsed + self.delay
         };
 

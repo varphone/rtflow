@@ -281,9 +281,10 @@ impl SrtServer {
 
         // Expire unredeemed SYN cookies so a flood of inductions cannot grow the table.
         {
-            let mut cookies = self.pending_cookies.lock().unwrap_or_else(
-                std::sync::PoisonError::into_inner,
-            );
+            let mut cookies = self
+                .pending_cookies
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if cookies.len() > 64 {
                 cookies.retain(|_, (_, issued_at)| issued_at.elapsed() <= COOKIE_TTL);
             }
@@ -324,9 +325,7 @@ impl SrtServer {
             // unchanged gap is only reported once, and never more often
             // than every 20ms.
             let losses = conn.tsbpd.detect_losses();
-            if !losses.is_empty()
-                && now.duration_since(conn.last_nak_time).as_millis() >= 20
-            {
+            if !losses.is_empty() && now.duration_since(conn.last_nak_time).as_millis() >= 20 {
                 if losses != conn.last_nak_losses {
                     let nak = nak_packet(&losses, conn.peer_socket_id, timestamp);
                     let encoded = encode_control_packet(&nak);
@@ -394,9 +393,10 @@ impl SrtServer {
                         let cookie = generate_cookie(peer, ctrl.timestamp);
                         // Remember the issued cookie so the conclusion can be verified.
                         {
-                            let mut cookies = self.pending_cookies.lock().unwrap_or_else(
-                                std::sync::PoisonError::into_inner,
-                            );
+                            let mut cookies = self
+                                .pending_cookies
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
                             cookies.insert(peer, (cookie, Instant::now()));
                         }
                         let local_socket_id = *next_socket_id;
@@ -415,15 +415,13 @@ impl SrtServer {
                     HandshakeType::Conclusion => {
                         // Phase 2: Verify cookie and complete handshake.
                         let cookie_ok = {
-                            let mut cookies = self.pending_cookies.lock().unwrap_or_else(
-                                std::sync::PoisonError::into_inner,
-                            );
-                            let valid = cookies
-                                .get(&peer)
-                                .is_some_and(|(expected, issued_at)| {
-                                    *expected == hs.cookie
-                                        && issued_at.elapsed() <= COOKIE_TTL
-                                });
+                            let mut cookies = self
+                                .pending_cookies
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let valid = cookies.get(&peer).is_some_and(|(expected, issued_at)| {
+                                *expected == hs.cookie && issued_at.elapsed() <= COOKIE_TTL
+                            });
                             // A conclusion redeems the cookie exactly once.
                             cookies.remove(&peer);
                             valid
@@ -494,7 +492,9 @@ impl SrtServer {
                             #[cfg(feature = "metrics")]
                             if let Some(metrics) = &self.config.metrics {
                                 use std::sync::atomic::Ordering;
-                                metrics.srt_connections_total.fetch_add(1, Ordering::Relaxed);
+                                metrics
+                                    .srt_connections_total
+                                    .fetch_add(1, Ordering::Relaxed);
                             }
 
                             connections.insert(
@@ -591,15 +591,12 @@ impl SrtServer {
         // not mistaken for a retransmission of an old one). Delivery is
         // scheduled from the sender-clock timestamp, absorbing jitter.
         let is_retransmit = tsbpd::seq_before(data_pkt.sequence, conn.tsbpd.ack_number());
-        if conn
-            .tsbpd
-            .push(
-                data_pkt.sequence,
-                data_pkt.payload.clone(),
-                data_pkt.timestamp,
-                is_retransmit,
-            )
-        {
+        if conn.tsbpd.push(
+            data_pkt.sequence,
+            data_pkt.payload.clone(),
+            data_pkt.timestamp,
+            is_retransmit,
+        ) {
             conn.pkts_since_ack += 1;
         }
 

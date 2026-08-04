@@ -140,7 +140,9 @@ impl Drop for RtmpSessionMetrics {
         use std::sync::atomic::Ordering;
         if let Some(metrics) = &self.metrics {
             if self.is_publisher {
-                metrics.rtmp_publishers_active.fetch_sub(1, Ordering::Relaxed);
+                metrics
+                    .rtmp_publishers_active
+                    .fetch_sub(1, Ordering::Relaxed);
             } else {
                 metrics.rtmp_players_active.fetch_sub(1, Ordering::Relaxed);
             }
@@ -161,8 +163,8 @@ pub async fn serve_rtmp_session(
     // Handshake with a hard timeout so idle peers cannot hold a
     // connection slot forever (the accept loop is connection-bounded).
     let handshake_timeout = Duration::from_secs(10);
-    if let Err(e) = tokio::time::timeout(handshake_timeout, handshake::server_handshake(&mut stream))
-        .await
+    if let Err(e) =
+        tokio::time::timeout(handshake_timeout, handshake::server_handshake(&mut stream)).await
     {
         debug!(?peer, "RTMP: handshake timed out or failed: {e}");
         return Err(Error::Rtmp(format!("handshake failed: {e}")));
@@ -480,7 +482,11 @@ pub async fn serve_rtmp_session(
     drop(state); // releases the LocalPublisher
     if let Some(path) = registered_path
         && let Some(handle) = mounts.get_handle(&path)
-        && handle.inner.publishers.load(std::sync::atomic::Ordering::Acquire) == 0
+        && handle
+            .inner
+            .publishers
+            .load(std::sync::atomic::Ordering::Acquire)
+            == 0
     {
         mounts.unregister(&path);
         debug!(?peer, "RTMP: unregistered publisher mount {path}");
@@ -607,7 +613,6 @@ async fn handle_command(
                 tracks: Vec::new(),
                 #[cfg(feature = "multicast")]
                 connection: None,
-
             };
 
             let mount_config = MountConfig::Publisher {
@@ -664,10 +669,15 @@ async fn handle_command(
             #[cfg(feature = "metrics")]
             if let Some(metrics) = &metrics {
                 use std::sync::atomic::Ordering;
-                metrics.rtmp_publishers_active.fetch_add(1, Ordering::Relaxed);
+                metrics
+                    .rtmp_publishers_active
+                    .fetch_add(1, Ordering::Relaxed);
             }
             #[cfg(feature = "metrics")]
-            let _session_metrics = RtmpSessionMetrics { metrics: metrics.clone(), is_publisher: true };
+            let _session_metrics = RtmpSessionMetrics {
+                metrics: metrics.clone(),
+                is_publisher: true,
+            };
 
             *state = SessionState::Publishing {
                 app,
@@ -759,7 +769,10 @@ async fn handle_command(
                 metrics.rtmp_players_active.fetch_add(1, Ordering::Relaxed);
             }
             #[cfg(feature = "metrics")]
-            let _session_metrics = RtmpSessionMetrics { metrics: metrics.clone(), is_publisher: false };
+            let _session_metrics = RtmpSessionMetrics {
+                metrics: metrics.clone(),
+                is_publisher: false,
+            };
 
             *state = SessionState::Playing {
                 app,
@@ -833,54 +846,59 @@ async fn handle_command(
                 let startup_keys = crate::mount::startup_dedup_keys(&startup);
 
                 // Send cached sequence headers (AVC/HEVC/AAC config) before the
-            // GOP so the player can initialize its decoder immediately
-            // (previously play never emitted sequence headers at all).
-            {
-                // Copy headers out under the lock; the MutexGuard is not
-                // Send and must not live across the send().await below.
-                let cached: Vec<(u8, Bytes, Codec)> = {
-                    let headers = handle.inner.rtmp_seq_headers.lock().unwrap_or_else(
-                        std::sync::PoisonError::into_inner,
-                    );
-                    headers
-                        .iter()
-                        .filter_map(|(track_id, header)| {
-                            handle.inner.codec_by_track[*track_id as usize]
-                                .map(|codec| (*track_id, header.clone(), codec))
-                        })
-                        .collect()
-                };
-                for (track_id, header, codec) in cached {
-                    let kind = match codec {
-                        crate::media::Codec::Aac | crate::media::Codec::Pcma | crate::media::Codec::Pcmu | crate::media::Codec::Opus => crate::media::MediaKind::Audio,
-                        _ => crate::media::MediaKind::Video,
+                // GOP so the player can initialize its decoder immediately
+                // (previously play never emitted sequence headers at all).
+                {
+                    // Copy headers out under the lock; the MutexGuard is not
+                    // Send and must not live across the send().await below.
+                    let cached: Vec<(u8, Bytes, Codec)> = {
+                        let headers = handle
+                            .inner
+                            .rtmp_seq_headers
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        headers
+                            .iter()
+                            .filter_map(|(track_id, header)| {
+                                handle.inner.codec_by_track[*track_id as usize]
+                                    .map(|codec| (*track_id, header.clone(), codec))
+                            })
+                            .collect()
                     };
-                    let unit = AccessUnit {
-                        track_id,
-                        codec,
-                        pts: Duration::ZERO,
-                        dts: None,
-                        rtp_timestamp: 0,
-                        is_keyframe: true,
-                        data: header,
-                    };
-                    let (msg_type, payload) = if kind == crate::media::MediaKind::Video {
-                        (MessageType::Video as u8, flv::build_video_tag(&unit, true))
-                    } else {
-                        (MessageType::Audio as u8, flv::build_audio_tag(&unit, true))
-                    };
-                    let _ = tx_clone
-                        .send(RtmpMessage {
-                            chunk_stream_id: 5,
-                            timestamp: 0,
-                            msg_type,
-                            msg_stream_id: 1,
-                            payload,
-                        })
-                        .await;
+                    for (track_id, header, codec) in cached {
+                        let kind = match codec {
+                            crate::media::Codec::Aac
+                            | crate::media::Codec::Pcma
+                            | crate::media::Codec::Pcmu
+                            | crate::media::Codec::Opus => crate::media::MediaKind::Audio,
+                            _ => crate::media::MediaKind::Video,
+                        };
+                        let unit = AccessUnit {
+                            track_id,
+                            codec,
+                            pts: Duration::ZERO,
+                            dts: None,
+                            rtp_timestamp: 0,
+                            is_keyframe: true,
+                            data: header,
+                        };
+                        let (msg_type, payload) = if kind == crate::media::MediaKind::Video {
+                            (MessageType::Video as u8, flv::build_video_tag(&unit, true))
+                        } else {
+                            (MessageType::Audio as u8, flv::build_audio_tag(&unit, true))
+                        };
+                        let _ = tx_clone
+                            .send(RtmpMessage {
+                                chunk_stream_id: 5,
+                                timestamp: 0,
+                                msg_type,
+                                msg_stream_id: 1,
+                                payload,
+                            })
+                            .await;
+                    }
                 }
-            }
-            // Send startup frames (sequence headers + cached GOP)
+                // Send startup frames (sequence headers + cached GOP)
                 let mut base_ts: Option<u32> = None;
                 for unit in &startup {
                     // FLV tag timestamp is the DTS (decode order); PTS goes
@@ -967,9 +985,7 @@ async fn handle_command(
                 task.abort();
             }
             if let SessionState::Playing { app, .. } = state {
-                *state = SessionState::Connected {
-                    app: app.clone(),
-                };
+                *state = SessionState::Connected { app: app.clone() };
             }
             Some(vec![RtmpMessage {
                 chunk_stream_id: 5,

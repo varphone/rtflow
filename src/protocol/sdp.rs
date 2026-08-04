@@ -156,7 +156,9 @@ pub fn parse(data: &[u8]) -> Result<MediaDescription> {
                 // Media control URLs are relative to the session-level
                 // control when one exists (RFC 2326 §C.1).
                 let control = match &session_control {
-                    Some(base) if !value.starts_with('/') && !value.contains("://") && value != "*" => {
+                    Some(base)
+                        if !value.starts_with('/') && !value.contains("://") && value != "*" =>
+                    {
                         format!("{}/{}", base.trim_end_matches('/'), value)
                     }
                     _ => value.to_string(),

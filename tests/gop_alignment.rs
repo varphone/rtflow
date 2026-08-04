@@ -5,8 +5,8 @@
 //! starts from it immediately.
 #![allow(dead_code)]
 use rtflow::client::{ClientOptions, RtspClient};
-use rtflow::protocol::transport::UpstreamTransport;
 use rtflow::media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription};
+use rtflow::protocol::transport::UpstreamTransport;
 use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::sync::Arc;
 use std::time::Duration;
@@ -56,7 +56,9 @@ fn frame(index: u64, is_keyframe: bool) -> AccessUnit {
 /// instead of replaying an old GOP from the startup window.
 fn init_tracing() {
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
         .try_init();
 }
 
@@ -64,7 +66,9 @@ fn init_tracing() {
 async fn joining_mid_gop_waits_for_next_idr() {
     init_tracing();
     let server = RtspServer::bind(
-        ServerConfig::builder("127.0.0.1:0".parse().unwrap()).build().unwrap(),
+        ServerConfig::builder("127.0.0.1:0".parse().unwrap())
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -142,7 +146,9 @@ async fn joining_mid_gop_waits_for_next_idr() {
 async fn joining_near_keyframe_starts_immediately() {
     init_tracing();
     let server = RtspServer::bind(
-        ServerConfig::builder("127.0.0.1:0".parse().unwrap()).build().unwrap(),
+        ServerConfig::builder("127.0.0.1:0".parse().unwrap())
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -173,7 +179,10 @@ async fn joining_near_keyframe_starts_immediately() {
 
     // Push a keyframe, then only 5 P frames (all within the 500ms window).
     for index in 0..=5 {
-        assert!(publisher.try_push(frame(index, index == 0)).unwrap() == rtflow::mount::PushResult::Accepted);
+        assert!(
+            publisher.try_push(frame(index, index == 0)).unwrap()
+                == rtflow::mount::PushResult::Accepted
+        );
     }
 
     // A second client joining now starts from the cached window keyframe.

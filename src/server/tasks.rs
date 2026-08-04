@@ -28,10 +28,7 @@ const INTERLEAVED_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from
 
 /// Write to the shared interleaved writer with a hard timeout.
 /// Returns `false` on timeout/error (caller should tear down the session).
-async fn write_interleaved(
-    writer: &Arc<Mutex<ControlWriteHalf>>,
-    wire: &[u8],
-) -> bool {
+async fn write_interleaved(writer: &Arc<Mutex<ControlWriteHalf>>, wire: &[u8]) -> bool {
     match tokio::time::timeout(INTERLEAVED_WRITE_TIMEOUT, async {
         let mut guard = writer.lock().await;
         guard.write_all(wire).await
@@ -75,8 +72,8 @@ impl RtpNtpClock {
         let raw_delta = rtp_timestamp.wrapping_sub(self.last_rtp) as i32 as i64;
         self.extended_delta = self.extended_delta.wrapping_add(raw_delta);
         self.last_rtp = rtp_timestamp;
-        let delta_ntp = i128::from(self.extended_delta) * (1i128 << 32)
-            / i128::from(self.clock_rate);
+        let delta_ntp =
+            i128::from(self.extended_delta) * (1i128 << 32) / i128::from(self.clock_rate);
         self.anchor_ntp.wrapping_add_signed(delta_ntp as i64)
     }
 }
@@ -138,8 +135,7 @@ impl Drop for InterleavedByeGuard {
             channel: self.channel,
             payload: wire,
         }
-        .try_encode()
-        else {
+        .try_encode() else {
             return;
         };
         let writer = self.writer.clone();
