@@ -31,10 +31,11 @@ use crate::hls::segment_ring::SegmentRing;
 use crate::hls::segmenter::{Segmenter, SegmenterConfig};
 use crate::http::Handler;
 use crate::media::MediaDescription;
+use handler::DashState;
 use mpd::MpdConfig;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::sync::broadcast;
 
 /// DASH output configuration.
@@ -69,6 +70,7 @@ pub fn create_dash_handlers(
     mount: &crate::mount::MountHandle,
 ) -> (Handler, Handler, Handler) {
     let ring = Arc::new(SegmentRing::new(config.segment_count));
+    let dash_state = Arc::new(DashState::new());
     let mut description: MediaDescription = mount.description.clone();
     let announced_fmtp = mount.announce_fmtp();
     for track in &mut description.tracks {
@@ -79,9 +81,11 @@ pub fn create_dash_handlers(
     let (mut receiver, startup) = mount.subscribe_with_startup();
     let cancel = mount.cancellation_token();
     let asset_prefix: Arc<str> = Arc::from(mount.path());
+    let mount_source = mount.announce_fmtp_source();
 
     // Spawn segmenter task
     let ring_clone = ring.clone();
+    let state_clone = dash_state.clone();
     let seg_config = SegmenterConfig {
         segment_duration: config.segment_duration,
         lookback_count: config.segment_count,
@@ -90,12 +94,28 @@ pub fn create_dash_handlers(
     tokio::spawn(async move {
         let mut segmenter = Segmenter::new(seg_config, &desc_segmenter);
         let mut segments = segmenter.subscribe();
+        // Skip broadcast replays of frames the startup snapshot already
+        // delivered (duplicate keyframes would corrupt segment timing).
+        let startup_keys = crate::mount::startup_dedup_keys(&startup);
         let mut startup = VecDeque::from(startup);
         let has_video = desc_segmenter
             .tracks
             .iter()
             .any(|track| track.kind == crate::media::MediaKind::Video);
         let mut awaiting_keyframe = has_video;
+        let mut fmtp_applied = false;
+        let mut frame_count: u64 = 0;
+        let mut keyframe_count: u64 = 0;
+        let mut segment_count: u64 = 0;
+        // Timestamp normalization: subtract first frame's PTS so media segment
+        // tfdt values start near 0, matching the MPD SegmentTimeline.
+        let mut base_pts: Option<Duration> = None;
+        tracing::info!(
+            tracks = desc_segmenter.tracks.len(),
+            has_video,
+            startup_frames = startup.len(),
+            "DASH segmenter task started"
+        );
 
         loop {
             let unit = if let Some(unit) = startup.pop_front() {
@@ -106,7 +126,7 @@ pub fn create_dash_handlers(
                     result = receiver.recv() => match result {
                         Ok(unit) => unit,
                         Err(broadcast::error::RecvError::Lagged(count)) => {
-                            tracing::debug!(count, "DASH input lagged; waiting for keyframe");
+                            tracing::warn!(count, "DASH input lagged; waiting for keyframe");
                             segmenter.reset_after_discontinuity();
                             awaiting_keyframe = has_video;
                             continue;
@@ -116,6 +136,16 @@ pub fn create_dash_handlers(
                 }
             };
 
+            frame_count += 1;
+            if frame_count == 1 {
+                tracing::debug!(
+                    codec = ?unit.codec,
+                    is_keyframe = unit.is_keyframe,
+                    track_id = unit.track_id,
+                    "DASH first frame received"
+                );
+            }
+
             if awaiting_keyframe {
                 if !matches!(
                     unit.codec,
@@ -124,15 +154,100 @@ pub fn create_dash_handlers(
                 {
                     continue;
                 }
+                tracing::info!(frame_count, "DASH first keyframe detected");
                 awaiting_keyframe = false;
+            }
+
+            // Skip broadcast replays of frames the startup snapshot already
+            // delivered (duplicate keyframes would corrupt segment timing).
+            if startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
+                continue;
+            }
+
+            if unit.is_keyframe {
+                keyframe_count += 1;
+            }
+
+            // Apply announce fmtp once available (publisher may ANNOUNCE after handlers created)
+            if !fmtp_applied {
+                let fmtp = mount_source
+                    .announce_fmtp
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
+                if !fmtp.is_empty() {
+                    tracing::debug!(tracks = fmtp.len(), "DASH applying announce fmtp");
+                    segmenter.update_fmtp(&fmtp);
+                    fmtp_applied = true;
+                }
+            }
+
+            // Normalize timestamps relative to first frame (so tfdt starts near 0)
+            let mut unit = unit;
+            // Detect publisher reconnection: large backward PTS jump means a new
+            // timestamp epoch.  Reset normalization base and DASH timeline state.
+            if let Some(base) = base_pts {
+                if unit.pts < base && base - unit.pts > Duration::from_secs(5) {
+                    tracing::info!(
+                        old_base_ms = base.as_millis() as u64,
+                        new_pts_ms = unit.pts.as_millis() as u64,
+                        "DASH timestamp discontinuity detected (publisher reconnect?), resetting"
+                    );
+                    base_pts = None;
+                    state_clone.reset_timeline();
+                    segmenter.reset_after_discontinuity();
+                    awaiting_keyframe = has_video;
+                    // Skip non-keyframe data until we get a clean starting point
+                    if has_video && !unit.is_keyframe {
+                        continue;
+                    }
+                }
+            }
+            let base = *base_pts.get_or_insert(unit.pts);
+            unit.pts = unit.pts.saturating_sub(base);
+            if let Some(dts) = unit.dts {
+                unit.dts = Some(dts.saturating_sub(base));
             }
 
             segmenter.push(unit);
             while let Ok(segment) = segments.try_recv() {
+                segment_count += 1;
+                tracing::debug!(
+                    segment_count,
+                    sequence = segment.sequence,
+                    keyframe_count,
+                    ring_len = ring_clone.len(),
+                    "DASH segment produced"
+                );
+                if state_clone.availability_start() == SystemTime::UNIX_EPOCH {
+                    state_clone.set_availability_start(SystemTime::now());
+                    state_clone.set_base_timestamp(segment.timestamp);
+                    // Derive actual codec string from init segment's avcC box
+                    if let Some(codec_str) = extract_h264_codec_string(&segment.init) {
+                        tracing::debug!(codec = %codec_str, "DASH init segment codec");
+                        state_clone.set_codec_string(codec_str);
+                    } else {
+                        tracing::warn!(
+                            init_len = segment.init.len(),
+                            "DASH init segment has no valid avcC"
+                        );
+                    }
+                    // Extract video dimensions from init segment's avc1/hvc1 box
+                    if let Some((w, h)) = extract_video_dimensions(&segment.init) {
+                        tracing::debug!(width = w, height = h, "DASH init segment dimensions");
+                        state_clone.set_video_dimensions(w, h);
+                    }
+                }
                 ring_clone.push(segment);
             }
         }
 
+        tracing::info!(
+            frame_count,
+            keyframe_count,
+            segment_count,
+            "DASH segmenter task exiting"
+        );
         segmenter.flush();
         while let Ok(segment) = segments.try_recv() {
             ring_clone.push(segment);
@@ -144,13 +259,17 @@ pub fn create_dash_handlers(
     let desc_mpd = description.clone();
     let mpd_config = config.mpd.clone();
     let prefix_mpd = asset_prefix.clone();
+    let state_mpd = dash_state.clone();
+    tracing::debug!("DASH handlers created");
     let mpd_handler: Handler = Arc::new(move |req, writer| {
         let r = ring_mpd.clone();
         let d = desc_mpd.clone();
         let c = mpd_config.clone();
         let p = prefix_mpd.clone();
+        let s = state_mpd.clone();
         Box::pin(async move {
-            handler::serve_mpd(req, writer, &r, &d, &c, &p).await
+            tracing::debug!(ring_len = r.len(), "DASH MPD requested");
+            handler::serve_mpd(req, writer, &r, &d, &c, &p, &s).await
         })
     });
 
@@ -181,4 +300,53 @@ pub fn create_dash_handlers(
     });
 
     (mpd_handler, segment_handler, init_handler)
+}
+
+/// Extract the H.264 codec string (e.g., "avc1.640028") from an init segment's avcC box.
+///
+/// Searches for the `avcC` box marker and reads profile/compat/level bytes.
+fn extract_h264_codec_string(init: &[u8]) -> Option<String> {
+    // Find "avcC" marker in the init segment
+    let marker = b"avcC";
+    let pos = init.windows(4).position(|window| window == marker)?;
+    // avcC payload starts right after the 4-byte marker
+    let payload = &init[pos + 4..];
+    if payload.len() < 4 {
+        return None;
+    }
+    // payload[0] = configurationVersion (should be 1)
+    // payload[1] = AVCProfileIndication
+    // payload[2] = profile_compatibility
+    // payload[3] = AVCLevelIndication
+    if payload[0] != 1 {
+        return None;
+    }
+    Some(format!(
+        "avc1.{:02X}{:02X}{:02X}",
+        payload[1], payload[2], payload[3]
+    ))
+}
+
+/// Extract video dimensions (width, height) from an init segment's avc1/hvc1 box.
+///
+/// The width/height fields are at fixed offsets within the visual sample entry:
+/// offset 32 = width (u16), offset 34 = height (u16) from the box start.
+fn extract_video_dimensions(init: &[u8]) -> Option<(u16, u16)> {
+    // Search for "avc1" or "hvc1" marker
+    let pos = init.windows(4).position(|w| w == b"avc1" || w == b"hvc1")?;
+    // The box starts 4 bytes before the marker (size field)
+    // width is at offset 32 from box start = pos - 4 + 32 = pos + 28
+    // height is at offset 34 from box start = pos + 30
+    let width_offset = pos + 28;
+    let height_offset = pos + 30;
+    if init.len() < height_offset + 2 {
+        return None;
+    }
+    let width = u16::from_be_bytes([init[width_offset], init[width_offset + 1]]);
+    let height = u16::from_be_bytes([init[height_offset], init[height_offset + 1]]);
+    if width > 0 && height > 0 {
+        Some((width, height))
+    } else {
+        None
+    }
 }

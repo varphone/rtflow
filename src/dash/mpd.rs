@@ -34,22 +34,36 @@ impl Default for MpdConfig {
 }
 
 /// Generate a dynamic MPD XML document.
+///
+/// `availability_start` is the fixed wall-clock instant when the first segment
+/// was produced (stream start). It MUST remain stable across MPD refreshes so
+/// that clients can derive the current segment number from elapsed time.
+///
+/// Uses `SegmentTimeline` to explicitly enumerate available segments, which is
+/// the most reliable approach for a sliding-window live server.
 pub fn generate_mpd(
     segments: &[Segment],
     description: &MediaDescription,
     config: &MpdConfig,
     asset_prefix: &str,
+    availability_start: SystemTime,
+    base_timestamp: Duration,
+    codec_override: Option<&str>,
+    video_dimensions: Option<(u16, u16)>,
 ) -> String {
     let mut xml = String::with_capacity(4096);
 
-    // Calculate availability start time (actual server start)
-    let availability_start = iso8601_now();
+    // Fixed availability start time (when the stream went live)
+    let ast_duration = availability_start
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let availability_start_str = iso8601_from_duration(ast_duration);
 
-    // Calculate publish time (latest segment time)
-    let publish_time = segments
-        .last()
-        .map(|s| iso8601_from_duration(s.timestamp))
-        .unwrap_or_else(|| availability_start.clone());
+    // publishTime = current wall-clock time (when this MPD was generated)
+    let now_duration = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let publish_time = iso8601_from_duration(now_duration);
 
     // Suggested presentation delay
     let suggested_delay = config
@@ -72,17 +86,19 @@ pub fn generate_mpd(
          timeShiftBufferDepth=\"{}\" \
          suggestedPresentationDelay=\"{}\" \
          maximumSegmentDuration=\"{}\" \
+         minimumUpdatePeriod=\"{}\" \
          availabilityStartTime=\"{}\" \
          publishTime=\"{}\">\n",
         format_duration(config.min_buffer_time),
         format_duration(config.time_shift_buffer_depth),
         format_duration(suggested_delay),
         format_duration(max_segment_duration),
-        availability_start,
+        format_duration(config.segment_duration),
+        availability_start_str,
         publish_time,
     ));
 
-    xml.push_str("  <Period id=\"0\">\n");
+    xml.push_str("  <Period id=\"0\" start=\"PT0S\">\n");
 
     // Group tracks by kind
     let has_video = description
@@ -94,6 +110,9 @@ pub fn generate_mpd(
         .iter()
         .any(|t| t.kind == MediaKind::Audio);
 
+    // Compute normalized segment timeline (timestamps relative to first-ever segment = AST)
+    let base_ts = base_timestamp;
+
     // Video AdaptationSet
     if has_video {
         let video_track = description
@@ -102,34 +121,48 @@ pub fn generate_mpd(
             .find(|t| t.kind == MediaKind::Video)
             .unwrap();
 
-        let start_number = segments.first().map(|s| s.sequence).unwrap_or(1);
-        let segment_duration_ticks =
-            (config.segment_duration.as_secs_f64() * config.timescale as f64) as u64;
+        let start_number = segments.first().map(|s| s.sequence).unwrap_or(0);
 
         xml.push_str(&format!(
             "    <AdaptationSet mimeType=\"video/mp4\" \
              codecs=\"{}\" \
              segmentAlignment=\"true\" \
              startWithSAP=\"1\">\n",
-            video_codec_string(video_track.codec),
+            codec_override.unwrap_or_else(|| video_codec_string(video_track.codec)),
         ));
 
         xml.push_str(&format!(
             "      <SegmentTemplate timescale=\"{}\" \
-             duration=\"{}\" \
              startNumber=\"{}\" \
              initialization=\"{}/init.mp4\" \
-             media=\"{}/segment_$Number$.m4s\"/>\n",
-            config.timescale,
-            segment_duration_ticks,
-            start_number,
-            asset_prefix,
-            asset_prefix,
+             media=\"{}/segment_$Number$.m4s\">\n",
+            config.timescale, start_number, asset_prefix, asset_prefix,
         ));
 
+        // SegmentTimeline: explicitly list available segments
+        xml.push_str("        <SegmentTimeline>\n");
+        for segment in segments {
+            let relative_ts = segment.timestamp.saturating_sub(base_ts);
+            let t_ticks = duration_to_ticks(relative_ts, config.timescale);
+            let d_ticks = duration_to_ticks(segment.duration, config.timescale).max(1);
+            xml.push_str(&format!(
+                "          <S t=\"{}\" d=\"{}\"/>\n",
+                t_ticks, d_ticks,
+            ));
+        }
+        xml.push_str("        </SegmentTimeline>\n");
+        xml.push_str("      </SegmentTemplate>\n");
+
         // Dynamic Representation attributes
-        let width = video_track.width.unwrap_or(1920);
-        let height = video_track.height.unwrap_or(1080);
+        // Prefer dimensions from init segment parsing, fall back to track description
+        let (width, height) = video_dimensions
+            .map(|(w, h)| (w as u32, h as u32))
+            .unwrap_or_else(|| {
+                (
+                    video_track.width.unwrap_or(1920) as u32,
+                    video_track.height.unwrap_or(1080) as u32,
+                )
+            });
         let frame_rate = video_track
             .frame_rate
             .map(|(n, d)| format!("{n}/{d}"))
@@ -152,10 +185,8 @@ pub fn generate_mpd(
             .find(|t| t.kind == MediaKind::Audio)
             .unwrap();
 
-        let start_number = segments.first().map(|s| s.sequence).unwrap_or(1);
+        let start_number = segments.first().map(|s| s.sequence).unwrap_or(0);
         let audio_timescale = audio_track.clock_rate;
-        let segment_duration_ticks =
-            (config.segment_duration.as_secs_f64() * audio_timescale as f64) as u64;
 
         xml.push_str(&format!(
             "    <AdaptationSet mimeType=\"audio/mp4\" \
@@ -167,16 +198,25 @@ pub fn generate_mpd(
 
         xml.push_str(&format!(
             "      <SegmentTemplate timescale=\"{}\" \
-             duration=\"{}\" \
              startNumber=\"{}\" \
              initialization=\"{}/init.mp4\" \
-             media=\"{}/segment_$Number$.m4s\"/>\n",
-            audio_timescale,
-            segment_duration_ticks,
-            start_number,
-            asset_prefix,
-            asset_prefix,
+             media=\"{}/segment_$Number$.m4s\">\n",
+            audio_timescale, start_number, asset_prefix, asset_prefix,
         ));
+
+        // SegmentTimeline for audio
+        xml.push_str("        <SegmentTimeline>\n");
+        for segment in segments {
+            let relative_ts = segment.timestamp.saturating_sub(base_ts);
+            let t_ticks = duration_to_ticks(relative_ts, audio_timescale);
+            let d_ticks = duration_to_ticks(segment.duration, audio_timescale).max(1);
+            xml.push_str(&format!(
+                "          <S t=\"{}\" d=\"{}\"/>\n",
+                t_ticks, d_ticks,
+            ));
+        }
+        xml.push_str("        </SegmentTimeline>\n");
+        xml.push_str("      </SegmentTemplate>\n");
 
         xml.push_str(&format!(
             "      <Representation id=\"audio\" bandwidth=\"128000\" \
@@ -201,6 +241,15 @@ pub fn generate_mpd(
     xml
 }
 
+/// Convert a Duration to ticks at the given timescale.
+fn duration_to_ticks(d: Duration, timescale: u32) -> u64 {
+    d.as_secs()
+        .saturating_mul(u64::from(timescale))
+        .saturating_add(
+            u64::from(d.subsec_nanos()).saturating_mul(u64::from(timescale)) / 1_000_000_000,
+        )
+}
+
 fn format_duration(d: Duration) -> String {
     let secs = d.as_secs();
     let frac = d.subsec_millis();
@@ -208,6 +257,7 @@ fn format_duration(d: Duration) -> String {
 }
 
 /// Format current time as ISO 8601 UTC.
+#[allow(dead_code)]
 fn iso8601_now() -> String {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -336,7 +386,16 @@ mod tests {
 
         let desc = test_description();
         let config = MpdConfig::default();
-        let mpd = generate_mpd(&segments, &desc, &config, "/live/stream");
+        let mpd = generate_mpd(
+            &segments,
+            &desc,
+            &config,
+            "/live/stream",
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+            Duration::ZERO,
+            None,
+            None,
+        );
 
         assert!(mpd.contains("<?xml version=\"1.0\""));
         assert!(mpd.contains("type=\"dynamic\""));
@@ -346,7 +405,11 @@ mod tests {
         assert!(mpd.contains("/live/stream/segment_$Number$.m4s"));
         assert!(mpd.contains("avc1.42E01E"));
         assert!(mpd.contains("mp4a.40.2"));
-        // New dynamic attributes
+        // SegmentTimeline
+        assert!(mpd.contains("<SegmentTimeline>"));
+        assert!(mpd.contains("<S t=\"0\" d=\"180000\"/>"));
+        assert!(mpd.contains("<S t=\"180000\" d=\"180000\"/>"));
+        // Dynamic attributes
         assert!(mpd.contains("suggestedPresentationDelay="));
         assert!(mpd.contains("maximumSegmentDuration="));
         assert!(mpd.contains("publishTime="));

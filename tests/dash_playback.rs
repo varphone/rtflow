@@ -6,7 +6,7 @@
 //! by publishing frames directly to a mount and querying via HTTP.
 
 use bytes::Bytes;
-use rtflow::dash::{create_dash_handlers, DashConfig};
+use rtflow::dash::{DashConfig, create_dash_handlers};
 use rtflow::http::{HttpConfig, HttpServer, Method};
 use rtflow::media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription};
 use rtflow::mount::MountRegistry;
@@ -183,7 +183,10 @@ async fn dash_mpd_and_segments_after_publish() {
     // MPD should now be available
     let (status, body) = http_get(addr, "/live/cam/manifest.mpd").await;
     assert_eq!(status, 200, "MPD should return 200 after publishing");
-    assert!(body.contains("MPD") || body.contains("mpd"), "Body should contain MPD XML");
+    assert!(
+        body.contains("MPD") || body.contains("mpd"),
+        "Body should contain MPD XML"
+    );
     assert!(
         body.contains("SegmentTemplate") || body.contains("Representation"),
         "MPD should contain segment info"
