@@ -18,15 +18,22 @@
 //! Usage:
 //!   cargo run --example ipc_camera -- --audio aac
 //!   vlc rtsp://127.0.0.1:8554/cam/main   (and /cam/sub)
+//!   # browser playback (WS-FLV / HTTP-FLV / HLS): open
+//!   #   http://127.0.0.1:8080/   (--no-web to disable the HTTP/WS servers)
 use clap::{Parser, ValueEnum};
+use rtflow::hls::{HlsConfig, create_hls_handlers};
+use rtflow::http::{HttpConfig, HttpServer, Method};
+use rtflow::http_flv::create_flv_handler;
+use rtflow::http_flv::web::{WebPlayerConfig, WebPlayerMode, create_web_player_handler};
+use rtflow::http_flv::ws::{WsFlvConfig, WsFlvServer};
 use rtflow::media::bitstream::{h264_parameter_sets, is_idr};
 use rtflow::media::clock::RtpClock;
 use rtflow::media::{AccessUnit, Codec, MediaDescription, TrackDescription};
 use rtflow::server::ServerConfig;
 use rtflow::{MountConfig, RtspServer};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -63,7 +70,17 @@ struct Args {
     /// session ≈ capacity × average frame size; e.g. 1080p@4Mbps ≈ 16KB/
     /// frame → 128 frames ≈ 2MB. Embedded IPC: 64–128; desktop: 256.
     #[arg(long, default_value_t = 128)]
-    queue: usize,}
+    queue: usize,
+    /// HTTP listen address: browser player page + HTTP-FLV + HLS.
+    #[arg(long, default_value = "0.0.0.0:8080")]
+    web_listen: SocketAddr,
+    /// WS-FLV (WebSocket) listen address for low-latency browser playback.
+    #[arg(long, default_value = "0.0.0.0:8088")]
+    ws_listen: SocketAddr,
+    /// Disable the web player (HTTP-FLV / WS-FLV / HLS servers); RTSP only.
+    #[arg(long)]
+    no_web: bool,
+}
 
 /// Minimal synthetic H.264 access unit. The first IDR includes SPS/PPS
 /// (NAL 7/8); later IDRs are slice-only, like separated VENC output.
@@ -105,7 +122,6 @@ async fn publish_stream(
     stop: Arc<AtomicBool>,
 ) -> rtflow::Result<()> {
     let publisher = mount.publisher()?;
-    tracing::info!(url = format!("rtsp://{}{}", mount.path, config.name), "stream ready");
     let mut video_clock = RtpClock::new(90_000);
     let mut index: u64 = 0;
     let frame_interval = Duration::from_micros(1_000_000 / u64::from(fps));
@@ -177,8 +193,7 @@ async fn publish_stream(
 async fn main() -> rtflow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .try_init()
         .ok();
@@ -237,11 +252,77 @@ async fn main() -> rtflow::Result<()> {
                 },
             )
             .await?;
-        tracing::info!(url = format!("rtsp://{}{}", server.local_addr(), path), "stream ready");
+        tracing::info!(
+            url = format!("rtsp://{}{}", server.local_addr(), path),
+            "stream ready"
+        );
         mounts.push(mount);
     }
 
     let stop = Arc::new(AtomicBool::new(false));
+    let mut http_server = None;
+
+    // --- Web playback: player page + HTTP-FLV + HLS + WS-FLV ---
+    if !args.no_web {
+        let registry = server.registry();
+        let mut web = HttpServer::bind(HttpConfig::new(args.web_listen)).await?;
+        let player = create_web_player_handler(
+            registry.clone(),
+            WebPlayerConfig {
+                ws_flv_port: Some(args.ws_listen.port()),
+                default_mode: WebPlayerMode::WsFlv,
+            },
+        );
+        web.add_route(Method::Get, "/", player).await;
+        for mount in &mounts {
+            let path = mount.path().to_string();
+            web.add_route(
+                Method::Get,
+                &format!("{path}.flv"),
+                create_flv_handler(mount),
+            )
+            .await;
+            // HLS live window: 2 s segments × 5 = ~10 s rolling buffer.
+            let hls_config = HlsConfig {
+                segment_duration: Duration::from_secs(2),
+                segment_count: 5,
+                live: true,
+            };
+            let (playlist, segment, init) = create_hls_handlers(hls_config, mount);
+            web.add_route(Method::Get, &format!("{path}.m3u8"), playlist)
+                .await;
+            web.add_route(Method::Get, &format!("{path}/init.m4s"), init)
+                .await;
+            web.add_route(Method::Get, &format!("{path}/{{seq}}"), segment)
+                .await;
+        }
+        let web_addr = web.local_addr();
+        web.run().await?;
+
+        let ws = WsFlvServer::bind(
+            WsFlvConfig {
+                bind_addr: args.ws_listen,
+                ..Default::default()
+            },
+            registry,
+        )
+        .await?;
+        let ws_addr = ws.local_addr();
+        tokio::spawn(async move {
+            if let Err(e) = ws.run().await {
+                tracing::error!("ws-flv server: {e}");
+            }
+        });
+
+        println!("=== IPC Camera Web Player ===");
+        println!("浏览器打开: http://{web_addr}/   (WS-FLV / HTTP-FLV / HLS 三模式)");
+        println!("WS-FLV:   ws://{ws_addr}{}/main.flv", args.mount);
+        println!("HTTP-FLV: http://{web_addr}{}/main.flv", args.mount);
+        println!("HLS:      http://{web_addr}{}/main.m3u8", args.mount);
+        println!();
+        http_server = Some(web);
+    }
+
     let mut handles = Vec::new();
     for (mount, config) in mounts.iter().zip(stream_configs.iter()) {
         let stop = stop.clone();
@@ -254,6 +335,9 @@ async fn main() -> rtflow::Result<()> {
 
     tokio::signal::ctrl_c().await?;
     stop.store(true, Ordering::Relaxed);
+    if let Some(web) = http_server {
+        web.shutdown();
+    }
     for handle in handles {
         let _ = handle.await;
     }
