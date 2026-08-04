@@ -289,29 +289,34 @@ pub fn authorization_from_challenge(
     let realm = required(&fields, "realm")?;
     let nonce = required(&fields, "nonce")?;
     let algorithm = fields.get("algorithm").map(String::as_str).unwrap_or("MD5");
-    if !algorithm.eq_ignore_ascii_case("MD5") {
+    if !algorithm.eq_ignore_ascii_case("MD5") && !algorithm.eq_ignore_ascii_case("SHA-256") {
         return Err(Error::Rtsp(format!(
             "unsupported Digest algorithm {algorithm}"
         )));
     }
-    let ha1 = md5_hex(&format!(
+    let digest: fn(&str) -> String = if algorithm.eq_ignore_ascii_case("SHA-256") {
+        sha256_hex
+    } else {
+        md5_hex
+    };
+    let ha1 = digest(&format!(
         "{}:{realm}:{}",
         credentials.username, credentials.password
     ));
-    let ha2 = md5_hex(&format!("{}:{uri}", method.as_str()));
-    let mut response = md5_hex(&format!("{ha1}:{nonce}:{ha2}"));
+    let ha2 = digest(&format!("{}:{uri}", method.as_str()));
+    let mut response = digest(&format!("{ha1}:{nonce}:{ha2}"));
     let mut suffix = String::new();
     if fields
         .get("qop")
         .is_some_and(|value| value.split(',').any(|item| item.trim() == "auth"))
     {
         let nc = "00000001";
-        let cnonce = md5_hex(&format!("{}:{nonce}:{uri}", credentials.username));
-        response = md5_hex(&format!("{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}"));
+        let cnonce = digest(&format!("{}:{nonce}:{uri}", credentials.username));
+        response = digest(&format!("{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}"));
         suffix = format!(", qop=auth, nc={nc}, cnonce=\"{cnonce}\"");
     }
     Ok(format!(
-        "Digest username=\"{}\", realm=\"{realm}\", nonce=\"{nonce}\", uri=\"{uri}\", response=\"{response}\", algorithm=MD5{suffix}",
+        "Digest username=\"{}\", realm=\"{realm}\", nonce=\"{nonce}\", uri=\"{uri}\", response=\"{response}\", algorithm={algorithm}{suffix}",
         credentials.username
     ))
 }
@@ -348,17 +353,23 @@ pub fn verify_digest(
     {
         return Ok(false);
     }
-    let ha1 = md5_hex(&format!(
+    let algorithm = fields.get("algorithm").map(String::as_str).unwrap_or("MD5");
+    let digest: fn(&str) -> String = if algorithm.eq_ignore_ascii_case("SHA-256") {
+        sha256_hex
+    } else {
+        md5_hex
+    };
+    let ha1 = digest(&format!(
         "{}:{realm}:{}",
         credentials.username, credentials.password
     ));
-    let ha2 = md5_hex(&format!("{}:{uri}", method.as_str()));
+    let ha2 = digest(&format!("{}:{uri}", method.as_str()));
     let expected = if let (Some(qop), Some(nc), Some(cnonce)) =
         (fields.get("qop"), fields.get("nc"), fields.get("cnonce"))
     {
-        md5_hex(&format!("{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}"))
+        digest(&format!("{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}"))
     } else {
-        md5_hex(&format!("{ha1}:{nonce}:{ha2}"))
+        digest(&format!("{ha1}:{nonce}:{ha2}"))
     };
     Ok(constant_time_eq(
         expected.as_bytes(),
@@ -432,6 +443,12 @@ fn insert_field(out: &mut BTreeMap<String, String>, item: &str) -> Result<()> {
         value.trim().trim_matches('"').to_owned(),
     );
     Ok(())
+}
+
+fn sha256_hex(value: &str) -> String {
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(value.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn md5_hex(value: &str) -> String {

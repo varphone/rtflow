@@ -31,6 +31,38 @@ impl TlsServerConfig {
             .map_err(|error| Error::Tls(error.to_string()))?;
         Ok(Self::new(Arc::new(config)))
     }
+
+    /// Build a server config that requires client certificates (mTLS):
+    /// clients must present a certificate signed by one of `ca_certs_pem`.
+    pub fn from_pem_with_client_auth(
+        certificate_chain: &[u8],
+        private_key_pem: &[u8],
+        ca_certs_pem: &[u8],
+    ) -> Result<Self> {
+        use rustls::server::WebPkiClientVerifier;
+        let certificates = certs(&mut Cursor::new(certificate_chain))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|error| Error::Tls(error.to_string()))?;
+        let key = private_key(&mut Cursor::new(private_key_pem))
+            .map_err(|error| Error::Tls(error.to_string()))?
+            .ok_or_else(|| Error::Tls("PEM contains no private key".into()))?;
+        let ca_certificates = certs(&mut Cursor::new(ca_certs_pem))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|error| Error::Tls(error.to_string()))?;
+        let mut roots = RootCertStore::empty();
+        let (accepted, rejected) = roots.add_parsable_certificates(ca_certificates);
+        if accepted == 0 || rejected != 0 {
+            return Err(Error::Tls("no valid client CA certificates in PEM".into()));
+        }
+        let verifier = WebPkiClientVerifier::builder(Arc::new(roots))
+            .build()
+            .map_err(|error| Error::Tls(error.to_string()))?;
+        let config = ServerConfig::builder()
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(certificates, key)
+            .map_err(|error| Error::Tls(error.to_string()))?;
+        Ok(Self::new(Arc::new(config)))
+    }
 }
 
 #[derive(Clone)]

@@ -5,7 +5,7 @@ use common::{CodecArg, advertised_url, description, init_tracing, mount_path, sa
 use futures::future::BoxFuture;
 use rtflow::{
     AccessRole, AuthDecision, Authenticator, Credentials, MountConfig, RtspServer, ServerConfig,
-    auth::{AuthRequest, verify_basic, verify_digest},
+    auth::{AuthRequest, DigestNonceManager, verify_basic, verify_digest_managed},
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -20,6 +20,7 @@ struct RoleAuthenticator {
     publish: Credentials,
     mode: AuthMode,
     realm: String,
+    nonces: DigestNonceManager,
 }
 
 impl Authenticator for RoleAuthenticator {
@@ -32,7 +33,18 @@ impl Authenticator for RoleAuthenticator {
             let allowed = request.authorization.is_some_and(|header| match self.mode {
                 AuthMode::Basic => verify_basic(header, credentials),
                 AuthMode::Digest => {
-                    verify_digest(header, request.method, credentials, &self.realm).unwrap_or(false)
+                    // verify_digest_managed validates the HMAC-signed
+                    // nonce, its TTL, and the per-nonce-count replay
+                    // protection (README's "签名 nonce 和防重放"); the
+                    // static nonce of plain verify_digest is replayable.
+                    verify_digest_managed(
+                        header,
+                        request.method,
+                        credentials,
+                        &self.realm,
+                        &self.nonces,
+                    )
+                    .unwrap_or(false)
                 }
             });
             if allowed {
@@ -90,6 +102,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         mode: args.mode,
         realm: "rtsp-example".into(),
+        // Signed nonces: random per-process secret, 1 hour TTL.
+        nonces: DigestNonceManager::new(
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+                .to_be_bytes()
+                .to_vec(),
+            std::time::Duration::from_secs(3600),
+            16_384,
+        )
+        .expect("nonce manager"),
     });
     let server = RtspServer::bind(config).await?;
     let live = server
