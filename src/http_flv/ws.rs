@@ -250,17 +250,14 @@ async fn handle_connection(
             continue;
         }
         let is_video = matches!(unit.codec, Codec::H264 | Codec::H265);
-        if awaiting_video_keyframe {
-            if !is_video || !unit.is_keyframe {
+        if awaiting_video_keyframe && is_video {
+            if !unit.is_keyframe {
                 continue;
             }
             awaiting_video_keyframe = false;
             dropping_h265_cra_leading_pictures = false;
         }
-        if dropping_h265_cra_leading_pictures {
-            if !is_video {
-                continue;
-            }
+        if dropping_h265_cra_leading_pictures && is_video {
             match h265_vcl_nal_type(&unit.data) {
                 Some(8 | 9) => continue,
                 Some(_) => dropping_h265_cra_leading_pictures = false,
@@ -326,16 +323,16 @@ async fn handshake(mut stream: TcpStream, timeout: Duration) -> Result<(String, 
     loop {
         let n = tokio::time::timeout(timeout, stream.read(&mut tmp))
             .await
-            .map_err(|_| crate::Error::Rtsp("ws-flv: handshake timeout".into()))??;
+            .map_err(|_| crate::Error::Http("ws-flv: handshake timeout".into()))??;
         if n == 0 {
-            return Err(crate::Error::Rtsp("ws-flv: closed during handshake".into()));
+            return Err(crate::Error::Http("ws-flv: closed during handshake".into()));
         }
         buf.extend_from_slice(&tmp[..n]);
         if buf.windows(4).any(|w| w == b"\r\n\r\n") {
             break;
         }
         if buf.len() > MAX_HANDSHAKE_BYTES {
-            return Err(crate::Error::Rtsp("ws-flv: handshake too large".into()));
+            return Err(crate::Error::Http("ws-flv: handshake too large".into()));
         }
     }
 
@@ -344,13 +341,13 @@ async fn handshake(mut stream: TcpStream, timeout: Duration) -> Result<(String, 
     let request_line = lines.next().unwrap_or("");
     let mut parts = request_line.split_whitespace();
     if parts.next() != Some("GET") {
-        return Err(crate::Error::Rtsp("ws-flv: method must be GET".into()));
+        return Err(crate::Error::Http("ws-flv: method must be GET".into()));
     }
     let path = parts
         .next()
-        .ok_or_else(|| crate::Error::Rtsp("ws-flv: missing path".into()))?;
+        .ok_or_else(|| crate::Error::Http("ws-flv: missing path".into()))?;
     if !path.starts_with('/') {
-        return Err(crate::Error::Rtsp("ws-flv: invalid path".into()));
+        return Err(crate::Error::Http("ws-flv: invalid path".into()));
     }
 
     let mut sec_key: Option<String> = None;
@@ -371,14 +368,14 @@ async fn handshake(mut stream: TcpStream, timeout: Duration) -> Result<(String, 
         }
     }
     let sec_key =
-        sec_key.ok_or_else(|| crate::Error::Rtsp("ws-flv: missing Sec-WebSocket-Key".into()))?;
+        sec_key.ok_or_else(|| crate::Error::Http("ws-flv: missing Sec-WebSocket-Key".into()))?;
     if !upgrade_ok {
-        return Err(crate::Error::Rtsp(
+        return Err(crate::Error::Http(
             "ws-flv: missing Upgrade: websocket".into(),
         ));
     }
     if !version_ok {
-        return Err(crate::Error::Rtsp(
+        return Err(crate::Error::Http(
             "ws-flv: unsupported Sec-WebSocket-Version".into(),
         ));
     }
@@ -405,7 +402,8 @@ async fn handshake(mut stream: TcpStream, timeout: Duration) -> Result<(String, 
 }
 
 /// Write one server frame: FIN + opcode, unmasked (RFC 6455 §5.1).
-/// The frame header is built on a stack array (no per-frame allocation).
+/// The frame header is built on a stack array (no per-frame allocation)
+/// and sent together with the payload in a single vectored syscall.
 async fn write_ws_frame<W: AsyncWrite + Unpin>(
     w: &mut W,
     opcode: u8,
@@ -426,8 +424,13 @@ async fn write_ws_frame<W: AsyncWrite + Unpin>(
         hdr[2..10].copy_from_slice(&(len as u64).to_be_bytes());
         10
     };
-    w.write_all(&hdr[..hdr_len]).await?;
-    w.write_all(payload).await?;
+    let bufs = [
+        std::io::IoSlice::new(&hdr[..hdr_len]),
+        std::io::IoSlice::new(payload),
+    ];
+    // tokio's write_vectored already loops until every byte is written
+    // (unlike std), so the returned amount is always the full length.
+    let _ = w.write_vectored(&bufs).await?;
     Ok(())
 }
 
@@ -449,7 +452,7 @@ async fn read_client_frame(r: &mut (impl AsyncRead + Unpin)) -> Result<(u8, Vec<
         len = u64::from_be_bytes(b);
     }
     if len > MAX_FRAME_PAYLOAD {
-        return Err(crate::Error::Rtsp("ws-flv: frame too large".into()));
+        return Err(crate::Error::Http("ws-flv: frame too large".into()));
     }
     // Mask key precedes the payload (RFC 6455 §5.2); client frames
     // are always masked.
@@ -485,7 +488,7 @@ async fn read_control_loop(
                 Ok(result) => result?,
                 Err(_elapsed) => {
                     if ping_pending {
-                        return Err(crate::Error::Rtsp(
+                        return Err(crate::Error::Http(
                             "ws-flv: client unresponsive to heartbeat".into(),
                         ));
                     }

@@ -25,10 +25,13 @@ pub struct HlsConfig {
 impl Default for HlsConfig {
     fn default() -> Self {
         Self {
-            segment_duration: Duration::from_secs(2),
+            // 1 s segments: with a 1 s GOP this is the theoretical minimum
+            // server-side cut latency (average GOP/2 = 0.5 s to the next
+            // segment). The 3-segment window still satisfies the HLS
+            // spec's 3×TARGETDURATION lookback requirement.
+            segment_duration: Duration::from_secs(1),
             // Embedded budget: lookback segments are retained in RAM
-            // after finalization (2s×bitrate×count peak); 3 keeps a 3×
-            // duration window at ~2×segment bytes (P1-6).
+            // after finalization (1s×bitrate×count peak).
             segment_count: 3,
             live: true,
         }
@@ -94,12 +97,13 @@ pub fn create_hls_handlers(
                     },
                 }
             };
-            if awaiting_keyframe {
-                if !matches!(
+            if awaiting_keyframe
+                && matches!(
                     unit.codec,
                     crate::media::Codec::H264 | crate::media::Codec::H265
-                ) || !unit.is_keyframe
-                {
+                )
+            {
+                if !unit.is_keyframe {
                     continue;
                 }
                 awaiting_keyframe = false;

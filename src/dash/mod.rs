@@ -150,12 +150,13 @@ pub fn create_dash_handlers(
                 );
             }
 
-            if awaiting_keyframe {
-                if !matches!(
+            if awaiting_keyframe
+                && matches!(
                     unit.codec,
                     crate::media::Codec::H264 | crate::media::Codec::H265
-                ) || !unit.is_keyframe
-                {
+                )
+            {
+                if !unit.is_keyframe {
                     continue;
                 }
                 tracing::info!(frame_count, "DASH first keyframe detected");

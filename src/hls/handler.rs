@@ -72,7 +72,7 @@ pub async fn serve_playlist<W: AsyncWrite + Unpin>(
                 &[
                     ("ETag", etag.as_str()),
                     ("Cache-Control", "no-cache"),
-                    ("Connection", "close"),
+                    ("Connection", "keep-alive"),
                 ],
             )
             .await?;
@@ -95,7 +95,7 @@ pub async fn serve_playlist<W: AsyncWrite + Unpin>(
                 ("ETag", etag.as_str()),
                 ("Cache-Control", "no-cache"),
                 ("Access-Control-Allow-Origin", "*"),
-                ("Connection", "close"),
+                ("Connection", "keep-alive"),
             ],
         )
         .await?;
@@ -126,7 +126,7 @@ pub async fn serve_segment<W: AsyncWrite + Unpin>(
         ("Content-Length", content_length.as_str()),
         ("Cache-Control", "public, max-age=3600"),
         ("Access-Control-Allow-Origin", "*"),
-        ("Connection", "close"),
+        ("Connection", "keep-alive"),
     ];
     writer.write_headers(200, &headers).await?;
     writer.write_raw(&segment.data).await?;
@@ -156,7 +156,7 @@ pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
         ("Content-Length", content_length.as_str()),
         ("Cache-Control", "public, max-age=3600"),
         ("Access-Control-Allow-Origin", "*"),
-        ("Connection", "close"),
+        ("Connection", "keep-alive"),
     ];
     writer.write_headers(200, &headers).await?;
     writer.write_raw(&init).await?;
@@ -231,6 +231,10 @@ mod tests {
         let out = writer.into_inner();
         let text = String::from_utf8_lossy(&out);
         assert!(text.starts_with("HTTP/1.1 200"), "first request: {text}");
+        assert!(
+            text.to_ascii_lowercase().contains("connection: keep-alive"),
+            "playlist response must keep the connection alive: {text}"
+        );
         let etag = text
             .lines()
             .find(|line| line.to_ascii_lowercase().starts_with("etag:"))

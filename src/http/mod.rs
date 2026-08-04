@@ -234,7 +234,7 @@ async fn handle_connection(
                 if let Some(writer) = writer.as_mut() {
                     let _ = writer.write_body(400, "text/plain", b"Bad Request").await;
                 }
-                return Err(Error::Rtsp("invalid HTTP request".into()));
+                return Err(Error::Http("invalid HTTP request".into()));
             }
         };
 
@@ -242,7 +242,11 @@ async fn handle_connection(
             .header("connection")
             .is_some_and(|value| value.eq_ignore_ascii_case("close"));
 
-        let w = writer.take().expect("writer should be available");
+        let mut w = writer.take().expect("writer should be available");
+        // Keep-alive: the same writer serves multiple requests; clear the
+        // previous response's state (headers_written/connection_close)
+        // before handing it to the next handler.
+        w.reset();
         let guard = router.read().await;
         let (handler, params) = guard.route(&req.method, &req.path.clone());
         let handler = handler.clone();

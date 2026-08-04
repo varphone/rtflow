@@ -16,6 +16,13 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
         }
     }
 
+    /// Reset per-response state so the same writer can serve the next
+    /// request on a keep-alive connection.
+    pub fn reset(&mut self) {
+        self.headers_written = false;
+        self.connection_close = false;
+    }
+
     /// Whether the response indicated the connection should be closed.
     pub fn should_close(&self) -> bool {
         self.connection_close
@@ -23,7 +30,7 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
 
     pub async fn write_headers(&mut self, status: u16, headers: &[(&str, &str)]) -> Result<()> {
         if self.headers_written {
-            return Err(Error::Rtsp("HTTP response headers already written".into()));
+            return Err(Error::Http("HTTP response headers already written".into()));
         }
         let reason = status_reason(status);
         let mut buf = format!("HTTP/1.1 {} {}\r\n", status, reason);
@@ -61,7 +68,7 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
 
     pub async fn write_chunk(&mut self, data: &[u8]) -> Result<()> {
         if !self.headers_written {
-            return Err(Error::Rtsp("HTTP chunk written before headers".into()));
+            return Err(Error::Http("HTTP chunk written before headers".into()));
         }
         if data.is_empty() {
             return Ok(());

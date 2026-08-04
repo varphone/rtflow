@@ -121,10 +121,10 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
             continue;
         }
         let is_video = matches!(unit.codec, Codec::H264 | Codec::H265);
-        if awaiting_video_keyframe {
-            if !is_video || !unit.is_keyframe {
+        if awaiting_video_keyframe && is_video {
+            if !unit.is_keyframe {
                 tracing::debug!(
-                    "flv: skip non-keyframe (awaiting IDR) key={}",
+                    "flv: skip non-keyframe video (awaiting IDR) key={}",
                     unit.is_keyframe
                 );
                 continue;
@@ -132,10 +132,7 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
             awaiting_video_keyframe = false;
             dropping_h265_cra_leading_pictures = false;
         }
-        if dropping_h265_cra_leading_pictures {
-            if !is_video {
-                continue;
-            }
+        if dropping_h265_cra_leading_pictures && is_video {
             match h265_vcl_nal_type(&unit.data) {
                 Some(8 | 9) => continue,
                 Some(_) => dropping_h265_cra_leading_pictures = false,
