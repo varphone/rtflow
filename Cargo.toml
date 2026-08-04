@@ -37,7 +37,7 @@ hls = ["http", "mp4"]
 dash = ["http", "mp4"]
 rtmp = []
 srt = []
-webrtc = ["srtp", "dep:webrtc-ice", "dep:webrtc-dtls", "dep:rcgen"]
+webrtc = ["dep:webrtc", "dep:rtc", "dep:async-trait"]
 
 [[bench]]
 name = "hot_path"
@@ -92,14 +92,15 @@ url = "2.5"
 gstreamer = { version = "0.25", optional = true }
 gstreamer-app = { version = "0.25", optional = true }
 http-crate = { package = "http", version = "1", optional = true }
-webrtc-ice = { version = "0.12", optional = true }
-webrtc-dtls = { version = "0.12", optional = true }
-rcgen = { version = "0.14", optional = true }
+webrtc = { version = "0.20", optional = true }
+rtc = { version = "0.20", optional = true }
+async-trait = { version = "0.1", optional = true }
 
 [dev-dependencies]
 clap = { version = "4.5", features = ["derive"] }
 criterion = { version = "0.8", features = ["html_reports"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-log = "0.2"
 rcgen = "0.14"
 
 # ---------------------------------------------------------------------------

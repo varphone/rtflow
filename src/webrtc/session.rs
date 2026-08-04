@@ -1,15 +1,19 @@
 //! WebRTC session management.
 //!
-//! Tracks active WHIP/WHEP sessions with their ICE, DTLS, and SRTP state.
+//! Tracks active WHIP/WHEP sessions with their peer connection, ICE state
+//! and media tasks.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
+use webrtc::peer_connection::PeerConnection;
 
-use super::dtls::{DtlsConfig, DtlsConnection};
-use super::ice::IceAgent;
+use super::transport::PcState;
 use crate::Result;
 
 /// WebRTC session type.
@@ -21,7 +25,7 @@ pub enum SessionType {
     Play,
 }
 
-/// WebRTC session state.
+/// WebRTC session state, driven by the ICE/peer-connection state machine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionState {
     /// SDP exchange in progress.
@@ -46,10 +50,12 @@ pub struct WebrtcSession {
     pub state: SessionState,
     /// Mount path this session is associated with.
     pub mount_path: String,
-    /// ICE agent.
-    pub ice: Option<Arc<IceAgent>>,
-    /// DTLS connection.
-    pub dtls: Option<DtlsConnection>,
+    /// The peer connection (transport + media plane).
+    pub pc: Option<Arc<dyn PeerConnection>>,
+    /// Transport state (ICE candidates, connection signals).
+    pub pc_state: Option<Arc<PcState>>,
+    /// Media-plane tasks (publish/play loops) to abort on close.
+    media_tasks: Vec<JoinHandle<()>>,
     /// Cancellation token for cleanup.
     pub cancel: CancellationToken,
     /// Session creation time.
@@ -67,12 +73,47 @@ impl WebrtcSession {
             session_type,
             state: SessionState::Connecting,
             mount_path,
-            ice: None,
-            dtls: None,
+            pc: None,
+            pc_state: None,
+            media_tasks: Vec::new(),
             cancel: CancellationToken::new(),
             created_at: now,
             last_activity: now,
         }
+    }
+
+    /// Attach the peer connection and its transport state.
+    pub fn attach(&mut self, pc: Arc<dyn PeerConnection>, pc_state: Arc<PcState>) {
+        self.pc = Some(pc);
+        self.pc_state = Some(pc_state);
+        self.state = SessionState::Establishing;
+    }
+
+    /// Advance the session state from an ICE connection state.
+    pub fn on_ice_state(&mut self, ice_state: &webrtc::peer_connection::RTCIceConnectionState) {
+        use webrtc::peer_connection::RTCIceConnectionState as S;
+        match ice_state {
+            S::Checking | S::New => {
+                if self.state == SessionState::Connecting {
+                    self.state = SessionState::Establishing;
+                }
+            }
+            S::Connected | S::Completed => {
+                if self.state != SessionState::Active {
+                    info!("WebRTC session {} active", self.id);
+                    self.state = SessionState::Active;
+                }
+            }
+            S::Failed | S::Disconnected | S::Closed => {
+                self.state = SessionState::Closed;
+            }
+            _ => {}
+        }
+    }
+
+    /// Spawn a media-plane task owned by this session.
+    pub fn spawn_media_task(&mut self, task: JoinHandle<()>) {
+        self.media_tasks.push(task);
     }
 
     /// Update last activity time.
@@ -81,19 +122,24 @@ impl WebrtcSession {
     }
 
     /// Check if session has timed out.
+    ///
+    /// Active sessions are not reaped by the idle sweep — media flowing
+    /// keeps the session alive until the peer closes it (DELETE request
+    /// or an ICE failure, which sets [`SessionState::Closed`]).
     pub fn is_expired(&self, timeout: Duration) -> bool {
-        self.last_activity.elapsed() > timeout
+        self.state != SessionState::Active && self.last_activity.elapsed() > timeout
     }
 
-    /// Close the session.
+    /// Close the session: cancel tasks, close the peer connection.
     pub async fn close(&mut self) -> Result<()> {
         self.state = SessionState::Closing;
         self.cancel.cancel();
-
-        if let Some(ice) = &self.ice {
-            let _ = ice.close().await;
+        for task in self.media_tasks.drain(..) {
+            task.abort();
         }
-
+        if let Some(pc) = &self.pc {
+            let _ = pc.close().await;
+        }
         self.state = SessionState::Closed;
         info!("WebRTC session {} closed", self.id);
         Ok(())
@@ -106,25 +152,15 @@ pub struct SessionRegistry {
     sessions: RwLock<HashMap<String, Arc<RwLock<WebrtcSession>>>>,
     /// Session timeout duration.
     timeout: Duration,
-    /// Shared DTLS configuration.
-    dtls_config: Arc<DtlsConfig>,
 }
 
 impl SessionRegistry {
     /// Create a new session registry.
     pub fn new(timeout: Duration) -> Result<Self> {
-        let dtls_config = DtlsConfig::generate()?;
-
         Ok(Self {
             sessions: RwLock::new(HashMap::new()),
             timeout,
-            dtls_config: Arc::new(dtls_config),
         })
-    }
-
-    /// Get the shared DTLS config.
-    pub fn dtls_config(&self) -> Arc<DtlsConfig> {
-        self.dtls_config.clone()
     }
 
     /// Create a new session.
@@ -189,14 +225,27 @@ impl SessionRegistry {
     }
 }
 
-/// Generate a unique session ID.
+/// Generate an unguessable session ID (128-bit SplitMix64 over a
+/// time-seeded counter). The ID is used as the WHIP/WHEP resource URL, so
+/// predictability would let anyone DELETE another client's session.
 fn generate_session_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now()
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_nanos();
-    format!("{:016x}", ts)
+        .as_nanos() as u64;
+    let mut z = seed
+        .wrapping_add(COUNTER.fetch_add(1, Ordering::Relaxed))
+        .wrapping_add(0x9E3779B97F4A7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+    let a = z ^ (z >> 31);
+    z = z.wrapping_mul(0xBF58476D1CE4E5B9) ^ (z >> 27);
+    let b = z.wrapping_mul(0x94D049BB133111EB) ^ (z >> 31);
+    format!("{a:016x}{b:016x}")
 }
 
 #[cfg(test)]
@@ -206,11 +255,11 @@ mod tests {
     #[test]
     fn session_id_generation() {
         let id1 = generate_session_id();
-        let _id2 = generate_session_id();
-        assert_eq!(id1.len(), 16);
-        // IDs should be different (unless called in same nanosecond)
-        // Just check format
+        let id2 = generate_session_id();
+        // 128-bit random hex, unique per call.
+        assert_eq!(id1.len(), 32);
         assert!(id1.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(id1, id2);
     }
 
     #[tokio::test]
@@ -243,5 +292,18 @@ mod tests {
 
         assert_eq!(registry.session_count().await, 0);
         assert!(registry.get_session(&id).await.is_none());
+    }
+
+    #[test]
+    fn session_state_progression() {
+        use webrtc::peer_connection::RTCIceConnectionState as S;
+        let mut session = WebrtcSession::new("t".into(), SessionType::Play, "/live".into());
+        assert_eq!(session.state, SessionState::Connecting);
+        session.on_ice_state(&S::Checking);
+        assert_eq!(session.state, SessionState::Establishing);
+        session.on_ice_state(&S::Connected);
+        assert_eq!(session.state, SessionState::Active);
+        session.on_ice_state(&S::Failed);
+        assert_eq!(session.state, SessionState::Closed);
     }
 }

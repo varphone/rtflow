@@ -8,6 +8,8 @@ pub use request::{HttpRequest, Method};
 pub(crate) use request::{ParseError, parse_request};
 pub use response::ResponseWriter;
 pub use router::{Handler, Router};
+#[cfg(feature = "webrtc")]
+pub(crate) use router::ConnWriter;
 
 use crate::{Error, Result, security::SecurityConfig};
 use std::{net::SocketAddr, sync::Arc, time::Duration};

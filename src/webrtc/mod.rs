@@ -25,11 +25,8 @@
 //! // Register handlers with HTTP server router...
 //! # }
 //! ```
-pub mod dtls;
-pub mod ice;
-pub mod opus_payload;
-pub mod sdp_ext;
 pub mod session;
+pub mod transport;
 pub mod whep;
 pub mod whip;
 
@@ -128,12 +125,12 @@ pub fn create_webrtc_handlers(
         Box::pin(async move {
             match req.method {
                 crate::http::Method::Post => {
-                    whip::handle_whip_post(req, writer, &body, mounts, &config, sessions).await
+                    whip::handle_whip_post(&req, writer, &body, mounts, &config, sessions).await
                 }
                 crate::http::Method::Delete => {
-                    whip::handle_whip_delete(req, writer, sessions).await
+                    whip::handle_whip_delete(&req, writer, sessions).await
                 }
-                _ => whip::handle_whip_options(req, writer).await,
+                _ => whip::handle_whip_options(&req, writer).await,
             }
         })
     });
@@ -150,12 +147,12 @@ pub fn create_webrtc_handlers(
         Box::pin(async move {
             match req.method {
                 crate::http::Method::Post => {
-                    whep::handle_whep_post(req, writer, &body, mounts, &config, sessions).await
+                    whep::handle_whep_post(&req, writer, &body, mounts, &config, sessions).await
                 }
                 crate::http::Method::Delete => {
-                    whep::handle_whep_delete(req, writer, sessions).await
+                    whep::handle_whep_delete(&req, writer, sessions).await
                 }
-                _ => whep::handle_whep_options(req, writer).await,
+                _ => whep::handle_whep_options(&req, writer).await,
             }
         })
     });
@@ -170,8 +167,8 @@ mod tests {
     #[test]
     fn config_defaults() {
         let config = WebRtcConfig::default();
-        assert_eq!(config.whip.public_ip, "127.0.0.1");
-        assert_eq!(config.whep.video_payload_type, 96);
+        assert_eq!(config.whip.udp_addrs, vec!["0.0.0.0:0".to_string()]);
+        assert_eq!(config.whep.udp_addrs, vec!["0.0.0.0:0".to_string()]);
         assert_eq!(config.session_timeout, Duration::from_secs(60));
     }
 }
