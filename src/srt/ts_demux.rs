@@ -2,7 +2,7 @@
 //!
 //! Processes TS packets as they arrive from the network and produces
 //! AccessUnits suitable for pushing to a mount.
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -19,7 +19,7 @@ pub struct TsStreamDemuxer {
     /// Discovered tracks (pid -> track info).
     tracks: HashMap<u16, TrackInfo>,
     /// PES assembly buffers (pid -> data).
-    pes_buffers: HashMap<u16, Vec<u8>>,
+    pes_buffers: HashMap<u16, BytesMut>,
     /// Track ID assignment counter.
     next_track_id: u8,
     /// Origin PTS for timestamp normalization.
@@ -214,7 +214,8 @@ impl TsStreamDemuxer {
         while pos + 5 <= entries_end {
             let stream_type = data[pos];
             let elementary_pid = (((data[pos + 1] & 0x1F) as u16) << 8) | (data[pos + 2] as u16);
-            let es_info_length = (((data[pos + 3] & 0x0F) as usize) << 8) | (data[pos + 4] as usize);
+            let es_info_length =
+                (((data[pos + 3] & 0x0F) as usize) << 8) | (data[pos + 4] as usize);
 
             let codec = match stream_type {
                 0x1B => Some(Codec::H264),
@@ -256,15 +257,17 @@ impl TsStreamDemuxer {
         if unit_start {
             // Flush previous PES buffer
             if let Some(pes_data) = self.pes_buffers.remove(&pid) {
-                self.process_pes_packet(pid, &pes_data);
+                self.process_pes_packet(pid, pes_data);
             }
-            self.pes_buffers.insert(pid, payload.to_vec());
+            // One copy into the accumulating buffer; the final AccessUnit
+            // is split out zero-copy in process_pes_packet.
+            self.pes_buffers.insert(pid, BytesMut::from(payload));
         } else if let Some(buffer) = self.pes_buffers.get_mut(&pid) {
             buffer.extend_from_slice(payload);
         }
     }
 
-    fn process_pes_packet(&mut self, pid: u16, data: &[u8]) {
+    fn process_pes_packet(&mut self, pid: u16, mut data: BytesMut) {
         if data.len() < 9 {
             return;
         }
@@ -329,7 +332,9 @@ impl TsStreamDemuxer {
             dts: Some(dts_duration),
             rtp_timestamp: (normalized_dts % (u32::MAX as u64)) as u32,
             is_keyframe,
-            data: Bytes::copy_from_slice(payload),
+            // Zero-copy: split the payload region out of the PES buffer
+            // (the PES header prefix is discarded).
+            data: data.split_off(payload_start).freeze(),
         };
 
         self.output.push(unit);
@@ -351,16 +356,15 @@ fn parse_timestamp(data: &[u8]) -> u64 {
     let b3 = data[3] as u64;
     let b4 = data[4] as u64;
 
-    ((b0 >> 1) & 0x07) << 30
-        | (b1 << 22)
-        | ((b2 >> 1) << 15)
-        | (b3 << 7)
-        | (b4 >> 1)
+    ((b0 >> 1) & 0x07) << 30 | (b1 << 22) | ((b2 >> 1) << 15) | (b3 << 7) | (b4 >> 1)
 }
 
 fn is_h264_keyframe(data: &[u8]) -> bool {
-    // Look for IDR NAL unit (type 5) or SPS (type 7)
-    for i in 0..data.len().saturating_sub(4) {
+    // Look for IDR NAL unit (type 5) or SPS (type 7). Scanning the whole
+    // frame is wasteful: the start code and first NAL headers sit at the
+    // front, so cap the scan window.
+    let limit = data.len().min(2048).saturating_sub(4);
+    for i in 0..limit {
         if data[i] == 0 && data[i + 1] == 0 {
             let start = if data[i + 2] == 1 {
                 i + 3
@@ -381,8 +385,10 @@ fn is_h264_keyframe(data: &[u8]) -> bool {
 }
 
 fn is_h265_keyframe(data: &[u8]) -> bool {
-    // Look for IDR/CRA/BLA NAL units (types 16-23)
-    for i in 0..data.len().saturating_sub(4) {
+    // Look for IDR/CRA/BLA NAL units (types 16-23). The first NALUs
+    // (VPS/SPS/IDR) carry the answer, so only scan the frame head.
+    let limit = data.len().min(2048).saturating_sub(4);
+    for i in 0..limit {
         if data[i] == 0 && data[i + 1] == 0 {
             let start = if data[i + 2] == 1 {
                 i + 3

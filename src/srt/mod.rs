@@ -121,6 +121,9 @@ struct SrtConnection {
     mount_path: Option<String>,
     /// Whether we've registered the mount.
     mount_registered: bool,
+    /// Cached mount for this connection (avoids a registry lookup + hash
+    /// on every delivered packet).
+    mount: Option<Arc<crate::mount::Mount>>,
     /// Stream ID parsed from handshake (for mount routing).
     stream_id: Option<String>,
     /// Last time we received any packet (for keepalive timeout).
@@ -139,7 +142,12 @@ pub struct SrtServer {
     mounts: Arc<MountRegistry>,
     config: SrtConfig,
     cancel: CancellationToken,
+    /// SYN cookies issued during induction, pending conclusion verification.
+    pending_cookies: std::sync::Mutex<HashMap<SocketAddr, (u32, Instant)>>,
 }
+
+/// How long an issued SYN cookie stays valid before it must be redeemed.
+const COOKIE_TTL: Duration = Duration::from_secs(30);
 
 impl SrtServer {
     /// Bind an SRT server to the given address.
@@ -159,6 +167,7 @@ impl SrtServer {
             mounts,
             config: SrtConfig::default(),
             cancel: CancellationToken::new(),
+            pending_cookies: std::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -175,6 +184,7 @@ impl SrtServer {
             mounts,
             config,
             cancel: CancellationToken::new(),
+            pending_cookies: std::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -254,6 +264,16 @@ impl SrtServer {
         let now = Instant::now();
         let mut expired = Vec::new();
 
+        // Expire unredeemed SYN cookies so a flood of inductions cannot grow the table.
+        {
+            let mut cookies = self.pending_cookies.lock().unwrap_or_else(
+                std::sync::PoisonError::into_inner,
+            );
+            if cookies.len() > 64 {
+                cookies.retain(|_, (_, issued_at)| issued_at.elapsed() <= COOKIE_TTL);
+            }
+        }
+
         for (peer, conn) in connections.iter_mut() {
             // Keepalive timeout check
             if now.duration_since(conn.last_recv_time) > self.config.keepalive_timeout {
@@ -307,6 +327,13 @@ impl SrtServer {
         // Remove expired connections
         for peer in expired {
             warn!("SRT: connection {peer} timed out (no keepalive)");
+            if let Some(conn) = connections.get(&peer)
+                && conn.mount_registered
+                && let Some(path) = &conn.mount_path
+            {
+                self.mounts.unregister(path);
+                info!("SRT: unregistered mount {path} with expired connection");
+            }
             connections.remove(&peer);
         }
     }
@@ -334,12 +361,18 @@ impl SrtServer {
                     HandshakeType::Induction => {
                         // Phase 1: Send induction response with cookie
                         let cookie = generate_cookie(peer, ctrl.timestamp);
+                        // Remember the issued cookie so the conclusion can be verified.
+                        {
+                            let mut cookies = self.pending_cookies.lock().unwrap_or_else(
+                                std::sync::PoisonError::into_inner,
+                            );
+                            cookies.insert(peer, (cookie, Instant::now()));
+                        }
                         let local_socket_id = *next_socket_id;
                         *next_socket_id += 1;
 
                         let response = induction_response(local_socket_id, cookie);
-                        let response_pkt =
-                            handshake_control_packet(&response, 0, ctrl.timestamp);
+                        let response_pkt = handshake_control_packet(&response, 0, ctrl.timestamp);
                         let encoded = encode_control_packet(&response_pkt);
 
                         if let Err(e) = self.socket.send_to(&encoded, peer).await {
@@ -349,8 +382,34 @@ impl SrtServer {
                         }
                     }
                     HandshakeType::Conclusion => {
-                        // Phase 2: Verify cookie and complete handshake
-                        let _expected_cookie = generate_cookie(peer, ctrl.timestamp);
+                        // Phase 2: Verify cookie and complete handshake.
+                        let cookie_ok = {
+                            let mut cookies = self.pending_cookies.lock().unwrap_or_else(
+                                std::sync::PoisonError::into_inner,
+                            );
+                            let valid = cookies
+                                .get(&peer)
+                                .is_some_and(|(expected, issued_at)| {
+                                    *expected == hs.cookie
+                                        && issued_at.elapsed() <= COOKIE_TTL
+                                });
+                            // A conclusion redeems the cookie exactly once.
+                            cookies.remove(&peer);
+                            valid
+                        };
+                        if !cookie_ok {
+                            warn!(
+                                "SRT: rejected conclusion handshake from {peer} (invalid or expired cookie)"
+                            );
+                            return;
+                        }
+                        if connections.len() >= self.config.max_connections {
+                            warn!(
+                                "SRT: rejecting connection from {peer}: at capacity ({} connections)",
+                                connections.len()
+                            );
+                            return;
+                        }
 
                         let local_socket_id = *next_socket_id;
                         *next_socket_id += 1;
@@ -358,11 +417,8 @@ impl SrtServer {
                         // Parse Stream ID from extension (for mount routing)
                         let stream_id = parse_stream_id(&ctrl.data);
 
-                        let response = conclusion_response(
-                            local_socket_id,
-                            hs.initial_sequence,
-                            hs.socket_id,
-                        );
+                        let response =
+                            conclusion_response(local_socket_id, hs.initial_sequence, hs.socket_id);
                         let response_pkt =
                             handshake_control_packet(&response, hs.socket_id, ctrl.timestamp);
                         let encoded = encode_control_packet(&response_pkt);
@@ -370,7 +426,9 @@ impl SrtServer {
                         if let Err(e) = self.socket.send_to(&encoded, peer).await {
                             warn!("SRT: failed to send conclusion response to {peer}: {e}");
                         } else {
-                            info!("SRT: connection established with {peer} (stream_id={stream_id:?})");
+                            info!(
+                                "SRT: connection established with {peer} (stream_id={stream_id:?})"
+                            );
 
                             let now = Instant::now();
                             let mut tsbpd = TsbpdBuffer::new(self.config.tsbpd_delay_ms);
@@ -387,6 +445,7 @@ impl SrtServer {
                                     demuxer: ts_demux::TsStreamDemuxer::new(),
                                     mount_path: None,
                                     mount_registered: false,
+                                    mount: None,
                                     stream_id,
                                     last_recv_time: now,
                                     last_ack_time: now,
@@ -397,7 +456,10 @@ impl SrtServer {
                         }
                     }
                     _ => {
-                        debug!("SRT: unhandled handshake type from {peer}: {:?}", hs.handshake_type);
+                        debug!(
+                            "SRT: unhandled handshake type from {peer}: {:?}",
+                            hs.handshake_type
+                        );
                     }
                 }
             }
@@ -417,11 +479,20 @@ impl SrtServer {
                 info!("SRT: peer {peer} requested shutdown");
                 if let Some(conn) = connections.get_mut(&peer) {
                     conn.state = ConnState::Closing;
+                    if conn.mount_registered
+                        && let Some(path) = conn.mount_path.clone()
+                    {
+                        self.mounts.unregister(&path);
+                        info!("SRT: unregistered mount {path} on peer shutdown");
+                    }
                 }
                 connections.remove(&peer);
             }
             _ => {
-                debug!("SRT: unhandled control type from {peer}: {:?}", ctrl.control_type);
+                debug!(
+                    "SRT: unhandled control type from {peer}: {:?}",
+                    ctrl.control_type
+                );
             }
         }
     }
@@ -443,9 +514,14 @@ impl SrtServer {
             return;
         }
 
-        // Insert into TSBPD reorder buffer
-        let is_retransmit = data_pkt.sequence < conn.tsbpd.ack_number();
-        if conn.tsbpd.push(data_pkt.sequence, data_pkt.payload.clone(), is_retransmit) {
+        // Insert into TSBPD reorder buffer (retransmit detection is
+        // wrapping-aware so a packet just before a sequence-space wrap is
+        // not mistaken for a retransmission of an old one).
+        let is_retransmit = tsbpd::seq_before(data_pkt.sequence, conn.tsbpd.ack_number());
+        if conn
+            .tsbpd
+            .push(data_pkt.sequence, data_pkt.payload.clone(), is_retransmit)
+        {
             conn.pkts_since_ack += 1;
         }
 
@@ -491,6 +567,7 @@ impl SrtServer {
                         info!("SRT: registered mount {mount_path}");
                         conn.mount_path = Some(mount_path);
                         conn.mount_registered = true;
+                        conn.mount = Some(handle.inner.clone());
 
                         if let Ok(publisher) = handle.publisher() {
                             for unit in units {
@@ -503,13 +580,10 @@ impl SrtServer {
                     }
                 }
             }
-        } else if let Some(mount_path) = &conn.mount_path {
-            if let Some(handle) = self.mounts.get_handle(mount_path) {
-                if let Ok(publisher) = handle.publisher() {
-                    for unit in units {
-                        let _ = publisher.push(unit);
-                    }
-                }
+        } else if let Some(mount) = &conn.mount {
+            // Fast path: deliver straight through the cached mount handle.
+            for unit in units {
+                let _ = mount.publish_cached(unit);
             }
         }
     }

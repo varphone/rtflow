@@ -11,6 +11,12 @@ use std::time::{Duration, Instant};
 /// Default TSBPD delay (receiver buffer depth).
 pub const DEFAULT_TSBPD_DELAY_MS: u32 = 120;
 
+/// Maximum forward sequence jump a single packet may cause before it is
+/// treated as an anomaly and dropped. Real traffic stays within the flow
+/// window (thousands); a jump near half the sequence space would advance
+/// the delivery cursor past every in-flight packet.
+pub const MAX_GAP_SKIP: u32 = 1 << 20;
+
 /// A buffered SRT data packet awaiting ordered delivery.
 #[derive(Clone, Debug)]
 pub struct BufferedPacket {
@@ -86,6 +92,16 @@ impl TsbpdBuffer {
             return false;
         }
 
+        // Reject absurdly large forward jumps: a single packet must not be
+        // able to advance the delivery cursor by a huge amount, which would
+        // make every in-flight packet look "too old" afterwards.
+        if seq_after(seq, self.next_deliver_seq)
+            && seq_distance(self.next_deliver_seq, seq) > MAX_GAP_SKIP
+        {
+            self.dropped_count += 1;
+            return false;
+        }
+
         // Reject duplicates
         if self.buffer.contains_key(&seq) {
             return false;
@@ -142,8 +158,15 @@ impl TsbpdBuffer {
             } else if seq_after(seq, self.next_deliver_seq) {
                 // There's a gap. Check if we've waited too long (2x delay timeout)
                 if age >= self.delay * 2 {
-                    // Skip the gap: advance cursor and count loss
                     let gap = seq_distance(self.next_deliver_seq, seq);
+                    if gap > MAX_GAP_SKIP {
+                        // Defensive: an anomalous far-jump packet must not
+                        // advance the cursor; drop it and keep waiting.
+                        self.buffer.remove(&seq);
+                        self.dropped_count += 1;
+                        continue;
+                    }
+                    // Skip the gap: advance cursor and count loss
                     self.loss_events += 1;
                     self.dropped_count += gap as u64;
                     self.next_deliver_seq = seq;

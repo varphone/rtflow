@@ -83,7 +83,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("TSBPD delay:  {}ms", args.tsbpd_delay_ms);
     println!();
     println!("Publish via FFmpeg:");
-    println!("  ffmpeg -re -i INPUT -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac -f mpegts \"srt://127.0.0.1:{}?streamid={srt_streamid}\"", srt_addr.port());
+    println!(
+        "  ffmpeg -re -i INPUT -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac -f mpegts \"srt://127.0.0.1:{}?streamid={srt_streamid}\"",
+        srt_addr.port()
+    );
     println!();
     println!("Publish via OBS:");
     println!("  Settings -> Stream -> Service: Custom");

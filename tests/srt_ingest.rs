@@ -57,7 +57,12 @@ fn build_induction_request(socket_id: u32) -> Handshake {
 }
 
 /// Build a conclusion request with optional Stream ID (caller → listener, phase 2).
-fn build_conclusion_request(socket_id: u32, cookie: u32, initial_seq: u32, stream_id: Option<&str>) -> Bytes {
+fn build_conclusion_request(
+    socket_id: u32,
+    cookie: u32,
+    initial_seq: u32,
+    stream_id: Option<&str>,
+) -> Bytes {
     let mut buf = BytesMut::with_capacity(128);
 
     // Fixed 48-byte handshake header
@@ -198,15 +203,24 @@ fn build_pes_ts_packet_start(pts: u64) -> [u8; 188] {
 
     // PES header
     let mut pos = 4;
-    pkt[pos] = 0x00; pos += 1; // PES start code prefix
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x01; pos += 1;
-    pkt[pos] = 0xE0; pos += 1; // stream_id = video
-    pkt[pos] = 0x00; pos += 1; // PES_packet_length high (0 = unbounded)
-    pkt[pos] = 0x00; pos += 1; // PES_packet_length low
-    pkt[pos] = 0x80; pos += 1; // marker bits
-    pkt[pos] = 0x80; pos += 1; // PTS_DTS_flags = 10 (PTS only)
-    pkt[pos] = 0x05; pos += 1; // PES_header_data_length = 5
+    pkt[pos] = 0x00;
+    pos += 1; // PES start code prefix
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x01;
+    pos += 1;
+    pkt[pos] = 0xE0;
+    pos += 1; // stream_id = video
+    pkt[pos] = 0x00;
+    pos += 1; // PES_packet_length high (0 = unbounded)
+    pkt[pos] = 0x00;
+    pos += 1; // PES_packet_length low
+    pkt[pos] = 0x80;
+    pos += 1; // marker bits
+    pkt[pos] = 0x80;
+    pos += 1; // PTS_DTS_flags = 10 (PTS only)
+    pkt[pos] = 0x05;
+    pos += 1; // PES_header_data_length = 5
 
     // Encode PTS (5 bytes)
     let pts_bytes = encode_pts(pts);
@@ -215,24 +229,40 @@ fn build_pes_ts_packet_start(pts: u64) -> [u8; 188] {
 
     // H.264 payload: SPS NAL + IDR NAL
     // SPS: 00 00 00 01 67 ...
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x01; pos += 1;
-    pkt[pos] = 0x67; pos += 1; // NAL type 7 (SPS)
-    pkt[pos] = 0x42; pos += 1; // profile_idc
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x1F; pos += 1;
-    pkt[pos] = 0xDA; pos += 1;
-    pkt[pos] = 0x01; pos += 1;
-    pkt[pos] = 0x40; pos += 1;
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x01;
+    pos += 1;
+    pkt[pos] = 0x67;
+    pos += 1; // NAL type 7 (SPS)
+    pkt[pos] = 0x42;
+    pos += 1; // profile_idc
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x1F;
+    pos += 1;
+    pkt[pos] = 0xDA;
+    pos += 1;
+    pkt[pos] = 0x01;
+    pos += 1;
+    pkt[pos] = 0x40;
+    pos += 1;
 
     // IDR: 00 00 00 01 65 ...
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x01; pos += 1;
-    pkt[pos] = 0x65; pos += 1; // NAL type 5 (IDR)
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x01;
+    pos += 1;
+    pkt[pos] = 0x65;
+    pos += 1; // NAL type 5 (IDR)
     // Fill rest with dummy slice data
     while pos < 188 {
         pkt[pos] = 0xAA;
@@ -251,26 +281,40 @@ fn build_pes_ts_packet_second(pts: u64) -> [u8; 188] {
     pkt[3] = 0x10;
 
     let mut pos = 4;
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x01; pos += 1;
-    pkt[pos] = 0xE0; pos += 1;
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x80; pos += 1;
-    pkt[pos] = 0x80; pos += 1;
-    pkt[pos] = 0x05; pos += 1;
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x01;
+    pos += 1;
+    pkt[pos] = 0xE0;
+    pos += 1;
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x80;
+    pos += 1;
+    pkt[pos] = 0x80;
+    pos += 1;
+    pkt[pos] = 0x05;
+    pos += 1;
 
     let pts_bytes = encode_pts(pts);
     pkt[pos..pos + 5].copy_from_slice(&pts_bytes);
     pos += 5;
 
     // Non-IDR frame: 00 00 00 01 41 ...
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x00; pos += 1;
-    pkt[pos] = 0x01; pos += 1;
-    pkt[pos] = 0x41; pos += 1; // NAL type 1 (non-IDR slice)
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x00;
+    pos += 1;
+    pkt[pos] = 0x01;
+    pos += 1;
+    pkt[pos] = 0x41;
+    pos += 1; // NAL type 1 (non-IDR slice)
     while pos < 188 {
         pkt[pos] = 0xBB;
         pos += 1;
@@ -323,7 +367,8 @@ async fn perform_handshake(
 
     // Phase 2: Conclusion
     let initial_seq = 1000u32;
-    let conclusion_data = build_conclusion_request(caller_socket_id, cookie, initial_seq, stream_id);
+    let conclusion_data =
+        build_conclusion_request(caller_socket_id, cookie, initial_seq, stream_id);
     let wire = conclusion_to_wire(conclusion_data, server_socket_id, 1000);
     sock.send_to(&wire, server_addr).await.unwrap();
 
@@ -402,7 +447,9 @@ async fn srt_ts_ingest_creates_mount() {
         tsbpd_delay_ms: 0,
         ..Default::default()
     };
-    let server = SrtServer::with_config(config, mounts.clone()).await.unwrap();
+    let server = SrtServer::with_config(config, mounts.clone())
+        .await
+        .unwrap();
     let server_addr = server.local_addr().unwrap();
     let cancel = server.cancellation_token();
     tokio::spawn(server.run());
@@ -440,7 +487,9 @@ async fn srt_stream_id_routing() {
         tsbpd_delay_ms: 0,
         ..Default::default()
     };
-    let server = SrtServer::with_config(config, mounts.clone()).await.unwrap();
+    let server = SrtServer::with_config(config, mounts.clone())
+        .await
+        .unwrap();
     let server_addr = server.local_addr().unwrap();
     let cancel = server.cancellation_token();
     tokio::spawn(server.run());
@@ -481,7 +530,9 @@ async fn srt_keepalive_timeout_disconnects() {
         keepalive_timeout: Duration::from_millis(100), // Very short timeout
         ..Default::default()
     };
-    let server = SrtServer::with_config(config, mounts.clone()).await.unwrap();
+    let server = SrtServer::with_config(config, mounts.clone())
+        .await
+        .unwrap();
     let server_addr = server.local_addr().unwrap();
     let cancel = server.cancellation_token();
     tokio::spawn(server.run());
@@ -499,11 +550,18 @@ async fn srt_keepalive_timeout_disconnects() {
     send_ts_data(&sock, server_addr, server_sid, initial_seq, &ts_packets).await;
 
     // Wait for mount to appear
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(!mounts.snapshots().is_empty(), "Mount should exist");
 
     // Now stop sending anything (no keepalives) and wait for timeout
     tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // The connection timed out, so its publisher mount must be unregistered
+    // (otherwise distinct stream paths would leak registry slots forever).
+    assert!(
+        mounts.snapshots().is_empty(),
+        "Mount should be unregistered after keepalive timeout"
+    );
 
     // After timeout, sending data should not crash the server
     // (connection is removed, data from unknown peer is ignored)

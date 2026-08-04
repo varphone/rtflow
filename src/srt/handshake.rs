@@ -231,11 +231,7 @@ pub fn conclusion_response(
 }
 
 /// Wrap a handshake in a control packet.
-pub fn handshake_control_packet(
-    hs: &Handshake,
-    socket_id: u32,
-    timestamp: u32,
-) -> ControlPacket {
+pub fn handshake_control_packet(hs: &Handshake, socket_id: u32, timestamp: u32) -> ControlPacket {
     ControlPacket {
         control_type: ControlType::Handshake,
         type_specific: 0,
