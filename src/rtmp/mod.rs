@@ -99,10 +99,7 @@ impl RtmpServer {
     }
 
     /// Create an RTMP server with full configuration.
-    pub async fn with_config(
-        config: RtmpConfig,
-        mounts: Arc<MountRegistry>,
-    ) -> RtflowResult<Self> {
+    pub async fn with_config(config: RtmpConfig, mounts: Arc<MountRegistry>) -> RtflowResult<Self> {
         let listener = TcpListener::bind(config.bind_addr)
             .await
             .map_err(|e| Error::Rtmp(format!("bind {}: {e}", config.bind_addr)))?;

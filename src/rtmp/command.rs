@@ -199,7 +199,10 @@ pub fn connect_result(transaction_id: f64) -> Bytes {
         AmfValue::Str("_result".to_string()),
         AmfValue::Number(transaction_id),
         AmfValue::Object(vec![
-            ("fmsVer".to_string(), AmfValue::Str("FMS/3,0,1,123".to_string())),
+            (
+                "fmsVer".to_string(),
+                AmfValue::Str("FMS/3,0,1,123".to_string()),
+            ),
             ("capabilities".to_string(), AmfValue::Number(31.0)),
         ]),
         AmfValue::Object(vec![
@@ -238,7 +241,10 @@ pub fn on_status(level: &str, code: &str, description: &str) -> Bytes {
         AmfValue::Object(vec![
             ("level".to_string(), AmfValue::Str(level.to_string())),
             ("code".to_string(), AmfValue::Str(code.to_string())),
-            ("description".to_string(), AmfValue::Str(description.to_string())),
+            (
+                "description".to_string(),
+                AmfValue::Str(description.to_string()),
+            ),
         ]),
     ];
     encode_values(&values)
@@ -253,7 +259,10 @@ pub fn error_response(transaction_id: f64, code: &str, description: &str) -> Byt
         AmfValue::Object(vec![
             ("level".to_string(), AmfValue::Str("error".to_string())),
             ("code".to_string(), AmfValue::Str(code.to_string())),
-            ("description".to_string(), AmfValue::Str(description.to_string())),
+            (
+                "description".to_string(),
+                AmfValue::Str(description.to_string()),
+            ),
         ]),
     ];
     encode_values(&values)
@@ -303,7 +312,10 @@ mod tests {
             AmfValue::Number(1.0),
             AmfValue::Object(vec![
                 ("app".to_string(), AmfValue::Str("live".to_string())),
-                ("tcUrl".to_string(), AmfValue::Str("rtmp://localhost/live".to_string())),
+                (
+                    "tcUrl".to_string(),
+                    AmfValue::Str("rtmp://localhost/live".to_string()),
+                ),
             ]),
         ]);
         let cmd = RtmpCommand::parse(&payload).unwrap();

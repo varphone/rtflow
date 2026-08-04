@@ -133,13 +133,9 @@ mod tests {
     async fn handshake_roundtrip() {
         let (mut client, mut server) = duplex(8192);
 
-        let server_task = tokio::spawn(async move {
-            server_handshake(&mut server).await
-        });
+        let server_task = tokio::spawn(async move { server_handshake(&mut server).await });
 
-        let client_task = tokio::spawn(async move {
-            client_handshake(&mut client).await
-        });
+        let client_task = tokio::spawn(async move { client_handshake(&mut client).await });
 
         let (server_result, client_result) = tokio::join!(server_task, client_task);
         server_result.unwrap().unwrap();

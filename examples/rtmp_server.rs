@@ -80,7 +80,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("RTSP listen:  {}", rtsp_addr);
     println!();
     println!("Publish via FFmpeg:");
-    println!("  ffmpeg -re -i INPUT -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac -f flv {rtmp_url}");
+    println!(
+        "  ffmpeg -re -i INPUT -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac -f flv {rtmp_url}"
+    );
     println!();
     println!("Publish via OBS:");
     println!("  Settings -> Stream -> Service: Custom");

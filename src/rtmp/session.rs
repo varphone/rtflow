@@ -102,6 +102,9 @@ enum SessionState {
         stream_name: String,
         publisher: LocalPublisher,
         mount_handle: MountHandle,
+        /// Whether this session registered the mount itself (and should
+        /// unregister it when the session ends).
+        registered_here: bool,
         video_seq_header: Option<Bytes>,
         audio_seq_header: Option<Bytes>,
         video_codec: Option<Codec>,
@@ -127,9 +130,13 @@ pub async fn serve_rtmp_session(
     let peer = stream.peer_addr().ok();
     debug!(?peer, "RTMP: new connection");
 
-    // Handshake
-    if let Err(e) = handshake::server_handshake(&mut stream).await {
-        debug!(?peer, "RTMP: handshake failed: {e}");
+    // Handshake with a hard timeout so idle peers cannot hold a
+    // connection slot forever (the accept loop is connection-bounded).
+    let handshake_timeout = Duration::from_secs(10);
+    if let Err(e) = tokio::time::timeout(handshake_timeout, handshake::server_handshake(&mut stream))
+        .await
+    {
+        debug!(?peer, "RTMP: handshake timed out or failed: {e}");
         return Err(Error::Rtmp(format!("handshake failed: {e}")));
     }
     debug!(?peer, "RTMP: handshake complete");
@@ -146,14 +153,17 @@ pub async fn serve_rtmp_session(
         let mut write_stream = write_half;
         let mut chunker = Chunker::new();
         chunker.set_chunk_size(config.chunk_size);
+        // Reused output buffer: avoids a fresh allocation + full-frame
+        // copy per message on the playback hot path.
+        let mut out = bytes::BytesMut::new();
 
         loop {
             tokio::select! {
                 _ = writer_cancel.cancelled() => break,
                 msg = rx.recv() => {
                     let Some(msg) = msg else { break };
-                    let encoded = chunker.encode(&msg);
-                    if write_stream.write_all(&encoded).await.is_err() {
+                    chunker.encode_into(&msg, &mut out);
+                    if write_stream.write_all(&out).await.is_err() {
                         break;
                     }
                     let _ = write_stream.flush().await;
@@ -195,6 +205,10 @@ pub async fn serve_rtmp_session(
                 };
                 bytes_received += n as u64;
                 dechunker.feed(&read_buf[..n]);
+                if dechunker.overflowed() {
+                    debug!(?peer, "RTMP: dechunker overflow, dropping connection");
+                    break;
+                }
 
                 // Send ACK if we've received enough data
                 if bytes_received - last_ack_sent >= config.window_ack_size as u64 {
@@ -237,8 +251,7 @@ pub async fn serve_rtmp_session(
             }
 
             match msg.msg_type {
-                t if t == MessageType::CommandAmf0 as u8 || t == MessageType::CommandAmf3 as u8 =>
-                {
+                t if t == MessageType::CommandAmf0 as u8 || t == MessageType::CommandAmf3 as u8 => {
                     let payload = if t == MessageType::CommandAmf3 as u8 && !msg.payload.is_empty()
                     {
                         &msg.payload[1..]
@@ -387,6 +400,26 @@ pub async fn serve_rtmp_session(
     drop(tx); // close channel so writer task exits
     let _ = writer_task.await;
 
+    // If this session registered its own publisher mount and no other
+    // publisher remains, unregister it so distinct stream paths do not
+    // permanently consume registry slots.
+    let registered_path = match &state {
+        SessionState::Publishing {
+            mount_handle,
+            registered_here: true,
+            ..
+        } => Some(mount_handle.path.clone()),
+        _ => None,
+    };
+    drop(state); // releases the LocalPublisher
+    if let Some(path) = registered_path
+        && let Some(handle) = mounts.get_handle(&path)
+        && handle.inner.publishers.load(std::sync::atomic::Ordering::Acquire) == 0
+    {
+        mounts.unregister(&path);
+        debug!(?peer, "RTMP: unregistered publisher mount {path}");
+    }
+
     Ok(())
 }
 
@@ -443,7 +476,7 @@ async fn handle_command(
 
         RtmpCommand::CreateStream { transaction_id } => {
             let stream_id = *msg_stream_id;
-            *msg_stream_id += 1;
+            *msg_stream_id = msg_stream_id.wrapping_add(1);
 
             let result_payload = command::create_stream_result(*transaction_id, stream_id as f64);
             Some(vec![RtmpMessage {
@@ -507,13 +540,13 @@ async fn handle_command(
             };
 
             // Register or get existing mount
-            let mount_handle = match mounts.get_handle(&mount_path) {
-                Some(handle) => handle,
+            let (mount_handle, registered_here) = match mounts.get_handle(&mount_path) {
+                Some(handle) => (handle, false),
                 None => {
                     // We need to register via a server-like API.
                     // For now, create directly in the registry.
                     match mounts.register(mount_path.clone().into(), mount_config) {
-                        Ok(handle) => handle,
+                        Ok(handle) => (handle, true),
                         Err(e) => {
                             warn!("RTMP: failed to register mount {mount_path}: {e}");
                             let error_payload = command::error_response(
@@ -557,6 +590,7 @@ async fn handle_command(
                 stream_name: stream_name.clone(),
                 publisher,
                 mount_handle,
+                registered_here,
                 video_seq_header: None,
                 audio_seq_header: None,
                 video_codec: None,
@@ -659,22 +693,33 @@ async fn handle_command(
             let handle = mount_handle.clone();
             let description = mount_handle.description.clone();
 
-            let has_video = description.tracks.iter().any(|t| t.kind == MediaKind::Video);
-            let has_audio = description.tracks.iter().any(|t| t.kind == MediaKind::Audio);
+            let has_video = description
+                .tracks
+                .iter()
+                .any(|t| t.kind == MediaKind::Video);
+            let has_audio = description
+                .tracks
+                .iter()
+                .any(|t| t.kind == MediaKind::Audio);
 
             let task = tokio::spawn(async move {
                 // Send onMetaData
                 let meta_payload = command::on_metadata(has_video, has_audio, 0.0);
-                let _ = tx_clone.send(RtmpMessage {
-                    chunk_stream_id: 4,
-                    timestamp: 0,
-                    msg_type: MessageType::DataAmf0 as u8,
-                    msg_stream_id: 1,
-                    payload: meta_payload,
-                }).await;
+                let _ = tx_clone
+                    .send(RtmpMessage {
+                        chunk_stream_id: 4,
+                        timestamp: 0,
+                        msg_type: MessageType::DataAmf0 as u8,
+                        msg_stream_id: 1,
+                        payload: meta_payload,
+                    })
+                    .await;
 
                 // Subscribe with startup cache (GOP cache for fast start)
                 let (mut rx, startup) = handle.subscribe_with_startup();
+                // Skip broadcast replays of frames the startup snapshot
+                // already delivered.
+                let startup_keys = crate::mount::startup_dedup_keys(&startup);
 
                 // Send startup frames (sequence headers + cached GOP)
                 let mut base_ts: Option<u32> = None;
@@ -692,13 +737,19 @@ async fn handle_command(
                     if payload.is_empty() {
                         continue;
                     }
-                    let _ = tx_clone.send(RtmpMessage {
-                        chunk_stream_id: if unit.kind() == MediaKind::Video { 6 } else { 7 },
-                        timestamp: rel_ts,
-                        msg_type,
-                        msg_stream_id: 1,
-                        payload,
-                    }).await;
+                    let _ = tx_clone
+                        .send(RtmpMessage {
+                            chunk_stream_id: if unit.kind() == MediaKind::Video {
+                                6
+                            } else {
+                                7
+                            },
+                            timestamp: rel_ts,
+                            msg_type,
+                            msg_stream_id: 1,
+                            payload,
+                        })
+                        .await;
                 }
 
                 // Forward live frames
@@ -708,6 +759,9 @@ async fn handle_command(
                         result = rx.recv() => {
                             match result {
                                 Ok(unit) => {
+                                    if startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
+                                        continue;
+                                    }
                                     let ts = unit.pts.as_millis() as u32;
                                     let base = *base_ts.get_or_insert(ts);
                                     let rel_ts = ts.wrapping_sub(base);
@@ -783,10 +837,8 @@ mod tests {
 
     #[test]
     fn stream_key_auth_restricts() {
-        let auth = StreamKeyAuthenticator::new(vec![
-            "live/stream1".to_string(),
-            "live/cam2".to_string(),
-        ]);
+        let auth =
+            StreamKeyAuthenticator::new(vec!["live/stream1".to_string(), "live/cam2".to_string()]);
         assert!(auth.authorize_publish("live", "stream1"));
         assert!(auth.authorize_publish("live", "cam2"));
         assert!(!auth.authorize_publish("live", "unknown"));

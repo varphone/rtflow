@@ -285,8 +285,14 @@ mod tests {
     fn roundtrip_object() {
         let val = AmfValue::Object(vec![
             ("app".to_string(), AmfValue::Str("live".to_string())),
-            ("flashVer".to_string(), AmfValue::Str("FMLE/3.0".to_string())),
-            ("tcUrl".to_string(), AmfValue::Str("rtmp://localhost/live".to_string())),
+            (
+                "flashVer".to_string(),
+                AmfValue::Str("FMLE/3.0".to_string()),
+            ),
+            (
+                "tcUrl".to_string(),
+                AmfValue::Str("rtmp://localhost/live".to_string()),
+            ),
         ]);
         let encoded = encode_values(&[val.clone()]);
         let decoded = decode_values(&encoded).unwrap();

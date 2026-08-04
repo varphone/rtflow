@@ -8,10 +8,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use rtflow::mount::MountRegistry;
-use rtflow::rtmp::amf::{decode_values, encode_values, AmfValue};
+use rtflow::rtmp::RtmpServer;
+use rtflow::rtmp::amf::{AmfValue, decode_values, encode_values};
 use rtflow::rtmp::chunk::{Chunker, Dechunker, MessageType, RtmpMessage};
 use rtflow::rtmp::handshake::client_handshake;
-use rtflow::rtmp::RtmpServer;
 
 /// Helper: connect and handshake with the RTMP server.
 async fn connect_client(addr: std::net::SocketAddr) -> TcpStream {
@@ -21,12 +21,7 @@ async fn connect_client(addr: std::net::SocketAddr) -> TcpStream {
 }
 
 /// Helper: send an RTMP command message.
-async fn send_command(
-    stream: &mut TcpStream,
-    chunker: &Chunker,
-    csid: u32,
-    values: &[AmfValue],
-) {
+async fn send_command(stream: &mut TcpStream, chunker: &Chunker, csid: u32, values: &[AmfValue]) {
     let payload = encode_values(values);
     let msg = RtmpMessage {
         chunk_stream_id: csid,
@@ -79,7 +74,10 @@ async fn read_messages(
                 all_msgs.extend(msgs);
 
                 // If we got command messages, we likely have what we need
-                if all_msgs.iter().any(|m| m.msg_type == MessageType::CommandAmf0 as u8) {
+                if all_msgs
+                    .iter()
+                    .any(|m| m.msg_type == MessageType::CommandAmf0 as u8)
+                {
                     // Give a tiny bit more time for additional messages
                     tokio::time::sleep(Duration::from_millis(20)).await;
                     if let Ok(Ok(n)) =
@@ -132,7 +130,9 @@ fn find_command<'a>(msgs: &'a [RtmpMessage], name: &str) -> Option<Vec<AmfValue>
 #[tokio::test]
 async fn rtmp_publish_delivers_video_to_mount() {
     let mounts = Arc::new(MountRegistry::new(10));
-    let server = RtmpServer::bind("127.0.0.1:0", mounts.clone()).await.unwrap();
+    let server = RtmpServer::bind("127.0.0.1:0", mounts.clone())
+        .await
+        .unwrap();
     let addr = server.local_addr().unwrap();
 
     let cancel = server.cancellation_token();
@@ -153,10 +153,7 @@ async fn rtmp_publish_delivers_video_to_mount() {
             AmfValue::Number(1.0),
             AmfValue::Object(vec![
                 ("app".into(), AmfValue::Str("live".into())),
-                (
-                    "tcUrl".into(),
-                    AmfValue::Str(format!("rtmp://{addr}/live")),
-                ),
+                ("tcUrl".into(), AmfValue::Str(format!("rtmp://{addr}/live"))),
             ]),
         ],
     )
@@ -208,7 +205,9 @@ async fn rtmp_publish_delivers_video_to_mount() {
     assert!(status.is_some(), "Expected onStatus for publish");
     let status_values = status.unwrap();
     let info_obj = status_values.get(3);
-    let code = info_obj.and_then(|o| o.get("code")).and_then(|v| v.as_str());
+    let code = info_obj
+        .and_then(|o| o.get("code"))
+        .and_then(|v| v.as_str());
     assert_eq!(code, Some("NetStream.Publish.Start"));
 
     // Now send H.264 sequence header (AVC decoder configuration record)
@@ -349,7 +348,9 @@ async fn rtmp_play_receives_flv_tags() {
     let publisher = mount.publisher().unwrap();
 
     // Start RTMP server
-    let server = RtmpServer::bind("127.0.0.1:0", mounts.clone()).await.unwrap();
+    let server = RtmpServer::bind("127.0.0.1:0", mounts.clone())
+        .await
+        .unwrap();
     let addr = server.local_addr().unwrap();
     let cancel = server.cancellation_token();
     tokio::spawn(server.run());
@@ -461,7 +462,9 @@ async fn rtmp_play_receives_flv_tags() {
 #[tokio::test]
 async fn rtmp_idle_timeout_disconnects() {
     let mounts = Arc::new(MountRegistry::new(10));
-    let server = RtmpServer::bind("127.0.0.1:0", mounts.clone()).await.unwrap();
+    let server = RtmpServer::bind("127.0.0.1:0", mounts.clone())
+        .await
+        .unwrap();
     let addr = server.local_addr().unwrap();
     let cancel = server.cancellation_token();
     tokio::spawn(server.run());

@@ -4,12 +4,18 @@
 //! chunk size negotiation per the RTMP specification.
 use bytes::{BufMut, Bytes, BytesMut};
 use std::collections::HashMap;
+use tracing::warn;
 
 /// Default chunk size per RTMP spec.
 pub const DEFAULT_CHUNK_SIZE: u32 = 128;
 
 /// Maximum chunk size we allow (16 MB).
 pub const MAX_CHUNK_SIZE: u32 = 16 * 1024 * 1024;
+
+/// Maximum bytes buffered waiting for more chunk data. A peer that
+/// repeatedly declares a large message but never completes it must not
+/// be able to grow `pending` without bound.
+pub const MAX_PENDING_BYTES: usize = MAX_CHUNK_SIZE as usize + 4096;
 
 /// RTMP message type IDs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -78,6 +84,9 @@ pub struct Dechunker {
     chunk_size: u32,
     streams: HashMap<u32, ChunkStreamState>,
     pending: BytesMut,
+    /// Set when buffered input exceeded [`MAX_PENDING_BYTES`]; the
+    /// connection should be dropped.
+    overflowed: bool,
 }
 
 impl Dechunker {
@@ -86,7 +95,13 @@ impl Dechunker {
             chunk_size: DEFAULT_CHUNK_SIZE,
             streams: HashMap::new(),
             pending: BytesMut::new(),
+            overflowed: false,
         }
+    }
+
+    /// Whether the input buffer overflowed and the peer must be dropped.
+    pub fn overflowed(&self) -> bool {
+        self.overflowed
     }
 
     /// Set the incoming chunk size (from peer's SetChunkSize message).
@@ -96,6 +111,19 @@ impl Dechunker {
 
     /// Feed raw bytes from the network.
     pub fn feed(&mut self, data: &[u8]) {
+        if self.overflowed {
+            return;
+        }
+        if self.pending.len().saturating_add(data.len()) > MAX_PENDING_BYTES {
+            warn!(
+                "RTMP: dechunker input buffer overflow ({} bytes buffered), dropping connection",
+                self.pending.len()
+            );
+            self.pending.clear();
+            self.streams.clear();
+            self.overflowed = true;
+            return;
+        }
         self.pending.extend_from_slice(data);
     }
 
@@ -192,8 +220,7 @@ impl Dechunker {
             0 => {
                 let b = &data[header_start..header_start + 11];
                 let ts = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
-                state.msg_length =
-                    ((b[3] as u32) << 16) | ((b[4] as u32) << 8) | (b[5] as u32);
+                state.msg_length = ((b[3] as u32) << 16) | ((b[4] as u32) << 8) | (b[5] as u32);
                 state.msg_type = b[6];
                 state.msg_stream_id = u32::from_le_bytes([b[7], b[8], b[9], b[10]]);
                 if ts == 0xFFFFFF {
@@ -210,8 +237,7 @@ impl Dechunker {
             1 => {
                 let b = &data[header_start..header_start + 7];
                 let delta = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
-                state.msg_length =
-                    ((b[3] as u32) << 16) | ((b[4] as u32) << 8) | (b[5] as u32);
+                state.msg_length = ((b[3] as u32) << 16) | ((b[4] as u32) << 8) | (b[5] as u32);
                 state.msg_type = b[6];
                 if delta == 0xFFFFFF {
                     let ext = &data[header_start + 7..header_start + 11];
@@ -254,7 +280,9 @@ impl Dechunker {
             return Err(ChunkError::NeedMoreData);
         }
 
-        state.buffer.extend_from_slice(&data[pos..pos + chunk_payload_len as usize]);
+        state
+            .buffer
+            .extend_from_slice(&data[pos..pos + chunk_payload_len as usize]);
         pos += chunk_payload_len as usize;
 
         // Consume processed bytes
@@ -304,9 +332,9 @@ impl Chunker {
         self.chunk_size
     }
 
-    /// Encode a complete message into chunks.
-    pub fn encode(&self, msg: &RtmpMessage) -> BytesMut {
-        let mut out = BytesMut::with_capacity(msg.payload.len() + 64);
+    /// Encode a complete message into chunks, reusing `out`'s capacity.
+    pub fn encode_into(&self, msg: &RtmpMessage, out: &mut BytesMut) {
+        out.clear();
         let payload = &msg.payload;
         let mut offset = 0;
         let mut first = true;
@@ -314,12 +342,18 @@ impl Chunker {
         while offset < payload.len() {
             if first {
                 // fmt 0 header
-                self.write_basic_header(&mut out, 0, msg.chunk_stream_id);
-                self.write_type0_header(&mut out, msg.timestamp, payload.len() as u32, msg.msg_type, msg.msg_stream_id);
+                self.write_basic_header(out, 0, msg.chunk_stream_id);
+                self.write_type0_header(
+                    out,
+                    msg.timestamp,
+                    payload.len() as u32,
+                    msg.msg_type,
+                    msg.msg_stream_id,
+                );
                 first = false;
             } else {
                 // fmt 3 header (continuation)
-                self.write_basic_header(&mut out, 3, msg.chunk_stream_id);
+                self.write_basic_header(out, 3, msg.chunk_stream_id);
             }
 
             let end = (offset + self.chunk_size as usize).min(payload.len());
@@ -329,10 +363,15 @@ impl Chunker {
 
         // Handle empty payload
         if payload.is_empty() {
-            self.write_basic_header(&mut out, 0, msg.chunk_stream_id);
-            self.write_type0_header(&mut out, msg.timestamp, 0, msg.msg_type, msg.msg_stream_id);
+            self.write_basic_header(out, 0, msg.chunk_stream_id);
+            self.write_type0_header(out, msg.timestamp, 0, msg.msg_type, msg.msg_stream_id);
         }
+    }
 
+    /// Encode a complete message into chunks (allocates a fresh buffer).
+    pub fn encode(&self, msg: &RtmpMessage) -> BytesMut {
+        let mut out = BytesMut::with_capacity(msg.payload.len() + 64);
+        self.encode_into(msg, &mut out);
         out
     }
 
@@ -489,6 +528,14 @@ mod tests {
         let msg = set_chunk_size_message(4096);
         assert_eq!(msg.msg_type, MessageType::SetChunkSize as u8);
         assert_eq!(msg.payload.len(), 4);
-        assert_eq!(u32::from_be_bytes([msg.payload[0], msg.payload[1], msg.payload[2], msg.payload[3]]), 4096);
+        assert_eq!(
+            u32::from_be_bytes([
+                msg.payload[0],
+                msg.payload[1],
+                msg.payload[2],
+                msg.payload[3]
+            ]),
+            4096
+        );
     }
 }

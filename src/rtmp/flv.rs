@@ -73,7 +73,7 @@ pub enum AudioData {
 }
 
 /// Parse an RTMP video message payload (FLV video tag body).
-pub fn parse_video_tag(data: &[u8]) -> Option<VideoData> {
+pub fn parse_video_tag(data: &Bytes) -> Option<VideoData> {
     if data.len() < 5 {
         return None;
     }
@@ -90,16 +90,15 @@ pub fn parse_video_tag(data: &[u8]) -> Option<VideoData> {
     match codec_id {
         FLV_VIDEO_H264 => {
             let avc_packet_type = data[1];
-            let composition_time = ((data[2] as i32) << 16)
-                | ((data[3] as i32) << 8)
-                | (data[4] as i32);
+            let composition_time =
+                ((data[2] as i32) << 16) | ((data[3] as i32) << 8) | (data[4] as i32);
             // Sign extend 24-bit
             let composition_time = if composition_time & 0x800000 != 0 {
                 composition_time | !0xFFFFFF
             } else {
                 composition_time
             };
-            let body = Bytes::copy_from_slice(&data[5..]);
+            let body = data.slice(5..);
             match avc_packet_type {
                 AVC_SEQUENCE_HEADER => Some(VideoData::AvcSequenceHeader(body)),
                 AVC_NALU => Some(VideoData::AvcNalu {
@@ -112,15 +111,14 @@ pub fn parse_video_tag(data: &[u8]) -> Option<VideoData> {
         }
         FLV_VIDEO_H265 => {
             let hevc_packet_type = data[1];
-            let composition_time = ((data[2] as i32) << 16)
-                | ((data[3] as i32) << 8)
-                | (data[4] as i32);
+            let composition_time =
+                ((data[2] as i32) << 16) | ((data[3] as i32) << 8) | (data[4] as i32);
             let composition_time = if composition_time & 0x800000 != 0 {
                 composition_time | !0xFFFFFF
             } else {
                 composition_time
             };
-            let body = Bytes::copy_from_slice(&data[5..]);
+            let body = data.slice(5..);
             match hevc_packet_type {
                 AVC_SEQUENCE_HEADER => Some(VideoData::HevcSequenceHeader(body)),
                 AVC_NALU => Some(VideoData::HevcNalu {
@@ -139,7 +137,7 @@ pub fn parse_video_tag(data: &[u8]) -> Option<VideoData> {
 ///
 /// Format: [enhanced_byte][FourCC(4)][packet_data...]
 /// enhanced_byte: bit7=1, bits6-4=frame_type, bits3-0=packet_type
-fn parse_enhanced_video_tag(data: &[u8]) -> Option<VideoData> {
+fn parse_enhanced_video_tag(data: &Bytes) -> Option<VideoData> {
     if data.len() < 5 {
         return None;
     }
@@ -154,7 +152,7 @@ fn parse_enhanced_video_tag(data: &[u8]) -> Option<VideoData> {
             ENHANCED_PACKET_SEQUENCE_START => {
                 // HEVC decoder configuration record
                 if data.len() > 5 {
-                    Some(VideoData::HevcSequenceHeader(Bytes::copy_from_slice(&data[5..])))
+                    Some(VideoData::HevcSequenceHeader(data.slice(5..)))
                 } else {
                     None
                 }
@@ -164,9 +162,8 @@ fn parse_enhanced_video_tag(data: &[u8]) -> Option<VideoData> {
                 if data.len() < 8 {
                     return None;
                 }
-                let composition_time = ((data[5] as i32) << 16)
-                    | ((data[6] as i32) << 8)
-                    | (data[7] as i32);
+                let composition_time =
+                    ((data[5] as i32) << 16) | ((data[6] as i32) << 8) | (data[7] as i32);
                 let composition_time = if composition_time & 0x800000 != 0 {
                     composition_time | !0xFFFFFF
                 } else {
@@ -174,7 +171,7 @@ fn parse_enhanced_video_tag(data: &[u8]) -> Option<VideoData> {
                 };
                 Some(VideoData::HevcNalu {
                     composition_time,
-                    data: Bytes::copy_from_slice(&data[8..]),
+                    data: data.slice(8..),
                     is_keyframe,
                 })
             }
@@ -182,7 +179,7 @@ fn parse_enhanced_video_tag(data: &[u8]) -> Option<VideoData> {
                 // No composition time (CTS=0)
                 Some(VideoData::HevcNalu {
                     composition_time: 0,
-                    data: Bytes::copy_from_slice(&data[5..]),
+                    data: data.slice(5..),
                     is_keyframe,
                 })
             }
@@ -194,7 +191,7 @@ fn parse_enhanced_video_tag(data: &[u8]) -> Option<VideoData> {
 }
 
 /// Parse an RTMP audio message payload (FLV audio tag body).
-pub fn parse_audio_tag(data: &[u8]) -> Option<AudioData> {
+pub fn parse_audio_tag(data: &Bytes) -> Option<AudioData> {
     if data.len() < 2 {
         return None;
     }
@@ -202,7 +199,7 @@ pub fn parse_audio_tag(data: &[u8]) -> Option<AudioData> {
     match sound_format {
         FLV_AUDIO_AAC => {
             let aac_packet_type = data[1];
-            let body = Bytes::copy_from_slice(&data[2..]);
+            let body = data.slice(2..);
             match aac_packet_type {
                 AAC_SEQUENCE_HEADER => Some(AudioData::AacSequenceHeader(body)),
                 AAC_RAW => Some(AudioData::AacRaw(body)),
@@ -231,8 +228,7 @@ pub fn avcc_to_annexb(data: &[u8], sps_pps: Option<&[u8]>) -> Bytes {
     let mut pos = 0;
     while pos + 4 <= data.len() {
         let nalu_len =
-            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]])
-                as usize;
+            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         pos += 4;
         if pos + nalu_len > data.len() {
             break;
