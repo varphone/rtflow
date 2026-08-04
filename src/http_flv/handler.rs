@@ -28,10 +28,14 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
     let mut video_seq_pending = video_codec.is_some();
     let mut audio_seq_pending = description.tracks.iter().any(|t| t.codec == Codec::Aac);
 
+    // fmtp only changes on ANNOUNCE; take one snapshot and refresh it only
+    // while sequence headers are still pending (instead of locking and
+    // cloning the map on every frame).
+    let mut fmtp_snapshot = fmtp_source.announce_fmtp();
     configure_sequence_headers(
         &mut muxer,
         &description,
-        &fmtp_source.announce_fmtp(),
+        &fmtp_snapshot,
         &mut video_seq_pending,
         &mut audio_seq_pending,
     );
@@ -65,6 +69,9 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
                 .collect()
         })
         .unwrap_or_default();
+    // Skip broadcast replays of frames the (filtered) startup snapshot
+    // already delivered.
+    let startup_keys = crate::mount::startup_dedup_keys(&startup);
     let mut startup = VecDeque::from(startup);
     let mut awaiting_video_keyframe = video_codec.is_some();
     // A CRA picture is a valid random-access point, but it can be followed by
@@ -89,6 +96,11 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
                 Err(broadcast::error::RecvError::Closed) => break,
             }
         };
+        // Skip broadcast replays of frames the startup snapshot already
+        // delivered (duplicate keyframes break FLV timestamp continuity).
+        if startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
+            continue;
+        }
         let is_video = matches!(unit.codec, Codec::H264 | Codec::H265);
         if awaiting_video_keyframe {
             if !is_video || !unit.is_keyframe {
@@ -107,15 +119,24 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
                 None => continue,
             }
         }
-        let starts_h265_cra = unit.codec == Codec::H265 && h265_random_access_is_cra(&unit.data);
+        // CRA is a random-access point, hence always a keyframe; skip the
+        // full-frame scan on every other frame.
+        let starts_h265_cra = unit.is_keyframe
+            && unit.codec == Codec::H265
+            && h265_random_access_is_cra(&unit.data);
         if video_seq_pending || audio_seq_pending {
             configure_sequence_headers(
                 &mut muxer,
                 &description,
-                &fmtp_source.announce_fmtp(),
+                &fmtp_snapshot,
                 &mut video_seq_pending,
                 &mut audio_seq_pending,
             );
+            if video_seq_pending || audio_seq_pending {
+                // fmtp may still arrive via a later ANNOUNCE; refresh the
+                // snapshot instead of locking and cloning it every frame.
+                fmtp_snapshot = fmtp_source.announce_fmtp();
+            }
         }
         if video_seq_pending && unit.is_keyframe && is_video {
             let seq = match unit.codec {

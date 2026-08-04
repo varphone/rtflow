@@ -146,7 +146,7 @@ impl FlvMuxer {
             }
         }
 
-        self.tag_buffer.split().freeze()
+        self.tag_buffer.split_to(self.tag_buffer.len()).freeze()
     }
 
     fn observe_video_frame_duration(&mut self, pts: Duration) -> Duration {
@@ -568,8 +568,16 @@ fn write_g711_audio_tag(buf: &mut BytesMut, unit: &AccessUnit) {
 
 /// Convert Annex-B NALUs (with start codes) to AVCC/HVCC format (4-byte length prefix).
 fn annex_b_to_avcc(data: &Bytes) -> Bytes {
-    let nals = parse_annex_b_nals(data);
-    if nals.is_empty() {
+    // Fast path: the payload is already AVCC/HVCC (length-prefixed), which
+    // is what RTMP ingest delivers. Detecting it avoids a full-frame scan
+    // and rebuild; the Bytes clone is a reference-count bump only.
+    if data.len() >= 4
+        && u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize == data.len() - 4
+    {
+        return data.clone();
+    }
+    let ranges = annex_b_nal_ranges(data);
+    if ranges.is_empty() {
         // No start code — treat whole buffer as a single NAL.
         let mut buf = BytesMut::with_capacity(4 + data.len());
         buf.put_u32(data.len() as u32);
@@ -577,13 +585,44 @@ fn annex_b_to_avcc(data: &Bytes) -> Bytes {
         return buf.freeze();
     }
 
-    let total_size: usize = nals.iter().map(|n| 4 + n.len()).sum();
+    let total_size: usize = ranges.iter().map(|(start, end)| 4 + (end - start)).sum();
     let mut buf = BytesMut::with_capacity(total_size);
-    for nal in &nals {
-        buf.put_u32(nal.len() as u32);
-        buf.put_slice(nal);
+    for (start, end) in &ranges {
+        buf.put_u32((end - start) as u32);
+        buf.put_slice(&data[*start..*end]);
     }
     buf.freeze()
+}
+
+/// Locate Annex-B NAL boundaries as offset ranges into the buffer, without
+/// copying the NAL data.
+fn annex_b_nal_ranges(data: &Bytes) -> Vec<(usize, usize)> {
+    let bytes = data.as_ref();
+    let mut nals = Vec::new();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        let Some(start) = find_start_code(bytes, i) else {
+            break;
+        };
+        let nal_end = find_start_code(bytes, start + 3).unwrap_or(bytes.len());
+
+        let nal_data_start = if start + 3 < bytes.len() && bytes[start + 2] == 0x01 {
+            start + 3
+        } else if start + 4 < bytes.len() && bytes[start + 3] == 0x01 {
+            start + 4
+        } else {
+            start + 3
+        };
+
+        if nal_data_start < nal_end {
+            nals.push((nal_data_start, nal_end));
+        }
+
+        i = nal_end;
+    }
+
+    nals
 }
 
 /// Parse Annex-B byte stream into individual NAL units.
