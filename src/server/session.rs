@@ -1227,6 +1227,20 @@ async fn handle_request(req: crate::rtsp::Request, state: &State) -> Response {
                     let path = url.path().trim_start_matches('/');
                     track.control = Arc::from(path.to_string());
                 }
+                // Merge the fmtp auto-injected from the first keyframe
+                // (hardware encoders with separated SPS/PPS) when the
+                // description itself has no fmtp.
+                if track.fmtp.is_none() {
+                    let fmtp = mount
+                        .announce_fmtp
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .get(&track.id)
+                        .cloned();
+                    if let Some(fmtp) = fmtp {
+                        track.fmtp = Some(fmtp);
+                    }
+                }
             }
             // Content-Base must be a clean request path: the raw URI can
             // carry query strings or (with broken clients) userinfo, which

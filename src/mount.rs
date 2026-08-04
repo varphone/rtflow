@@ -237,6 +237,7 @@ impl Mount {
         &self,
         frame: AccessUnit,
     ) -> std::result::Result<usize, broadcast::error::SendError<AccessUnit>> {
+        self.auto_inject_fmtp(&frame);
         // A cancelled mount (unregistered, or its server shutting down) must
         // not keep accepting data: publishers would silently write into a
         // detached mount while new registrations of the same path split the
@@ -261,6 +262,66 @@ impl Mount {
     /// while no subscriber is attached: PLAY answers need a rtptime base
     /// the moment a client connects, before the first GOP lands in the
     /// startup cache.
+    /// Auto-inject SDP fmtp from the first keyframe carrying parameter
+    /// sets (hardware encoders like HiMPP often emit SPS/PPS separated
+    /// from the IDR slices). DESCRIBE merges this into the SDP when the
+    /// description has no explicit fmtp. Cheap: runs on keyframes only,
+    /// once per track, and also while no subscriber is attached (the
+    /// very first keyframe typically arrives before the first PLAY).
+    #[cfg(feature = "server")]
+    pub fn auto_inject_fmtp(&self, frame: &AccessUnit) {
+        if !frame.is_keyframe {
+            return;
+        }
+        let Some(codec) = self
+            .codec_by_track
+            .get(frame.track_id as usize)
+            .copied()
+            .flatten()
+        else {
+            return;
+        };
+        if codec != crate::media::Codec::H264 && codec != crate::media::Codec::H265 {
+            return;
+        }
+        {
+            let lock = self
+                .announce_fmtp
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if lock.contains_key(&frame.track_id) {
+                return;
+            }
+        }
+        use crate::media::bitstream::{
+            h264_fmtp, h264_parameter_sets, h265_fmtp, h265_parameter_sets,
+        };
+        let fmtp = match codec {
+            crate::media::Codec::H264 => {
+                let sets = h264_parameter_sets(&frame.data);
+                match (sets.sps.as_deref(), sets.pps.as_deref()) {
+                    (Some(sps), Some(pps)) => Some(h264_fmtp(sps, pps)),
+                    _ => None,
+                }
+            }
+            crate::media::Codec::H265 => {
+                let sets = h265_parameter_sets(&frame.data);
+                match (sets.vps.as_deref(), sets.sps.as_deref(), sets.pps.as_deref()) {
+                    (Some(vps), Some(sps), Some(pps)) => Some(h265_fmtp(vps, sps, pps)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        if let Some(fmtp) = fmtp {
+            tracing::debug!("auto fmtp for track {}: {fmtp}", frame.track_id);
+            self.announce_fmtp
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(frame.track_id, Arc::from(fmtp));
+        }
+    }
+
     pub fn update_bootstrap(&self, frame: &AccessUnit) {
         if frame.data.len() <= self.max_queued_bytes_per_session
             && (!matches!(
@@ -523,6 +584,7 @@ impl LocalPublisher {
             // Otherwise the snapshot a new PLAY sees is frozen at the last
             // disconnect — replaying it jumps straight from stale frames
             // to the live edge, which stalls VLC for seconds.
+            self.inner.auto_inject_fmtp(&frame);
             #[cfg(feature = "server")]
             if let Ok(mut cache) = self.inner.startup_cache.try_lock() {
                 cache.push(&frame);
@@ -564,6 +626,7 @@ impl LocalPublisher {
             // Otherwise the snapshot a new PLAY sees is frozen at the last
             // disconnect — replaying it jumps straight from stale frames
             // to the live edge, which stalls VLC for seconds.
+            self.inner.auto_inject_fmtp(&frame);
             #[cfg(feature = "server")]
             if let Ok(mut cache) = self.inner.startup_cache.try_lock() {
                 cache.push(&frame);

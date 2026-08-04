@@ -1,3 +1,13 @@
+//! Media types and hardware-encoder integration helpers.
+//!
+//! [`AccessUnit`] carries encoded frames (Annex-B for video, raw AAC/PCM
+//! for audio) into the data plane; the `*_video`/`*_audio` constructors
+//! below remove the SDP/clock boilerplate when wiring a hardware encoder
+//! (HiSilicon HiMPP VENC, V4L2, ...) into the framework.
+
+pub mod bitstream;
+pub mod clock;
+
 use bytes::Bytes;
 use std::{sync::Arc, time::Duration};
 pub type TrackId = u8;
@@ -37,6 +47,47 @@ impl AccessUnit {
             Codec::Aac | Codec::Pcma | Codec::Pcmu | Codec::Opus => MediaKind::Audio,
         }
     }
+
+    /// Construct a video access unit. `data` is an Annex-B H.264/H.265
+    /// access unit (start codes included, as produced by HiMPP VENC).
+    pub fn video(
+        track_id: TrackId,
+        codec: Codec,
+        pts: Duration,
+        rtp_timestamp: RtpTimestamp,
+        is_keyframe: bool,
+        data: Bytes,
+    ) -> Self {
+        Self {
+            track_id,
+            codec,
+            pts,
+            dts: None,
+            rtp_timestamp,
+            is_keyframe,
+            data,
+        }
+    }
+
+    /// Construct an audio access unit (raw AAC frame or 8 kHz G.711
+    /// sample block; the caller supplies the RTP timestamp).
+    pub fn audio(
+        track_id: TrackId,
+        codec: Codec,
+        pts: Duration,
+        rtp_timestamp: RtpTimestamp,
+        data: Bytes,
+    ) -> Self {
+        Self {
+            track_id,
+            codec,
+            pts,
+            dts: None,
+            rtp_timestamp,
+            is_keyframe: true,
+            data,
+        }
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TrackDescription {
@@ -58,6 +109,156 @@ pub struct TrackDescription {
     #[cfg(feature = "srtp")]
     pub crypto: Option<crate::protocol::sdp::SdpCrypto>,
 }
+impl TrackDescription {
+    /// H.264 video track from encoder parameter sets.
+    ///
+    /// `sps`/`pps` are the NAL bodies *without* start codes (extract them
+    /// with [`bitstream::h264_parameter_sets`] from an Annex-B IDR).
+    /// `sps`/`pps` may be empty for raw single-NAL setups, in which case
+    /// the fmtp is a plain `packetization-mode=1` (the mount auto-injects
+    /// `sprop-parameter-sets` once a keyframe with parameter sets arrives).
+    pub fn h264_video(
+        id: TrackId,
+        sps: &[u8],
+        pps: &[u8],
+        width: u32,
+        height: u32,
+        frame_rate: u32,
+    ) -> Self {
+        // Empty parameter sets → no fmtp yet: the mount auto-injects
+        // sprop-parameter-sets from the first keyframe that carries them
+        // (hardware encoders with separated SPS/PPS), which DESCRIBE then
+        // merges in. A stream without any parameter sets still works when
+        // every IDR carries them inline (single-NAL packaging is valid
+        // under the default packetization-mode=0).
+        let fmtp = if sps.is_empty() || pps.is_empty() {
+            None
+        } else {
+            Some(Arc::from(bitstream::h264_fmtp(sps, pps)))
+        };
+        Self {
+            id,
+            kind: MediaKind::Video,
+            codec: Codec::H264,
+            clock_rate: 90_000,
+            channels: None,
+            payload_type: 96,
+            fmtp,
+            control: Arc::from(format!("track{id}")),
+            width: Some(width),
+            height: Some(height),
+            frame_rate: Some((frame_rate, 1)),
+            #[cfg(feature = "srtp")]
+            crypto: None,
+        }
+    }
+
+    /// H.265 video track from encoder parameter sets (VPS/SPS/PPS NAL
+    /// bodies without start codes).
+    pub fn h265_video(
+        id: TrackId,
+        vps: &[u8],
+        sps: &[u8],
+        pps: &[u8],
+        width: u32,
+        height: u32,
+        frame_rate: u32,
+    ) -> Self {
+        let fmtp = if vps.is_empty() || sps.is_empty() || pps.is_empty() {
+            None
+        } else {
+            Some(Arc::from(bitstream::h265_fmtp(vps, sps, pps)))
+        };
+        Self {
+            id,
+            kind: MediaKind::Video,
+            codec: Codec::H265,
+            clock_rate: 90_000,
+            channels: None,
+            payload_type: 96,
+            fmtp,
+            control: Arc::from(format!("track{id}")),
+            width: Some(width),
+            height: Some(height),
+            frame_rate: Some((frame_rate, 1)),
+            #[cfg(feature = "srtp")]
+            crypto: None,
+        }
+    }
+
+    /// AAC-LC audio track (MPEG4-GENERIC, RFC 3640 fmtp with an
+    /// auto-generated `config=` AudioSpecificConfig).
+    pub fn aac_audio(id: TrackId, sample_rate: u32, channels: u8) -> Self {
+        let fmtp = bitstream::aac_audio_specific_config(sample_rate, channels)
+            .map(|config| Arc::from(bitstream::aac_fmtp(&config)));
+        Self {
+            id,
+            kind: MediaKind::Audio,
+            codec: Codec::Aac,
+            clock_rate: sample_rate,
+            channels: Some(channels),
+            payload_type: 97,
+            fmtp,
+            control: Arc::from(format!("track{id}")),
+            width: None,
+            height: None,
+            frame_rate: None,
+            #[cfg(feature = "srtp")]
+            crypto: None,
+        }
+    }
+
+    /// G.711 A-law audio track (8 kHz, 1 channel; no fmtp needed).
+    pub fn pcma_audio(id: TrackId, sample_rate: u32, channels: u8) -> Self {
+        Self {
+            id,
+            kind: MediaKind::Audio,
+            codec: Codec::Pcma,
+            clock_rate: sample_rate,
+            channels: Some(channels),
+            payload_type: 8,
+            fmtp: None,
+            control: Arc::from(format!("track{id}")),
+            width: None,
+            height: None,
+            frame_rate: None,
+            #[cfg(feature = "srtp")]
+            crypto: None,
+        }
+    }
+
+    /// G.711 μ-law audio track (8 kHz, 1 channel; no fmtp needed).
+    pub fn pcmu_audio(id: TrackId, sample_rate: u32, channels: u8) -> Self {
+        Self {
+            id,
+            kind: MediaKind::Audio,
+            codec: Codec::Pcmu,
+            clock_rate: sample_rate,
+            channels: Some(channels),
+            payload_type: 0,
+            fmtp: None,
+            control: Arc::from(format!("track{id}")),
+            width: None,
+            height: None,
+            frame_rate: None,
+            #[cfg(feature = "srtp")]
+            crypto: None,
+        }
+    }
+}
+
+impl MediaDescription {
+    /// Build a description from tracks (ids must be contiguous from 0).
+    pub fn from_tracks(session_name: impl Into<Arc<str>>, tracks: Vec<TrackDescription>) -> Self {
+        Self {
+            session_name: session_name.into(),
+            tracks,
+            #[cfg(feature = "multicast")]
+            connection: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MediaDescription {
     pub session_name: Arc<str>,
