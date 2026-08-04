@@ -83,6 +83,14 @@ struct Args {
     /// Disable the web player (HTTP-FLV / WS-FLV / HLS servers); RTSP only.
     #[arg(long)]
     no_web: bool,
+
+    /// WebRTC WHIP (browser publish) HTTP endpoint, e.g. 0.0.0.0:8089.
+    #[arg(long)]
+    whip_listen: Option<SocketAddr>,
+
+    /// WebRTC WHEP (browser playback) HTTP endpoint, e.g. 0.0.0.0:8090.
+    #[arg(long)]
+    whep_listen: Option<SocketAddr>,
 }
 
 /// Minimal synthetic H.264 access unit. The first IDR includes SPS/PPS

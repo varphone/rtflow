@@ -119,6 +119,25 @@ server.shutdown().await
 `http://<ip>:8080/`，页面自动列出全部通道并以 WS-FLV / HTTP-FLV /
 HLS 三种模式播放（`--no-web` 可只留 RTSP）。
 
+## WebRTC（WHIP/WHEP）
+
+基于 `webrtc` crate（0.20，纯 Rust ICE/DTLS/SRTP）的浏览器原生实时
+协议，`webrtc` feature 启用：
+
+- **WHEP 播放**（draft-ietf-wish-whep）：浏览器 `POST` SDP offer 到
+  `/whep{path}`，服务器应答（含完整 ICE 候选）后把 mount 的 H.264/
+  H.265/VP8/VP9 视频（以及 Opus 音频，若源如此）打包为 RTP 推给
+  浏览器——`examples/ipc_camera --whep-listen 0.0.0.0:8090` 后任意
+  WebRTC 播放器（或原生 `<video>` + RTCPeerConnection）拉流。
+- **WHIP 发布**（draft-ietf-wish-whip）：浏览器 `POST` offer 到
+  `/whip{path}` 后推 H.264/Opus RTP，服务器解包并经公共
+  depacketizer 进入 mount（与 RTSP 发布同路径）——
+  `--whip-listen 0.0.0.0:8089` 即可让浏览器把摄像头推入
+  `/cam` 等挂载点。
+- 说明：WebRTC 无 AAC/G.711 音频，WHEP 在源为这些编码时只发视频
+  （音频需转码后才有）；两端同机时 ICE host 候选直连即通，跨 NAT
+  需在 `WebRtcConfig` 配置 STUN/TURN。
+
 ## Feature profile
 
 嵌入式网关可使用 `--no-default-features --features embedded-gateway`，只启用 RTSP client/server、TLS、metrics、HTTP-FLV 和 HLS 等生产模块。`full` 保留已实现的完整能力；实验协议必须显式启用 `experimental-protocols`。
