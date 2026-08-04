@@ -145,6 +145,27 @@ impl Default for GstPipelineBuilder {
     }
 }
 
+/// Extract the AudioSpecificConfig from GStreamer AAC caps
+/// (`codec_data`) and build the RFC 3640 fmtp line; without it downstream
+/// players cannot initialize an AAC decoder.
+fn aac_fmtp_from_caps(caps: &gstreamer::Caps) -> Option<String> {
+    let structure = caps.structure(0)?;
+    let value = structure.value("codec_data").ok()?;
+    let codec_data: gstreamer::glib::Bytes = value.get().ok()?;
+    let bytes = codec_data.as_ref();
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut config = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write;
+        let _ = write!(config, "{byte:02X}");
+    }
+    Some(format!(
+        "profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config={config}"
+    ))
+}
+
 impl GStreamerSource {
     /// Build a MediaDescription from the configured tracks.
     pub fn build_media_description(&self) -> MediaDescription {
@@ -159,7 +180,11 @@ impl GStreamerSource {
                 clock_rate: t.clock_rate,
                 channels: t.channels,
                 payload_type: t.payload_type,
-                fmtp: None,
+                fmtp: if t.codec == Codec::Aac {
+                    aac_fmtp_from_caps(&t.caps).map(Arc::from)
+                } else {
+                    None
+                },
                 control: Arc::from(format!("trackID={i}")),
                 width: None,
                 height: None,
@@ -174,6 +199,7 @@ impl GStreamerSource {
             tracks,
             #[cfg(feature = "multicast")]
             connection: None,
+
         }
     }
 

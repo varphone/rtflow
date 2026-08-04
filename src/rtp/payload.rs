@@ -209,6 +209,10 @@ pub struct Depacketizer {
     /// Keyframe flag accumulated while assembling the current AU (avoids a
     /// second full-frame Annex-B scan after assembly).
     assembled_is_keyframe: bool,
+    /// Last raw RTP timestamp, for wrap-extended PTS.
+    last_rtp_ts: u32,
+    /// Wrap-free RTP timestamp clock (units of `clock_rate` ticks).
+    extended_ts: u64,
 }
 impl Depacketizer {
     pub fn new(codec: Codec, track_id: TrackId, clock_rate: u32) -> Self {
@@ -222,13 +226,25 @@ impl Depacketizer {
             expected_sequence: None,
             damaged_timestamp: None,
             assembled_is_keyframe: false,
+            last_rtp_ts: 0,
+            extended_ts: 0,
         }
     }
-    fn pts_from_timestamp(&self, rtp_ts: u32) -> std::time::Duration {
+
+    /// PTS from the RTP timestamp, extended across the 32-bit wrap:
+    /// without extension the PTS resets to zero every ~13.1h at 90kHz.
+    /// The delta is interpreted as signed so out-of-order timestamps and
+    /// wrap-arounds both extend correctly.
+    fn pts_from_timestamp(&mut self, rtp_ts: u32) -> std::time::Duration {
         if self.clock_rate == 0 {
             return std::time::Duration::ZERO;
         }
-        std::time::Duration::from_micros((rtp_ts as u64) * 1_000_000 / self.clock_rate as u64)
+        let raw_delta = rtp_ts.wrapping_sub(self.last_rtp_ts) as i32 as i64;
+        self.extended_ts = self.extended_ts.wrapping_add(raw_delta as u64);
+        self.last_rtp_ts = rtp_ts;
+        std::time::Duration::from_micros(
+            self.extended_ts.saturating_mul(1_000_000) / u64::from(self.clock_rate),
+        )
     }
     pub fn push(&mut self, p: RtpPacket) -> Result<Vec<AccessUnit>> {
         let timestamp = p.header.timestamp;
