@@ -317,10 +317,17 @@ async fn handle_connection(
 
 /// HTTP upgrade handshake: read the request, validate the WS headers,
 /// answer 101 with the computed accept key, return (mount_path, stream).
+///
+/// Request-line/header parsing is delegated to the shared HTTP parser
+/// (`crate::http::request::parse_request`) so WS-FLV honours the same
+/// framing rules (header size limit, content-length validation, method
+/// whitelist) as every other HTTP endpoint.
 async fn handshake(mut stream: TcpStream, timeout: Duration) -> Result<(String, TcpStream)> {
+    use crate::http::{Method, ParseError, parse_request};
+
     let mut buf = Vec::with_capacity(1024);
     let mut tmp = [0u8; 1024];
-    loop {
+    let request = loop {
         let n = tokio::time::timeout(timeout, stream.read(&mut tmp))
             .await
             .map_err(|_| crate::Error::Http("ws-flv: handshake timeout".into()))??;
@@ -328,42 +335,36 @@ async fn handshake(mut stream: TcpStream, timeout: Duration) -> Result<(String, 
             return Err(crate::Error::Http("ws-flv: closed during handshake".into()));
         }
         buf.extend_from_slice(&tmp[..n]);
-        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
-            break;
+        match parse_request(&buf, MAX_HANDSHAKE_BYTES, 0) {
+            Ok(Some((request, _))) => break request,
+            // parse_request never yields Ok(None) today; keep the branch
+            // for forward compatibility with incremental parsing.
+            Ok(None) => unreachable!("parse_request returns Ok(None)"),
+            Err(ParseError::Incomplete) => continue,
+            Err(_) => {
+                return Err(crate::Error::Http("ws-flv: invalid handshake".into()));
+            }
         }
-        if buf.len() > MAX_HANDSHAKE_BYTES {
-            return Err(crate::Error::Http("ws-flv: handshake too large".into()));
-        }
-    }
+    };
 
-    let text = String::from_utf8_lossy(&buf);
-    let mut lines = text.split("\r\n");
-    let request_line = lines.next().unwrap_or("");
-    let mut parts = request_line.split_whitespace();
-    if parts.next() != Some("GET") {
+    if request.method != Method::Get {
         return Err(crate::Error::Http("ws-flv: method must be GET".into()));
     }
-    let path = parts
-        .next()
-        .ok_or_else(|| crate::Error::Http("ws-flv: missing path".into()))?;
-    if !path.starts_with('/') {
+    if !request.path.starts_with('/') {
         return Err(crate::Error::Http("ws-flv: invalid path".into()));
     }
 
     let mut sec_key: Option<String> = None;
     let mut upgrade_ok = false;
     let mut version_ok = false;
-    for line in lines {
-        let lower = line.to_ascii_lowercase();
-        // Index into the ORIGINAL line using the lowercased position so
-        // base64 key characters keep their case.
-        if let Some(pos) = lower.find("sec-websocket-key:") {
-            sec_key = Some(line[pos + "sec-websocket-key:".len()..].trim().to_string());
+    for (key, value) in &request.headers {
+        if key.eq_ignore_ascii_case("sec-websocket-key") {
+            sec_key = Some(value.clone());
         }
-        if lower.starts_with("upgrade:") && lower.contains("websocket") {
+        if key.eq_ignore_ascii_case("upgrade") && value.to_ascii_lowercase().contains("websocket") {
             upgrade_ok = true;
         }
-        if lower.starts_with("sec-websocket-version:") && lower.contains("13") {
+        if key.eq_ignore_ascii_case("sec-websocket-version") && value.contains("13") {
             version_ok = true;
         }
     }
@@ -397,7 +398,7 @@ async fn handshake(mut stream: TcpStream, timeout: Duration) -> Result<(String, 
     stream.flush().await?;
 
     // Path convention: /live/stream.flv -> mount /live/stream.
-    let mount_path = path.strip_suffix(".flv").unwrap_or(path).to_string();
+    let mount_path = request.path.strip_suffix(".flv").unwrap_or(&request.path).to_string();
     Ok((mount_path, stream))
 }
 

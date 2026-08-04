@@ -5,6 +5,7 @@ pub mod response;
 mod router;
 
 pub use request::{HttpRequest, Method};
+pub(crate) use request::{ParseError, parse_request};
 pub use response::ResponseWriter;
 pub use router::{Handler, Router};
 
