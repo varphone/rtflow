@@ -4,6 +4,7 @@
 - 目标场景：**海思（HiSilicon）平台 IPC**——HiMPP 的 VENC 输出 H.264/H.265 编码帧，通过 rtflow 以 RTSP 发布，实现主/子多码流网络摄像机
 - 方法：以"嵌入式客户从零接入"的最小路径逐环节走查（README 最小示例 → API 形状 → 帧格式契约 → 平台构建），对照现有 examples/docs 能力
 - 口径：易用性 = 从拿到 SDK 到出流所需的代码量、需要理解的协议概念、需要自行实现的胶水、以及文档/示例覆盖
+- **实施状态（2026-08）：H1-H4 全部落地**——`media::bitstream`/`media::clock` 公开工具、`AccessUnit::video/audio`、`TrackDescription::h264_video/h265_video/aac_audio/pcma_audio/pcmu_audio`、mount 首关键帧自动提取 `sprop-parameter-sets` 并合并进 DESCRIBE、`examples/ipc_camera.rs` 双码流参考、`docs/embedded.md` 交叉编译/调参指南
 
 ## 结论摘要
 

@@ -104,6 +104,12 @@ server.shutdown().await
 
 普通文件 mount 是多客户端共享时间线；录制目录可通过 `RecordingVodSource` 注册为 `MountConfig::Vod`，为每个 RTSP session 提供独立 seek 和播放游标。
 
+## 嵌入式接入（IPC / 海思 HiMPP）
+
+把硬件编码器（HiMPP VENC / V4L2）输出的 H.264/H.265/AAC/G.711 帧直接
+推入 RTSP 的最小路径见 `examples/ipc_camera.rs`；帧构造/时间戳/SPS/PPS
+自动注入等细节见 `docs/embedded.md`。
+
 ## Feature profile
 
 嵌入式网关可使用 `--no-default-features --features embedded-gateway`，只启用 RTSP client/server、TLS、metrics、HTTP-FLV 和 HLS 等生产模块。`full` 保留已实现的完整能力；实验协议必须显式启用 `experimental-protocols`。
