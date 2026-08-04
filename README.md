@@ -17,7 +17,10 @@
 - 录制/VOD：崩溃安全分段、容量保留和恢复索引；每客户端独立 `Range: npt=`、PAUSE/续播及 UDP/TCP 输出。
 - HTTP 分发：HTTP-FLV（H.264/H.265 + AAC，含 onMetaData）、WS-FLV（RFC 6455 WebSocket 传输，mpegts.js/flv.js 浏览器低延迟播放）和基于 fMP4 的 HLS live playlist；HLS 分段在随机访问点切换，并提供独立 init segment；HTTP 连接、请求头和请求体均有界，lag 后等待关键帧/生成 discontinuity。注意：HTTP-FLV 的 H.265 使用 enhanced-RTMP 封装（codec id 12），需要 FFmpeg ≥ 6.1 或支持 enhanced-RTMP 的播放器；老版本播放器无法解码。
 - 网页播放：`http_flv::web::create_web_player_handler` 提供自包含播放页面（mpegts.js + hls.js，CDN 加载），一个页面同时覆盖 WS-FLV / HTTP-FLV / HLS 三种浏览器直播协议，断流自动指数退避重连——`examples/ipc_camera --web` 一键演示 IPC 摄像头网页实时预览。
-- 商业级特性：FLV 打包零中间拷贝（Annex-B→AVCC 原地转换，单拷贝单分配，适合弱核 IPC）；WS-FLV 服务器主动心跳（30 s 间隔，~60 s 回收僵尸连接，防 fd 泄漏）；HLS live playlist ETag/304 缓存协商（hls.js 轮询期省带宽与生成开销）；HTTP/WS accept socket 显式 TCP_NODELAY；`MountSnapshot::broadcast_receivers` 让发布端功率门控覆盖网页订阅者（RTSP 会话 + HTTP-FLV/WS-FLV/HLS 任一订阅即推流）。
+- 商业级特性：FLV 打包零中间拷贝（Annex-B→AVCC 原地转换，单拷贝单分配，适合弱核 IPC）；WS-FLV 服务器主动心跳（30 s 间隔，~60 s 回收僵尸连接，防 fd 泄漏）；HLS live playlist ETag/304 缓存协商（hls.js 轮询期省带宽与生成开销）与 keep-alive 连接复用；HTTP/WS accept socket 显式 TCP_NODELAY；`MountSnapshot::broadcast_receivers` 让发布端功率门控覆盖网页订阅者（RTSP 会话 + HTTP-FLV/WS-FLV/HLS 任一订阅即推流）。
+- 低延迟配置基线：HLS 默认 1 s 段（`HlsConfig::default`），配合编码器 GOP ≤1 s 时帧到段延迟下限约 GOP/2 = 0.5 s；IPC 示例 `ipc_camera` 默认 GOP=30（1 s @30 fps）与之一致。Lagged 恢复只等视频关键帧、音频立即恢复，断流重连不再中断声音。
+- 编码支持矩阵：H.264/H.265（RTP↔FLV/WS-FLV↔HLS/DASH 全链路）、AAC（MPEG4-GENERIC）、G.711 A-law/μ-law（FLV/WS-FLV/HLS 输出，μ-law 正确标注 `ulaw`）、Opus（RTP 直通 + SDP/RTP 映射 + fmtp 注入；FLV 不支持，属容器限制）；VP8/VP9/AV1 的 RTP 解包/FLV 打包返回显式错误而非 panic（`Error::Media`）。RTP 重组与 PES 缓冲有 16 MB 硬上限，恶意/异常流无法撑爆单连接内存。
+- 错误分类：`Error` 按域区分（`Rtsp`/`Media`/`Http`/`InvalidConfig`/`Unsupported`/…），`code()`/`retry_class()`/`rtsp_status()` 稳定映射（Http/InvalidConfig→500，Unsupported→501），供重试策略与遥测使用。
 
 ## 分发能力边界
 

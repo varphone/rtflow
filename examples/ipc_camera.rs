@@ -54,7 +54,10 @@ struct Args {
     mount: String,
     #[arg(long, default_value_t = 30)]
     fps: u32,
-    #[arg(long, default_value_t = 60)]
+    // GOP of 30 (1 s at 30 fps): matches the default 1 s HLS segment
+    // duration — HLS segments align to keyframes, so a longer GOP would
+    // silently defeat the low-latency segment configuration.
+    #[arg(long, default_value_t = 30)]
     gop: u32,
     #[arg(long, default_value_t = 1920)]
     main_width: u32,
@@ -287,9 +290,11 @@ async fn main() -> rtflow::Result<()> {
                 create_flv_handler(mount),
             )
             .await;
-            // HLS live window: 2 s segments × 5 = ~10 s rolling buffer.
+            // HLS live window: 1 s segments × 3 = ~3 s rolling buffer.
+            // (1 s segments halve the frame-to-segment latency; see
+            // HlsConfig::default.)
             let hls_config = HlsConfig {
-                segment_duration: Duration::from_secs(2),
+                segment_duration: Duration::from_secs(1),
                 segment_count: 5,
                 live: true,
             };
