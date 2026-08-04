@@ -44,7 +44,6 @@ async fn write_interleaved(writer: &Arc<Mutex<ControlWriteHalf>>, wire: &[u8]) -
 #[derive(Clone)]
 pub(super) struct RtpNtpClock {
     anchor_ntp: u64,
-    anchor_rtp_timestamp: u32,
     clock_rate: u32,
     /// Last observed RTP timestamp, for wrap-extended deltas.
     last_rtp: u32,
@@ -56,7 +55,6 @@ impl RtpNtpClock {
     fn new(anchor_rtp_timestamp: u32, clock_rate: u32) -> Option<Self> {
         (clock_rate != 0).then(|| Self {
             anchor_ntp: ntp_now(),
-            anchor_rtp_timestamp,
             clock_rate,
             last_rtp: anchor_rtp_timestamp,
             extended_delta: 0,
@@ -348,7 +346,7 @@ pub(super) fn spawn_udp_sender_from(
         let mut rtcp_buffer = [0u8; 2048];
         // Last sender report's NTP timestamp, for periodic receiver reports
         // (LSR reference).
-        let mut last_sr_ntp: Option<u64> = None;
+        let last_sr_ntp: Option<u64> = None;
         let mut report_tick = tokio::time::interval(std::time::Duration::from_secs(5));
         report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         report_tick.tick().await;
@@ -632,7 +630,6 @@ mod tests {
     fn rtp_ntp_clock_advances_at_the_media_clock_rate() {
         let mut clock = RtpNtpClock {
             anchor_ntp: NTP_UNIX_EPOCH_OFFSET_SECS << 32,
-            anchor_rtp_timestamp: 90_000,
             clock_rate: 90_000,
             last_rtp: 90_000,
             extended_delta: 0,

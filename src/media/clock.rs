@@ -52,7 +52,7 @@ impl RtpClock {
                 let delta = pts.saturating_sub(last);
                 self.last_pts = Some(pts);
                 let delta_ticks =
-                    (delta.as_nanos() as u128 * u128::from(self.rate) / 1_000_000_000u128) as u64;
+                    (delta.as_nanos() * u128::from(self.rate) / 1_000_000_000u128) as u64;
                 self.extended_ticks = self.extended_ticks.wrapping_add(delta_ticks);
                 self.extended_ticks as u32
             }

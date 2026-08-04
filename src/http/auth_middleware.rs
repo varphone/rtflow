@@ -77,23 +77,9 @@ async fn write_forbidden<W: tokio::io::AsyncWrite + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http::{HttpRequest, Method};
-    use bytes::Bytes;
-    use std::collections::HashMap;
 
     fn test_config() -> TokenConfig {
         TokenConfig::new(b"test-secret".to_vec())
-    }
-
-    fn make_request(path: &str, query: HashMap<String, String>) -> HttpRequest {
-        HttpRequest {
-            method: Method::Get,
-            path: path.to_string(),
-            query,
-            headers: vec![],
-            body: Bytes::new(),
-            path_params: vec![],
-        }
     }
 
     fn ok_handler() -> Handler {

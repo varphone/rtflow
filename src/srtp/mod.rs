@@ -11,7 +11,7 @@
 //!   sending and [`SrtpContext::unprotect_rtp`] after receiving.
 //! - The normal [`crate::rtp::RtpPacket::parse`] path operates on plaintext;
 //!   SRTP decryption happens first, producing the plaintext bytes.
-//! - Session keys are derived once via [`key_derive::derive_session_keys`].
+//! - Session keys are derived once via `key_derive::derive_session_keys`.
 //! - SRTCP is handled separately via [`SrtcpContext`].
 
 mod auth;

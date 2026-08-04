@@ -206,7 +206,7 @@ pub(crate) fn codec_lookup_table(description: &MediaDescription) -> [Option<Code
 /// Keys of frames covered by a startup snapshot.
 ///
 /// Consumers that first drain the `startup` frames returned by
-/// [`Mount::subscribe_with_startup`] and then read the broadcast receiver
+/// `Mount::subscribe_with_startup` and then read the broadcast receiver
 /// will receive the same frames twice: the broadcast ring replays frames
 /// that were sent before subscription. Skip any receiver frame whose
 /// `(track_id, rtp_timestamp)` matches one of these keys.
@@ -522,7 +522,8 @@ impl MountHandle {
     ///
     /// Unlike `announce_fmtp()` which returns a snapshot, this allows
     /// long-lived tasks to poll for updates as publishers ANNOUNCE.
-    pub fn announce_fmtp_source(&self) -> Arc<Mount> {
+    #[cfg(feature = "dash")]
+    pub(crate) fn announce_fmtp_source(&self) -> Arc<Mount> {
         self.inner.clone()
     }
 

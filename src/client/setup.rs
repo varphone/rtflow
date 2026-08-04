@@ -52,7 +52,7 @@ async fn connect_interleaved(
         // Two interleaved channels per track; more than 127 tracks would
         // overflow the 8-bit channel space — refuse instead of wrapping.
         let channel = u8::try_from(index * 2)
-            .map_err(|_| Error::Limit("too many tracks for interleaved transport".into()))?;
+            .map_err(|_| Error::Limit("too many tracks for interleaved transport"))?;
         let setup_uri = crate::protocol::sdp::control_uri(&setup_base, &track.control)?;
         let mut extra = format!(
             "Transport: RTP/AVP/TCP;unicast;interleaved={}-{}\r\n",

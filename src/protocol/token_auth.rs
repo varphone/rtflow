@@ -100,10 +100,10 @@ pub fn verify_token(config: &TokenConfig, path: &str, token: &str) -> bool {
 pub fn extract_token_from_query<'a>(config: &TokenConfig, query: &'a str) -> Option<&'a str> {
     let param = &config.param_name;
     for pair in query.split('&') {
-        if let Some((key, value)) = pair.split_once('=') {
-            if key == param {
-                return Some(value);
-            }
+        if let Some((key, value)) = pair.split_once('=')
+            && key == param
+        {
+            return Some(value);
         }
     }
     None

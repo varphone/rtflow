@@ -13,6 +13,7 @@ use crate::server::{RtspServer, ServerConfig};
 use crate::srt::SrtServer;
 use crate::{Result, mount::MountHandle};
 use std::sync::Arc;
+#[cfg(any(feature = "rtmp", feature = "srt"))]
 use tokio_util::sync::CancellationToken;
 
 /// Unified multi-protocol streaming gateway.

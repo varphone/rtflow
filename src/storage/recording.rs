@@ -348,11 +348,9 @@ impl SegmentWriter {
             let _ = std::fs::remove_file(&self.partial);
             return Err(e.into());
         }
-        if sync {
-            if let Err(e) = self.writer.get_ref().sync_all() {
-                let _ = std::fs::remove_file(&self.partial);
-                return Err(e.into());
-            }
+        if sync && let Err(e) = self.writer.get_ref().sync_all() {
+            let _ = std::fs::remove_file(&self.partial);
+            return Err(e.into());
         }
         drop(self.writer);
         if let Err(e) = fs::rename(&self.partial, &self.final_path) {
