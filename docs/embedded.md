@@ -125,19 +125,47 @@ cargo build --release --target aarch64-unknown-linux-gnu \
   `aarch64-unknown-linux-gnu` + SDK 的交叉 gcc；静态/极简部署 →
   `aarch64-unknown-linux-musl`（需 musl 交叉工具链）。
 - `embedded-gateway` profile 已含：`client`、`server`、`tls`、`metrics`、
-  `http`、`http-flv`、`hls`。IPC 只需 RTSP 时可再裁剪。
-- 二进制 footprint 参考（release）：核心 RTSP 路径约 1-2 MB 量级
-  （tokio + rustls 为主）；关闭 `tls`/`metrics` 可进一步减小。
+  `http`、`http-flv`、`hls`。IPC 只需 RTSP 时可再裁剪（如
+  `--no-default-features --features client,server`）。
+- 二进制 footprint 实测（本仓库 HEAD，release + strip，见
+  `docs/embedded-resource-audit.md`）：
+
+  | 特性组合 | ROM |
+  |---|---|
+  | `embedded-gateway`（默认 release profile） | **2.2 MB** |
+  | `embedded-gateway`（lto+abort+strip 前） | 4.8 MB |
+  | 全特性（含 webrtc/srt/dash/rtmp/mkv） | ≈ 7 MB |
+
+  release profile 已固化 `lto`/`panic=abort`/`strip=symbols`/
+  `opt-level=s`（见 Cargo.toml `[profile.release]`）；`tracing` 已开
+  `release_max_level_info`（release 下 info 级封顶，debug 构建不受影响）。
+  CPU 吃紧时把 `opt-level` 改回 `3` 再对比。
 
 ## 6. 调参速查
 
 | 参数 | 作用 | IPC 建议 |
 |---|---|---|
-| `ServerConfig::consumer_queue_capacity` | 广播队列容量（帧） | 默认 256 足够；内存紧张可降到 128 |
+| `ServerConfig::consumer_queue_capacity` | 每会话广播队列容量（帧） | **按码率预算**（见下方公式）：1080p@4Mbps 主码流 128（≈2MB），子码流 64 |
 | `STARTUP_WINDOW`（`src/mount.rs`） | 新客户端起播回放窗口 | 500ms 默认；GOP 大于窗口时等下一个 IDR |
 | `ServerConfig::session_timeout` | RTSP 会话超时 | 设备侧建议 86400s（IPC 长连接） |
 | GOP / 关键帧间隔 | 起播延迟上限 | 建议 1s（如 30fps 下 `-g 30`）；越大起播越慢 |
 | B 帧 | 解码缓冲延迟 | 建议关闭（VENC 开 low-delay / zerolatency） |
+
+### 内存预算公式（P0-2）
+
+```
+每会话内存 ≈ consumer_queue_capacity × 平均帧大小
+平均帧大小 ≈ 码率 ÷ fps ÷ 8
+例：1080p 4Mbps@30fps → 16.7KB/帧 → 128 帧 ≈ 2.1MB/会话
+例：子码流 512Kbps@15fps → 4.3KB/帧 → 64 帧 ≈ 0.27MB/会话
+```
+
+- 总预算 = 各码流每会话 × 并发客户端数 + startup 快照（0.5s×码率）+ HLS
+  段缓冲（若开：2s 段 × 码率 × lookback）。
+- `examples/ipc_camera --queue 128`（默认）即按此预算；主/子码流若需
+  不同容量，可起两个 `RtspServer`（不同端口）分别配置。
+- 队列满时丢最旧帧（`PushResult::DroppedQueueFull` / 客户端 lagged），
+  不会无限增长——网络抖动与内存预算之间按产品取舍。
 
 ## 7. 部署检查清单
 
@@ -147,3 +175,94 @@ cargo build --release --target aarch64-unknown-linux-gnu \
    `a=fmtp:96 profile-level-id=...;sprop-parameter-sets=...` 且能出帧
 4. VLC 播放主/子码流均正常；断网重连后设备自动恢复推流
    （`allow_replace_after_disconnect=true`）
+
+## 8. 弱核 runtime 指引（P0-3）
+
+框架不创建 runtime（由你的 `main` 决定）。弱核 IPC（如单核 A53）推荐：
+
+```rust
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> rtflow::Result<()> {
+    // 纯 RTSP 预览（≤ 4 路客户端）单线程足够；
+    // 并发 HLS/HTTP-FLV 消费或大客户端数时回到多线程。
+    ...
+}
+```
+
+- 多核平台：**每核一个 `current_thread` runtime、各管一路码流**，比
+  多线程共享 runtime 的锁竞争更低（发布路径每帧一次 broadcast 锁）。
+- `RtspServer` 与 `publisher()` 均可跨 task 使用；把一路码流的
+  VENC 回调绑定到一个 runtime 的 task 即可。
+- 线程数 = `rt-multi-thread` 默认按 CPU 核数；64MB RAM 设备建议
+  `current_thread` 或 `worker_threads(2)`。
+
+## 9. 多码流与节能策略（P1-7）
+
+- 主/子码流 = 独立 `Mount`（`/cam/main`、`/cam/sub`）+ 独立 publisher；
+  HiMPP 双 VENC 线程各推一路（见 `examples/ipc_camera`）。
+- 按订阅者数节能：`mount.subscriber_count()` 已暴露唯一会话数——
+  子码流无订阅者时可降低 VENC 帧率/码率或暂停推流：
+
+```rust
+if mount.subscriber_count() == 0 {
+    // 通知 VENC 降帧率/暂停子码流（HiMPP 侧），或直接停推
+}
+```
+
+- 断流恢复：`allow_replace_after_disconnect=true` 下，VENC 重启后新的
+  publisher 自动替换旧会话，播放器无需重连（现有行为）。
+
+## 10. 录制与掉电恢复（P1-8）
+
+- `file-storage` 录制按 `pts` 切段；建议每段 ≤ 1s 并定期
+  `fsync`（掉电最多丢 1 段），SD 卡/NAND 上避免高频小写。
+- 断流（编码器重启）会写 `DISCONTINUITY` 标记，播放器侧按标记重置
+  解码器；录制文件按段自包含（关键帧开头），可独立回放。
+- 异常退出前调用 `server.shutdown()`（有 `shutdown_grace` 宽限），
+  进程被杀时至少保证已写段完整。
+
+## 11. HiMPP VB 零拷贝接入（P2-9）
+
+默认路径：VENC 输出 VB 块 → memcpy 到 Rust `Vec` → `AccessUnit`。
+省掉这次拷贝的方法——把 VB 块包装成 `Bytes`（引用计数释放时归还 VB）：
+
+```rust
+use std::os::raw::c_void;
+
+// VB 块包装：drop 时调 HI_MPI_VB_ReleaseBlock
+struct VbBlock { vb: u32 } // HI_VB_BLOCK
+impl Drop for VbBlock {
+    fn drop(&mut self) {
+        unsafe { hisi::HI_MPI_VB_ReleaseBlock(self.vb) }; // 伪代码
+    }
+}
+fn wrap_vb(block: VbBlock, ptr: *mut c_void, len: usize) -> Bytes {
+    let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, len) };
+    // Bytes::from_owner 将 Vec<u8> 的所有权语义迁移：
+    let mut v = Vec::with_capacity(len);
+    unsafe { v.set_len(len); }
+    v.copy_from_slice(slice); // ← 若想真零拷贝，需自定义 allocator 让 Vec 直接
+                              //   指向 VB 块并借 Drop 归还——Rust 侧可用
+                              //   bytes::Bytes::from_owner(Box::new(VbBlock)) 的
+                              //   扩展 allocator 方案，或直接每帧一次 memcpy
+                              //   （4Mbps@30fps ≈ 0.5MB/s，CPU 可忽略）
+    Bytes::from(v)
+}
+```
+
+工程结论：4Mbps 主码流每帧 ~16KB，memcpy 一次的开销（≈2µs/帧）远小于
+VENC 编码本身，**IPC 上建议先用 memcpy 路径**；真零拷贝（自定义
+allocator / `Bytes::from_owner`）留到 CPU 余量 < 20% 时再优化。
+
+## 12. 分配器与 IO 层评估（P2-10/11）
+
+- 默认 glibc malloc 在多线程 runtime 下 arena 膨胀：64MB 设备建议
+  `MALLOC_ARENA_MAX=2`（或 `MALLOC_ARENA_MAX=1`）环境变量，或链接
+  jemalloc（`tikv-jemallocator`）——实测 RSS 通常可降 10–30%。
+- `tokio-uring`（io_uring）对本框架的收益：RTSP 小包多发场景 syscall
+  减少有限；**弱核 + 大客户端数（>16）时再评估**，当前 TCP socket 路径
+  已用 tokio 批量写。
+- RTP 打包（`src/rtp/payload.rs`）每帧新建 `BytesMut`（H.264 分片
+  2–5 次小分配/帧，30fps ≈ 150 次小分配/秒，CPU 占比 <0.1%）——
+  核查结论：**不值得引入池化**（复杂度/内存碎片风险大于收益）；
+  如弱核上仍见分配热点，先 `perf` 确认热路径再优化。
