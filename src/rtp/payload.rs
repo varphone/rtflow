@@ -202,6 +202,11 @@ pub struct Depacketizer {
     track_id: TrackId,
     clock_rate: u32,
     assembling: Option<BytesMut>,
+    /// Keyframe flag of the NAL currently being reassembled from
+    /// fragmentation units (H.264 FU-A / H.265 FU). The FU start packet
+    /// carries the NAL type; continuation packets do not, so the flag is
+    /// latched here until the FU end packet completes the NAL.
+    assembling_is_keyframe: bool,
     access_unit: Vec<Bytes>,
     current_timestamp: Option<u32>,
     expected_sequence: Option<u16>,
@@ -221,6 +226,7 @@ impl Depacketizer {
             track_id,
             clock_rate,
             assembling: None,
+            assembling_is_keyframe: false,
             access_unit: Vec::new(),
             current_timestamp: None,
             expected_sequence: None,
@@ -256,6 +262,7 @@ impl Depacketizer {
         {
             let d = self.current_timestamp == Some(timestamp);
             self.assembling = None;
+            self.assembling_is_keyframe = false;
             self.access_unit.clear();
             self.assembled_is_keyframe = false;
             self.current_timestamp = None;
@@ -270,6 +277,7 @@ impl Depacketizer {
                 self.access_unit.clear();
                 self.assembled_is_keyframe = false;
                 self.assembling = None;
+                self.assembling_is_keyframe = false;
             }
             self.current_timestamp = Some(timestamp);
             let nal = match self.codec {
@@ -416,6 +424,10 @@ impl Depacketizer {
             if end {
                 return Ok(Some((b.freeze(), keyframe)));
             }
+            // Latch the keyframe flag: FU continuation packets do not
+            // carry the NAL type, so the flag must survive until the
+            // FU end packet completes the NAL.
+            self.assembling_is_keyframe = keyframe;
             self.assembling = Some(b);
             return Ok(None);
         }
@@ -425,7 +437,8 @@ impl Depacketizer {
             .ok_or_else(|| Error::Media("H264 FU continuation without start".into()))?;
         b.extend_from_slice(&p[2..]);
         if end {
-            Ok(self.assembling.take().map(|b| (b.freeze(), false)))
+            let keyframe = std::mem::take(&mut self.assembling_is_keyframe);
+            Ok(self.assembling.take().map(|b| (b.freeze(), keyframe)))
         } else {
             Ok(None)
         }
@@ -472,6 +485,8 @@ impl Depacketizer {
             if end {
                 return Ok(Some((b.freeze(), keyframe)));
             }
+            // Latch the keyframe flag (see H.264 FU-A handling).
+            self.assembling_is_keyframe = keyframe;
             self.assembling = Some(b);
             return Ok(None);
         }
@@ -481,7 +496,8 @@ impl Depacketizer {
             .ok_or_else(|| Error::Media("H265 FU continuation without start".into()))?;
         b.extend_from_slice(&p[3..]);
         if end {
-            Ok(self.assembling.take().map(|b| (b.freeze(), false)))
+            let keyframe = std::mem::take(&mut self.assembling_is_keyframe);
+            Ok(self.assembling.take().map(|b| (b.freeze(), keyframe)))
         } else {
             Ok(None)
         }
@@ -753,5 +769,74 @@ mod tests {
         jitter.reset();
         assert_eq!(jitter.push(packet(u16::MAX))[0].header.sequence, u16::MAX);
         assert_eq!(jitter.push(packet(0))[0].header.sequence, 0);
+    }
+}
+
+#[cfg(test)]
+mod fu_keyframe_tests {
+    use super::*;
+
+    fn packet(seq: u16, ts: u32, marker: bool, payload: &[u8]) -> RtpPacket {
+        RtpPacket {
+            header: RtpHeader {
+                marker,
+                payload_type: 96,
+                sequence: seq,
+                timestamp: ts,
+                ssrc: 1,
+            },
+            payload: Bytes::copy_from_slice(payload),
+        }
+    }
+
+    /// A multi-packet H.264 IDR (FU-A: 3 fragments) must assemble with
+    /// `is_keyframe = true` — the FU start packet carries the NAL type,
+    /// which must survive to the FU end packet.
+    #[test]
+    fn h264_fu_a_multi_fragment_idr_is_keyframe() {
+        let mut d = Depacketizer::new(Codec::H264, 0, 90_000);
+        let ts = 1000u32;
+        // FU-A start: NAL type 5 (IDR), S=1 E=0.
+        let fu_start = [0x7c, 0x85, 0x01, 0x02, 0x03];
+        let units = d.push(packet(10, ts, false, &fu_start)).unwrap();
+        assert!(units.is_empty());
+        // FU-A continuation: S=0 E=0.
+        let fu_mid = [0x7c, 0x05, 0x04, 0x05];
+        assert!(d.push(packet(11, ts, false, &fu_mid)).unwrap().is_empty());
+        // FU-A end: S=0 E=1, marker set.
+        let fu_end = [0x7c, 0x45, 0x06];
+        let units = d.push(packet(12, ts, true, &fu_end)).unwrap();
+        assert_eq!(units.len(), 1, "one access unit");
+        assert!(units[0].is_keyframe, "FU-A IDR must be a keyframe");
+        // Annex-B output: 00 00 00 01 65 ...
+        assert_eq!(&units[0].data[..5], &[0, 0, 0, 1, 0x65]);
+    }
+
+    /// A multi-packet H.264 P-frame (FU-A, NAL type 1) must NOT be marked
+    /// as a keyframe.
+    #[test]
+    fn h264_fu_a_multi_fragment_delta_is_not_keyframe() {
+        let mut d = Depacketizer::new(Codec::H264, 0, 90_000);
+        let ts = 2000u32;
+        let fu_start = [0x7c, 0x81, 0x01];
+        assert!(d.push(packet(20, ts, false, &fu_start)).unwrap().is_empty());
+        let fu_end = [0x7c, 0x41, 0x02];
+        let units = d.push(packet(21, ts, true, &fu_end)).unwrap();
+        assert_eq!(units.len(), 1);
+        assert!(!units[0].is_keyframe, "P-frame FU-A must not be a keyframe");
+    }
+
+    /// H.265 FU (type 49) IDR (NAL type 19) across fragments.
+    #[test]
+    fn h265_fu_multi_fragment_idr_is_keyframe() {
+        let mut d = Depacketizer::new(Codec::H265, 0, 90_000);
+        let ts = 3000u32;
+        // FU header byte 0: type 49 << 1 | layer; byte 2: S=1 E=0, type 19.
+        let fu_start = [0x62, 0x01, 0x93, 0xaa, 0xbb];
+        assert!(d.push(packet(30, ts, false, &fu_start)).unwrap().is_empty());
+        let fu_end = [0x62, 0x01, 0x53, 0xcc];
+        let units = d.push(packet(31, ts, true, &fu_end)).unwrap();
+        assert_eq!(units.len(), 1);
+        assert!(units[0].is_keyframe, "H265 FU IDR must be a keyframe");
     }
 }
