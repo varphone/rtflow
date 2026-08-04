@@ -54,6 +54,11 @@ struct TrackState {
     timescale: u32,
     samples: Vec<SampleEntry>,
     last_dts: Option<Duration>,
+    /// Last PTS pushed for this track, for reset detection against the
+    /// track's own timeline (audio and video clocks are independent; a
+    /// global comparison would mistake their long-term baseline drift
+    /// for a stream reset).
+    last_pts: Option<Duration>,
     codec_config: Option<Bytes>,
 }
 
@@ -96,6 +101,7 @@ impl Segmenter {
                 timescale: t.clock_rate,
                 samples: Vec::new(),
                 last_dts: None,
+                last_pts: None,
                 codec_config: None,
             })
             .collect();
@@ -131,16 +137,15 @@ impl Segmenter {
         }
         // Try to initialize codec_config from fmtp for tracks that don't have it yet
         for (i, track_desc) in self.description.tracks.iter().enumerate() {
-            if let Some(state) = self.tracks.get_mut(i) {
-                if state.codec_config.is_none() {
-                    state.codec_config = codec_config_from_fmtp(track_desc);
-                    tracing::debug!(
-                        track_id = track_desc.id,
-                        codec_config_len =
-                            state.codec_config.as_ref().map(|c| c.len()).unwrap_or(0),
-                        "Segmenter update_fmtp codec_config"
-                    );
-                }
+            if let Some(state) = self.tracks.get_mut(i)
+                && state.codec_config.is_none()
+            {
+                state.codec_config = codec_config_from_fmtp(track_desc);
+                tracing::debug!(
+                    track_id = track_desc.id,
+                    codec_config_len = state.codec_config.as_ref().map(|c| c.len()).unwrap_or(0),
+                    "Segmenter update_fmtp codec_config"
+                );
             }
         }
     }
@@ -153,48 +158,65 @@ impl Segmenter {
             return;
         };
         let pts = unit.pts;
-        let starts_new_segment = self.current_segment_pts.is_some_and(|start| {
-            if pts < start {
-                // A large backward jump is a timestamp wrap or source
-                // reset: force a cut and mark the next segment as a
-                // discontinuity. Small backward deltas are just the
-                // difference between track start baselines (audio vs
-                // video) and must not cut a segment.
-                if start.saturating_sub(pts) > Duration::from_secs(30) {
-                    self.next_discontinuity = true;
+        // A reset of this track's own timeline (timestamp wrap / source
+        // restart) is detected against the track's last PTS. A global
+        // comparison against the segment start would mistake independent
+        // audio/video clock baselines for a reset once they drift >30 s
+        // apart — which produced a discontinuity storm and 0-length
+        // segments on long-running multi-track streams.
+        let track_reset = self.tracks[track_index]
+            .last_pts
+            .is_some_and(|last| last.saturating_sub(pts) > Duration::from_secs(30));
+        // The reset flag must land on the segment *after* the cut (the one
+        // starting at the restart frame), not on the finalized pre-reset
+        // segment: players reset their decoder where they see the flag.
+        let mut delayed_discontinuity = false;
+        let starts_new_segment = if track_reset {
+            delayed_discontinuity = true;
+            true
+        } else {
+            self.current_segment_pts.is_some_and(|start| {
+                if pts < start {
+                    // A small backward delta is just the difference
+                    // between track start baselines (audio vs video) and
+                    // must not cut a segment.
+                    return false;
+                }
+                let elapsed = pts.saturating_sub(start);
+                if elapsed < self.config.segment_duration {
+                    return false;
+                }
+                let hard_limit = self
+                    .config
+                    .segment_duration
+                    .saturating_mul(2)
+                    .max(Duration::from_millis(1));
+                if elapsed >= hard_limit {
+                    // Hard time-based cut: audio-only streams never produce a
+                    // video keyframe, and a video stream without IDR frames must
+                    // not accumulate samples forever.
                     return true;
                 }
-                return false;
-            }
-            let elapsed = pts.saturating_sub(start);
-            if elapsed < self.config.segment_duration {
-                return false;
-            }
-            let hard_limit = self
-                .config
-                .segment_duration
-                .saturating_mul(2)
-                .max(Duration::from_millis(1));
-            if elapsed >= hard_limit {
-                // Hard time-based cut: audio-only streams never produce a
-                // video keyframe, and a video stream without IDR frames must
-                // not accumulate samples forever.
-                return true;
-            }
-            // Regular cut: align with a video random-access point.
-            unit.is_keyframe && matches!(unit.codec, Codec::H264 | Codec::H265)
-        });
+                // Regular cut: align with a video random-access point.
+                unit.is_keyframe && matches!(unit.codec, Codec::H264 | Codec::H265)
+            })
+        };
         if unit.is_keyframe && matches!(unit.codec, Codec::H264 | Codec::H265) {
             tracing::debug!(?pts, ?self.current_segment_pts, "HLS video random-access point");
         }
         if starts_new_segment {
             self.finalize_segment(pts);
         }
+        // Apply a pending reset flag to the *new* segment only.
+        if delayed_discontinuity {
+            self.next_discontinuity = true;
+        }
         if self.current_segment_pts.is_none() {
             self.current_segment_pts = Some(pts);
         }
 
         let track = &mut self.tracks[track_index];
+        track.last_pts = Some(pts);
         if track.codec_config.is_none() {
             track.codec_config = codec_config_from_annex_b(unit.codec, &unit.data);
         }
@@ -277,6 +299,7 @@ impl Segmenter {
         for track in &mut self.tracks {
             track.samples.clear();
             track.last_dts = None;
+            track.last_pts = None;
             track.codec_config = None;
         }
         self.current_segment_pts = None;
@@ -380,8 +403,7 @@ fn duration_to_ticks(duration: Duration, timescale: u32) -> u64 {
     // µs-resolution durations drifts the fMP4 timeline (tfdt) relative to
     // the RTP timeline over long streams.
     duration.as_secs().saturating_mul(u64::from(timescale))
-        + (u64::from(duration.subsec_nanos()).saturating_mul(u64::from(timescale))
-            + 500_000_000)
+        + (u64::from(duration.subsec_nanos()).saturating_mul(u64::from(timescale)) + 500_000_000)
             / 1_000_000_000
 }
 

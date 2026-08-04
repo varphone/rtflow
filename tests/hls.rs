@@ -29,7 +29,6 @@ fn h264_description() -> MediaDescription {
         }],
         #[cfg(feature = "multicast")]
         connection: None,
-
     }
 }
 
@@ -377,7 +376,6 @@ fn segmenter_rotates_audio_only_stream_by_time() {
         }],
         #[cfg(feature = "multicast")]
         connection: None,
-
     };
     let config = SegmenterConfig {
         segment_duration: Duration::from_millis(100),
@@ -407,4 +405,141 @@ fn segmenter_rotates_audio_only_stream_by_time() {
         .try_recv()
         .expect("audio-only stream must rotate segments");
     assert!(!second.data.is_empty());
+}
+
+/// A long-running stream whose audio and video clocks advance at their own
+/// rates (video 33.33 ms/frame, audio 20 ms/block — independent baselines,
+/// as on real encoders). After ~30 s of wall time the baselines drift more
+/// than 30 s apart; the segmenter must NOT mistake this for a stream reset
+/// (regression: discontinuity storm + zero-length segments).
+#[test]
+fn segmenter_survives_av_clock_drift() {
+    let desc = MediaDescription::from_tracks(
+        "drift",
+        vec![
+            TrackDescription::h264_video(0, &[], &[], 640, 360, 30),
+            TrackDescription::aac_audio(1, 48_000, 2),
+        ],
+    );
+    let config = SegmenterConfig {
+        segment_duration: Duration::from_secs(2),
+        lookback_count: 5,
+    };
+    let mut segmenter = Segmenter::new(config, &desc);
+    let mut rx = segmenter.subscribe();
+    let mut segments = Vec::new();
+
+    // 4000 frames: video reaches ~133 s, audio ~80 s — the baselines drift
+    // ~53 s apart, far beyond the 30 s reset threshold.
+    for index in 0..4000u64 {
+        let video_pts = Duration::from_micros(index * 1_000_000 / 30);
+        let is_key = index % 60 == 0;
+        let data = if is_key {
+            h264_keyframe()
+        } else {
+            h264_interframe()
+        };
+        segmenter.push(AccessUnit::video(
+            0,
+            Codec::H264,
+            video_pts,
+            (index * 3000) as u32,
+            is_key,
+            data,
+        ));
+        let audio_pts = Duration::from_micros(index * 20_000);
+        segmenter.push(AccessUnit::audio(
+            1,
+            Codec::Aac,
+            audio_pts,
+            (index * 960) as u32,
+            Bytes::from_static(&[0xff, 0xf1, 0x50, 0x80, 0x00, 0x1f, 0xfc, 0x00]),
+        ));
+        while let Ok(segment) = rx.try_recv() {
+            segments.push(segment);
+        }
+    }
+    segmenter.flush();
+    while let Ok(segment) = rx.try_recv() {
+        segments.push(segment);
+    }
+
+    assert!(!segments.is_empty(), "stream must produce segments");
+    assert!(
+        segments.iter().all(|s| !s.duration.is_zero()),
+        "no zero-duration segments"
+    );
+    assert_eq!(
+        segments.iter().filter(|s| s.discontinuity).count(),
+        0,
+        "clock drift must not look like a stream reset"
+    );
+    // Segment durations stay in the 1–5 s band (2 s target, GOP-aligned).
+    for segment in &segments {
+        assert!(
+            segment.duration >= Duration::from_secs(1)
+                && segment.duration <= Duration::from_secs(5),
+            "segment duration {:?} out of band",
+            segment.duration
+        );
+    }
+}
+
+/// A real stream restart (timestamp wrap / source reboot) must still be
+/// detected per-track and marked as a discontinuity — the track-level
+/// reset check added for clock-drift robustness must not lose this.
+#[test]
+fn segmenter_detects_real_track_reset() {
+    let desc = MediaDescription::from_tracks(
+        "reset",
+        vec![TrackDescription::h264_video(0, &[], &[], 640, 360, 30)],
+    );
+    let config = SegmenterConfig {
+        segment_duration: Duration::from_secs(2),
+        lookback_count: 5,
+    };
+    let mut segmenter = Segmenter::new(config, &desc);
+    let mut rx = segmenter.subscribe();
+    let mut segments = Vec::new();
+
+    // 3000 frames ≈ 100 s of video.
+    for index in 0..3000u64 {
+        let pts = Duration::from_micros(index * 1_000_000 / 30);
+        let is_key = index % 60 == 0;
+        let data = if is_key {
+            h264_keyframe()
+        } else {
+            h264_interframe()
+        };
+        segmenter.push(AccessUnit::video(
+            0,
+            Codec::H264,
+            pts,
+            (index * 3000) as u32,
+            is_key,
+            data,
+        ));
+        while let Ok(segment) = rx.try_recv() {
+            segments.push(segment);
+        }
+    }
+
+    // Source restarts: PTS jumps back to 0 (a >30 s backward jump).
+    segmenter.push(AccessUnit::video(
+        0,
+        Codec::H264,
+        Duration::ZERO,
+        0,
+        true,
+        h264_keyframe(),
+    ));
+    segmenter.flush();
+    while let Ok(segment) = rx.try_recv() {
+        segments.push(segment);
+    }
+
+    let resets = segments.iter().filter(|s| s.discontinuity).count();
+    assert_eq!(resets, 1, "restart must be marked once: {segments:#?}");
+    let last = segments.last().expect("segment after restart");
+    assert!(last.discontinuity, "segment after restart is flagged");
 }
