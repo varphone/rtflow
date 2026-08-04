@@ -28,6 +28,10 @@ pub struct ReceptionStats {
     received_prior: u64,
     previous_transit: Option<i64>,
     jitter: f64,
+    /// Arrival clock (in clock-rate units) of the first observed packet.
+    first_arrival_units: Option<i64>,
+    /// RTP timestamp of the first observed packet.
+    first_timestamp: Option<u32>,
     last_sender_report: Option<(u32, Instant)>,
     last_rtt: Option<Duration>,
 }
@@ -49,6 +53,8 @@ impl ReceptionStats {
             received_prior: 0,
             previous_transit: None,
             jitter: 0.0,
+            first_arrival_units: None,
+            first_timestamp: None,
             last_sender_report: None,
             last_rtt: None,
         })
@@ -82,7 +88,22 @@ impl ReceptionStats {
 
         let elapsed = received_at.saturating_duration_since(self.started_at);
         let arrival_units = (elapsed.as_secs_f64() * f64::from(self.clock_rate)) as i64;
-        let transit = arrival_units - i64::from(packet.header.timestamp);
+        // RFC 3550 transit = arrival(clock units) - RTP timestamp. The two
+        // clocks share no absolute zero, so subtract the first packet's
+        // (arrival, timestamp) pair: the constant offset cancels and the
+        // jitter estimate is unaffected by the reference mismatch (and by
+        // a 32-bit timestamp wrap, via wrapping subtraction).
+        let transit = match (self.first_arrival_units, self.first_timestamp) {
+            (Some(first_arrival), Some(first_ts)) => {
+                (arrival_units - first_arrival)
+                    - i64::from(packet.header.timestamp.wrapping_sub(first_ts))
+            }
+            _ => {
+                self.first_arrival_units = Some(arrival_units);
+                self.first_timestamp = Some(packet.header.timestamp);
+                0
+            }
+        };
         if let Some(previous) = self.previous_transit {
             let difference = transit.abs_diff(previous) as f64;
             self.jitter += (difference - self.jitter) / 16.0;

@@ -87,6 +87,13 @@ impl ClientReconnectPolicy {
     }
 }
 
+/// Exponential backoff with deterministic jitter (±25%) so that many
+/// clients failing at once do not reconnect in a synchronized herd.
+fn jittered_backoff(delay: Duration, attempt: u32) -> Duration {
+    let sample = (attempt.wrapping_mul(1_103_515_245).wrapping_add(12_345) % 101) as f32 / 100.0;
+    delay.mul_f32(0.75 + 0.5 * sample)
+}
+
 pub struct ReconnectingClientSession {
     pub description: MediaDescription,
     receiver: mpsc::Receiver<Result<AccessUnit>>,
@@ -255,8 +262,23 @@ impl ClientSession {
             tokio::select! {
                 frame = self.receiver.recv() => return frame,
                 _ = sleep_until(deadline) => {
-                    if let Err(error) = self.keep_alive().await {
-                        return Some(Err(error));
+                    // The keep-alive round-trip runs inline (this task owns
+                    // the control connection), so bound it: a slow control
+                    // plane must not stall media consumption for the full
+                    // request timeout on every interval.
+                    match tokio::time::timeout(
+                        self.request_timeout.min(std::time::Duration::from_secs(2)),
+                        self.keep_alive(),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => return Some(Err(error)),
+                        Err(_) => {
+                            return Some(Err(Error::Rtsp(
+                                "keep-alive timed out; control plane unreachable".into(),
+                            )));
+                        }
                     }
                 }
             }
@@ -446,9 +468,10 @@ impl RtspClient {
                                 return;
                             }
                             tracing::warn!(error = %error, delay_ms = delay.as_millis(), "RTSP client reconnect failed");
+                            let jittered = jittered_backoff(delay, failures);
                             tokio::select! {
                                 _ = task_cancel.cancelled() => return,
-                                _ = sleep(delay) => {}
+                                _ = sleep(jittered) => {}
                             }
                             delay = delay.saturating_mul(2).min(policy.max_delay);
                             continue;
@@ -470,9 +493,10 @@ impl RtspClient {
                     }
                 }
                 tracing::warn!("RTSP client session ended; reconnecting");
+                let jittered = jittered_backoff(delay, failures);
                 tokio::select! {
                     _ = task_cancel.cancelled() => return,
-                    _ = sleep(delay) => {}
+                    _ = sleep(jittered) => {}
                 }
                 delay = delay.saturating_mul(2).min(policy.max_delay);
             }

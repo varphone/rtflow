@@ -21,11 +21,38 @@ use tokio::{
     task::JoinHandle,
 };
 
-#[derive(Clone, Copy)]
+/// Upper bound for a single interleaved (RTSP/TCP) write. A stalled peer
+/// must not hold the per-session write lock indefinitely — that would
+/// freeze every track's sender and the RTCP path.
+const INTERLEAVED_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Write to the shared interleaved writer with a hard timeout.
+/// Returns `false` on timeout/error (caller should tear down the session).
+async fn write_interleaved(
+    writer: &Arc<Mutex<ControlWriteHalf>>,
+    wire: &[u8],
+) -> bool {
+    match tokio::time::timeout(INTERLEAVED_WRITE_TIMEOUT, async {
+        let mut guard = writer.lock().await;
+        guard.write_all(wire).await
+    })
+    .await
+    {
+        Ok(Ok(())) => true,
+        Ok(Err(_)) => false,
+        Err(_) => false,
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct RtpNtpClock {
     anchor_ntp: u64,
     anchor_rtp_timestamp: u32,
     clock_rate: u32,
+    /// Last observed RTP timestamp, for wrap-extended deltas.
+    last_rtp: u32,
+    /// Cumulative signed RTP-clock delta since the anchor (wrap-free).
+    extended_delta: i64,
 }
 
 impl RtpNtpClock {
@@ -34,13 +61,92 @@ impl RtpNtpClock {
             anchor_ntp: ntp_now(),
             anchor_rtp_timestamp,
             clock_rate,
+            last_rtp: anchor_rtp_timestamp,
+            extended_delta: 0,
         })
     }
 
-    fn ntp_for(self, rtp_timestamp: u32) -> u64 {
-        let delta_ticks = rtp_timestamp.wrapping_sub(self.anchor_rtp_timestamp) as i32 as i128;
-        let delta_ntp = delta_ticks * (1i128 << 32) / i128::from(self.clock_rate);
+    /// NTP wall clock for an RTP timestamp. The per-packet delta is
+    /// interpreted as a signed 32-bit difference (so short backward jumps
+    /// and wrap-arounds are right) and accumulated into a wrap-free 64-bit
+    /// clock — a plain signed delta would make the sender-report NTP jump
+    /// backwards after ~6.6h of continuous playback.
+    fn ntp_for(&mut self, rtp_timestamp: u32) -> u64 {
+        let raw_delta = rtp_timestamp.wrapping_sub(self.last_rtp) as i32 as i64;
+        self.extended_delta = self.extended_delta.wrapping_add(raw_delta);
+        self.last_rtp = rtp_timestamp;
+        let delta_ntp = i128::from(self.extended_delta) * (1i128 << 32)
+            / i128::from(self.clock_rate);
         self.anchor_ntp.wrapping_add_signed(delta_ntp as i64)
+    }
+}
+
+/// Per-process random SSRC seed: RFC 3550 wants a random initial SSRC so
+/// two servers on the same network do not collide (and a receiver must not
+/// merge sessions from different sources).
+fn initial_ssrc(track_id: u8) -> u32 {
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u32;
+    seed ^ (track_id as u32).rotate_left(24) ^ 0x5254_5350
+}
+
+/// SDES CNAME: RFC 3550 wants a globally unique per-session identifier;
+/// `user@host` is the canonical form (statistics tools aggregate by it).
+fn sdes_cname() -> Bytes {
+    let host = std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".into());
+    Bytes::from(format!("rtflow@{host}"))
+}
+
+/// Sends an RTCP BYE when the sender task ends (RAII; Drop runs on the
+/// tokio runtime the task lives in).
+struct ByeGuard {
+    pair: UdpPair,
+    target: SocketAddr,
+    ssrc: u32,
+}
+impl Drop for ByeGuard {
+    fn drop(&mut self) {
+        if let Ok(wire) = CompoundPacket::new(vec![RtcpPacket::Bye { ssrc: self.ssrc }])
+            .and_then(|compound| compound.try_encode())
+        {
+            let pair = self.pair.clone();
+            let target = self.target;
+            tokio::spawn(async move {
+                let _ = pair.rtcp.send_to(&wire, target).await;
+            });
+        }
+    }
+}
+
+/// Interleaved variant of [`ByeGuard`]: writes BYE over the shared RTSP
+/// control connection instead of a UDP socket.
+struct InterleavedByeGuard {
+    writer: Arc<Mutex<ControlWriteHalf>>,
+    channel: u8,
+    ssrc: u32,
+}
+impl Drop for InterleavedByeGuard {
+    fn drop(&mut self) {
+        let Ok(wire) = CompoundPacket::new(vec![RtcpPacket::Bye { ssrc: self.ssrc }])
+            .and_then(|compound| compound.try_encode())
+        else {
+            return;
+        };
+        let Ok(frame) = InterleavedFrame {
+            channel: self.channel,
+            payload: wire,
+        }
+        .try_encode()
+        else {
+            return;
+        };
+        let writer = self.writer.clone();
+        tokio::spawn(async move {
+            let mut guard = writer.lock().await;
+            let _ = guard.write_all(&frame).await;
+        });
     }
 }
 
@@ -68,7 +174,17 @@ pub(super) fn spawn_interleaved_sender_from(
         // will replay the same frames, so skip them.
         let startup_keys = startup_dedup_keys(&startup);
         let mut startup = VecDeque::from(startup);
-        let ssrc = 0x5254_5350u32.wrapping_add(track.id as u32);
+        // Pace startup frames at their media rate so a burst of cached
+        // frames does not slam the receiver all at once; the bounded
+        // startup window (STARTUP_WINDOW) keeps this short.
+        let mut startup_clock: Option<tokio::time::Instant> = None;
+        let mut startup_base_pts = std::time::Duration::ZERO;
+        let ssrc = initial_ssrc(track.id);
+        let _bye = InterleavedByeGuard {
+            writer: writer.clone(),
+            channel: rtcp_channel,
+            ssrc,
+        };
         let mut packetizer = match Packetizer::new(track.codec, track.payload_type, ssrc, 1200) {
             Ok(value) => value,
             Err(_) => return,
@@ -84,16 +200,24 @@ pub(super) fn spawn_interleaved_sender_from(
         let mount_cancel = mount.cancel_token();
         loop {
             let frame = if let Some(frame) = startup.pop_front() {
+                if let Some(clock) = startup_clock {
+                    let due = clock + frame.pts.saturating_sub(startup_base_pts);
+                    tokio::time::sleep_until(due).await;
+                } else {
+                    startup_clock = Some(tokio::time::Instant::now());
+                    startup_base_pts = frame.pts;
+                }
                 frame
             } else {
                 tokio::select! {
+                    biased;
                     _ = mount_cancel.cancelled() => {
                         // Mount unregistered or server shutting down.
                         return;
                     }
                     _ = report_tick.tick() => {
                         if sent_packets > 0
-                            && let Some(clock) = ntp_clock
+                            && let Some(clock) = ntp_clock.as_mut()
                             && let Ok(report) = encode_sender_report(
                                 ssrc,
                                 clock.ntp_for(last_rtp_timestamp),
@@ -107,7 +231,7 @@ pub(super) fn spawn_interleaved_sender_from(
                             })
                             .try_encode()
                         {
-                            if writer.lock().await.write_all(&wire).await.is_err() {
+                            if !write_interleaved(&writer, &wire).await {
                                 return;
                             }
                             mount.stats.add_sender_reports(1);
@@ -151,7 +275,7 @@ pub(super) fn spawn_interleaved_sender_from(
                     let Ok(wire) = wire else {
                         return;
                     };
-                    if writer.lock().await.write_all(&wire).await.is_err() {
+                    if !write_interleaved(&writer, &wire).await {
                         return;
                     }
                     sent_packets = sent_packets.wrapping_add(1);
@@ -162,7 +286,7 @@ pub(super) fn spawn_interleaved_sender_from(
                     }
                     mount.stats.add_rtp(1, u64::from(payload_len));
                     if sent_packets == 1
-                        && let Some(clock) = ntp_clock
+                        && let Some(clock) = ntp_clock.as_mut()
                         && let Ok(report) = encode_sender_report(
                             ssrc,
                             clock.ntp_for(last_rtp_timestamp),
@@ -205,7 +329,17 @@ pub(super) fn spawn_udp_sender_from(
         // will replay the same frames, so skip them.
         let startup_keys = startup_dedup_keys(&startup);
         let mut startup = VecDeque::from(startup);
-        let ssrc = 0x5254_5350u32.wrapping_add(track.id as u32);
+        // Pace startup frames at their media rate so a burst of cached
+        // frames does not slam the receiver all at once; the bounded
+        // startup window (STARTUP_WINDOW) keeps this short.
+        let mut startup_clock: Option<tokio::time::Instant> = None;
+        let mut startup_base_pts = std::time::Duration::ZERO;
+        let ssrc = initial_ssrc(track.id);
+        let _bye = ByeGuard {
+            pair: pair.clone(),
+            target: rtcp_target,
+            ssrc,
+        };
         let mut packetizer = match Packetizer::new(track.codec, track.payload_type, ssrc, 1200) {
             Ok(value) => value,
             Err(_) => return,
@@ -216,19 +350,23 @@ pub(super) fn spawn_udp_sender_from(
         let mut last_rtp_timestamp = 0u32;
         let mut ntp_clock: Option<RtpNtpClock> = None;
         let mut rtcp_buffer = [0u8; 2048];
+        // Last sender report's NTP timestamp, for periodic receiver reports
+        // (LSR reference).
+        let mut last_sr_ntp: Option<u64> = None;
         let mut report_tick = tokio::time::interval(std::time::Duration::from_secs(5));
         report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         report_tick.tick().await;
         let mount_cancel = mount.cancel_token();
         loop {
             tokio::select! {
+                biased;
                 _ = mount_cancel.cancelled() => {
                     // Mount unregistered or server shutting down.
                     return;
                 }
                 _ = report_tick.tick() => {
                     if sent_packets > 0 {
-                        let report = ntp_clock.map(|clock| {
+                        let report = ntp_clock.as_mut().map(|clock| {
                             encode_sender_report(
                                 ssrc,
                                 clock.ntp_for(last_rtp_timestamp),
@@ -242,6 +380,19 @@ pub(super) fn spawn_udp_sender_from(
                         {
                             mount.stats.add_sender_reports(1);
                         }
+                    }
+                    // Periodic receiver report (RFC 3550 §6.4.2): keep the
+                    // peer's sender statistics alive even when we receive no
+                    // SRs in between.
+                    if let Some(sr_ntp) = last_sr_ntp
+                        && let Ok(wire) = CompoundPacket::new(vec![RtcpPacket::ReceiverReport {
+                            ssrc,
+                        }])
+                        .and_then(|packet| packet.try_encode())
+                        && pair.rtcp.send_to(&wire, rtcp_target).await.is_ok()
+                    {
+                        mount.stats.add_receiver_reports(1);
+                        let _ = sr_ntp;
                     }
                 }
                 report = pair.rtcp.recv_from(&mut rtcp_buffer) => {
@@ -266,7 +417,18 @@ pub(super) fn spawn_udp_sender_from(
                 }
                 received = async {
                     match startup.pop_front() {
-                        Some(frame) => Ok(frame),
+                        Some(frame) => {
+                            // Pace startup frames at their media rate (see
+                            // startup_clock above); live frames are not paced.
+                            if let Some(clock) = startup_clock {
+                                let due = clock + frame.pts.saturating_sub(startup_base_pts);
+                                tokio::time::sleep_until(due).await;
+                            } else {
+                                startup_clock = Some(tokio::time::Instant::now());
+                                startup_base_pts = frame.pts;
+                            }
+                            Ok(frame)
+                        }
                         None => receiver.recv().await,
                     }
                 } => {
@@ -318,7 +480,7 @@ pub(super) fn spawn_udp_sender_from(
                             }
                             mount.stats.add_rtp(1, packet.payload.len() as u64);
                             if sent_packets == 1
-                                && let Some(clock) = ntp_clock
+                                && let Some(clock) = ntp_clock.as_mut()
                                 && let Ok(report) = encode_sender_report(
                                     ssrc,
                                     clock.ntp_for(last_rtp_timestamp),
@@ -423,7 +585,7 @@ fn encode_sender_report(
                 ssrc,
                 items: vec![SdesItem {
                     kind: 1,
-                    value: Bytes::from_static(b"rtflow"),
+                    value: sdes_cname(),
                 }],
             }],
         },
@@ -465,10 +627,12 @@ mod tests {
 
     #[test]
     fn rtp_ntp_clock_advances_at_the_media_clock_rate() {
-        let clock = RtpNtpClock {
+        let mut clock = RtpNtpClock {
             anchor_ntp: NTP_UNIX_EPOCH_OFFSET_SECS << 32,
             anchor_rtp_timestamp: 90_000,
             clock_rate: 90_000,
+            last_rtp: 90_000,
+            extended_delta: 0,
         };
         assert_eq!(
             clock.ntp_for(180_000),

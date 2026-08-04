@@ -16,7 +16,10 @@ impl Default for JitterBufferConfig {
         Self {
             max_packets: 128,
             max_reorder_window: 64,
-            max_delay: Duration::from_millis(100),
+            // 40ms is enough for typical LAN/edge jitter while keeping the
+            // live edge close; 100ms added a fixed latency even when the
+            // network had none.
+            max_delay: Duration::from_millis(40),
         }
     }
 }
