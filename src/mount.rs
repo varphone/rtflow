@@ -71,7 +71,13 @@ pub struct StreamStats {
 
 #[derive(Clone, Debug)]
 pub struct MountSnapshot {
+    /// Unique RTSP play sessions (clients) on this mount.
     pub subscriber_count: usize,
+    /// Current broadcast receivers (RTSP track subscriptions plus
+    /// HTTP-FLV / WS-FLV / HLS subscribers). Publishers use the sum of
+    /// both counters as their power gate so browser playback keeps the
+    /// encoder running.
+    pub broadcast_receivers: usize,
     pub publisher_connected: bool,
     #[cfg(feature = "server")]
     pub proxy_state: Option<ProxyState>,
@@ -534,6 +540,12 @@ impl MountHandle {
         // Unique sessions, not track subscriptions: one client with a
         // video+audio pair counts once.
         let subscribers = self.inner.active_sessions.load(Ordering::Relaxed);
+        // HTTP-FLV / WS-FLV / HLS subscribers hold a broadcast receiver
+        // but never register an RTSP session; a publisher's power gate
+        // (`subscriber_count + broadcast_receivers == 0` → stop pushing)
+        // would otherwise stall browser playback after the startup
+        // snapshot. RTSP track subscriptions are included here too.
+        let broadcast_receivers = self.inner.frames.receiver_count();
         let s = self.inner.stats.snapshot(subscribers);
         #[cfg(feature = "server")]
         let (startup_cache_frames, startup_cache_bytes) = self
@@ -546,6 +558,7 @@ impl MountHandle {
         let (startup_cache_frames, startup_cache_bytes) = (0, 0);
         MountSnapshot {
             subscriber_count: s.subscribers,
+            broadcast_receivers,
             publisher_connected: self.inner.publishers.load(Ordering::Relaxed) > 0,
             #[cfg(feature = "server")]
             proxy_state: match &self.inner.config {
