@@ -1,10 +1,14 @@
 use crate::{Error, Result};
+use std::time::Duration;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 pub struct ResponseWriter<W: AsyncWrite + Unpin> {
     inner: W,
     headers_written: bool,
     connection_close: bool,
+    /// Per-write deadline; `None` disables the guard (R22: a frozen peer
+    /// must not pin a connection slot forever).
+    write_timeout: Option<Duration>,
 }
 
 impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
@@ -13,7 +17,14 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
             inner: writer,
             headers_written: false,
             connection_close: false,
+            write_timeout: None,
         }
+    }
+
+    /// Enforce a per-write deadline (see `crate::http::HttpConfig::response_timeout`).
+    pub fn with_write_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.write_timeout = timeout;
+        self
     }
 
     /// Reset per-response state so the same writer can serve the next
@@ -21,6 +32,17 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
     pub fn reset(&mut self) {
         self.headers_written = false;
         self.connection_close = false;
+    }
+
+    /// Write with the configured deadline (R22).
+    async fn write_all_with_timeout(&mut self, buf: &[u8]) -> Result<()> {
+        match self.write_timeout {
+            Some(timeout) => tokio::time::timeout(timeout, self.inner.write_all(buf))
+                .await
+                .map_err(|_| Error::Http("response write timed out".into()))??,
+            None => self.inner.write_all(buf).await?,
+        }
+        Ok(())
     }
 
     /// Whether the response indicated the connection should be closed.
@@ -44,7 +66,7 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
             buf.push_str("\r\n");
         }
         buf.push_str("\r\n");
-        self.inner.write_all(buf.as_bytes()).await?;
+        self.write_all_with_timeout(buf.as_bytes()).await?;
         self.headers_written = true;
         Ok(())
     }
@@ -74,9 +96,9 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
             return Ok(());
         }
         let header = format!("{:x}\r\n", data.len());
-        self.inner.write_all(header.as_bytes()).await?;
-        self.inner.write_all(data).await?;
-        self.inner.write_all(b"\r\n").await?;
+        self.write_all_with_timeout(header.as_bytes()).await?;
+        self.write_all_with_timeout(data).await?;
+        self.write_all_with_timeout(b"\r\n").await?;
         Ok(())
     }
 
@@ -86,7 +108,7 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
         if data.is_empty() {
             return Ok(());
         }
-        self.inner.write_all(data).await?;
+        self.write_all_with_timeout(data).await?;
         Ok(())
     }
 
@@ -102,7 +124,7 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
             ("Access-Control-Allow-Origin", "*"),
         ];
         self.write_headers(status, &headers).await?;
-        self.inner.write_all(body).await?;
+        self.write_all_with_timeout(body).await?;
         Ok(())
     }
 

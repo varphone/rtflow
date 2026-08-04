@@ -27,6 +27,10 @@ pub struct HttpConfig {
     pub shutdown_timeout: Duration,
     pub max_header_bytes: usize,
     pub max_body_bytes: usize,
+    /// Per-write deadline for response bodies. A peer that stops reading
+    /// (slow/frozen client) is disconnected after this, instead of
+    /// pinning a connection slot forever (R22).
+    pub response_timeout: Duration,
     pub security: SecurityConfig,
     /// Optional global metrics registry for request counting.
     #[cfg(feature = "metrics")]
@@ -42,6 +46,7 @@ impl HttpConfig {
             shutdown_timeout: Duration::from_secs(5),
             max_header_bytes: 8 * 1024,
             max_body_bytes: 256 * 1024,
+            response_timeout: Duration::from_secs(60),
             security: SecurityConfig::default(),
             #[cfg(feature = "metrics")]
             metrics: None,
@@ -97,6 +102,7 @@ impl HttpServer {
         let shutdown_timeout = self.config.shutdown_timeout;
         let max_header_bytes = self.config.max_header_bytes;
         let max_body_bytes = self.config.max_body_bytes;
+        let response_timeout = self.config.response_timeout;
         let connections = Arc::new(tokio::sync::Semaphore::new(self.config.max_connections));
         let rate_limiter = Arc::new(crate::security::ConnectionRateLimiter::new(
             self.config.security.connection_rate_limit,
@@ -149,8 +155,16 @@ impl HttpServer {
                                 metrics.http_requests_total.fetch_add(1, Ordering::Relaxed);
                             }
                             if let Err(e) = handle_connection(
-                                stream, router, security, read_timeout, max_header_bytes, max_body_bytes,
-                            ).await {
+                                stream,
+                                router,
+                                security,
+                                read_timeout,
+                                max_header_bytes,
+                                max_body_bytes,
+                                response_timeout,
+                            )
+                            .await
+                            {
                                 tracing::debug!("http connection error: {e}");
                             }
                         });
@@ -181,6 +195,7 @@ async fn handle_connection(
     read_timeout: Duration,
     max_header_bytes: usize,
     max_body_bytes: usize,
+    response_timeout: Duration,
 ) -> Result<()> {
     let peer = stream.peer_addr().ok();
 
@@ -192,7 +207,8 @@ async fn handle_connection(
     }
 
     let (mut read_half, write_half) = stream.into_split();
-    let mut writer = Some(ResponseWriter::new(write_half));
+    let mut writer =
+        Some(ResponseWriter::new(write_half).with_write_timeout(Some(response_timeout)));
     let mut buf = Vec::with_capacity(READ_BUF_SIZE);
 
     loop {
