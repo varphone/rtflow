@@ -47,8 +47,15 @@ impl Router {
             }),
             method_not_allowed: Arc::new(|_req, mut writer| {
                 Box::pin(async move {
+                    // Content-Length + Connection: close are mandatory: an
+                    // HTTP/1.1 client would otherwise wait for the body to
+                    // end until its own timeout.
                     writer
-                        .write_headers(405, &[("Allow", "GET, HEAD, OPTIONS")])
+                        .write_headers(405, &[
+                            ("Allow", "GET, HEAD, OPTIONS"),
+                            ("Content-Length", "18"),
+                            ("Connection", "close"),
+                        ])
                         .await?;
                     writer.write_raw(b"Method Not Allowed").await?;
                     Ok(writer)

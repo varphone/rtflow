@@ -90,6 +90,9 @@ impl<W: AsyncWrite + Unpin> ResponseWriter<W> {
             ("Content-Length", content_length.as_str()),
             ("Cache-Control", "no-cache"),
             ("Connection", "close"),
+            // HLS playlists and other bodies are consumed cross-origin by
+            // browser players (hls.js etc).
+            ("Access-Control-Allow-Origin", "*"),
         ];
         self.write_headers(status, &headers).await?;
         self.inner.write_all(body).await?;

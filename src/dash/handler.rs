@@ -94,9 +94,20 @@ impl DashState {
     }
 }
 
+/// Serialize a parsed query map back into `k=v&k2=v2` form (used to
+/// propagate auth tokens from the manifest request into segment URLs).
+fn serialize_query(query: &std::collections::HashMap<String, String>) -> String {
+    let mut parts: Vec<String> = query
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect();
+    parts.sort();
+    parts.join("&")
+}
+
 /// Serve the DASH MPD manifest.
 pub async fn serve_mpd<W: AsyncWrite + Unpin>(
-    _req: HttpRequest,
+    req: HttpRequest,
     mut writer: ResponseWriter<W>,
     ring: &SegmentRing,
     description: &MediaDescription,
@@ -117,7 +128,10 @@ pub async fn serve_mpd<W: AsyncWrite + Unpin>(
         return Ok(writer);
     }
 
-    let body = mpd::generate_mpd(
+    // Propagate the request query (e.g. ?token=...) into embedded segment
+    // URLs so token-protected deployments do not break on segment fetches.
+    let query = serialize_query(&req.query);
+    let body = mpd::generate_mpd_q(
         &segments,
         description,
         config,
@@ -126,6 +140,7 @@ pub async fn serve_mpd<W: AsyncWrite + Unpin>(
         state.base_timestamp().unwrap_or_default(),
         state.codec_string(),
         state.video_dimensions(),
+        &query,
     );
 
     let content_length = body.len().to_string();

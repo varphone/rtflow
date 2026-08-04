@@ -1,12 +1,17 @@
 use super::segmenter::Segment;
 use std::time::Duration;
 
-fn asset_uri(asset_prefix: &str, asset: &str) -> String {
+fn asset_uri(asset_prefix: &str, asset: &str, query: &str) -> String {
     let prefix = asset_prefix.trim_end_matches('/');
-    if prefix.is_empty() {
+    let base = if prefix.is_empty() {
         asset.to_owned()
     } else {
         format!("{prefix}/{asset}")
+    };
+    if query.is_empty() {
+        base
+    } else {
+        format!("{base}?{query}")
     }
 }
 
@@ -20,6 +25,17 @@ pub fn write_live_playlist_at(
     segments: &[Segment],
     target_duration: Duration,
     asset_prefix: &str,
+) -> String {
+    write_live_playlist_at_q(segments, target_duration, asset_prefix, "")
+}
+
+/// Like [`write_live_playlist_at`], with a query suffix appended to every
+/// embedded URI (e.g. `?token=...` for token-protected deployments).
+pub fn write_live_playlist_at_q(
+    segments: &[Segment],
+    target_duration: Duration,
+    asset_prefix: &str,
+    query: &str,
 ) -> String {
     if segments.is_empty() {
         // A valid but empty playlist: players poll it until segments
@@ -54,7 +70,7 @@ pub fn write_live_playlist_at(
     ));
     playlist.push_str(&format!(
         "#EXT-X-MAP:URI=\"{}\"\n",
-        asset_uri(asset_prefix, "init.m4s")
+        asset_uri(asset_prefix, "init.m4s", query)
     ));
 
     for segment in segments {
@@ -65,7 +81,7 @@ pub fn write_live_playlist_at(
         playlist.push_str(&format!("#EXTINF:{:.3},\n", duration));
         playlist.push_str(&format!(
             "{}\n",
-            asset_uri(asset_prefix, &format!("{}.m4s", segment.sequence))
+            asset_uri(asset_prefix, &format!("{}.m4s", segment.sequence), query)
         ));
     }
 
@@ -79,6 +95,11 @@ pub fn write_vod_playlist(segments: &[Segment]) -> String {
 
 /// Generate a VOD playlist whose init and media URIs are rooted at `asset_prefix`.
 pub fn write_vod_playlist_at(segments: &[Segment], asset_prefix: &str) -> String {
+    write_vod_playlist_at_q(segments, asset_prefix, "")
+}
+
+/// Like [`write_vod_playlist_at`], with a query suffix on every URI.
+pub fn write_vod_playlist_at_q(segments: &[Segment], asset_prefix: &str, query: &str) -> String {
     if segments.is_empty() {
         return String::new();
     }
@@ -99,7 +120,7 @@ pub fn write_vod_playlist_at(segments: &[Segment], asset_prefix: &str) -> String
     playlist.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
     playlist.push_str(&format!(
         "#EXT-X-MAP:URI=\"{}\"\n",
-        asset_uri(asset_prefix, "init.m4s")
+        asset_uri(asset_prefix, "init.m4s", query)
     ));
 
     for segment in segments {
@@ -110,7 +131,7 @@ pub fn write_vod_playlist_at(segments: &[Segment], asset_prefix: &str) -> String
         playlist.push_str(&format!("#EXTINF:{:.3},\n", duration));
         playlist.push_str(&format!(
             "{}\n",
-            asset_uri(asset_prefix, &format!("{}.m4s", segment.sequence))
+            asset_uri(asset_prefix, &format!("{}.m4s", segment.sequence), query)
         ));
     }
 

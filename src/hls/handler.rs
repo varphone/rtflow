@@ -7,9 +7,20 @@ use crate::{
 use std::time::Duration;
 use tokio::io::AsyncWrite;
 
+/// Serialize a parsed query map back into `k=v&k2=v2` form (used to
+/// propagate auth tokens from the playlist request into embedded URIs).
+fn serialize_query(query: &std::collections::HashMap<String, String>) -> String {
+    let mut parts: Vec<String> = query
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect();
+    parts.sort();
+    parts.join("&")
+}
+
 /// Serve an HLS M3U8 playlist.
 pub async fn serve_playlist<W: AsyncWrite + Unpin>(
-    _req: HttpRequest,
+    req: HttpRequest,
     mut writer: ResponseWriter<W>,
     ring: &SegmentRing,
     is_live: bool,
@@ -18,10 +29,13 @@ pub async fn serve_playlist<W: AsyncWrite + Unpin>(
 ) -> Result<ResponseWriter<W>> {
     let segments = ring.snapshot();
 
+    // Propagate the request query (e.g. ?token=...) into every embedded
+    // URI so token-protected deployments do not break on segment fetches.
+    let query = serialize_query(&req.query);
     let body = if is_live {
-        playlist::write_live_playlist_at(&segments, target_duration, asset_prefix)
+        playlist::write_live_playlist_at_q(&segments, target_duration, asset_prefix, &query)
     } else {
-        playlist::write_vod_playlist_at(&segments, asset_prefix)
+        playlist::write_vod_playlist_at_q(&segments, asset_prefix, &query)
     };
 
     writer

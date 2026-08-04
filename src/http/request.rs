@@ -79,7 +79,7 @@ pub(crate) fn parse_request(
     let method_str = parts.next().ok_or(ParseError::Invalid)?;
     let path_str = parts.next().ok_or(ParseError::Invalid)?;
     let version = parts.next().ok_or(ParseError::Invalid)?;
-    if version != "HTTP/1.1" {
+    if version != "HTTP/1.1" && version != "HTTP/1.0" {
         return Err(ParseError::Invalid);
     }
 
@@ -185,7 +185,8 @@ mod tests {
 
     #[test]
     fn parser_rejects_invalid_version_and_header_lines() {
-        assert!(parse(b"GET / HTTP/1.0\r\n\r\n").is_err());
+        // HTTP/1.0 is accepted (answered with HTTP/1.1 framing).
+        assert!(parse(b"GET / HTTP/1.0\r\n\r\n").is_ok());
         assert!(parse(b"GET / HTTP/1.1\r\nBroken\r\n\r\n").is_err());
     }
 

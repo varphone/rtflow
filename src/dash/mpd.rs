@@ -51,6 +51,34 @@ pub fn generate_mpd(
     codec_override: Option<&str>,
     video_dimensions: Option<(u16, u16)>,
 ) -> String {
+    generate_mpd_q(
+        segments, description, config, asset_prefix, availability_start,
+        base_timestamp, codec_override, video_dimensions, "",
+    )
+}
+
+/// Like [`generate_mpd`], with a query suffix appended to every embedded
+/// segment URL (e.g. `?token=...` for token-protected deployments).
+/// Append a query string to an asset base path (`/x/y` + `?a=b`).
+fn query_suffix(_asset_prefix: &str, query: &str) -> String {
+    if query.is_empty() {
+        String::new()
+    } else {
+        format!("?{query}")
+    }
+}
+
+pub fn generate_mpd_q(
+    segments: &[Segment],
+    description: &MediaDescription,
+    config: &MpdConfig,
+    asset_prefix: &str,
+    availability_start: SystemTime,
+    base_timestamp: Duration,
+    codec_override: Option<&str>,
+    video_dimensions: Option<(u16, u16)>,
+    query: &str,
+) -> String {
     let mut xml = String::with_capacity(4096);
 
     // Fixed availability start time (when the stream went live). Before
@@ -141,9 +169,10 @@ pub fn generate_mpd(
         xml.push_str(&format!(
             "      <SegmentTemplate timescale=\"{}\" \
              startNumber=\"{}\" \
-             initialization=\"{}/init.mp4\" \
-             media=\"{}/segment_$Number$.m4s\">\n",
-            config.timescale, start_number, asset_prefix, asset_prefix,
+             initialization=\"{}{}/init.mp4\" \
+             media=\"{}{}/segment_$Number$.m4s\">\n",
+            config.timescale, start_number, asset_prefix, query_suffix(asset_prefix, query),
+            asset_prefix, query_suffix(asset_prefix, query),
         ));
 
         // SegmentTimeline: explicitly list available segments
