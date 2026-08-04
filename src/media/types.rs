@@ -7,6 +7,10 @@
 
 pub mod bitstream;
 pub mod clock;
+pub mod flv;
+
+/// MPEG-TS packet size in bytes.
+pub const TS_PACKET_SIZE: usize = 188;
 
 use bytes::Bytes;
 use std::{sync::Arc, time::Duration};
@@ -140,7 +144,7 @@ impl TrackDescription {
             id,
             kind: MediaKind::Video,
             codec: Codec::H264,
-            clock_rate: 90_000,
+            clock_rate: crate::media::clock::VIDEO_CLOCK_RATE,
             channels: None,
             payload_type: 96,
             fmtp,
@@ -173,7 +177,7 @@ impl TrackDescription {
             id,
             kind: MediaKind::Video,
             codec: Codec::H265,
-            clock_rate: 90_000,
+            clock_rate: crate::media::clock::VIDEO_CLOCK_RATE,
             channels: None,
             payload_type: 96,
             fmtp,

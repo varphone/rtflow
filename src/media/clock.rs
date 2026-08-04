@@ -77,6 +77,32 @@ impl RtpClock {
     }
 }
 
+/// Convert a [`Duration`] to clock ticks at `rate` Hz, truncating toward
+/// zero. Integer-exact (no float rounding drift over long runs) and the
+/// single reference implementation for every `Duration → ticks` mapping.
+pub fn duration_to_ticks(d: Duration, rate: u32) -> u64 {
+    let rate = u64::from(rate);
+    d.as_secs().saturating_mul(rate)
+        + u64::from(d.subsec_nanos()).saturating_mul(rate) / 1_000_000_000
+}
+
+/// Round-to-nearest variant of [`duration_to_ticks`] (MPEG-TS PTS
+/// convention: half a tick added before truncation).
+pub fn duration_to_ticks_rounded(d: Duration, rate: u32) -> u64 {
+    let rate = u64::from(rate);
+    d.as_secs().saturating_mul(rate)
+        + (u64::from(d.subsec_nanos()).saturating_mul(rate) + 500_000_000) / 1_000_000_000
+}
+
+/// Convert clock ticks at `rate` Hz back to a [`Duration`].
+pub fn ticks_to_duration(ticks: u64, rate: u32) -> Duration {
+    let rate = u64::from(rate).max(1);
+    Duration::new(ticks / rate, ((ticks % rate) * 1_000_000_000 / rate) as u32)
+}
+
+/// RTP clock rate for video tracks (H.264/H.265/VP8/VP9 all use 90 kHz).
+pub const VIDEO_CLOCK_RATE: u32 = 90_000;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +153,66 @@ mod tests {
         }
         // The clock must have wrapped at least once (13.2h > 66.6s*2M).
         assert!(clock.position_ticks() > (1u64 << 32));
+    }
+}
+
+#[cfg(test)]
+mod conversion_tests {
+    use super::*;
+
+    #[test]
+    fn duration_to_ticks_truncates_int_exactly() {
+        // 33.333ms at 90 kHz = 2999.97 ticks → floor 2999 (no float drift).
+        assert_eq!(duration_to_ticks(Duration::from_micros(33_333), 90_000), 2999);
+        assert_eq!(duration_to_ticks(Duration::from_micros(66_666), 90_000), 5999);
+        // Whole seconds are exact.
+        assert_eq!(duration_to_ticks(Duration::from_secs(2), 90_000), 180_000);
+        // Sub-nanosecond remainder truncates to zero.
+        assert_eq!(duration_to_ticks(Duration::from_nanos(1), 44_100), 0);
+    }
+
+    #[test]
+    fn duration_to_ticks_rounded_half_tick_up() {
+        // 33.333ms at 90 kHz: 2999.97 → round 3000.
+        assert_eq!(duration_to_ticks_rounded(Duration::from_micros(33_333), 90_000), 3000);
+        // Exactly on a tick boundary is unchanged.
+        assert_eq!(duration_to_ticks_rounded(Duration::from_millis(40), 90_000), 3600);
+        // Half a tick rounds up.
+        assert_eq!(duration_to_ticks_rounded(Duration::from_nanos(5_555_555), 90_000), 500);
+    }
+
+    #[test]
+    fn ticks_to_duration_round_trips() {
+        let cases = [(0u64, 90_000u32), (1, 90_000), (2999, 90_000), (1024, 44_100), (u32::MAX as u64, 8_000)];
+        for (ticks, rate) in cases {
+            let d = ticks_to_duration(ticks, rate);
+            // Truncation loses at most one tick on the way back (the
+            // fractional tick of the inverse conversion).
+            let back = duration_to_ticks(d, rate);
+            assert!(
+                back == ticks || back + 1 == ticks,
+                "round trip {ticks}@{rate}: got {back}"
+            );
+        }
+        assert_eq!(ticks_to_duration(90_000, 90_000), Duration::from_secs(1));
+        assert_eq!(ticks_to_duration(44_100, 44_100), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn duration_to_ticks_never_loses_a_tick_to_float() {
+        // Float math can under-count by one on exact boundaries
+        // (703ms * 90000 = 63270 exactly, but f64 gives 63269.9999…).
+        // The integer implementation must hit the exact value.
+        assert_eq!(duration_to_ticks(Duration::from_millis(703), 90_000), 63_270);
+        // And stay exact across a long run: every integer millisecond.
+        for ms in 0..10_000u32 {
+            let d = Duration::from_millis(u64::from(ms));
+            let int = duration_to_ticks(d, 90_000);
+            let float = (d.as_secs_f64() * 90_000.0) as u64;
+            assert!(
+                int == float || int == float + 1,
+                "ms={ms}: int {int} vs float {float}"
+            );
+        }
     }
 }

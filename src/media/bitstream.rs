@@ -96,6 +96,29 @@ pub fn is_idr(codec: super::Codec, data: &[u8]) -> bool {
     false
 }
 
+/// Whether a NAL unit is an H.264 IDR slice (type 5).
+pub fn is_h264_idr(nal: &[u8]) -> bool {
+    nal_type_h264(nal) == Some(5)
+}
+
+/// Whether a NAL unit is an H.265 random access point: IDR (19/20),
+/// CRA (21) or BLA (16–18). These are the slices a decoder can start
+/// decoding from without prior pictures.
+pub fn is_h265_random_access(nal: &[u8]) -> bool {
+    matches!(nal_type_h265(nal), Some(16..=21))
+}
+
+/// Whether the Annex-B access unit contains a random access point:
+/// H.264 IDR (type 5) or H.265 IDR/CRA/BLA (types 16–21). Audio and VP8/VP9
+/// frames are always independently decodable.
+pub fn is_random_access_point(codec: super::Codec, data: &[u8]) -> bool {
+    match codec {
+        super::Codec::H264 => annex_b_nals(data).iter().any(|nal| is_h264_idr(nal)),
+        super::Codec::H265 => annex_b_nals(data).iter().any(|nal| is_h265_random_access(nal)),
+        _ => true,
+    }
+}
+
 /// Parameter sets found in an Annex-B buffer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ParameterSets {
@@ -188,6 +211,94 @@ pub fn h265_fmtp(vps: &[u8], sps: &[u8], pps: &[u8]) -> String {
         base64_nal(sps),
         base64_nal(pps)
     )
+}
+
+/// Build an AVCDecoderConfigurationRecord from SPS + PPS NALs.
+///
+/// `None` when the SPS is too short to carry profile/compatibility/level
+/// (the first three bytes beyond the NAL header).
+pub fn build_avc_config_record(sps: &[u8], pps: &[u8]) -> Option<Bytes> {
+    if sps.len() < 4 || pps.is_empty() {
+        return None;
+    }
+    let mut buf = BytesMut::with_capacity(sps.len() + pps.len() + 16);
+    buf.put_u8(1); // configurationVersion
+    buf.put_u8(sps[1]); // AVCProfileIndication
+    buf.put_u8(sps[2]); // profile_compatibility
+    buf.put_u8(sps[3]); // AVCLevelIndication
+    buf.put_u8(0xff); // lengthSizeMinusOne = 3 (4-byte lengths)
+    buf.put_u8(0xe1); // numOfSequenceParameterSets = 1
+    buf.put_u16(sps.len() as u16);
+    buf.put_slice(sps);
+    buf.put_u8(1); // numOfPictureParameterSets = 1
+    buf.put_u16(pps.len() as u16);
+    buf.put_slice(pps);
+    Some(buf.freeze())
+}
+
+/// Build a HEVCDecoderConfigurationRecord from VPS + SPS + PPS NALs.
+///
+/// `None` when any parameter set is too short (SPS must be > 14 bytes to
+/// carry the profile/tier/level fields).
+pub fn build_hevc_config_record(vps: &[u8], sps: &[u8], pps: &[u8]) -> Option<Bytes> {
+    if vps.len() < 2 || sps.len() <= 14 || pps.len() < 2 {
+        return None;
+    }
+    let profile = &sps[2..];
+    let mut buf = BytesMut::with_capacity(128);
+    buf.put_u8(1);
+    buf.put_u8(profile[1]);
+    buf.put_slice(&profile[2..6]);
+    buf.put_slice(&profile[6..12]);
+    buf.put_u8(profile[12]);
+    buf.put_u16(0xf000);
+    buf.put_u8(0xfc);
+    buf.put_u8(0xfd);
+    buf.put_u8(0xf8);
+    buf.put_u8(0xf8);
+    buf.put_u16(0);
+    buf.put_u8(0x0f);
+    buf.put_u8(3);
+    for (kind, nal) in [(32u8, vps), (33, sps), (34, pps)] {
+        buf.put_u8(0x80 | kind);
+        buf.put_u16(1);
+        buf.put_u16(nal.len() as u16);
+        buf.put_slice(nal);
+    }
+    Some(buf.freeze())
+}
+
+/// AAC sampling-frequency table (AudioSpecificConfig 4-bit index),
+/// index → Hz. Index 13–15 are reserved.
+const AAC_SAMPLE_RATES: [u32; 13] = [
+    96_000, 88_200, 64_000, 48_000, 44_100, 32_000, 24_000, 22_050, 16_000, 12_000, 11_025, 8_000,
+    7_350,
+];
+
+/// Sample rate (Hz) for an AAC sampling-frequency index (0–12).
+/// Unknown/reserved indexes → `None` (callers choose a fallback).
+pub fn aac_sample_rate_for_index(index: u8) -> Option<u32> {
+    AAC_SAMPLE_RATES.get(index as usize).copied()
+}
+
+/// AAC sampling-frequency index for a sample rate (Hz). Unknown rates
+/// default to index 4 (44 100 Hz) — the FLV/TS convention.
+pub fn aac_sample_rate_index(sample_rate: u32) -> u8 {
+    AAC_SAMPLE_RATES
+        .iter()
+        .position(|rate| *rate == sample_rate)
+        .unwrap_or(4) as u8
+}
+
+/// 2-byte AudioSpecificConfig (AAC-LC, MPEG-4 Audio Object Type 2) for
+/// FLV/MP4/TS sequence headers: 5 bits objectType + 4 bits frequency
+/// index + 4 bits channel configuration.
+pub fn aac_audio_specific_config_bytes(sample_rate: u32, channels: u8) -> Bytes {
+    let freq_index = aac_sample_rate_index(sample_rate);
+    let channel_config = channels.min(7);
+    let byte0 = (2u8 << 3) | ((freq_index >> 1) & 0x07);
+    let byte1 = ((freq_index & 0x01) << 7) | ((channel_config & 0x0F) << 3);
+    Bytes::from(vec![byte0, byte1])
 }
 
 /// AudioSpecificConfig for AAC-LC (MPEG-4 Audio Object Type 2) with the
