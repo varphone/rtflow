@@ -427,12 +427,15 @@ pub(super) fn spawn_udp_sender_from(
                                 startup_clock = Some(tokio::time::Instant::now());
                                 startup_base_pts = frame.pts;
                             }
-                            Ok(frame)
+                            // Startup snapshot frames must NOT be filtered
+                            // by the broadcast dedup below: the snapshot
+                            // was already delivered through this sender.
+                            Ok((frame, false))
                         }
-                        None => receiver.recv().await,
+                        None => receiver.recv().await.map(|frame| (frame, true)),
                     }
                 } => {
-                    let frame = match received {
+                    let (frame, from_broadcast) = match received {
                         Ok(frame) => frame,
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
                             mount.stats.add_dropped(count);
@@ -441,7 +444,11 @@ pub(super) fn spawn_udp_sender_from(
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     };
-                    if startup_keys.contains(&(frame.track_id, frame.rtp_timestamp)) {
+                    // Skip broadcast duplicates of snapshot frames only;
+                    // snapshot frames themselves are delivered as replayed.
+                    if from_broadcast
+                        && startup_keys.contains(&(frame.track_id, frame.rtp_timestamp))
+                    {
                         continue;
                     }
                     if frame.track_id != track.id || (awaiting_key && !frame.is_keyframe) {

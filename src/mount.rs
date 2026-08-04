@@ -304,24 +304,33 @@ impl Mount {
             // media, cutting at the nearest keyframe.
             if let Some(last) = startup.last() {
                 let cutoff = last.pts.saturating_sub(STARTUP_WINDOW);
-                if let Some(cut) = startup
+                match startup
                     .iter()
                     .position(|frame| frame.pts >= cutoff && frame.is_keyframe)
                 {
-                    startup.drain(..cut);
+                    Some(cut) => {
+                        // Window contains a keyframe: start playback there
+                        // (decodes immediately, replay ≤ STARTUP_WINDOW).
+                        startup.drain(..cut);
+                    }
+                    None => {
+                        // No keyframe inside the window (GOP > STARTUP_WINDOW):
+                        // the current GOP start was missed. Like mainstream
+                        // surveillance cameras, drop the snapshot and wait
+                        // for the next IDR (the sender's awaiting_key gate
+                        // handles that) instead of replaying from an old GOP
+                        // start — the viewer would otherwise stay a full GOP
+                        // behind the live edge (and the old start may already
+                        // have been evicted, causing a black screen).
+                        startup.clear();
+                    }
                 }
             }
-            if startup.is_empty()
-                && let Some(frame) = self
-                    .bootstrap
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .as_ref()
-                    .get(track_id as usize)
-                    .and_then(Clone::clone)
-            {
-                startup.push(frame);
-            }
+            // Deliberately no bootstrap fallback here: an empty snapshot
+            // means "wait for the next IDR" (sender's awaiting_key gate),
+            // matching surveillance-camera startup. The bootstrap frame is
+            // still used for RTP-Info rtptime so the PLAY answer always
+            // carries a timing base.
             (receiver, startup)
         }
         #[cfg(not(feature = "server"))]

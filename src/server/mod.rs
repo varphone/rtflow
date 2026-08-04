@@ -547,12 +547,14 @@ impl RtspServer {
             }
         }
         let description = description_for(&config)?;
+        // The startup keyframe cache drives GOP-aligned low-latency
+        // startup for EVERY mount type (not just proxies): a joining
+        // player replays at most STARTUP_WINDOW of media from the nearest
+        // keyframe; when no keyframe is inside the window it waits for
+        // the next IDR (surveillance-camera behavior).
         let startup_cache_config = match &config {
             MountConfig::Proxy { upstream } => upstream.startup_cache,
-            _ => StartupCacheConfig {
-                enabled: false,
-                ..Default::default()
-            },
+            _ => StartupCacheConfig::default(),
         };
         let startup_cache = KeyframeCache::new(&description, startup_cache_config)?;
         let (tx, _) = tokio::sync::broadcast::channel(self.state.config.consumer_queue_capacity);
