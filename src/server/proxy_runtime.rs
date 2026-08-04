@@ -10,6 +10,10 @@ use crate::{
     },
     runtime::{TaskSpec, TaskSupervisor},
 };
+
+/// Window during which a freshly started proxy ignores the no-subscriber
+/// grace, so a SETUP-phase warmup survives until the session issues PLAY.
+const PROXY_WARMUP_HOLDOFF: std::time::Duration = std::time::Duration::from_secs(2);
 use std::{
     sync::{Arc, atomic::Ordering},
     time::Duration,
@@ -96,26 +100,27 @@ async fn run_proxy(
         strategy: upstream.failover.strategy,
     };
     let mut attempts = 0u32;
+    let mut no_subscriber_since: Option<std::time::Instant> = None;
+    let mut had_subscriber = false;
     loop {
+        // On-demand lifecycle. The warmup holdoff applies only before the
+        // first subscriber ever appears (SETUP-phase warmup); afterwards
+        // the proxy stops once subscribers stay away for the grace period.
         if mount.frames.receiver_count() == 0 {
-            let idle_since = std::time::Instant::now();
-            while mount.frames.receiver_count() == 0 {
-                if idle_since.elapsed() >= no_subscriber_grace {
-                    finish_proxy(&mount, &upstream, ProxyState::Idle);
-                    return Ok(());
+            let idle_since = *no_subscriber_since.get_or_insert_with(|| {
+                if had_subscriber {
+                    std::time::Instant::now()
+                } else {
+                    std::time::Instant::now() + PROXY_WARMUP_HOLDOFF
                 }
-                tokio::select! {
-                    _ = server_cancel.cancelled() => {
-                        finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                        return Ok(());
-                    }
-                    _ = mount.cancel.cancelled() => {
-                        finish_proxy(&mount, &upstream, ProxyState::Stopped);
-                        return Ok(());
-                    }
-                    _ = tokio::time::sleep(Duration::from_millis(250)) => {}
-                }
+            });
+            if idle_since.elapsed() >= no_subscriber_grace {
+                finish_proxy(&mount, &upstream, ProxyState::Idle);
+                return Ok(());
             }
+        } else {
+            had_subscriber = true;
+            no_subscriber_since = None;
         }
 
         upstream.set_state(ProxyState::Connecting);
@@ -207,6 +212,7 @@ async fn run_proxy(
                         }),
                     );
                     let mut idle_since = None;
+                    let mut had_subscriber = false;
                     let interval_duration = no_subscriber_grace
                         .min(Duration::from_millis(250))
                         .max(Duration::from_millis(10));
@@ -223,12 +229,19 @@ async fn run_proxy(
                             }
                             _ = idle_check.tick() => {
                                 if mount.frames.receiver_count() == 0 {
-                                    let since = idle_since.get_or_insert_with(std::time::Instant::now);
+                                    let since = idle_since.get_or_insert_with(|| {
+                                        if had_subscriber {
+                                            std::time::Instant::now()
+                                        } else {
+                                            std::time::Instant::now() + PROXY_WARMUP_HOLDOFF
+                                        }
+                                    });
                                     if since.elapsed() >= no_subscriber_grace {
                                         finish_proxy(&mount, &upstream, ProxyState::Idle);
                                         return Ok(());
                                     }
                                 } else {
+                                    had_subscriber = true;
                                     idle_since = None;
                                 }
                             }

@@ -444,6 +444,7 @@ pub(super) async fn serve_connection(
                 } = transport
                 {
                     let track = track_for_uri(&description_for(&mount.config)?, &req.uri)?;
+                    let proxy_mount = mount.clone();
                     interleaved.push((mount, rtp_channel, rtcp_channel, track));
                     selected_mount.get_or_insert(path.clone());
                     phase = ConnectionPhase::Ready;
@@ -465,6 +466,14 @@ pub(super) async fn serve_connection(
                         .await
                         .write_all(&rtsp::encode_response(&response))
                         .await?;
+                    // Warm the proxy during SETUP so PLAY's first frame does
+                    // not wait for a full control round trip.
+                    start_proxy_if_idle(
+                        proxy_mount,
+                        state.cancel.clone(),
+                        state.supervisor.clone(),
+                        state.config.no_subscriber_grace,
+                    );
                     continue;
                 }
                 let TransportSpec::Udp {
@@ -509,6 +518,7 @@ pub(super) async fn serve_connection(
                     }
                     .render(),
                 );
+                let proxy_mount = mount.clone();
                 setups.push((mount, pair, rtp_target, rtcp_target, track));
                 selected_mount.get_or_insert(path);
                 phase = ConnectionPhase::Ready;
@@ -517,6 +527,14 @@ pub(super) async fn serve_connection(
                     .await
                     .write_all(&rtsp::encode_response(&response))
                     .await?;
+                // Warm the proxy during SETUP so PLAY's first frame does not
+                // wait for a full OPTIONS+DESCRIBE+SETUP+PLAY round trip.
+                start_proxy_if_idle(
+                    proxy_mount,
+                    state.cancel.clone(),
+                    state.supervisor.clone(),
+                    state.config.no_subscriber_grace,
+                );
             } else if req.method == Method::Play {
                 #[cfg(feature = "file-storage")]
                 let vod_source = interleaved
@@ -1109,7 +1127,7 @@ async fn handle_request(req: crate::rtsp::Request, state: &State) -> Response {
                     body: vec![],
                 };
             };
-            let Ok(d) = description_for(&mount.config) else {
+            let Ok(mut d) = description_for(&mount.config) else {
                 return Response {
                     status: 503,
                     reason: "Service Unavailable".into(),
@@ -1117,10 +1135,35 @@ async fn handle_request(req: crate::rtsp::Request, state: &State) -> Response {
                     body: vec![],
                 };
             };
+            // Rewrite absolute control URLs (e.g. proxied upstream SDP)
+            // into path-relative forms: a downstream client must SETUP
+            // against *this* server, not against the upstream host.
+            for track in &mut d.tracks {
+                if let Ok(url) = url::Url::parse(&track.control) {
+                    let path = url.path().trim_start_matches('/');
+                    track.control = Arc::from(path.to_string());
+                }
+            }
+            // Content-Base must be a clean request path: the raw URI can
+            // carry query strings or (with broken clients) userinfo, which
+            // would leak credentials into every relative-URL response.
+            let raw = req.uri.split(['?', '#']).next().unwrap_or(&req.uri);
+            let base_path = if raw.contains("://") {
+                url::Url::parse(raw)
+                    .map(|url| url.path().to_string())
+                    .unwrap_or_else(|_| raw.to_string())
+            } else {
+                raw.to_string()
+            };
+            let base_path = if base_path.is_empty() {
+                "/".to_string()
+            } else {
+                base_path
+            };
             headers.insert("content-type".into(), "application/sdp".into());
             headers.insert(
                 "content-base".into(),
-                format!("{}/", req.uri.trim_end_matches('/')),
+                format!("{}/", base_path.trim_end_matches('/')),
             );
             Response {
                 status: 200,
