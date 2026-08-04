@@ -5,7 +5,6 @@
 //! registry, enabling cross-protocol interop.
 #[cfg(feature = "server")]
 use crate::proxy::{KeyframeCache, ProxyState, UpstreamConfig};
-use bytes::Bytes;
 #[cfg(feature = "file-storage")]
 use crate::storage::VodSource;
 use crate::{
@@ -14,6 +13,7 @@ use crate::{
     media::{AccessUnit, MediaDescription},
     observe::EventSink,
 };
+use bytes::Bytes;
 use std::{
     collections::HashMap,
     sync::{
@@ -127,9 +127,7 @@ impl StreamCounters {
             global
                 .rtp_packets_sent
                 .fetch_add(packets, Ordering::Relaxed);
-            global
-                .rtp_octets_sent
-                .fetch_add(octets, Ordering::Relaxed);
+            global.rtp_octets_sent.fetch_add(octets, Ordering::Relaxed);
         }
     }
     pub fn add_sender_reports(&self, value: u64) {
@@ -255,7 +253,11 @@ impl Mount {
             }
         }
         self.update_bootstrap(&frame);
-        self.frames.send(frame)
+        let result = self.frames.send(frame);
+        if tracing::enabled!(tracing::Level::DEBUG) && self.frames.receiver_count() == 0 {
+            tracing::debug!("mount: frames.send dropped (no receivers)");
+        }
+        result
     }
 
     /// Keep the latest (key)frame per track for RTP-Info/SDP timing even
@@ -306,7 +308,11 @@ impl Mount {
             }
             crate::media::Codec::H265 => {
                 let sets = h265_parameter_sets(&frame.data);
-                match (sets.vps.as_deref(), sets.sps.as_deref(), sets.pps.as_deref()) {
+                match (
+                    sets.vps.as_deref(),
+                    sets.sps.as_deref(),
+                    sets.pps.as_deref(),
+                ) {
                     (Some(vps), Some(sps), Some(pps)) => Some(h265_fmtp(vps, sps, pps)),
                     _ => None,
                 }
@@ -772,7 +778,6 @@ impl MountRegistry {
                             tracks: Vec::new(),
                             #[cfg(feature = "multicast")]
                             connection: None,
-
                         },
                         crate::proxy::StartupCacheConfig {
                             enabled: false,
@@ -818,7 +823,6 @@ impl MountRegistry {
                 tracks: Vec::new(),
                 #[cfg(feature = "multicast")]
                 connection: None,
-
             });
             MountHandle {
                 path: mount.id.as_str().into(),
@@ -843,7 +847,6 @@ impl MountRegistry {
                 tracks: Vec::new(),
                 #[cfg(feature = "multicast")]
                 connection: None,
-
             }),
             inner: removed,
         })
@@ -863,7 +866,6 @@ impl MountRegistry {
                         tracks: Vec::new(),
                         #[cfg(feature = "multicast")]
                         connection: None,
-
                     },
                     inner: mount.clone(),
                 };

@@ -118,6 +118,14 @@ pub(super) async fn serve_connection(
                                 continue;
                             }
                         };
+                        if tracing::enabled!(tracing::Level::DEBUG) && frame.channel == 0 {
+                            tracing::debug!(
+                                seq = packet.header.sequence,
+                                ts = packet.header.timestamp,
+                                marker = packet.header.marker,
+                                "rtp in"
+                            );
+                        }
                         if packet.header.payload_type != track.payload_type
                             && !(packet.header.payload_type >= 96 && track.payload_type >= 96)
                         {
@@ -443,8 +451,7 @@ pub(super) async fn serve_connection(
                     rtcp_channel,
                 } = transport
                 {
-                    let Ok(track) =
-                        track_for_uri(&description_for(&mount.config)?, &req.uri)
+                    let Ok(track) = track_for_uri(&description_for(&mount.config)?, &req.uri)
                     else {
                         // Unknown control URI: reply 404 instead of dropping
                         // the connection (strict clients treat a dropped
@@ -947,7 +954,11 @@ impl ConnectionResources {
     /// Idempotent across repeated PLAY requests.
     fn register_play<'a>(&mut self, mounts: impl Iterator<Item = &'a Arc<Mount>>) {
         for mount in mounts {
-            if !self.played_mounts.iter().any(|seen| Arc::ptr_eq(seen, mount)) {
+            if !self
+                .played_mounts
+                .iter()
+                .any(|seen| Arc::ptr_eq(seen, mount))
+            {
                 mount.active_sessions.fetch_add(1, Ordering::Relaxed);
                 self.played_mounts.push(mount.clone());
             }
@@ -1146,9 +1157,7 @@ fn rtp_info_entry(
     // absolute url — omit it instead of dropping RTP-Info entirely.
     // Clients pair the entry with the session/track by seq+rtptime.
     let url = sdp::control_uri(play_uri, &track.control).ok();
-    let prefix = url
-        .map(|url| format!("url={url};"))
-        .unwrap_or_default();
+    let prefix = url.map(|url| format!("url={url};")).unwrap_or_default();
     Some(format!(
         "{prefix}seq={};rtptime={}",
         input.sequence.load(Ordering::Relaxed),
