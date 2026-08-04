@@ -1272,6 +1272,9 @@ fn write_audio_entry(buf: &mut BytesMut, track: &crate::media::TrackDescription)
         Codec::Aac => buf.put_slice(b"mp4a"),
         Codec::Pcma => buf.put_slice(b"alaw"),
         Codec::Pcmu => buf.put_slice(b"ulaw"),
+        // RFC 7845: the Opus sample entry is box type "Opus" followed by
+        // a dOps box.
+        Codec::Opus => buf.put_slice(b"Opus"),
         _ => buf.put_slice(b"mp4a"),
     }
     buf.put_u32(0); // reserved
@@ -1296,6 +1299,22 @@ fn write_audio_entry(buf: &mut BytesMut, track: &crate::media::TrackDescription)
         let config = aac_config_from_fmtp(track)
             .unwrap_or_else(|| default_aac_config(track.clock_rate, track.channels.unwrap_or(1)));
         write_esds(buf, &config);
+    }
+
+    // dOps box for Opus (RFC 7845 §5.2): pre_skip of 312 is the RFC
+    // recommended default for 48 kHz streams.
+    if track.codec == Codec::Opus {
+        let dops_start = buf.len();
+        buf.put_u32(0); // size placeholder
+        buf.put_slice(b"dOps");
+        buf.put_u8(0); // version
+        buf.put_u8(track.channels.unwrap_or(1)); // channel count
+        buf.put_u16(312); // pre_skip
+        buf.put_u32(track.clock_rate); // input sample rate
+        buf.put_u16(0); // output gain
+        buf.put_u8(0); // channel mapping family
+        let size = (buf.len() - dops_start) as u32;
+        buf[dops_start..dops_start + 4].copy_from_slice(&size.to_be_bytes());
     }
 
     let entry_size = (buf.len() - entry_start) as u32;

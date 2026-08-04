@@ -4,7 +4,7 @@ use crate::{
     Error, Result,
     media::{AccessUnit, Codec, TrackId},
 };
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
 #[derive(Clone, Debug)]
 pub struct Packetizer {
@@ -59,10 +59,33 @@ impl Packetizer {
                 frame.rtp_timestamp,
                 true,
             )]),
-            Codec::Vp8 | Codec::Vp9 => Err(Error::Media(
-                "VP8/VP9 packetization not yet implemented".into(),
-            )),
+            Codec::Vp8 => self.vp8(frame),
+            Codec::Vp9 => Err(Error::Media("VP9 packetization not yet implemented".into())),
         }
+    }
+    /// RFC 7741 VP8 packetization: 1-byte payload descriptor
+    /// (X=0 R=0 N=0, S on the first fragment, PID increments per
+    /// fragment, wrapping at 16). Frames larger than the MTU are
+    /// fragmented; marker is set on the last fragment.
+    fn vp8(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        if f.data.is_empty() {
+            return Err(Error::Media("empty VP8 access unit".into()));
+        }
+        let max = self.mtu - 12;
+        let fragment_size = max.saturating_sub(1); // payload descriptor
+        if fragment_size == 0 {
+            return Err(Error::Media("MTU too small for VP8".into()));
+        }
+        let total = f.data.len().div_ceil(fragment_size);
+        let mut out = Vec::with_capacity(total);
+        for (index, chunk) in f.data.chunks(fragment_size).enumerate() {
+            let mut payload = BytesMut::with_capacity(1 + chunk.len());
+            let start = index == 0;
+            payload.put_u8(((start as u8) << 4) | (index & 0x0f) as u8);
+            payload.extend_from_slice(chunk);
+            out.push(self.packet(payload.freeze(), f.rtp_timestamp, index + 1 == total));
+        }
+        Ok(out)
     }
     fn h264(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
         if f.data.is_empty() {
@@ -214,6 +237,12 @@ pub struct Depacketizer {
     /// carries the NAL type; continuation packets do not, so the flag is
     /// latched here until the FU end packet completes the NAL.
     assembling_is_keyframe: bool,
+    /// VP8 frame reassembly (RFC 7741): fragments share one timestamp,
+    /// the S bit of the payload descriptor starts a new frame.
+    vp8_assembling: Option<BytesMut>,
+    /// Keyframe flag of the VP8 frame being assembled (VP8 frame header
+    /// P bit, only present on the fragment with S=1).
+    vp8_is_keyframe: bool,
     access_unit: Vec<Bytes>,
     /// Bytes accumulated in `access_unit` (avoids O(n) re-scans on every
     /// packet for the assembly limit check).
@@ -237,6 +266,8 @@ impl Depacketizer {
             clock_rate,
             assembling: None,
             assembling_is_keyframe: false,
+            vp8_assembling: None,
+            vp8_is_keyframe: false,
             access_unit: Vec::new(),
             access_unit_bytes: 0,
             current_timestamp: None,
@@ -269,11 +300,16 @@ impl Depacketizer {
         if self
             .expected_sequence
             .is_some_and(|e| e != p.header.sequence)
-            && matches!(self.codec, Codec::H264 | Codec::H265)
+            && matches!(self.codec, Codec::H264 | Codec::H265 | Codec::Vp8)
         {
             let d = self.current_timestamp == Some(timestamp);
             self.assembling = None;
             self.assembling_is_keyframe = false;
+            // VP8 fragments share one timestamp; a gap must discard the
+            // in-flight frame too, otherwise fragments of two different
+            // frames get spliced into one corrupted frame.
+            self.vp8_assembling = None;
+            self.vp8_is_keyframe = false;
             self.access_unit.clear();
             self.assembled_is_keyframe = false;
             self.current_timestamp = None;
@@ -282,6 +318,9 @@ impl Depacketizer {
         self.expected_sequence = Some(p.header.sequence.wrapping_add(1));
         if self.damaged_timestamp.is_some_and(|d| d != timestamp) {
             self.damaged_timestamp = None;
+        }
+        if matches!(self.codec, Codec::Vp8) {
+            return self.vp8(&p);
         }
         if matches!(self.codec, Codec::H264 | Codec::H265) {
             if self.current_timestamp.is_some_and(|v| v != timestamp) {
@@ -396,7 +435,7 @@ impl Depacketizer {
                 }
                 Ok(units)
             }
-            Codec::Pcma | Codec::Pcmu | Codec::Opus => {
+            Codec::Opus | Codec::Pcma | Codec::Pcmu => {
                 let pts = self.pts_from_timestamp(timestamp);
                 Ok(vec![AccessUnit {
                     track_id: self.track_id,
@@ -550,6 +589,63 @@ impl Depacketizer {
         } else {
             Ok(None)
         }
+    }
+
+    /// RFC 7741 VP8 depacketization: strips the 1-byte payload descriptor
+    /// and reassembles fragments (same timestamp, S bit starts a frame,
+    /// marker ends it). Returns the frame directly — VP8 frames are
+    /// single access units, they never aggregate.
+    fn vp8(&mut self, p: &RtpPacket) -> Result<Vec<AccessUnit>> {
+        let payload = &p.payload;
+        if payload.is_empty() {
+            return Err(Error::Media("empty VP8 packet".into()));
+        }
+        let first = payload[0];
+        let start = first & 0x10 != 0;
+        let data = &payload[1..];
+        if start {
+            // A new frame begins: drop any truncated previous frame.
+            if let Some(prev) = self.vp8_assembling.take() {
+                tracing::debug!(bytes = prev.len(), "VP8 frame dropped (truncated)");
+            }
+            if data.len() > MAX_ASSEMBLY_BYTES {
+                return Err(Error::Media(format!(
+                    "VP8 frame exceeds {MAX_ASSEMBLY_BYTES} bytes"
+                )));
+            }
+            // RFC 7741 §4.3: the first byte of the VP8 frame header is
+            // P (frame type): 0 = keyframe. Only present on S fragments.
+            self.vp8_is_keyframe = data.first().is_some_and(|byte| byte & 0x01 == 0);
+            self.vp8_assembling = Some(BytesMut::from(data));
+        } else if let Some(buffer) = &mut self.vp8_assembling {
+            if buffer.len().saturating_add(data.len()) > MAX_ASSEMBLY_BYTES {
+                self.vp8_assembling = None;
+                self.vp8_is_keyframe = false;
+                return Err(Error::Media(format!(
+                    "VP8 frame exceeds {MAX_ASSEMBLY_BYTES} bytes"
+                )));
+            }
+            buffer.extend_from_slice(data);
+        } else {
+            // Continuation without a start (first fragment lost): drop
+            // until the next S fragment.
+            return Ok(vec![]);
+        }
+        if p.header.marker
+            && let Some(frame) = self.vp8_assembling.take()
+        {
+            let is_keyframe = std::mem::take(&mut self.vp8_is_keyframe);
+            return Ok(vec![AccessUnit {
+                track_id: self.track_id,
+                codec: self.codec,
+                pts: self.pts_from_timestamp(p.header.timestamp),
+                dts: None,
+                rtp_timestamp: p.header.timestamp,
+                is_keyframe,
+                data: frame.freeze(),
+            }]);
+        }
+        Ok(vec![])
     }
 }
 #[cfg(test)]
@@ -919,11 +1015,158 @@ mod audit_tests {
     /// Unsupported codecs must surface a typed error, never a panic.
     #[test]
     fn unsupported_codec_returns_error_not_panic() {
-        let mut dep = Depacketizer::new(Codec::Vp8, 0, 90_000);
+        let mut dep = Depacketizer::new(Codec::Vp9, 0, 90_000);
         let err = dep.push(opus_packet(&[0x80])).unwrap_err();
         assert!(
             matches!(err, Error::Media(_)),
             "typed error for unsupported codec: {err:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod vp8_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn vp8_keyframe() -> Bytes {
+        // VP8 frame header: P bit (bit 0) = 0 → keyframe.
+        Bytes::from(vec![
+            0x10, 0x02, 0x00, 0x9d, 0x01, 0x2a, 0x00, 0x00, 0x00, 0x00,
+        ])
+    }
+
+    fn packet(seq: u16, ts: u32, marker: bool, payload: &[u8]) -> RtpPacket {
+        RtpPacket {
+            header: RtpHeader {
+                marker,
+                payload_type: 96,
+                sequence: seq,
+                timestamp: ts,
+                ssrc: 1,
+            },
+            payload: Bytes::copy_from_slice(payload),
+        }
+    }
+
+    #[test]
+    fn vp8_roundtrip_single_packet() {
+        let frame = vp8_keyframe();
+        let mut pack = Packetizer::new(Codec::Vp8, 0, 90_000, 1200).unwrap();
+        let packets = pack
+            .packetize(&AccessUnit {
+                track_id: 0,
+                codec: Codec::Vp8,
+                pts: Duration::from_millis(0),
+                dts: None,
+                rtp_timestamp: 1000,
+                is_keyframe: true,
+                data: frame.clone(),
+            })
+            .unwrap();
+        assert_eq!(packets.len(), 1);
+        // Descriptor: S=1, PID=0 → 0x10; marker set.
+        assert!(packets[0].header.marker);
+        assert_eq!(packets[0].payload[0], 0x10);
+
+        let mut dep = Depacketizer::new(Codec::Vp8, 0, 90_000);
+        let units = dep.push(packets[0].clone()).unwrap();
+        assert_eq!(units.len(), 1);
+        assert_eq!(units[0].data, frame);
+        assert!(units[0].is_keyframe, "P bit 0 = keyframe");
+    }
+
+    #[test]
+    fn vp8_roundtrip_fragmented() {
+        // Frame larger than MTU → multiple fragments with S/PID/marker.
+        let frame: Bytes = {
+            let mut v = vp8_keyframe().to_vec();
+            v.resize(3000, 0xab);
+            Bytes::from(v)
+        };
+        let mut pack = Packetizer::new(Codec::Vp8, 0, 90_000, 1200).unwrap();
+        let packets = pack
+            .packetize(&AccessUnit {
+                track_id: 0,
+                codec: Codec::Vp8,
+                pts: Duration::from_millis(0),
+                dts: None,
+                rtp_timestamp: 2000,
+                is_keyframe: true,
+                data: frame.clone(),
+            })
+            .unwrap();
+        assert!(packets.len() >= 2, "large frame is fragmented");
+        // Descriptor flags: first S=1, last marker=1, PID increments.
+        assert_eq!(packets[0].payload[0] & 0x10, 0x10, "S on first fragment");
+        assert_eq!(packets[0].payload[0] & 0x0f, 0, "PID 0");
+        assert!(packets.last().unwrap().header.marker, "marker on last");
+
+        let mut dep = Depacketizer::new(Codec::Vp8, 0, 90_000);
+        let mut units = Vec::new();
+        for p in &packets {
+            units.extend(dep.push(p.clone()).unwrap());
+        }
+        assert_eq!(units.len(), 1);
+        assert_eq!(units[0].data, frame, "fragments reassembled");
+        assert!(units[0].is_keyframe);
+    }
+
+    #[test]
+    fn vp8_continuation_without_start_is_dropped() {
+        let mut dep = Depacketizer::new(Codec::Vp8, 0, 90_000);
+        // First fragment lost: a continuation packet must not panic and
+        // must not emit a frame.
+        let units = dep
+            .push(packet(5, 3000, false, &[0x01, 0x02, 0x03]))
+            .unwrap();
+        assert!(units.is_empty());
+        // The next complete frame recovers normally.
+        let p = packet(6, 3000, true, &[0x10, 0x00, 0x02]);
+        let units = dep.push(p).unwrap();
+        assert_eq!(units.len(), 1);
+        assert!(units[0].is_keyframe);
+    }
+
+    #[test]
+    fn vp8_interframe_is_not_keyframe() {
+        let mut dep = Depacketizer::new(Codec::Vp8, 0, 90_000);
+        let units = dep
+            .push(packet(1, 4000, true, &[0x10, 0x01, 0x02]))
+            .unwrap();
+        assert!(!units[0].is_keyframe, "P bit 1 = interframe");
+    }
+}
+
+#[cfg(test)]
+mod vp8_gap_tests {
+    use super::*;
+
+    fn packet(seq: u16, ts: u32, marker: bool, payload: &[u8]) -> RtpPacket {
+        RtpPacket {
+            header: RtpHeader {
+                marker,
+                payload_type: 96,
+                sequence: seq,
+                timestamp: ts,
+                ssrc: 1,
+            },
+            payload: Bytes::copy_from_slice(payload),
+        }
+    }
+
+    /// A sequence gap mid-frame must discard the in-flight fragments:
+    /// splicing fragments of two frames would emit a corrupted frame.
+    #[test]
+    fn vp8_sequence_gap_discards_inflight_frame() {
+        let mut dep = Depacketizer::new(Codec::Vp8, 0, 90_000);
+        // Frame 1: fragments seq 1 (S) ... seq 2.
+        let _ = dep.push(packet(1, 100, false, &[0x10, 0x00, 0x01])).unwrap();
+        // Gap: seq 4 (not 3) — starts a new frame with S=1.
+        let units = dep.push(packet(4, 200, true, &[0x10, 0x00, 0x02])).unwrap();
+        assert_eq!(units.len(), 1, "new frame still delivered");
+        assert_eq!(units[0].data.as_ref(), &[0x00, 0x02]);
+        // The spliced buffer must NOT contain bytes from the abandoned frame.
+        assert_ne!(units[0].data.as_ref(), &[0x00, 0x01, 0x00, 0x02]);
     }
 }
