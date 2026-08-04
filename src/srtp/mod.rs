@@ -258,11 +258,13 @@ impl SrtpContext {
     }
 
     /// Create an SRTCP context using the derived RTCP session keys.
-    pub fn srtcp_context(&self) -> SrtcpContext {
-        // We need the RTCP keys, which we don't store directly.
-        // Re-derive from the master key/salt (or store them).
-        // For now, this is a placeholder — the caller should use SrtcpContext::new directly.
-        todo!("SRTCP context creation requires RTCP session keys")
+    ///
+    /// Not implemented: the RTCP session keys are not stored on this
+    /// context. Use [`SrtcpContext::new`] directly with the derived keys.
+    pub fn srtcp_context(&self) -> crate::Result<SrtcpContext> {
+        Err(crate::Error::Media(
+            "SRTCP context creation requires RTCP session keys; use SrtcpContext::new".into(),
+        ))
     }
 }
 

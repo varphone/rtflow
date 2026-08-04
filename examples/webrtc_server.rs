@@ -3,7 +3,7 @@ mod common;
 use clap::Parser;
 use common::{CodecArg, init_tracing, mount_path, publisher_description};
 use rtflow::http::{HttpConfig, HttpServer, Method};
-use rtflow::webrtc::{WebRtcConfig, create_webrtc_handlers};
+
 use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 
@@ -19,7 +19,8 @@ use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 ///   Open http://127.0.0.1:8080/player
 ///
 /// Publish via FFmpeg (experimental WHIP support):
-///   ffmpeg -re -i INPUT -c:v libx264 -c:a libopus -f whip http://127.0.0.1:8080/whip/live/stream
+///   NOTE: WHIP/WHEP is a placeholder (no ICE/DTLS/SRTP media pipeline);
+///   routes answer 501 and the pages explain the limitation.
 #[derive(Debug, Parser)]
 struct Args {
     /// HTTP listen address for WHIP/WHEP.
@@ -43,157 +44,6 @@ struct Args {
 }
 
 /// Embedded WHEP player HTML page.
-fn whep_player_html(whep_url: &str) -> String {
-    let mut html = String::with_capacity(3072);
-    html.push_str(r#"<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>rtflow WebRTC Player</title>
-<style>
-  body { font-family: system-ui, sans-serif; max-width: 960px; margin: 40px auto; padding: 0 20px; background: #1a1a2e; color: #eee; }
-  h1 { color: #0f3460; background: #e94560; display: inline-block; padding: 8px 16px; border-radius: 4px; }
-  video { width: 100%; border-radius: 8px; background: #000; }
-  .info { margin-top: 16px; padding: 12px; background: #16213e; border-radius: 4px; font-size: 14px; }
-  .info code { color: #e94560; }
-  #status { margin-top: 8px; padding: 8px; border-radius: 4px; }
-  .connected { background: #1b4332; color: #95d5b2; }
-  .error { background: #3d0000; color: #ff6b6b; }
-  .waiting { background: #1a1a2e; color: #aaa; }
-</style>
-</head>
-<body>
-<h1>rtflow WebRTC Player (WHEP)</h1>
-<video id="video" controls autoplay muted playsinline></video>
-<div class="info">
-  <p>WHEP endpoint: <code>"#);
-    html.push_str(whep_url);
-    html.push_str(
-        r#"</code></p>
-  <div id="status" class="waiting">Connecting...</div>
-</div>
-<script>
-async function startPlayback() {
-  const statusEl = document.getElementById('status');
-  const video = document.getElementById('video');
-  const pc = new RTCPeerConnection({ iceServers: [] });
-
-  pc.addTransceiver('video', { direction: 'recvonly' });
-  pc.addTransceiver('audio', { direction: 'recvonly' });
-
-  pc.ontrack = (event) => {
-    video.srcObject = event.streams[0];
-    statusEl.textContent = 'Playing';
-    statusEl.className = 'connected';
-  };
-
-  pc.oniceconnectionstatechange = () => {
-    statusEl.textContent = 'ICE: ' + pc.iceConnectionState;
-    if (pc.iceConnectionState === 'connected') statusEl.className = 'connected';
-    if (pc.iceConnectionState === 'failed') statusEl.className = 'error';
-  };
-
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-
-  try {
-    const resp = await fetch('"#,
-    );
-    html.push_str(whep_url);
-    html.push_str(
-        r#"', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/sdp' },
-      body: offer.sdp,
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const answerSdp = await resp.text();
-    await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-    statusEl.textContent = 'Connected, waiting for media...';
-  } catch (e) {
-    statusEl.textContent = 'Error: ' + e.message;
-    statusEl.className = 'error';
-  }
-}
-startPlayback();
-</script>
-</body>
-</html>"#,
-    );
-    html
-}
-
-/// Embedded WHIP publisher HTML page.
-fn whip_publisher_html(whip_url: &str) -> String {
-    let mut html = String::with_capacity(3072);
-    html.push_str(r#"<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>rtflow WebRTC Publisher</title>
-<style>
-  body { font-family: system-ui, sans-serif; max-width: 960px; margin: 40px auto; padding: 0 20px; background: #1a1a2e; color: #eee; }
-  h1 { color: #0f3460; background: #e94560; display: inline-block; padding: 8px 16px; border-radius: 4px; }
-  video { width: 100%; border-radius: 8px; background: #000; }
-  button { margin-top: 12px; padding: 10px 24px; font-size: 16px; cursor: pointer; border: none; border-radius: 4px; background: #e94560; color: #fff; }
-  button:hover { background: #c73e54; }
-  .info { margin-top: 16px; padding: 12px; background: #16213e; border-radius: 4px; font-size: 14px; }
-  #status { margin-top: 8px; }
-</style>
-</head>
-<body>
-<h1>rtflow WebRTC Publisher (WHIP)</h1>
-<video id="preview" autoplay muted playsinline></video>
-<button id="startBtn" onclick="startPublish()">Start Publishing</button>
-<div class="info">
-  <p>WHIP endpoint: <code>"#);
-    html.push_str(whip_url);
-    html.push_str(
-        r#"</code></p>
-  <p id="status">Click "Start Publishing" to begin.</p>
-</div>
-<script>
-let pc = null;
-async function startPublish() {
-  const statusEl = document.getElementById('status');
-  const preview = document.getElementById('preview');
-  document.getElementById('startBtn').disabled = true;
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    preview.srcObject = stream;
-
-    pc = new RTCPeerConnection({ iceServers: [] });
-    stream.getTracks().forEach(t => pc.addTrack(t, stream));
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    const resp = await fetch('"#,
-    );
-    html.push_str(whip_url);
-    html.push_str(
-        r#"', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/sdp' },
-      body: offer.sdp,
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const answerSdp = await resp.text();
-    await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-    statusEl.textContent = 'Publishing...';
-  } catch (e) {
-    statusEl.textContent = 'Error: ' + e.message;
-    document.getElementById('startBtn').disabled = false;
-  }
-}
-</script>
-</body>
-</html>"#,
-    );
-    html
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing();
@@ -222,57 +72,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut http_server = HttpServer::bind(HttpConfig::new(args.http_listen)).await?;
     let http_port = http_server.local_addr().port();
 
-    // WebRTC handlers
-    let config = WebRtcConfig {
-        session_timeout: Duration::from_secs(args.session_timeout),
-        ..Default::default()
-    };
-    let mounts = Arc::new(rtflow::mount::MountRegistry::new(10));
-    let (whip_handler, whep_handler) = create_webrtc_handlers(config, mounts);
-
-    // Register WHIP/WHEP routes
+    // WHIP/WHEP are NOT implemented (no ICE/DTLS/SRTP media pipeline):
+    // per project policy these routes must not lure browsers into a
+    // signaling exchange that yields no media. Routes answer 501 and the
+    // player/publisher pages explain the limitation.
+    let unavailable: rtflow::http::Handler = Arc::new(|_req, mut writer| {
+        Box::pin(async move {
+            writer
+                .write_body(
+                    501,
+                    "text/plain",
+                    b"WHIP/WHEP is not implemented (no ICE/DTLS/SRTP media pipeline)",
+                )
+                .await?;
+            Ok(writer)
+        })
+    });
     let whip_path = format!("/whip{}", args.mount);
     let whep_path = format!("/whep{}", args.mount);
-    http_server
-        .add_route(Method::Post, &whip_path, whip_handler.clone())
-        .await;
-    http_server
-        .add_route(Method::Delete, &whip_path, whip_handler)
-        .await;
-    http_server
-        .add_route(Method::Post, &whep_path, whep_handler)
-        .await;
+    for path in [whip_path.as_str(), whep_path.as_str()] {
+        http_server
+            .add_route(Method::Post, path, unavailable.clone())
+            .await;
+        http_server
+            .add_route(Method::Delete, path, unavailable.clone())
+            .await;
+        http_server
+            .add_route(Method::Get, path, unavailable.clone())
+            .await;
+    }
 
-    // Player pages
-    let whep_url = format!("http://{}:{}/whep{}", args.public_ip, http_port, args.mount);
-    let whip_url = format!("http://{}:{}/whip{}", args.public_ip, http_port, args.mount);
-
-    let player_html = whep_player_html(&whep_url);
-    let player_handler: rtflow::http::Handler = Arc::new(move |_req, mut writer| {
-        let html = player_html.clone();
+    let notice = b"<!doctype html><html><body><h1>WebRTC unavailable</h1><p>WHIP/WHEP is an experimental placeholder in this build: the ICE/DTLS/SRTP media pipeline is not implemented, so no media would flow. Use the RTSP endpoint instead.</p></body></html>";
+    let notice_handler: rtflow::http::Handler = Arc::new(move |_req, mut writer| {
         Box::pin(async move {
             writer
-                .write_body(200, "text/html; charset=utf-8", html.as_bytes())
+                .write_body(200, "text/html; charset=utf-8", notice)
                 .await?;
             Ok(writer)
         })
     });
     http_server
-        .add_route(Method::Get, "/player", player_handler)
+        .add_route(Method::Get, "/player", notice_handler.clone())
         .await;
-
-    let publisher_html = whip_publisher_html(&whip_url);
-    let publisher_handler: rtflow::http::Handler = Arc::new(move |_req, mut writer| {
-        let html = publisher_html.clone();
-        Box::pin(async move {
-            writer
-                .write_body(200, "text/html; charset=utf-8", html.as_bytes())
-                .await?;
-            Ok(writer)
-        })
-    });
     http_server
-        .add_route(Method::Get, "/publisher", publisher_handler)
+        .add_route(Method::Get, "/publisher", notice_handler)
         .await;
 
     http_server.run().await?;
@@ -283,17 +126,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.mount
     );
 
-    println!("=== WebRTC Server (WHIP/WHEP) ===");
+    println!("=== WebRTC Server (WHIP/WHEP placeholder) ===");
     println!("HTTP listen:    0.0.0.0:{http_port}");
     println!("RTSP ingest:    {rtsp_url}");
     println!();
-    println!("Browser playback (WHEP):");
-    println!("  Open http://{}:{}/player", args.public_ip, http_port);
+    println!("WHIP/WHEP: NOT IMPLEMENTED (no ICE/DTLS/SRTP media pipeline);");
+    println!("  routes answer 501, /player and /publisher show a notice.");
     println!();
-    println!("Browser publish (WHIP):");
-    println!("  Open http://{}:{}/publisher", args.public_ip, http_port);
-    println!();
-    println!("Publish via RTSP (for WHEP playback):");
+    println!("Use the RTSP endpoint for real media:");
     println!("  ffmpeg -re -i INPUT -c copy -f rtsp {rtsp_url}");
     println!();
     println!("Press Ctrl+C to stop.");
