@@ -66,6 +66,10 @@ pub struct SrtConfig {
     pub recv_buffer_size: usize,
     /// TSBPD delay in milliseconds.
     pub tsbpd_delay_ms: u32,
+    /// Hard cap on TSBPD reorder-buffer packets (memory bound for
+    /// small-RAM IPC; see `TsbpdBuffer::new`). Excess arrivals are
+    /// dropped instead of growing the reorder map.
+    pub tsbpd_max_buffered: usize,
     /// ACK interval in milliseconds.
     pub ack_interval_ms: u64,
     /// Keepalive timeout (disconnect after this without keepalive).
@@ -86,6 +90,7 @@ impl Default for SrtConfig {
             max_connections: 10,
             recv_buffer_size: 8192 * 188, // ~8192 TS packets
             tsbpd_delay_ms: tsbpd::DEFAULT_TSBPD_DELAY_MS,
+            tsbpd_max_buffered: tsbpd::DEFAULT_MAX_BUFFERED,
             ack_interval_ms: 10,
             keepalive_timeout: Duration::from_secs(30),
             #[cfg(feature = "metrics")]
@@ -480,7 +485,10 @@ impl SrtServer {
                             );
 
                             let now = Instant::now();
-                            let mut tsbpd = TsbpdBuffer::new(self.config.tsbpd_delay_ms);
+                            let mut tsbpd = TsbpdBuffer::new(
+                                self.config.tsbpd_delay_ms,
+                                self.config.tsbpd_max_buffered,
+                            );
                             tsbpd.init(hs.initial_sequence);
 
                             #[cfg(feature = "metrics")]

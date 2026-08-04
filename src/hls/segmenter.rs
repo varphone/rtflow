@@ -18,7 +18,11 @@ impl Default for SegmenterConfig {
     fn default() -> Self {
         Self {
             segment_duration: Duration::from_secs(2),
-            lookback_count: 5,
+            // Embedded budget (docs/embedded-resource-audit.md P1-6):
+            // lookback segments are retained in RAM after finalization,
+            // so 2s×bitrate×lookback caps the HLS writer peak (5→3 saves
+            // ~2×segment bytes, e.g. 2MB at 1080p 4Mbps).
+            lookback_count: 3,
         }
     }
 }

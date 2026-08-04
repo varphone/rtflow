@@ -17,6 +17,10 @@ pub const DEFAULT_TSBPD_DELAY_MS: u32 = 120;
 /// the delivery cursor past every in-flight packet.
 pub const MAX_GAP_SKIP: u32 = 1 << 20;
 
+/// Default reorder-buffer memory bound: 120ms at ~17k packets/s (≈2.6Mbps
+/// of 188B TS) ≈ 2048 packets; raised for higher-bitrate SRT feeds.
+pub const DEFAULT_MAX_BUFFERED: usize = 4096;
+
 /// A buffered SRT data packet awaiting ordered delivery.
 #[derive(Clone, Debug)]
 pub struct BufferedPacket {
@@ -39,6 +43,10 @@ pub struct TsbpdBuffer {
     buffer: BTreeMap<u32, BufferedPacket>,
     /// TSBPD delay before releasing packets.
     delay: Duration,
+    /// Hard cap on buffered packets (memory bound for small-RAM IPC:
+    /// ~delay×packet_rate×188B worst case; excess arrivals are dropped
+    /// instead of letting the reorder map grow without bound).
+    max_buffered: usize,
     /// Next expected sequence number for in-order delivery.
     next_deliver_seq: u32,
     /// Highest sequence number received (for loss detection).
@@ -62,11 +70,13 @@ pub struct TsbpdBuffer {
 }
 
 impl TsbpdBuffer {
-    /// Create a new TSBPD buffer with the given delay.
-    pub fn new(delay_ms: u32) -> Self {
+    /// Create a new TSBPD buffer with the given delay and a memory bound
+    /// of `max_buffered` packets (`usize::MAX` disables the cap).
+    pub fn new(delay_ms: u32, max_buffered: usize) -> Self {
         Self {
             buffer: BTreeMap::new(),
             delay: Duration::from_millis(delay_ms as u64),
+            max_buffered,
             next_deliver_seq: 0,
             highest_received: 0,
             initialized: false,
@@ -82,7 +92,7 @@ impl TsbpdBuffer {
 
     /// Create with default delay (120ms).
     pub fn with_default_delay() -> Self {
-        Self::new(DEFAULT_TSBPD_DELAY_MS)
+        Self::new(DEFAULT_TSBPD_DELAY_MS, DEFAULT_MAX_BUFFERED)
     }
 
     /// Initialize the buffer with the first expected sequence number.
@@ -130,6 +140,12 @@ impl TsbpdBuffer {
 
         // Reject duplicates
         if self.buffer.contains_key(&seq) {
+            return false;
+        }
+
+        // Memory bound: refuse to grow the reorder map beyond the cap.
+        if self.buffer.len() >= self.max_buffered {
+            self.dropped_count += 1;
             return false;
         }
 
@@ -314,7 +330,7 @@ mod tests {
 
     #[test]
     fn in_order_delivery() {
-        let mut buf = TsbpdBuffer::new(0); // 0ms delay for testing
+        let mut buf = TsbpdBuffer::new(0, 64); // 0ms delay for testing
         buf.init(100);
 
         buf.push(100, Bytes::from_static(b"pkt0"), 100000, false);
@@ -334,7 +350,7 @@ mod tests {
 
     #[test]
     fn out_of_order_reorder() {
-        let mut buf = TsbpdBuffer::new(0);
+        let mut buf = TsbpdBuffer::new(0, 64);
         buf.init(0);
 
         // Arrive out of order: 2, 0, 1
@@ -352,7 +368,7 @@ mod tests {
 
     #[test]
     fn duplicate_rejected() {
-        let mut buf = TsbpdBuffer::new(0);
+        let mut buf = TsbpdBuffer::new(0, 64);
         buf.init(0);
 
         assert!(buf.push(0, Bytes::from_static(b"pkt0"), 0, false));
@@ -362,7 +378,7 @@ mod tests {
 
     #[test]
     fn loss_detection() {
-        let mut buf = TsbpdBuffer::new(50);
+        let mut buf = TsbpdBuffer::new(50, 64);
         buf.init(0);
 
         buf.push(0, Bytes::from_static(b"pkt0"), 0, false);
@@ -378,7 +394,7 @@ mod tests {
     #[test]
     fn gap_timeout_skip() {
         // Use a very short delay so timeout triggers quickly
-        let mut buf = TsbpdBuffer::new(1); // 1ms delay, 2ms timeout
+        let mut buf = TsbpdBuffer::new(1, 64); // 1ms delay, 2ms timeout
         buf.init(0);
 
         buf.push(0, Bytes::from_static(b"pkt0"), 0, false);

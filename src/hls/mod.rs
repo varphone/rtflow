@@ -26,7 +26,10 @@ impl Default for HlsConfig {
     fn default() -> Self {
         Self {
             segment_duration: Duration::from_secs(2),
-            segment_count: 5,
+            // Embedded budget: lookback segments are retained in RAM
+            // after finalization (2s×bitrate×count peak); 3 keeps a 3×
+            // duration window at ~2×segment bytes (P1-6).
+            segment_count: 3,
             live: true,
         }
     }
