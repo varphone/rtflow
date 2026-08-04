@@ -3,7 +3,7 @@ use crate::{
     error::{ErrorCode, Operation},
     identity::{MountId, SessionId, TaskId},
 };
-use std::{fmt, net::SocketAddr, sync::Arc, time::Duration};
+use std::{any::Any, fmt, net::SocketAddr, sync::Arc, time::Duration};
 
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -135,14 +135,20 @@ pub enum SecurityEvent {
     },
 }
 
-pub trait EventSink: Send + Sync + 'static {
+pub trait EventSink: Send + Sync + Any + 'static {
     fn record(&self, event: &FrameworkEvent);
+    /// Downcast support so infrastructure can extract concrete sinks
+    /// (e.g. the metrics registry from a [`MetricsEventSink`](crate::metrics::MetricsEventSink)).
+    fn as_any(&self) -> &dyn Any;
 }
 
 #[derive(Default)]
 pub struct NoopEventSink;
 impl EventSink for NoopEventSink {
     fn record(&self, _: &FrameworkEvent) {}
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 #[derive(Default)]
@@ -150,6 +156,9 @@ pub struct TracingEventSink;
 impl EventSink for TracingEventSink {
     fn record(&self, event: &FrameworkEvent) {
         tracing::info!(target: "rtsp::event", event = ?event, "framework event");
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 

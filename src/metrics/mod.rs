@@ -130,8 +130,14 @@ impl Default for MetricsRegistry {
 impl std::fmt::Debug for MetricsRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MetricsRegistry")
-            .field("connections_total", &self.connections_total.load(Ordering::Relaxed))
-            .field("sessions_active", &self.sessions_active.load(Ordering::Relaxed))
+            .field(
+                "connections_total",
+                &self.connections_total.load(Ordering::Relaxed),
+            )
+            .field(
+                "sessions_active",
+                &self.sessions_active.load(Ordering::Relaxed),
+            )
             .field("mounts_active", &self.mounts_active.load(Ordering::Relaxed))
             .finish()
     }
@@ -172,7 +178,19 @@ impl MetricsEventSink {
     }
 }
 
+/// Extract the metrics registry from an event sink, if the sink is a
+/// [`MetricsEventSink`]. Used to wire per-mount frame counters into the
+/// global registry.
+pub fn registry_from_sink(sink: &Arc<dyn crate::observe::EventSink>) -> Option<Arc<MetricsRegistry>> {
+    sink.as_any()
+        .downcast_ref::<MetricsEventSink>()
+        .map(|sink| sink.registry.clone())
+}
+
 impl EventSink for MetricsEventSink {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
     fn record(&self, event: &FrameworkEvent) {
         match event {
             FrameworkEvent::Server(server_event) => match server_event {
@@ -631,32 +649,84 @@ pub fn create_metrics_handler(registry: Arc<MetricsRegistry>) -> crate::http::Ha
         Box::pin(async move {
             let mut body = String::with_capacity(6144);
             // Reuse the same format as the standalone exporter
-            write_counter(&mut body, "rtflow_connections_total", "Total connections accepted",
-                registry.connections_total.load(Ordering::Relaxed));
-            write_gauge(&mut body, "rtflow_connections_active", "Currently active connections",
-                registry.connections_active.load(Ordering::Relaxed));
-            write_counter(&mut body, "rtflow_sessions_total", "Total sessions",
-                registry.sessions_total.load(Ordering::Relaxed));
-            write_gauge(&mut body, "rtflow_sessions_active", "Active sessions",
-                registry.sessions_active.load(Ordering::Relaxed));
-            write_gauge(&mut body, "rtflow_mounts_active", "Active mounts",
-                registry.mounts_active.load(Ordering::Relaxed));
-            write_counter(&mut body, "rtflow_frames_accepted_total", "Frames accepted",
-                registry.frames_accepted.load(Ordering::Relaxed));
-            write_counter(&mut body, "rtflow_frames_dropped_total", "Frames dropped",
-                registry.frames_dropped.load(Ordering::Relaxed));
-            write_counter(&mut body, "rtflow_rtmp_connections_total", "RTMP connections",
-                registry.rtmp_connections_total.load(Ordering::Relaxed));
-            write_counter(&mut body, "rtflow_srt_connections_total", "SRT connections",
-                registry.srt_connections_total.load(Ordering::Relaxed));
-            write_counter(&mut body, "rtflow_webrtc_sessions_total", "WebRTC sessions",
-                registry.webrtc_sessions_total.load(Ordering::Relaxed));
-            write_counter(&mut body, "rtflow_hls_segments_served_total", "HLS segments served",
-                registry.hls_segments_served.load(Ordering::Relaxed));
-            write_counter(&mut body, "rtflow_dash_segments_served_total", "DASH segments served",
-                registry.dash_segments_served.load(Ordering::Relaxed));
+            write_counter(
+                &mut body,
+                "rtflow_connections_total",
+                "Total connections accepted",
+                registry.connections_total.load(Ordering::Relaxed),
+            );
+            write_gauge(
+                &mut body,
+                "rtflow_connections_active",
+                "Currently active connections",
+                registry.connections_active.load(Ordering::Relaxed),
+            );
+            write_counter(
+                &mut body,
+                "rtflow_sessions_total",
+                "Total sessions",
+                registry.sessions_total.load(Ordering::Relaxed),
+            );
+            write_gauge(
+                &mut body,
+                "rtflow_sessions_active",
+                "Active sessions",
+                registry.sessions_active.load(Ordering::Relaxed),
+            );
+            write_gauge(
+                &mut body,
+                "rtflow_mounts_active",
+                "Active mounts",
+                registry.mounts_active.load(Ordering::Relaxed),
+            );
+            write_counter(
+                &mut body,
+                "rtflow_frames_accepted_total",
+                "Frames accepted",
+                registry.frames_accepted.load(Ordering::Relaxed),
+            );
+            write_counter(
+                &mut body,
+                "rtflow_frames_dropped_total",
+                "Frames dropped",
+                registry.frames_dropped.load(Ordering::Relaxed),
+            );
+            write_counter(
+                &mut body,
+                "rtflow_rtmp_connections_total",
+                "RTMP connections",
+                registry.rtmp_connections_total.load(Ordering::Relaxed),
+            );
+            write_counter(
+                &mut body,
+                "rtflow_srt_connections_total",
+                "SRT connections",
+                registry.srt_connections_total.load(Ordering::Relaxed),
+            );
+            write_counter(
+                &mut body,
+                "rtflow_webrtc_sessions_total",
+                "WebRTC sessions",
+                registry.webrtc_sessions_total.load(Ordering::Relaxed),
+            );
+            write_counter(
+                &mut body,
+                "rtflow_hls_segments_served_total",
+                "HLS segments served",
+                registry.hls_segments_served.load(Ordering::Relaxed),
+            );
+            write_counter(
+                &mut body,
+                "rtflow_dash_segments_served_total",
+                "DASH segments served",
+                registry.dash_segments_served.load(Ordering::Relaxed),
+            );
             writer
-                .write_body(200, "text/plain; version=0.0.4; charset=utf-8", body.as_bytes())
+                .write_body(
+                    200,
+                    "text/plain; version=0.0.4; charset=utf-8",
+                    body.as_bytes(),
+                )
                 .await?;
             Ok(writer)
         })
@@ -669,21 +739,66 @@ fn build_stats_json(registry: &MetricsRegistry, mounts: &crate::mount::MountRegi
     let mount_metrics = collect_mount_metrics(mounts);
     let mut out = String::with_capacity(2048);
     out.push_str("{\"global\":{");
-    out.push_str(&format!("\"connections_total\":{},", registry.connections_total.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"connections_active\":{},", registry.connections_active.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"sessions_active\":{},", registry.sessions_active.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"mounts_active\":{},", registry.mounts_active.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"frames_accepted\":{},", registry.frames_accepted.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"frames_dropped\":{},", registry.frames_dropped.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"rtmp_connections_total\":{},", registry.rtmp_connections_total.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"rtmp_publishers_active\":{},", registry.rtmp_publishers_active.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"srt_connections_total\":{},", registry.srt_connections_total.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"srt_streams_active\":{},", registry.srt_streams_active.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"webrtc_sessions_total\":{},", registry.webrtc_sessions_total.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"webrtc_sessions_active\":{},", registry.webrtc_sessions_active.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"hls_segments_served\":{},", registry.hls_segments_served.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"dash_segments_served\":{},", registry.dash_segments_served.load(Ordering::Relaxed)));
-    out.push_str(&format!("\"flv_streams_active\":{}", registry.flv_streams_active.load(Ordering::Relaxed)));
+    out.push_str(&format!(
+        "\"connections_total\":{},",
+        registry.connections_total.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"connections_active\":{},",
+        registry.connections_active.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"sessions_active\":{},",
+        registry.sessions_active.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"mounts_active\":{},",
+        registry.mounts_active.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"frames_accepted\":{},",
+        registry.frames_accepted.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"frames_dropped\":{},",
+        registry.frames_dropped.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"rtmp_connections_total\":{},",
+        registry.rtmp_connections_total.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"rtmp_publishers_active\":{},",
+        registry.rtmp_publishers_active.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"srt_connections_total\":{},",
+        registry.srt_connections_total.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"srt_streams_active\":{},",
+        registry.srt_streams_active.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"webrtc_sessions_total\":{},",
+        registry.webrtc_sessions_total.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"webrtc_sessions_active\":{},",
+        registry.webrtc_sessions_active.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"hls_segments_served\":{},",
+        registry.hls_segments_served.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"dash_segments_served\":{},",
+        registry.dash_segments_served.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"flv_streams_active\":{}",
+        registry.flv_streams_active.load(Ordering::Relaxed)
+    ));
     out.push_str("},\"mounts\":[");
     for (i, m) in mount_metrics.iter().enumerate() {
         if i > 0 {

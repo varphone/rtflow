@@ -35,6 +35,9 @@ impl EventSink for Collector {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(event.clone());
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[tokio::test]
