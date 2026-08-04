@@ -150,7 +150,10 @@ async fn publish_stream(
         next_frame += frame_interval;
 
         // Power hint: no subscribers → skip pushing (gate VENC in real HW).
-        if mount.snapshot().subscriber_count == 0 {
+        // Both RTSP sessions and web subscribers (HTTP-FLV / WS-FLV / HLS)
+        // count, so browser playback keeps the encoder running.
+        let snapshot = mount.snapshot();
+        if snapshot.subscriber_count + snapshot.broadcast_receivers == 0 {
             continue;
         }
 
@@ -166,8 +169,11 @@ async fn publish_stream(
         ));
 
         if let Some(mode) = config.audio {
-            // 20 ms blocks: AAC (1024 samples) or G.711 (160 samples) at
-            // their respective rates — one block per video frame.
+            // One audio block per video frame, timestamped at the video
+            // frame instant. Real VENC/audio clocks share the wall-clock
+            // timeline; a synthetic audio PTS that advances at its own
+            // rate (20 ms/block vs 33 ms/frame) would drift apart from
+            // the video timeline over time and break A/V sync.
             let (clock_rate, codec) = match mode {
                 AudioMode::Aac => (48_000u32, Codec::Aac),
                 AudioMode::Pcma => (8_000, Codec::Pcma),
@@ -175,12 +181,11 @@ async fn publish_stream(
                 AudioMode::None => unreachable!(),
             };
             let mut audio_clock = RtpClock::new(clock_rate);
-            let audio_pts = Duration::from_micros(index * 20_000);
             let _ = publisher.try_push(AccessUnit::audio(
                 1,
                 codec,
-                audio_pts,
-                audio_clock.timestamp(audio_pts),
+                pts,
+                audio_clock.timestamp(pts),
                 synthetic_aac_frame(index).into(),
             ));
         }

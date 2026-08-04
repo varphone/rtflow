@@ -108,6 +108,10 @@ impl HttpServer {
                 tokio::select! {
                     result = listener.accept() => {
                         let Ok((stream, addr)) = result else { continue; };
+                        // Low-latency streaming: disable Nagle so small FLV
+                        // tags are not delayed behind unrelated segments
+                        // (tokio defaults to true, but be explicit).
+                        let _ = stream.set_nodelay(true);
                         if !security.ip_acl.permits(addr.ip()) {
                             continue;
                         }
@@ -228,9 +232,7 @@ async fn handle_connection(
                 // client can distinguish a protocol error from a network
                 // failure.
                 if let Some(writer) = writer.as_mut() {
-                    let _ = writer
-                        .write_body(400, "text/plain", b"Bad Request")
-                        .await;
+                    let _ = writer.write_body(400, "text/plain", b"Bad Request").await;
                 }
                 return Err(Error::Rtsp("invalid HTTP request".into()));
             }
