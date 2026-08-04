@@ -126,17 +126,19 @@ HLS 三种模式播放（`--no-web` 可只留 RTSP）。
 
 - **WHEP 播放**（draft-ietf-wish-whep）：浏览器 `POST` SDP offer 到
   `/whep{path}`，服务器应答（含完整 ICE 候选）后把 mount 的 H.264/
-  H.265/VP8/VP9 视频（以及 Opus 音频，若源如此）打包为 RTP 推给
-  浏览器——`examples/ipc_camera --whep-listen 0.0.0.0:8090` 后任意
-  WebRTC 播放器（或原生 `<video>` + RTCPeerConnection）拉流。
+  H.265/VP8/VP9 视频与 Opus/G.711/AAC-LC 音频打包为 RTP 推给浏览器
+  ——`examples/ipc_camera --whep-listen 0.0.0.0:8090` 后任意 WebRTC
+  播放器（或原生 `<video>` + RTCPeerConnection）拉流。
 - **WHIP 发布**（draft-ietf-wish-whip）：浏览器 `POST` offer 到
   `/whip{path}` 后推 H.264/Opus RTP，服务器解包并经公共
   depacketizer 进入 mount（与 RTSP 发布同路径）——
   `--whip-listen 0.0.0.0:8089` 即可让浏览器把摄像头推入
   `/cam` 等挂载点。
-- 说明：WebRTC 无 AAC/G.711 音频，WHEP 在源为这些编码时只发视频
-  （音频需转码后才有）；两端同机时 ICE host 候选直连即通，跨 NAT
-  需在 `WebRtcConfig` 配置 STUN/TURN。
+- 音频：G.711 PCMA/PCMU 是 RFC 7874 强制 codec（所有浏览器支持，
+  直通打包，IPC 摄像头 G.711 音频可原样播放）；AAC-LC
+  （`audio/mp4a.40.2`，MPEG4-GENERIC + AU-header）为 Chrome/Safari
+  事实支持（Firefox 不支持），同样直通无转码；跨 NAT 需在
+  `WebRtcConfig` 配置 STUN/TURN。
 
 ## Feature profile
 

@@ -132,6 +132,25 @@ where
     media_engine
         .register_default_codecs()
         .map_err(|e| crate::Error::Media(format!("WebRTC media engine init failed: {e}")))?;
+    // AAC-LC (MPEG4-GENERIC) is not part of the default set but is
+    // supported by Chrome/Safari WebRTC (not Firefox) — the common audio
+    // codec of IP cameras alongside Opus and G.711 (PCMA/PCMU, which the
+    // default set already registers).
+    media_engine
+        .register_codec(
+            rtc::rtp_transceiver::rtp_sender::RTCRtpCodecParameters {
+                payload_type: 97,
+                rtp_codec: rtc::rtp_transceiver::rtp_sender::RTCRtpCodec {
+                    mime_type: "audio/mp4a.40.2".to_string(),
+                    clock_rate: 48_000,
+                    channels: 2,
+                    sdp_fmtp_line: "profile-level-id=1;mode=AAC-hbr".to_string(),
+                    rtcp_feedback: vec![],
+                },
+            },
+            rtc::rtp_transceiver::rtp_sender::RtpCodecKind::Audio,
+        )
+        .map_err(|e| crate::Error::Media(format!("WebRTC AAC registration failed: {e}")))?;
 
     let config = RTCConfigurationBuilder::default().build();
     let builder = PeerConnectionBuilder::new()

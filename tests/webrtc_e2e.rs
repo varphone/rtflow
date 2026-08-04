@@ -512,3 +512,185 @@ async fn whip_receives_h264_rtp_over_real_ice_dtls_srtp() {
     let _ = sender;
     browser.close().await.unwrap();
 }
+
+#[tokio::test]
+async fn whep_streams_pcma_audio_over_real_ice_dtls_srtp() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("rtflow::webrtc=debug,webrtc_e2e=debug,rtc=warn")
+        .with_test_writer()
+        .try_init();
+    let _ = tracing_log::LogTracer::init();
+
+    // Server: mount with a G.711 A-law audio track only.
+    let mounts = Arc::new(MountRegistry::new(10));
+    mounts
+        .register(
+            Arc::from("/live/audio"),
+            MountConfig::Publisher {
+                description: MediaDescription {
+                    session_name: Arc::from("e2e-pcma"),
+                    tracks: vec![TrackDescription {
+                        id: 0,
+                        kind: MediaKind::Audio,
+                        codec: Codec::Pcma,
+                        clock_rate: 8_000,
+                        channels: Some(1),
+                        payload_type: 8,
+                        fmtp: None,
+                        control: Arc::from("trackID=0"),
+                        crypto: None,
+                        width: None,
+                        height: None,
+                        frame_rate: None,
+                    }],
+                    connection: None,
+                },
+                allow_replace_after_disconnect: true,
+            },
+        )
+        .unwrap();
+    let publisher = mounts.get_handle("/live/audio").unwrap().publisher().unwrap();
+
+    let (_whip_handler, whep_handler) =
+        create_webrtc_handlers(WebRtcConfig::default(), mounts.clone());
+    let mut http = HttpServer::bind(HttpConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let addr = http.local_addr();
+    http.add_route(Method::Post, "/whep/live/audio", whep_handler).await;
+    http.run().await.unwrap();
+
+    // Browser: audio-only recvonly PC (PCMA is registered by the default
+    // media engine).
+    let mut media_engine = webrtc::peer_connection::MediaEngine::default();
+    media_engine.register_default_codecs().unwrap();
+    let handler = BrowserHandler {
+        candidates: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+        track: Arc::new(tokio::sync::Mutex::new(None)),
+        connected: Arc::new(tokio::sync::Notify::new()),
+    };
+    let browser = PeerConnectionBuilder::new()
+        .with_configuration(RTCConfigurationBuilder::default().build())
+        .with_media_engine(media_engine)
+        .with_handler(Arc::new(handler.clone()))
+        .with_udp_addrs(vec!["127.0.0.1:0".to_string()])
+        .build()
+        .await
+        .unwrap();
+    browser
+        .add_transceiver_from_kind(
+            RtpCodecKind::Audio,
+            Some(RTCRtpTransceiverInit {
+                direction: RTCRtpTransceiverDirection::Recvonly,
+                streams: vec![],
+                send_encodings: vec![],
+            }),
+        )
+        .await
+        .unwrap();
+
+    let offer = browser.create_offer(None).await.unwrap();
+    browser.set_local_description(offer.clone()).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), handler.connected.notified())
+        .await
+        .expect("browser ICE gathering timeout");
+    let mut offer_sdp = offer.sdp.clone();
+    if !offer_sdp.contains("a=candidate") {
+        let candidates = handler.candidates.lock().await;
+        for line in candidates.iter() {
+            offer_sdp.push_str("\r\n");
+            offer_sdp.push_str(line);
+            offer_sdp.push_str("\r\n");
+        }
+    }
+
+    let (status, _headers, answer) = http_post(addr, "/whep/live/audio", &offer_sdp).await;
+    assert_eq!(status, 201, "WHEP POST failed: {answer}");
+    assert!(
+        answer.to_ascii_lowercase().contains("pcma"),
+        "answer must negotiate PCMA audio: {answer}"
+    );
+
+    let answer_sdp = answer.clone();
+    let answer_desc = RTCSessionDescription::answer(answer).unwrap();
+    browser.set_remote_description(answer_desc).await.unwrap();
+    let mut section = 0u16;
+    let mut mid: Option<String> = None;
+    for line in answer_sdp.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.starts_with("m=") {
+            section += 1;
+            mid = None;
+        } else if let Some(m) = line.strip_prefix("a=mid:") {
+            mid = Some(m.trim().to_string());
+        } else if let Some(c) = line.strip_prefix("a=candidate:") {
+            let init = webrtc::peer_connection::RTCIceCandidateInit {
+                candidate: format!("candidate:{c}"),
+                sdp_mid: mid.clone(),
+                sdp_mline_index: Some(section),
+                username_fragment: None,
+                url: None,
+            };
+            if let Err(e) = browser.add_ice_candidate(init).await {
+                tracing::debug!("browser add_ice_candidate failed: {e}");
+            }
+        }
+    }
+
+    // Wait for ICE+DTLS, then push G.711 frames (160 bytes = 20 ms @ 8 kHz).
+    tokio::time::timeout(Duration::from_secs(5), handler.connected.notified())
+        .await
+        .expect("browser PC never connected");
+
+    let alaw_frame = vec![0xd5u8; 160]; // ~silence in A-law
+    for i in 0..40u32 {
+        publisher
+            .push(AccessUnit {
+                track_id: 0,
+                codec: Codec::Pcma,
+                pts: Duration::from_millis(u64::from(i) * 20),
+                dts: None,
+                rtp_timestamp: i * 160,
+                is_keyframe: true,
+                data: alaw_frame.clone().into(),
+            })
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    // The browser must receive G.711 RTP packets on the audio track.
+    let track = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(track) = handler.track.lock().await.clone() {
+                return track;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("remote audio track never arrived");
+
+    let received = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut received = 0usize;
+        loop {
+            match track.poll().await {
+                Some(TrackRemoteEvent::OnRtpPacket(_)) => {
+                    received += 1;
+                    if received >= 3 {
+                        return received;
+                    }
+                }
+                Some(_) => {}
+                None => return received,
+            }
+        }
+    })
+    .await
+    .unwrap_or(0);
+    assert!(
+        received >= 3,
+        "browser received {received} PCMA RTP packets (expected >= 3)"
+    );
+
+    browser.close().await.unwrap();
+}

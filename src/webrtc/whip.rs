@@ -307,6 +307,12 @@ async fn negotiated_codec(track: &Arc<dyn TrackRemote>) -> Option<(Codec, u32)> 
         Some(Codec::Vp9)
     } else if name.contains("opus") {
         Some(Codec::Opus)
+    } else if name.contains("pcma") || name.ends_with("pcm-a") || name.contains("alaw") {
+        Some(Codec::Pcma)
+    } else if name.contains("pcmu") || name.ends_with("pcm-u") || name.contains("ulaw") {
+        Some(Codec::Pcmu)
+    } else if name.contains("mp4a") || name.contains("aac") {
+        Some(Codec::Aac)
     } else {
         tracing::warn!(mime = %codec.mime_type, "WHIP: unsupported codec, track skipped");
         None

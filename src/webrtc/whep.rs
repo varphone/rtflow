@@ -79,13 +79,16 @@ pub async fn handle_whep_post(
     let mount = mounts
         .get_handle(&path)
         .ok_or_else(|| Error::Http("WHEP: mount not found".into()))?;
-    let has_video = mount
-        .description
-        .tracks
-        .iter()
-        .any(|t| t.kind == crate::media::MediaKind::Video);
-    if !has_video {
-        return respond_plain(writer, 404, "no video track on mount").await;
+    // At least one WebRTC-playable track (video, or Opus/G.711/AAC audio)
+    // must exist; audio-only mounts are valid (e.g. voice intercom).
+    let playable = mount.description.tracks.iter().any(|t| match t.kind {
+        crate::media::MediaKind::Video => true,
+        crate::media::MediaKind::Audio => {
+            matches!(t.codec, Codec::Opus | Codec::Pcma | Codec::Pcmu | Codec::Aac)
+        }
+    });
+    if !playable {
+        return respond_plain(writer, 404, "no playable track on mount").await;
     }
 
     let session = sessions
@@ -117,17 +120,35 @@ pub async fn handle_whep_post(
         }
     }
 
-    // Add a sender for each video track (H.264) and Opus audio if present.
+    // Add a sender for each video track (H.264/H.265/VP8/VP9) and for
+    // WebRTC-capable audio: Opus, G.711 PCMA/PCMU (RFC 7874 mandatory) and
+    // AAC-LC (Chrome/Safari). AAC/G.711 sources have no transcoding, the
+    // frames pass through as-is.
     let mut senders = Vec::new();
     for track in &mount.description.tracks {
         let (kind, codec) = match track.kind {
             crate::media::MediaKind::Video => (RtpCodecKind::Video, track.codec),
-            crate::media::MediaKind::Audio if track.codec == Codec::Opus => {
+            crate::media::MediaKind::Audio
+                if matches!(
+                    track.codec,
+                    Codec::Opus | Codec::Pcma | Codec::Pcmu | Codec::Aac
+                ) =>
+            {
                 (RtpCodecKind::Audio, track.codec)
             }
             _ => continue,
         };
-        if !matches!(codec, Codec::H264 | Codec::H265 | Codec::Vp8 | Codec::Vp9 | Codec::Opus) {
+        if !matches!(
+            codec,
+            Codec::H264
+                | Codec::H265
+                | Codec::Vp8
+                | Codec::Vp9
+                | Codec::Opus
+                | Codec::Pcma
+                | Codec::Pcmu
+                | Codec::Aac
+        ) {
             tracing::warn!(?codec, "WHEP: codec not supported by WebRTC, skipping track");
             continue;
         }
@@ -248,7 +269,8 @@ fn rand_ssrc() -> u32 {
     (z ^ (z >> 31)) as u32 & 0x7fff_ffff
 }
 
-/// MIME type for a WebRTC-capable codec (H.264/VP8/VP9/Opus).
+/// MIME type for a WebRTC-capable codec (H.264/H.265/VP8/VP9, Opus,
+/// G.711 PCMA/PCMU, AAC-LC).
 fn mime_for(codec: Codec) -> &'static str {
     match codec {
         Codec::H264 => "video/H264",
@@ -256,7 +278,9 @@ fn mime_for(codec: Codec) -> &'static str {
         Codec::Vp8 => "video/VP8",
         Codec::Vp9 => "video/VP9",
         Codec::Opus => "audio/opus",
-        _ => "application/unknown",
+        Codec::Pcma => "audio/PCMA",
+        Codec::Pcmu => "audio/PCMU",
+        Codec::Aac => "audio/mp4a.40.2",
     }
 }
 
