@@ -187,21 +187,36 @@ pub async fn serve_rtmp_session(
                 debug!(?peer, "RTMP: server shutdown");
                 break;
             }
-            result = tokio::time::timeout(idle_timeout, read_half.read(&mut read_buf)) => {
+            result = async {
+                if matches!(state, SessionState::Playing { .. }) {
+                    // Playing clients send no data (ACKs only above 2.5MB),
+                    // so an idle timeout would disconnect every low-bitrate
+                    // stream.
+                    read_half.read(&mut read_buf).await
+                } else {
+                    match tokio::time::timeout(idle_timeout, read_half.read(&mut read_buf)).await {
+                        Ok(result) => result,
+                        Err(_) => Err(tokio::io::Error::new(
+                            tokio::io::ErrorKind::TimedOut,
+                            "idle",
+                        )),
+                    }
+                }
+            } => {
                 let n = match result {
-                    Err(_) => {
+                    Err(e) if e.kind() == tokio::io::ErrorKind::TimedOut => {
                         debug!(?peer, "RTMP: idle timeout");
                         break;
                     }
-                    Ok(Err(e)) => {
+                    Err(e) => {
                         debug!(?peer, "RTMP: read error: {e}");
                         break;
                     }
-                    Ok(Ok(0)) => {
+                    Ok(0) => {
                         debug!(?peer, "RTMP: connection closed by peer");
                         break;
                     }
-                    Ok(Ok(n)) => n,
+                    Ok(n) => n,
                 };
                 bytes_received += n as u64;
                 dechunker.feed(&read_buf[..n]);
@@ -284,6 +299,7 @@ pub async fn serve_rtmp_session(
                 t if t == MessageType::Video as u8 => {
                     if let SessionState::Publishing {
                         publisher,
+                        mount_handle,
                         video_seq_header,
                         video_codec,
                         has_video,
@@ -294,12 +310,22 @@ pub async fn serve_rtmp_session(
                         if let Some(video_data) = flv::parse_video_tag(&msg.payload) {
                             match video_data {
                                 VideoData::AvcSequenceHeader(data) => {
-                                    *video_seq_header = Some(data);
+                                    *video_seq_header = Some(data.clone());
+                                    if let Ok(mut headers) =
+                                        mount_handle.inner.rtmp_seq_headers.lock()
+                                    {
+                                        headers.insert(0, data);
+                                    }
                                     *video_codec = Some(Codec::H264);
                                     *has_video = true;
                                 }
                                 VideoData::HevcSequenceHeader(data) => {
-                                    *video_seq_header = Some(data);
+                                    *video_seq_header = Some(data.clone());
+                                    if let Ok(mut headers) =
+                                        mount_handle.inner.rtmp_seq_headers.lock()
+                                    {
+                                        headers.insert(0, data);
+                                    }
                                     *video_codec = Some(Codec::H265);
                                     *has_video = true;
                                 }
@@ -352,6 +378,7 @@ pub async fn serve_rtmp_session(
                 t if t == MessageType::Audio as u8 => {
                     if let SessionState::Publishing {
                         publisher,
+                        mount_handle,
                         audio_seq_header,
                         has_audio,
                         has_video,
@@ -362,7 +389,13 @@ pub async fn serve_rtmp_session(
                         if let Some(audio_data) = flv::parse_audio_tag(&msg.payload) {
                             match audio_data {
                                 AudioData::AacSequenceHeader(data) => {
-                                    *audio_seq_header = Some(data);
+                                    *audio_seq_header = Some(data.clone());
+                                    let track_id: u8 = if *has_video { 1 } else { 0 };
+                                    if let Ok(mut headers) =
+                                        mount_handle.inner.rtmp_seq_headers.lock()
+                                    {
+                                        headers.insert(track_id, data);
+                                    }
                                     *has_audio = true;
                                 }
                                 AudioData::AacRaw(data) => {
@@ -375,7 +408,10 @@ pub async fn serve_rtmp_session(
                                         codec: Codec::Aac,
                                         pts: Duration::from_millis(ts_ms as u64),
                                         dts: None,
-                                        rtp_timestamp: ts_ms.wrapping_mul(44100 / 1000),
+                                        // 44.1/48/32kHz from ms: use 64-bit
+                                        // intermediate so 44100/1000 is not
+                                        // truncated to an integer ×44.
+                                        rtp_timestamp: ((ts_ms as u64 * 44100) / 1000) as u32,
                                         is_keyframe: true,
                                         data,
                                     };
@@ -488,9 +524,17 @@ async fn handle_command(
             }])
         }
 
-        RtmpCommand::ReleaseStream { .. } | RtmpCommand::Fcpublish { .. } => {
-            // These are FMS-specific, respond with null result
-            Some(vec![])
+        RtmpCommand::ReleaseStream { transaction_id, .. }
+        | RtmpCommand::Fcpublish { transaction_id, .. } => {
+            // FMS-era housekeeping commands: acknowledge them with a null
+            // _result, otherwise strict SDKs wait on the transaction forever.
+            Some(vec![RtmpMessage {
+                chunk_stream_id: 5,
+                timestamp: 0,
+                msg_type: MessageType::CommandAmf0 as u8,
+                msg_stream_id: 1,
+                payload: command::null_result(*transaction_id),
+            }])
         }
 
         RtmpCommand::Publish {
@@ -532,6 +576,7 @@ async fn handle_command(
                 tracks: Vec::new(),
                 #[cfg(feature = "multicast")]
                 connection: None,
+
             };
 
             let mount_config = MountConfig::Publisher {
@@ -721,10 +766,61 @@ async fn handle_command(
                 // already delivered.
                 let startup_keys = crate::mount::startup_dedup_keys(&startup);
 
-                // Send startup frames (sequence headers + cached GOP)
+                // Send cached sequence headers (AVC/HEVC/AAC config) before the
+            // GOP so the player can initialize its decoder immediately
+            // (previously play never emitted sequence headers at all).
+            {
+                // Copy headers out under the lock; the MutexGuard is not
+                // Send and must not live across the send().await below.
+                let cached: Vec<(u8, Bytes, Codec)> = {
+                    let headers = handle.inner.rtmp_seq_headers.lock().unwrap_or_else(
+                        std::sync::PoisonError::into_inner,
+                    );
+                    headers
+                        .iter()
+                        .filter_map(|(track_id, header)| {
+                            handle.inner.codec_by_track[*track_id as usize]
+                                .map(|codec| (*track_id, header.clone(), codec))
+                        })
+                        .collect()
+                };
+                for (track_id, header, codec) in cached {
+                    let kind = match codec {
+                        crate::media::Codec::Aac | crate::media::Codec::Pcma | crate::media::Codec::Pcmu | crate::media::Codec::Opus => crate::media::MediaKind::Audio,
+                        _ => crate::media::MediaKind::Video,
+                    };
+                    let unit = AccessUnit {
+                        track_id,
+                        codec,
+                        pts: Duration::ZERO,
+                        dts: None,
+                        rtp_timestamp: 0,
+                        is_keyframe: true,
+                        data: header,
+                    };
+                    let (msg_type, payload) = if kind == crate::media::MediaKind::Video {
+                        (MessageType::Video as u8, flv::build_video_tag(&unit, true))
+                    } else {
+                        (MessageType::Audio as u8, flv::build_audio_tag(&unit, true))
+                    };
+                    let _ = tx_clone
+                        .send(RtmpMessage {
+                            chunk_stream_id: 5,
+                            timestamp: 0,
+                            msg_type,
+                            msg_stream_id: 1,
+                            payload,
+                        })
+                        .await;
+                }
+            }
+            // Send startup frames (sequence headers + cached GOP)
                 let mut base_ts: Option<u32> = None;
                 for unit in &startup {
-                    let ts = unit.pts.as_millis() as u32;
+                    // FLV tag timestamp is the DTS (decode order); PTS goes
+                    // into the tag's composite-time offset. Using PTS for
+                    // both double-counts the offset on B-frame streams.
+                    let ts = unit.dts.unwrap_or(unit.pts).as_millis() as u32;
                     let base = *base_ts.get_or_insert(ts);
                     let rel_ts = ts.wrapping_sub(base);
 
@@ -762,7 +858,7 @@ async fn handle_command(
                                     if startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
                                         continue;
                                     }
-                                    let ts = unit.pts.as_millis() as u32;
+                                    let ts = unit.dts.unwrap_or(unit.pts).as_millis() as u32;
                                     let base = *base_ts.get_or_insert(ts);
                                     let rel_ts = ts.wrapping_sub(base);
 

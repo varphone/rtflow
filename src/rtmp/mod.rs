@@ -142,6 +142,9 @@ impl RtmpServer {
                             continue;
                         }
                     };
+                    // RTMP carries many small control messages interleaved
+                    // with media; Nagle would add up to 40ms of latency.
+                    let _ = stream.set_nodelay(true);
 
                     let permit = match semaphore.clone().try_acquire_owned() {
                         Ok(p) => p,
