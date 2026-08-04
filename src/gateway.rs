@@ -4,7 +4,7 @@
 //! to a shared [`MountRegistry`], enabling cross-protocol stream relay.
 #[cfg(feature = "http")]
 use crate::http::{HttpConfig, HttpServer};
-use crate::mount::MountRegistry;
+use crate::mount::{MountConfig, MountOptions, MountRegistry};
 #[cfg(feature = "rtmp")]
 use crate::rtmp::RtmpServer;
 #[cfg(feature = "server")]
@@ -146,6 +146,10 @@ impl Gateway {
     ///
     /// For RTSP-specific mount registration (with proxy DESCRIBE resolution),
     /// use `RtspServer::register_mount` directly.
+    ///
+    /// This delegates to the single `Mount` construction path
+    /// ([`MountRegistry::register_with`]) so gateway mounts get identical
+    /// wiring (stats, lifecycle, queue policy) to protocol-server mounts.
     pub fn register_local_mount(
         &self,
         path: Arc<str>,
@@ -154,55 +158,21 @@ impl Gateway {
         consumer_queue_capacity: usize,
         max_queued_bytes: usize,
     ) -> Result<MountHandle> {
-        use crate::identity::MountId;
-        use crate::mount::{Mount, MountConfig};
-        use std::collections::HashMap;
-        use std::sync::Mutex;
-
-        let (tx, _) = tokio::sync::broadcast::channel(consumer_queue_capacity);
-        let mount = Arc::new(Mount {
-            id: MountId::from(path.clone()),
-            config: MountConfig::Local {
-                description: description.clone(),
-            },
-            frames: tx,
-            stats: {
-                // R12: mirror frame counters into the global metrics
-                // registry (same wiring as MountRegistry::register).
-                let mut counters = crate::mount::StreamCounters::default();
-                #[cfg(feature = "metrics")]
-                if let Some(registry) = crate::metrics::registry_from_sink(&event_sink) {
-                    counters.attach_global(registry);
-                }
-                counters
-            },
-            #[cfg(feature = "server")]
-            startup_cache: Mutex::new(crate::proxy::KeyframeCache::new(
-                &description,
-                crate::proxy::StartupCacheConfig {
+        self.mounts.register_with(
+            path,
+            MountConfig::Local { description },
+            MountOptions {
+                consumer_queue_capacity: Some(consumer_queue_capacity),
+                max_queued_bytes_per_session: Some(max_queued_bytes),
+                event_sink: Some(event_sink),
+                // Gateway local streams serve from the bootstrap keyframe
+                // snapshot; the RTSP-proxy startup cache is not used.
+                startup_cache_config: Some(crate::proxy::StartupCacheConfig {
                     enabled: false,
                     ..Default::default()
-                },
-            )?),
-            bootstrap: Mutex::new(std::array::from_fn(|_| None)),
-            codec_by_track: crate::mount::codec_lookup_table(&description),
-            event_sink,
-            cancel: tokio_util::sync::CancellationToken::new(),
-            #[cfg(feature = "server")]
-            proxy_running: std::sync::atomic::AtomicBool::new(false),
-            publishers: std::sync::atomic::AtomicUsize::new(0),
-            publisher_claimed: std::sync::atomic::AtomicBool::new(false),
-            active_sessions: std::sync::atomic::AtomicUsize::new(0),
-            max_queued_bytes_per_session: max_queued_bytes,
-            announce_fmtp: Mutex::new(HashMap::new()),
-            rtmp_seq_headers: Mutex::new(HashMap::new()),
-        });
-        self.mounts.insert(path.clone(), mount.clone())?;
-        Ok(MountHandle {
-            path,
-            description,
-            inner: mount,
-        })
+                }),
+            },
+        )
     }
 
     /// Shutdown all running protocol servers.

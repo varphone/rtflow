@@ -706,6 +706,27 @@ pub struct MountRegistry {
     global: Option<Arc<crate::metrics::MetricsRegistry>>,
 }
 
+/// Per-mount tuning knobs for [`MountRegistry::register_with`].
+///
+/// All fields are optional; `None` falls back to the defaults that
+/// [`MountRegistry::register`] historically used, so existing callers keep
+/// identical behavior.
+#[derive(Default, Clone)]
+pub struct MountOptions {
+    /// Capacity of the per-mount frame broadcast channel. Applies backpressure
+    /// to publishers when every consumer is slower than the encoder.
+    pub consumer_queue_capacity: Option<usize>,
+    /// Per-consumer buffering limit in bytes; excess frames are dropped
+    /// (with Lagged recovery) instead of growing memory without bound.
+    pub max_queued_bytes_per_session: Option<usize>,
+    /// Sink for mount lifecycle/stream events; `None` → no-op sink.
+    pub event_sink: Option<Arc<dyn EventSink>>,
+    /// Startup (keyframe) cache policy for proxy mounts; `None` → enabled
+    /// with default limits.
+    #[cfg(feature = "server")]
+    pub startup_cache_config: Option<crate::proxy::StartupCacheConfig>,
+}
+
 impl MountRegistry {
     pub fn new(max_mounts: usize) -> Self {
         Self {
@@ -798,45 +819,53 @@ impl MountRegistry {
             .map(|(path, mount)| (path.clone(), mount.clone()))
     }
 
-    /// Register a new mount from a config. Returns a handle on success.
+    /// Register a new mount from a config with default options. Returns a
+    /// handle on success.
     pub fn register(&self, path: Arc<str>, config: MountConfig) -> Result<MountHandle> {
+        self.register_with(path, config, MountOptions::default())
+    }
+
+    /// Register a new mount from a config plus per-mount tuning options
+    /// (queue capacity, event sink, startup cache policy). Returns a
+    /// handle on success.
+    ///
+    /// This is the single construction path for `Mount`: protocol servers
+    /// (RTSP via `register_mount`, RTMP, SRT) and the multi-protocol
+    /// gateway all funnel through it, so every mount gets identical
+    /// wiring for stats, startup cache and lifecycle.
+    pub fn register_with(
+        &self,
+        path: Arc<str>,
+        config: MountConfig,
+        options: MountOptions,
+    ) -> Result<MountHandle> {
         let description = description_for(&config)?;
-        let (tx, _) = broadcast::channel(256);
+        let queue_capacity = options.consumer_queue_capacity.unwrap_or(256);
+        let (tx, _) = broadcast::channel(queue_capacity);
         #[cfg(feature = "server")]
-        let startup_cache =
-            match KeyframeCache::new(&description, crate::proxy::StartupCacheConfig::default()) {
-                Ok(cache) => cache,
-                Err(_) => {
-                    // Degenerate fallback: a disabled cache never fails.
-                    KeyframeCache::new(
-                        &MediaDescription {
-                            session_name: "".into(),
-                            tracks: Vec::new(),
-                            #[cfg(feature = "multicast")]
-                            connection: None,
-                        },
-                        crate::proxy::StartupCacheConfig {
-                            enabled: false,
-                            max_bytes: 0,
-                            max_frames_per_track: 0,
-                        },
-                    )
-                    .unwrap_or_else(|e| {
-                        tracing::error!(%e, "failed to construct disabled startup cache");
-                        // Unreachable in practice (disabled config validates
-                        // as Ok); construct via the public default path.
-                        KeyframeCache::new(
-                            &description,
-                            crate::proxy::StartupCacheConfig {
-                                enabled: false,
-                                max_bytes: 0,
-                                max_frames_per_track: 0,
-                            },
-                        )
-                        .expect("disabled startup cache always validates")
-                    })
-                }
-            };
+        let startup_cache = match KeyframeCache::new(
+            &description,
+            options.startup_cache_config.unwrap_or_default(),
+        ) {
+            Ok(cache) => cache,
+            Err(e) => {
+                // Degenerate fallback: a disabled cache always validates.
+                tracing::warn!(%e, "startup cache init failed; disabling");
+                KeyframeCache::new(
+                    &MediaDescription {
+                        session_name: "".into(),
+                        tracks: Vec::new(),
+                        #[cfg(feature = "multicast")]
+                        connection: None,
+                    },
+                    crate::proxy::StartupCacheConfig {
+                        enabled: false,
+                        ..Default::default()
+                    },
+                )
+                .expect("disabled startup cache always validates")
+            }
+        };
         let mount = Arc::new(Mount {
             id: MountId::from(path.clone()),
             config,
@@ -846,6 +875,12 @@ impl MountRegistry {
                 #[cfg(feature = "metrics")]
                 if let Some(global) = &self.global {
                     counters.attach_global(global.clone());
+                } else if let Some(sink) = &options.event_sink {
+                    // Gateway-style registries carry metrics through the
+                    // event sink instead of a registry-global handle.
+                    if let Some(registry) = crate::metrics::registry_from_sink(sink) {
+                        counters.attach_global(registry);
+                    }
                 }
                 counters
             },
@@ -853,14 +888,18 @@ impl MountRegistry {
             startup_cache: Mutex::new(startup_cache),
             bootstrap: Mutex::new(std::array::from_fn(|_| None)),
             codec_by_track: codec_lookup_table(&description),
-            event_sink: Arc::new(crate::observe::NoopEventSink),
+            event_sink: options
+                .event_sink
+                .unwrap_or_else(|| Arc::new(crate::observe::NoopEventSink)),
             cancel: CancellationToken::new(),
             #[cfg(feature = "server")]
             proxy_running: AtomicBool::new(false),
             publishers: AtomicUsize::new(0),
             publisher_claimed: AtomicBool::new(false),
             active_sessions: AtomicUsize::new(0),
-            max_queued_bytes_per_session: 4 * 1024 * 1024,
+            max_queued_bytes_per_session: options
+                .max_queued_bytes_per_session
+                .unwrap_or(4 * 1024 * 1024),
             announce_fmtp: Mutex::new(HashMap::new()),
             rtmp_seq_headers: Mutex::new(HashMap::new()),
         });
