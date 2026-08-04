@@ -85,7 +85,7 @@ matroska-demuxer = { version = "0.8", optional = true }
 mp4box = { version = "0.12", default-features = false, optional = true }
 thiserror = "2"
 tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util", "process", "signal", "fs"] }
-tracing = "0.1"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 url = "2.5"
 gstreamer = { version = "0.25", optional = true }
@@ -100,3 +100,19 @@ clap = { version = "4.5", features = ["derive"] }
 criterion = { version = "0.8", features = ["html_reports"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rcgen = "0.14"
+
+# ---------------------------------------------------------------------------
+# Embedded IPC release profile (see docs/embedded-resource-audit.md §3 P0-1):
+# - fat LTO + codegen-units=1: smaller & slightly faster binary
+# - panic=abort: no unwinding tables (saves ROM/RAM)
+# - strip=symbols: drop symbol table from the shipped artifact
+# - opt-level="s": size-oriented codegen; switch to 3 if CPU-bound
+#   (RTP hot path) proves slower than 5% on the target.
+# Tests always use the dev profile, so panic=abort never affects them.
+# ---------------------------------------------------------------------------
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+opt-level = "s"
