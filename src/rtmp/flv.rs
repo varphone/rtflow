@@ -300,64 +300,6 @@ fn extract_sps_pps_from_avcc_config(config: &[u8]) -> Option<Vec<Bytes>> {
     Some(params)
 }
 
-/// Convert Annex B NALUs to AVCC (length-prefixed) format.
-pub fn annexb_to_avcc(data: &[u8]) -> Bytes {
-    let mut out = BytesMut::with_capacity(data.len());
-    let nalus = split_annexb(data);
-    for nalu in nalus {
-        out.put_u32(nalu.len() as u32);
-        out.put_slice(nalu);
-    }
-    out.freeze()
-}
-
-/// Split Annex B byte stream into individual NALUs.
-pub fn split_annexb(data: &[u8]) -> Vec<&[u8]> {
-    let mut nalus = Vec::new();
-    let mut pos = 0;
-    let mut nalu_start = None;
-
-    while pos < data.len() {
-        // Look for start code (0x000001 or 0x00000001)
-        if pos + 3 <= data.len() && data[pos] == 0 && data[pos + 1] == 0 {
-            let (sc_len, found) = if data[pos + 2] == 1 {
-                (3, true)
-            } else if pos + 4 <= data.len() && data[pos + 2] == 0 && data[pos + 3] == 1 {
-                (4, true)
-            } else {
-                (0, false)
-            };
-
-            if found {
-                if let Some(start) = nalu_start {
-                    // Trim trailing zeros from previous NALU
-                    let mut end = pos;
-                    while end > start && data[end - 1] == 0 {
-                        end -= 1;
-                    }
-                    if end > start {
-                        nalus.push(&data[start..end]);
-                    }
-                }
-                pos += sc_len;
-                nalu_start = Some(pos);
-                continue;
-            }
-        }
-        pos += 1;
-    }
-
-    if let Some(start) = nalu_start
-        && start < data.len()
-    {
-        nalus.push(&data[start..]);
-    }
-
-    nalus
-}
-
-/// Build an FLV video tag body from an AccessUnit (for play output).
-/// Output is in AVCC format.
 pub fn build_video_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
     let mut buf = BytesMut::with_capacity(unit.data.len() + 16);
 
@@ -604,7 +546,7 @@ mod tests {
         avcc.put_slice(&nalu2);
 
         let annexb = avcc_to_annexb(&avcc, None);
-        let nalus = split_annexb(&annexb);
+        let nalus = crate::media::bitstream::annex_b_nals(&annexb);
         assert_eq!(nalus.len(), 2);
         assert_eq!(nalus[0], &nalu1);
         assert_eq!(nalus[1], &nalu2);

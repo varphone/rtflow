@@ -5,7 +5,7 @@
 //! All functions are pure and allocation-light; they never parse beyond
 //! what is needed for RTP packaging and SDP signaling.
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use std::sync::Arc;
 
 /// Annex-B start codes, in descending length order.
@@ -56,6 +56,27 @@ pub fn nal_type_h265(nal: &[u8]) -> Option<u8> {
         return None;
     }
     Some((nal[0] >> 1) & 0x3f)
+}
+
+/// Convert an Annex-B byte stream to AVCC (length-prefixed) NALs.
+///
+/// Trailing zero bytes of each NAL (Annex-B `trailing_zero_8bits`
+/// alignment padding) are trimmed so the length prefix matches exactly
+/// what decoders expect from FLV/MP4.
+pub fn annexb_to_avcc(data: &[u8]) -> Bytes {
+    let mut out = BytesMut::with_capacity(data.len());
+    for nalu in annex_b_nals(data) {
+        // Trim trailing zero bytes (Annex-B `trailing_zero_8bits` padding)
+        // and skip NALs that collapse to nothing (e.g. a stream ending in
+        // a bare start code).
+        let end = nalu.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+        if end == 0 {
+            continue;
+        }
+        out.put_u32(end as u32);
+        out.put_slice(&nalu[..end]);
+    }
+    out.freeze()
 }
 
 /// True when the Annex-B access unit contains an H.264 IDR slice

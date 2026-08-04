@@ -227,7 +227,10 @@ impl FlvMuxer {
 
     /// Build an AVCDecoderConfigurationRecord from Annex-B H.264 data (SPS + PPS).
     pub fn build_avc_sequence_header(annex_b_data: &Bytes) -> Option<Bytes> {
-        let nals = parse_annex_b_nals(annex_b_data);
+        let nals: Vec<Vec<u8>> = crate::media::bitstream::annex_b_nals(annex_b_data)
+            .into_iter()
+            .map(<[u8]>::to_vec)
+            .collect();
         let mut sps = None;
         let mut pps = None;
         for nal in &nals {
@@ -261,7 +264,10 @@ impl FlvMuxer {
 
     /// Build a HEVCDecoderConfigurationRecord from Annex-B H.265 data (VPS + SPS + PPS).
     pub fn build_h265_sequence_header(annex_b_data: &Bytes) -> Option<Bytes> {
-        let nals = parse_annex_b_nals(annex_b_data);
+        let nals: Vec<Vec<u8>> = crate::media::bitstream::annex_b_nals(annex_b_data)
+            .into_iter()
+            .map(<[u8]>::to_vec)
+            .collect();
         let mut vps = None;
         let mut sps = None;
         let mut pps = None;
@@ -798,9 +804,7 @@ fn annex_b_to_avcc(data: &Bytes) -> Bytes {
 }
 
 /// Locate Annex-B NAL boundaries as offset ranges into the buffer, without
-/// copying the NAL data.
-/// NAL ranges of an Annex-B payload (test helper for the reference
-/// conversion).
+/// copying the NAL data (test helper for the reference conversion).
 #[cfg(test)]
 fn annex_b_nal_ranges(data: &Bytes) -> Vec<(usize, usize)> {
     let bytes = data.as_ref();
@@ -831,39 +835,8 @@ fn annex_b_nal_ranges(data: &Bytes) -> Vec<(usize, usize)> {
     nals
 }
 
-/// Parse Annex-B byte stream into individual NAL units.
-fn parse_annex_b_nals(data: &Bytes) -> Vec<Vec<u8>> {
-    let bytes = data.as_ref();
-    let mut nals = Vec::new();
-    let mut i = 0;
-
-    while i < bytes.len() {
-        let start = find_start_code(bytes, i);
-        if start.is_none() {
-            break;
-        }
-        let nal_start = start.unwrap();
-
-        let nal_end = find_start_code(bytes, nal_start + 3).unwrap_or(bytes.len());
-
-        let nal_data_start = if nal_start + 3 < bytes.len() && bytes[nal_start + 2] == 0x01 {
-            nal_start + 3
-        } else if nal_start + 4 < bytes.len() && bytes[nal_start + 3] == 0x01 {
-            nal_start + 4
-        } else {
-            nal_start + 3
-        };
-
-        if nal_data_start < nal_end {
-            nals.push(bytes[nal_data_start..nal_end].to_vec());
-        }
-
-        i = nal_end;
-    }
-
-    nals
-}
-
+/// Locate the next Annex-B start code (00 00 01 or 00 00 00 01) at or
+/// after `start`.
 fn find_start_code(data: &[u8], start: usize) -> Option<usize> {
     let len = data.len();
     if start + 2 >= len {
