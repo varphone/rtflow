@@ -51,6 +51,11 @@ pub fn create_hls_handlers(
     let cancel = mount.cancellation_token();
     let asset_prefix: Arc<str> = Arc::from(mount.path());
 
+    // Mirror served-segment counts into the global metrics registry when
+    // the mount's event sink is a MetricsEventSink.
+    #[cfg(feature = "metrics")]
+    let metrics = crate::metrics::registry_from_sink(&mount.inner.event_sink);
+
     let ring_clone = ring.clone();
     let seg_config = SegmenterConfig {
         segment_duration: config.segment_duration,
@@ -112,6 +117,28 @@ pub fn create_hls_handlers(
         }
     });
 
+    if !is_live {
+        // HlsConfig.live=false promises a VOD playlist, but segments are
+        // still served from the sliding window ring and get evicted (404).
+        // Refuse honestly instead of advertising an unusable VOD mode.
+        tracing::warn!(
+            "HLS VOD mode (HlsConfig.live=false) is not implemented;              segments would be evicted from the sliding window.              Use live mode (default)."
+        );
+        let reject: Handler = Arc::new(|_req, mut writer| {
+            Box::pin(async move {
+                writer
+                    .write_body(
+                        501,
+                        "text/plain",
+                        b"HLS VOD mode is not implemented; use live mode",
+                    )
+                    .await?;
+                Ok(writer)
+            })
+        });
+        return (reject.clone(), reject.clone(), reject);
+    }
+
     let ring_p = ring.clone();
     let playlist_asset_prefix = asset_prefix.clone();
     let playlist_handler: Handler = Arc::new(move |_req, writer| {
@@ -124,6 +151,8 @@ pub fn create_hls_handlers(
 
     let ring_s = ring.clone();
     let segment_handler: Handler = Arc::new(move |_req, writer| {
+        #[cfg(feature = "metrics")]
+        let metrics = metrics.clone();
         let r = ring_s.clone();
         Box::pin(async move {
             let seq = _req
@@ -132,6 +161,11 @@ pub fn create_hls_handlers(
                 .next()
                 .and_then(|value| value.trim_end_matches(".m4s").parse::<u64>().ok())
                 .unwrap_or(u64::MAX);
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = &metrics {
+                use std::sync::atomic::Ordering;
+                metrics.hls_segments_served.fetch_add(1, Ordering::Relaxed);
+            }
             handler::serve_segment(_req, writer, &r, seq).await
         })
     });

@@ -73,6 +73,10 @@ pub struct SrtConfig {
     /// Optional metrics registry for protocol-level counters.
     #[cfg(feature = "metrics")]
     pub metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
+    /// Allowed stream ids for publish (SRT `streamid` parameter). Empty
+    /// means open mode (any stream id may publish); otherwise a caller
+    /// whose stream id is not listed is rejected at handshake time.
+    pub allowed_stream_ids: Vec<String>,
 }
 
 impl Default for SrtConfig {
@@ -86,6 +90,7 @@ impl Default for SrtConfig {
             keepalive_timeout: Duration::from_secs(30),
             #[cfg(feature = "metrics")]
             metrics: None,
+            allowed_stream_ids: Vec::new(),
         }
     }
 }
@@ -340,6 +345,14 @@ impl SrtServer {
         // Remove expired connections
         for peer in expired {
             warn!("SRT: connection {peer} timed out (no keepalive)");
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = &self.config.metrics
+                && let Some(conn) = connections.get(&peer)
+                && conn.mount_registered
+            {
+                use std::sync::atomic::Ordering;
+                metrics.srt_streams_active.fetch_sub(1, Ordering::Relaxed);
+            }
             if let Some(conn) = connections.get(&peer)
                 && conn.mount_registered
                 && let Some(path) = &conn.mount_path
@@ -430,6 +443,29 @@ impl SrtServer {
                         // Parse Stream ID from extension (for mount routing)
                         let stream_id = parse_stream_id(&ctrl.data);
 
+                        // Publish authorization: reject callers whose stream
+                        // id is not allowed (open mode when the list is
+                        // empty). The caller learns about the rejection via
+                        // a failed handshake.
+                        let rejected = match &stream_id {
+                            Some(actual) => {
+                                !self.config.allowed_stream_ids.is_empty()
+                                    && !self.config.allowed_stream_ids.iter().any(|allowed| {
+                                        allowed == actual
+                                            || allowed.trim_start_matches('/')
+                                                == actual.trim_start_matches('/')
+                                    })
+                            }
+                            // No stream id at all: only open mode accepts it.
+                            None => !self.config.allowed_stream_ids.is_empty(),
+                        };
+                        if rejected {
+                            warn!(
+                                "SRT: rejected stream_id {stream_id:?} from {peer} (not allowed)"
+                            );
+                            return;
+                        }
+
                         let response =
                             conclusion_response(local_socket_id, hs.initial_sequence, hs.socket_id);
                         let response_pkt =
@@ -446,6 +482,12 @@ impl SrtServer {
                             let now = Instant::now();
                             let mut tsbpd = TsbpdBuffer::new(self.config.tsbpd_delay_ms);
                             tsbpd.init(hs.initial_sequence);
+
+                            #[cfg(feature = "metrics")]
+                            if let Some(metrics) = &self.config.metrics {
+                                use std::sync::atomic::Ordering;
+                                metrics.srt_connections_total.fetch_add(1, Ordering::Relaxed);
+                            }
 
                             connections.insert(
                                 peer,
@@ -494,6 +536,13 @@ impl SrtServer {
                 info!("SRT: peer {peer} requested shutdown");
                 if let Some(conn) = connections.get_mut(&peer) {
                     conn.state = ConnState::Closing;
+                    #[cfg(feature = "metrics")]
+                    if let Some(metrics) = &self.config.metrics
+                        && conn.mount_registered
+                    {
+                        use std::sync::atomic::Ordering;
+                        metrics.srt_streams_active.fetch_sub(1, Ordering::Relaxed);
+                    }
                     if conn.mount_registered
                         && let Some(path) = conn.mount_path.clone()
                     {
@@ -586,6 +635,11 @@ impl SrtServer {
                 match self.mounts.register(mount_path.clone().into(), config) {
                     Ok(handle) => {
                         info!("SRT: registered mount {mount_path}");
+                        #[cfg(feature = "metrics")]
+                        if let Some(metrics) = &self.config.metrics {
+                            use std::sync::atomic::Ordering;
+                            metrics.srt_streams_active.fetch_add(1, Ordering::Relaxed);
+                        }
                         conn.mount_path = Some(mount_path);
                         conn.mount_registered = true;
                         conn.mount = Some(handle.inner.clone());

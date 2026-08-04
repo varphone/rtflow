@@ -70,6 +70,10 @@ pub fn create_dash_handlers(
     mount: &crate::mount::MountHandle,
 ) -> (Handler, Handler, Handler) {
     let ring = Arc::new(SegmentRing::new(config.segment_count));
+    // Mirror served-segment counts into the global metrics registry when
+    // the mount's event sink is a MetricsEventSink.
+    #[cfg(feature = "metrics")]
+    let metrics = crate::metrics::registry_from_sink(&mount.inner.event_sink);
     let dash_state = Arc::new(DashState::new());
     let mut description: MediaDescription = mount.description.clone();
     let announced_fmtp = mount.announce_fmtp();
@@ -276,6 +280,8 @@ pub fn create_dash_handlers(
     // Segment handler
     let ring_seg = ring.clone();
     let segment_handler: Handler = Arc::new(move |req, writer| {
+        #[cfg(feature = "metrics")]
+        let metrics = metrics.clone();
         let r = ring_seg.clone();
         Box::pin(async move {
             let seq = req
@@ -288,6 +294,11 @@ pub fn create_dash_handlers(
                         .and_then(|n| n.parse::<u64>().ok())
                 })
                 .unwrap_or(u64::MAX);
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = &metrics {
+                use std::sync::atomic::Ordering;
+                metrics.dash_segments_served.fetch_add(1, Ordering::Relaxed);
+            }
             handler::serve_segment(req, writer, &r, seq).await
         })
     });

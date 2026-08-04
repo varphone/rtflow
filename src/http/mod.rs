@@ -28,6 +28,9 @@ pub struct HttpConfig {
     pub max_header_bytes: usize,
     pub max_body_bytes: usize,
     pub security: SecurityConfig,
+    /// Optional global metrics registry for request counting.
+    #[cfg(feature = "metrics")]
+    pub metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
 }
 
 impl HttpConfig {
@@ -40,7 +43,16 @@ impl HttpConfig {
             max_header_bytes: 8 * 1024,
             max_body_bytes: 256 * 1024,
             security: SecurityConfig::default(),
+            #[cfg(feature = "metrics")]
+            metrics: None,
         }
+    }
+
+    /// Attach a global metrics registry (request/segment counters).
+    #[cfg(feature = "metrics")]
+    pub fn with_metrics(mut self, metrics: Arc<crate::metrics::MetricsRegistry>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 }
 
@@ -79,6 +91,8 @@ impl HttpServer {
         let router = self.router.clone();
         let cancel = self.cancel.clone();
         let security = self.config.security.clone();
+        #[cfg(feature = "metrics")]
+        let metrics = self.config.metrics.clone();
         let read_timeout = self.config.read_timeout;
         let shutdown_timeout = self.config.shutdown_timeout;
         let max_header_bytes = self.config.max_header_bytes;
@@ -94,18 +108,42 @@ impl HttpServer {
                 tokio::select! {
                     result = listener.accept() => {
                         let Ok((stream, addr)) = result else { continue; };
-                        if !security.ip_acl.permits(addr.ip())
-                            || !rate_limiter.admit(addr.ip(), std::time::Instant::now())
-                        {
+                        if !security.ip_acl.permits(addr.ip()) {
+                            continue;
+                        }
+                        if !rate_limiter.admit(addr.ip(), std::time::Instant::now()) {
+                            // Reply 429 so clients can distinguish rate
+                            // limiting from a network failure.
+                            tokio::spawn(async move {
+                                let mut writer = ResponseWriter::new(stream);
+                                let _ = writer
+                                    .write_body(429, "text/plain", b"Too Many Requests")
+                                    .await;
+                            });
                             continue;
                         }
                         let Ok(permit) = connections.clone().try_acquire_owned() else {
+                            // Connection capacity exhausted: same 429
+                            // semantics as rate limiting.
+                            tokio::spawn(async move {
+                                let mut writer = ResponseWriter::new(stream);
+                                let _ = writer
+                                    .write_body(429, "text/plain", b"Too Many Requests")
+                                    .await;
+                            });
                             continue;
                         };
                         let router = router.clone();
                         let security = security.clone();
+                        #[cfg(feature = "metrics")]
+                        let metrics = metrics.clone();
                         tasks.spawn(async move {
                             let _permit = permit;
+                            #[cfg(feature = "metrics")]
+                            if let Some(metrics) = &metrics {
+                                use std::sync::atomic::Ordering;
+                                metrics.http_requests_total.fetch_add(1, Ordering::Relaxed);
+                            }
                             if let Err(e) = handle_connection(
                                 stream, router, security, read_timeout, max_header_bytes, max_body_bytes,
                             ).await {
@@ -186,6 +224,14 @@ async fn handle_connection(
                 return Err(Error::Limit("request headers too large"));
             }
             Err(request::ParseError::Invalid) => {
+                // Reply 400 instead of dropping the connection so the
+                // client can distinguish a protocol error from a network
+                // failure.
+                if let Some(writer) = writer.as_mut() {
+                    let _ = writer
+                        .write_body(400, "text/plain", b"Bad Request")
+                        .await;
+                }
                 return Err(Error::Rtsp("invalid HTTP request".into()));
             }
         };

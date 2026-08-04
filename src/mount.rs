@@ -122,6 +122,15 @@ impl StreamCounters {
     pub fn add_rtp(&self, packets: u64, octets: u64) {
         self.rtp_packets.fetch_add(packets, Ordering::Relaxed);
         self.rtp_octets.fetch_add(octets, Ordering::Relaxed);
+        #[cfg(feature = "metrics")]
+        if let Some(global) = &self.global {
+            global
+                .rtp_packets_sent
+                .fetch_add(packets, Ordering::Relaxed);
+            global
+                .rtp_octets_sent
+                .fetch_add(octets, Ordering::Relaxed);
+        }
     }
     pub fn add_sender_reports(&self, value: u64) {
         self.rtcp_sender_reports.fetch_add(value, Ordering::Relaxed);

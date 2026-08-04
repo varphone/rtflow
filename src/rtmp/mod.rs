@@ -167,7 +167,11 @@ impl RtmpServer {
                             use std::sync::atomic::Ordering;
                             m.rtmp_connections_total.fetch_add(1, Ordering::Relaxed);
                         }
-                        if let Err(e) = serve_rtmp_session(stream, mounts, config, cancel).await {
+                        #[cfg(feature = "metrics")]
+                        let metrics_opt = metrics.clone();
+                        #[cfg(not(feature = "metrics"))]
+                        let metrics_opt = ();
+                        if let Err(e) = serve_rtmp_session(stream, mounts, config, cancel, metrics_opt).await {
                             debug!("RTMP session error from {peer}: {e}");
                         }
                     });
