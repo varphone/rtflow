@@ -162,6 +162,10 @@ async fn whip_post_returns_201_with_sdp_answer() {
 
 #[tokio::test]
 async fn whep_post_returns_201_with_sdp_answer() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("rtflow=debug,webrtc=debug")
+        .with_test_writer()
+        .try_init();
     let (addr, _mounts) = setup_server().await;
 
     let offer = sdp_offer();
