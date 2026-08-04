@@ -206,6 +206,9 @@ pub struct Depacketizer {
     current_timestamp: Option<u32>,
     expected_sequence: Option<u16>,
     damaged_timestamp: Option<u32>,
+    /// Keyframe flag accumulated while assembling the current AU (avoids a
+    /// second full-frame Annex-B scan after assembly).
+    assembled_is_keyframe: bool,
 }
 impl Depacketizer {
     pub fn new(codec: Codec, track_id: TrackId, clock_rate: u32) -> Self {
@@ -218,6 +221,7 @@ impl Depacketizer {
             current_timestamp: None,
             expected_sequence: None,
             damaged_timestamp: None,
+            assembled_is_keyframe: false,
         }
     }
     fn pts_from_timestamp(&self, rtp_ts: u32) -> std::time::Duration {
@@ -237,6 +241,7 @@ impl Depacketizer {
             let d = self.current_timestamp == Some(timestamp);
             self.assembling = None;
             self.access_unit.clear();
+            self.assembled_is_keyframe = false;
             self.current_timestamp = None;
             self.damaged_timestamp = d.then_some(timestamp);
         }
@@ -247,6 +252,7 @@ impl Depacketizer {
         if matches!(self.codec, Codec::H264 | Codec::H265) {
             if self.current_timestamp.is_some_and(|v| v != timestamp) {
                 self.access_unit.clear();
+                self.assembled_is_keyframe = false;
                 self.assembling = None;
             }
             self.current_timestamp = Some(timestamp);
@@ -255,7 +261,10 @@ impl Depacketizer {
                 Codec::H265 => self.h265(p.payload)?,
                 _ => unreachable!(),
             };
-            if let Some(nal) = nal {
+            if let Some((nal, keyframe_nal)) = nal {
+                // Keyframe classification happens inside h264/h265 while the
+                // NAL headers are already being parsed — no second scan.
+                self.assembled_is_keyframe |= keyframe_nal;
                 self.access_unit.push(nal);
             }
             if !marker || self.assembling.is_some() || self.access_unit.is_empty() {
@@ -263,18 +272,28 @@ impl Depacketizer {
             }
             if self.damaged_timestamp == Some(timestamp) {
                 self.access_unit.clear();
+                self.assembled_is_keyframe = false;
                 self.current_timestamp = None;
                 self.damaged_timestamp = None;
                 return Ok(vec![]);
             }
             let data = {
-                let mut output = BytesMut::new();
+                // Pre-size the output: NAL lengths are known, so assemble
+                // with a single allocation instead of geometric growth.
+                let total: usize = self
+                    .access_unit
+                    .iter()
+                    .map(|nal| nal.len().saturating_add(4))
+                    .sum();
+                let mut output = BytesMut::with_capacity(total);
                 for nal in self.access_unit.drain(..) {
                     output.extend_from_slice(&[0, 0, 0, 1]);
                     output.extend_from_slice(&nal);
                 }
                 output.freeze()
             };
+            let is_keyframe = self.assembled_is_keyframe;
+            self.assembled_is_keyframe = false;
             self.current_timestamp = None;
             let pts = self.pts_from_timestamp(timestamp);
             return Ok(vec![AccessUnit {
@@ -283,7 +302,7 @@ impl Depacketizer {
                 pts,
                 dts: None,
                 rtp_timestamp: timestamp,
-                is_keyframe: is_keyframe(self.codec, &data),
+                is_keyframe,
                 data,
             }]);
         }
@@ -338,7 +357,7 @@ impl Depacketizer {
             _ => unreachable!(),
         }
     }
-    fn h264(&mut self, p: Bytes) -> Result<Option<Bytes>> {
+    fn h264(&mut self, p: Bytes) -> Result<Option<(Bytes, bool)>> {
         if p.is_empty() {
             return Err(Error::Media("empty H264 RTP payload".into()));
         }
@@ -346,12 +365,14 @@ impl Depacketizer {
         if typ == 24 {
             let mut offset = 1;
             let mut output = BytesMut::new();
+            let mut keyframe = false;
             while offset + 2 <= p.len() {
                 let size = u16::from_be_bytes([p[offset], p[offset + 1]]) as usize;
                 offset += 2;
                 if size == 0 || offset + size > p.len() {
                     return Err(Error::Media("invalid H264 STAP-A".into()));
                 }
+                keyframe |= size > 0 && (p[offset] & 0x1F) == 5;
                 output.extend_from_slice(&[0, 0, 0, 1]);
                 output.extend_from_slice(&p[offset..offset + size]);
                 offset += size;
@@ -359,10 +380,12 @@ impl Depacketizer {
             if offset != p.len() {
                 return Err(Error::Media("trailing H264 STAP-A bytes".into()));
             }
-            return Ok(Some(output.freeze()));
+            return Ok(Some((output.freeze(), keyframe)));
         }
         if typ != 28 {
-            return Ok(Some(p));
+            // Single NAL: its header byte is the classification.
+            let keyframe = (p[0] & 0x1F) == 5;
+            return Ok(Some((p, keyframe)));
         }
         if p.len() < 2 {
             return Err(Error::Media("short H264 FU-A".into()));
@@ -373,8 +396,9 @@ impl Depacketizer {
             let mut b = BytesMut::with_capacity(p.len());
             b.extend_from_slice(&[(p[0] & 0xe0) | (p[1] & 0x1f)]);
             b.extend_from_slice(&p[2..]);
+            let keyframe = (p[1] & 0x1f) == 5;
             if end {
-                return Ok(Some(b.freeze()));
+                return Ok(Some((b.freeze(), keyframe)));
             }
             self.assembling = Some(b);
             return Ok(None);
@@ -385,12 +409,12 @@ impl Depacketizer {
             .ok_or_else(|| Error::Media("H264 FU continuation without start".into()))?;
         b.extend_from_slice(&p[2..]);
         if end {
-            Ok(self.assembling.take().map(BytesMut::freeze))
+            Ok(self.assembling.take().map(|b| (b.freeze(), false)))
         } else {
             Ok(None)
         }
     }
-    fn h265(&mut self, p: Bytes) -> Result<Option<Bytes>> {
+    fn h265(&mut self, p: Bytes) -> Result<Option<(Bytes, bool)>> {
         if p.len() < 2 {
             return Err(Error::Media("short H265 RTP payload".into()));
         }
@@ -398,12 +422,14 @@ impl Depacketizer {
         if typ == 48 {
             let mut offset = 2;
             let mut output = BytesMut::new();
+            let mut keyframe = false;
             while offset + 2 <= p.len() {
                 let size = u16::from_be_bytes([p[offset], p[offset + 1]]) as usize;
                 offset += 2;
                 if size < 2 || offset + size > p.len() {
                     return Err(Error::Media("invalid H265 AP".into()));
                 }
+                keyframe |= size >= 2 && matches!((p[offset] >> 1) & 0x3F, 16..=21);
                 output.extend_from_slice(&[0, 0, 0, 1]);
                 output.extend_from_slice(&p[offset..offset + size]);
                 offset += size;
@@ -411,10 +437,11 @@ impl Depacketizer {
             if offset != p.len() {
                 return Err(Error::Media("trailing H265 AP bytes".into()));
             }
-            return Ok(Some(output.freeze()));
+            return Ok(Some((output.freeze(), keyframe)));
         }
         if typ != 49 {
-            return Ok(Some(p));
+            let keyframe = matches!((p[0] >> 1) & 0x3F, 16..=21);
+            return Ok(Some((p, keyframe)));
         }
         if p.len() < 3 {
             return Err(Error::Media("short H265 FU".into()));
@@ -425,8 +452,9 @@ impl Depacketizer {
             let mut b = BytesMut::with_capacity(p.len());
             b.extend_from_slice(&[(p[0] & 0x81) | ((p[2] & 0x3f) << 1), p[1]]);
             b.extend_from_slice(&p[3..]);
+            let keyframe = matches!(p[2] & 0x3f, 16..=21);
             if end {
-                return Ok(Some(b.freeze()));
+                return Ok(Some((b.freeze(), keyframe)));
             }
             self.assembling = Some(b);
             return Ok(None);
@@ -437,26 +465,10 @@ impl Depacketizer {
             .ok_or_else(|| Error::Media("H265 FU continuation without start".into()))?;
         b.extend_from_slice(&p[3..]);
         if end {
-            Ok(self.assembling.take().map(BytesMut::freeze))
+            Ok(self.assembling.take().map(|b| (b.freeze(), false)))
         } else {
             Ok(None)
         }
-    }
-}
-fn is_keyframe(codec: Codec, data: &Bytes) -> bool {
-    let nals = annex_b_nals(data);
-    let first_bytes = if nals.is_empty() {
-        data.first().copied().into_iter().collect::<Vec<_>>()
-    } else {
-        nals.iter().filter_map(|nal| nal.first().copied()).collect()
-    };
-    match codec {
-        Codec::H264 => first_bytes.iter().any(|v| (v & 0x1f) == 5),
-        Codec::H265 => first_bytes.iter().any(|v| {
-            let t = (v >> 1) & 0x3f;
-            (16..=21).contains(&t)
-        }),
-        _ => true,
     }
 }
 #[cfg(test)]

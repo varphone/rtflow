@@ -530,7 +530,12 @@ impl NodeRuntime {
                             edge.dropped.fetch_add(1, Ordering::Relaxed);
                             self.counters.dropped.fetch_add(1, Ordering::Relaxed);
                         }
-                        Err(_) => {}
+                        // Block-with-timeout expiry is also a drop: count it
+                        // so overflow is observable under every policy.
+                        Err(_) => {
+                            edge.dropped.fetch_add(1, Ordering::Relaxed);
+                            self.counters.dropped.fetch_add(1, Ordering::Relaxed);
+                        }
                     }
                 }
             }

@@ -175,7 +175,12 @@ impl DigestNonceManager {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let expiration = self.inner.ttl;
-        replay.retain(|_, state| state.updated_at.elapsed() <= expiration);
+        // Retain is O(n) under the lock; only run it when the table has
+        // grown enough. Stale entries merely cause conservative rejections
+        // until the next sweep, which is the safe direction.
+        if replay.len() >= 1024 {
+            replay.retain(|_, state| state.updated_at.elapsed() <= expiration);
+        }
         let key = ReplayKey {
             nonce: nonce.to_owned(),
             username: username.to_owned(),
