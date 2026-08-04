@@ -178,9 +178,6 @@ pub(super) fn spawn_interleaved_sender_from(
         // frames does not slam the receiver all at once; the bounded
         // startup window (STARTUP_WINDOW) keeps this short.
         let mut startup_clock: Option<tokio::time::Instant> = None;
-        // Whether queued broadcast frames were already dropped after the
-        // snapshot replay (once, to jump to the live edge).
-        let mut startup_drained = false;
         let mut startup_base_pts = std::time::Duration::ZERO;
         let ssrc = initial_ssrc(track.id);
         let _bye = InterleavedByeGuard {
@@ -336,9 +333,6 @@ pub(super) fn spawn_udp_sender_from(
         // frames does not slam the receiver all at once; the bounded
         // startup window (STARTUP_WINDOW) keeps this short.
         let mut startup_clock: Option<tokio::time::Instant> = None;
-        // Whether queued broadcast frames were already dropped after the
-        // snapshot replay (once, to jump to the live edge).
-        let mut startup_drained = false;
         let mut startup_base_pts = std::time::Duration::ZERO;
         let ssrc = initial_ssrc(track.id);
         let _bye = ByeGuard {
