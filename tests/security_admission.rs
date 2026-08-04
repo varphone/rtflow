@@ -14,6 +14,9 @@ impl EventSink for Events {
     fn record(&self, event: &FrameworkEvent) {
         self.0.lock().unwrap().push(event.clone());
     }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 async fn connection_is_closed(address: std::net::SocketAddr) -> bool {
