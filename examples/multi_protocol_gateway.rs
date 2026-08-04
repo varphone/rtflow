@@ -2,14 +2,14 @@ mod common;
 
 use clap::Parser;
 use common::{CodecArg, init_tracing, mount_path, publisher_description};
-use rtflow::dash::{create_dash_handlers, DashConfig};
+use rtflow::dash::{DashConfig, create_dash_handlers};
 use rtflow::gateway::Gateway;
-use rtflow::hls::{create_hls_handlers, HlsConfig};
-use rtflow::http::{HttpConfig, Method};
+use rtflow::hls::{HlsConfig, create_hls_handlers};
 use rtflow::http::auth_middleware::with_token_auth_bypass;
+use rtflow::http::{HttpConfig, Method};
 use rtflow::http_flv::create_flv_handler;
 use rtflow::token_auth::{TokenConfig, generate_token};
-use rtflow::webrtc::{create_webrtc_handlers, WebRtcConfig};
+use rtflow::webrtc::{WebRtcConfig, create_webrtc_handlers};
 use rtflow::{MountConfig, ServerConfig};
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 
@@ -132,9 +132,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
     }
 
-    http_server.add_route(Method::Get, &format!("{}.m3u8", args.mount), maybe_auth!(hls_playlist)).await;
-    http_server.add_route(Method::Get, &format!("{}/init.m4s", args.mount), maybe_auth!(hls_init)).await;
-    http_server.add_route(Method::Get, &format!("{}/{{seq}}", args.mount), maybe_auth!(hls_segment)).await;
+    http_server
+        .add_route(
+            Method::Get,
+            &format!("{}.m3u8", args.mount),
+            maybe_auth!(hls_playlist),
+        )
+        .await;
+    http_server
+        .add_route(
+            Method::Get,
+            &format!("{}/init.m4s", args.mount),
+            maybe_auth!(hls_init),
+        )
+        .await;
+    http_server
+        .add_route(
+            Method::Get,
+            &format!("{}/{{seq}}", args.mount),
+            maybe_auth!(hls_segment),
+        )
+        .await;
 
     // --- HTTP routes: DASH ---
     let dash_config = DashConfig {
@@ -143,13 +161,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
     let (dash_mpd, dash_segment, dash_init) = create_dash_handlers(dash_config, &mount);
-    http_server.add_route(Method::Get, &format!("{}/manifest.mpd", args.mount), maybe_auth!(dash_mpd)).await;
-    http_server.add_route(Method::Get, &format!("{}/init.mp4", args.mount), maybe_auth!(dash_init)).await;
-    http_server.add_route(Method::Get, &format!("{}/segment_{{seq}}.m4s", args.mount), maybe_auth!(dash_segment)).await;
+    http_server
+        .add_route(
+            Method::Get,
+            &format!("{}/manifest.mpd", args.mount),
+            maybe_auth!(dash_mpd),
+        )
+        .await;
+    http_server
+        .add_route(
+            Method::Get,
+            &format!("{}/init.mp4", args.mount),
+            maybe_auth!(dash_init),
+        )
+        .await;
+    http_server
+        .add_route(
+            Method::Get,
+            &format!("{}/segment_{{seq}}.m4s", args.mount),
+            maybe_auth!(dash_segment),
+        )
+        .await;
 
     // --- HTTP routes: HTTP-FLV ---
     let flv_handler = create_flv_handler(&mount);
-    http_server.add_route(Method::Get, &format!("{}.flv", args.mount), maybe_auth!(flv_handler)).await;
+    http_server
+        .add_route(
+            Method::Get,
+            &format!("{}.flv", args.mount),
+            maybe_auth!(flv_handler),
+        )
+        .await;
 
     // --- HTTP routes: WebRTC (WHIP/WHEP) ---
     let webrtc_config = WebRtcConfig {
@@ -160,9 +202,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (whip_handler, whep_handler) = create_webrtc_handlers(webrtc_config, webrtc_mounts);
     let whip_path = format!("/whip{}", args.mount);
     let whep_path = format!("/whep{}", args.mount);
-    http_server.add_route(Method::Post, &whip_path, whip_handler.clone()).await;
-    http_server.add_route(Method::Delete, &whip_path, whip_handler).await;
-    http_server.add_route(Method::Post, &whep_path, whep_handler).await;
+    http_server
+        .add_route(Method::Post, &whip_path, whip_handler.clone())
+        .await;
+    http_server
+        .add_route(Method::Delete, &whip_path, whip_handler)
+        .await;
+    http_server
+        .add_route(Method::Post, &whep_path, whep_handler)
+        .await;
 
     // Start HTTP accept loop
     let http_server = gateway; // move gateway into http run
@@ -181,7 +229,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("║  INGEST (publish):                                      ║");
     println!("║    RTSP: {rtsp_url}");
     println!("║    RTMP: {rtmp_url}");
-    println!("║    SRT:  srt://127.0.0.1:{}?streamid={srt_streamid}", srt_addr.port());
+    println!(
+        "║    SRT:  srt://127.0.0.1:{}?streamid={srt_streamid}",
+        srt_addr.port()
+    );
     println!("║                                                         ║");
     println!("║  PLAYBACK:                                              ║");
     println!("║    RTSP:     {rtsp_url}");
@@ -196,14 +247,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("║    HLS:      http://127.0.0.1:{http_port}{hls_path}?token={hls_token}");
         println!("║    DASH:     http://127.0.0.1:{http_port}{dash_path}?token={dash_token}");
         println!("║    HTTP-FLV: http://127.0.0.1:{http_port}{flv_path}?token={flv_token}");
-        println!("║    WebRTC:   http://127.0.0.1:{http_port}/whep{}", args.mount);
+        println!(
+            "║    WebRTC:   http://127.0.0.1:{http_port}/whep{}",
+            args.mount
+        );
         println!("║                                                         ║");
         println!("║  🔒 Token auth ENABLED (TTL: {}s)", args.auth_ttl);
     } else {
-        println!("║    HLS:      http://127.0.0.1:{http_port}{}.m3u8", args.mount);
-        println!("║    DASH:     http://127.0.0.1:{http_port}{}/manifest.mpd", args.mount);
-        println!("║    HTTP-FLV: http://127.0.0.1:{http_port}{}.flv", args.mount);
-        println!("║    WebRTC:   http://127.0.0.1:{http_port}/whep{}", args.mount);
+        println!(
+            "║    HLS:      http://127.0.0.1:{http_port}{}.m3u8",
+            args.mount
+        );
+        println!(
+            "║    DASH:     http://127.0.0.1:{http_port}{}/manifest.mpd",
+            args.mount
+        );
+        println!(
+            "║    HTTP-FLV: http://127.0.0.1:{http_port}{}.flv",
+            args.mount
+        );
+        println!(
+            "║    WebRTC:   http://127.0.0.1:{http_port}/whep{}",
+            args.mount
+        );
     }
     println!("║                                                         ║");
     println!("╚══════════════════════════════════════════════════════════╝");

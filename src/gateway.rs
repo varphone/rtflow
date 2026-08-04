@@ -2,16 +2,16 @@
 //!
 //! The [`Gateway`] binds multiple protocol servers (RTSP, HTTP, RTMP, SRT, etc.)
 //! to a shared [`MountRegistry`], enabling cross-protocol stream relay.
-use crate::mount::MountRegistry;
-use crate::{Result, mount::MountHandle};
 #[cfg(feature = "http")]
 use crate::http::{HttpConfig, HttpServer};
+use crate::mount::MountRegistry;
 #[cfg(feature = "rtmp")]
 use crate::rtmp::RtmpServer;
 #[cfg(feature = "server")]
 use crate::server::{RtspServer, ServerConfig};
 #[cfg(feature = "srt")]
 use crate::srt::SrtServer;
+use crate::{Result, mount::MountHandle};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -28,8 +28,12 @@ pub struct Gateway {
     http: Option<HttpServer>,
     #[cfg(feature = "rtmp")]
     rtmp_cancel: Option<CancellationToken>,
+    #[cfg(feature = "rtmp")]
+    rtmp_task: Option<tokio::task::JoinHandle<crate::Result<()>>>,
     #[cfg(feature = "srt")]
     srt_cancel: Option<CancellationToken>,
+    #[cfg(feature = "srt")]
+    srt_task: Option<tokio::task::JoinHandle<crate::Result<()>>>,
 }
 
 impl Gateway {
@@ -43,8 +47,12 @@ impl Gateway {
             http: None,
             #[cfg(feature = "rtmp")]
             rtmp_cancel: None,
+            #[cfg(feature = "rtmp")]
+            rtmp_task: None,
             #[cfg(feature = "srt")]
             srt_cancel: None,
+            #[cfg(feature = "srt")]
+            srt_task: None,
         }
     }
 
@@ -72,31 +80,52 @@ impl Gateway {
 
     /// Start an RTMP server sharing this gateway's mount registry.
     #[cfg(feature = "rtmp")]
-    pub async fn start_rtmp(&mut self, addr: impl tokio::net::ToSocketAddrs) -> Result<std::net::SocketAddr> {
+    pub async fn start_rtmp(
+        &mut self,
+        addr: impl tokio::net::ToSocketAddrs,
+    ) -> Result<std::net::SocketAddr> {
         let server = RtmpServer::bind(addr, self.mounts.clone()).await?;
-        let local = server.local_addr().map_err(|e| crate::Error::Rtmp(e.to_string()))?;
+        let local = server
+            .local_addr()
+            .map_err(|e| crate::Error::Rtmp(e.to_string()))?;
         self.rtmp_cancel = Some(server.cancellation_token());
-        tokio::spawn(server.run());
+        // Keep the task handle so shutdown can await it and so a
+        // panicked/errored accept loop is observable instead of silent.
+        self.rtmp_task = Some(tokio::spawn(server.run()));
         Ok(local)
     }
 
     /// Start an RTMP server with full configuration.
     #[cfg(feature = "rtmp")]
-    pub async fn start_rtmp_with_config(&mut self, config: crate::rtmp::RtmpConfig) -> Result<std::net::SocketAddr> {
+    pub async fn start_rtmp_with_config(
+        &mut self,
+        config: crate::rtmp::RtmpConfig,
+    ) -> Result<std::net::SocketAddr> {
         let server = RtmpServer::with_config(config, self.mounts.clone()).await?;
-        let local = server.local_addr().map_err(|e| crate::Error::Rtmp(e.to_string()))?;
+        let local = server
+            .local_addr()
+            .map_err(|e| crate::Error::Rtmp(e.to_string()))?;
         self.rtmp_cancel = Some(server.cancellation_token());
-        tokio::spawn(server.run());
+        // Keep the task handle so shutdown can await it and so a
+        // panicked/errored accept loop is observable instead of silent.
+        self.rtmp_task = Some(tokio::spawn(server.run()));
         Ok(local)
     }
 
     /// Start an SRT server sharing this gateway's mount registry.
     #[cfg(feature = "srt")]
-    pub async fn start_srt(&mut self, addr: impl tokio::net::ToSocketAddrs) -> Result<std::net::SocketAddr> {
+    pub async fn start_srt(
+        &mut self,
+        addr: impl tokio::net::ToSocketAddrs,
+    ) -> Result<std::net::SocketAddr> {
         let server = SrtServer::bind(addr, self.mounts.clone()).await?;
-        let local = server.local_addr().map_err(|e| crate::Error::Srt(e.to_string()))?;
+        let local = server
+            .local_addr()
+            .map_err(|e| crate::Error::Srt(e.to_string()))?;
         self.srt_cancel = Some(server.cancellation_token());
-        tokio::spawn(server.run());
+        // Keep the task handle so shutdown can await it and so a
+        // panicked/errored accept loop is observable instead of silent.
+        self.srt_task = Some(tokio::spawn(server.run()));
         Ok(local)
     }
 
@@ -145,7 +174,8 @@ impl Gateway {
                     ..Default::default()
                 },
             )?),
-            bootstrap: Mutex::new(HashMap::new()),
+            bootstrap: Mutex::new(std::array::from_fn(|_| None)),
+            codec_by_track: crate::mount::codec_lookup_table(&description),
             event_sink,
             cancel: tokio_util::sync::CancellationToken::new(),
             #[cfg(feature = "server")]
@@ -172,6 +202,14 @@ impl Gateway {
         #[cfg(feature = "srt")]
         if let Some(cancel) = self.srt_cancel.take() {
             cancel.cancel();
+        }
+        #[cfg(feature = "rtmp")]
+        if let Some(task) = self.rtmp_task.take() {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), task).await;
+        }
+        #[cfg(feature = "srt")]
+        if let Some(task) = self.srt_task.take() {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), task).await;
         }
         #[cfg(feature = "server")]
         if let Some(rtsp) = self.rtsp.take() {
