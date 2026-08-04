@@ -25,6 +25,12 @@ pub struct DashState {
     video_dimensions: std::sync::OnceLock<(u16, u16)>,
 }
 
+impl Default for DashState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DashState {
     pub fn new() -> Self {
         Self {
@@ -178,14 +184,14 @@ pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
     let etag = format!("\"init-{}\"", simple_hash(&init));
 
     // Check If-None-Match
-    if let Some(inm) = req.header("if-none-match") {
-        if inm == etag {
-            writer
-                .write_headers(304, &[("ETag", etag.as_str())])
-                .await?;
-            writer.flush().await?;
-            return Ok(writer);
-        }
+    if let Some(inm) = req.header("if-none-match")
+        && inm == etag
+    {
+        writer
+            .write_headers(304, &[("ETag", etag.as_str())])
+            .await?;
+        writer.flush().await?;
+        return Ok(writer);
     }
 
     let content_length = init.len().to_string();
@@ -225,14 +231,14 @@ pub async fn serve_segment<W: AsyncWrite + Unpin>(
     let etag = format!("\"seg-{sequence}\"");
 
     // Check If-None-Match
-    if let Some(inm) = req.header("if-none-match") {
-        if inm == etag {
-            writer
-                .write_headers(304, &[("ETag", etag.as_str())])
-                .await?;
-            writer.flush().await?;
-            return Ok(writer);
-        }
+    if let Some(inm) = req.header("if-none-match")
+        && inm == etag
+    {
+        writer
+            .write_headers(304, &[("ETag", etag.as_str())])
+            .await?;
+        writer.flush().await?;
+        return Ok(writer);
     }
 
     let content_length = segment.data.len().to_string();

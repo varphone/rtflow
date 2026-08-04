@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn roundtrip_number() {
         let val = AmfValue::Number(42.5);
-        let encoded = encode_values(&[val.clone()]);
+        let encoded = encode_values(std::slice::from_ref(&val));
         let decoded = decode_values(&encoded).unwrap();
         assert_eq!(decoded, vec![val]);
     }
@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn roundtrip_string() {
         let val = AmfValue::Str("connect".to_string());
-        let encoded = encode_values(&[val.clone()]);
+        let encoded = encode_values(std::slice::from_ref(&val));
         let decoded = decode_values(&encoded).unwrap();
         assert_eq!(decoded, vec![val]);
     }
@@ -294,7 +294,7 @@ mod tests {
                 AmfValue::Str("rtmp://localhost/live".to_string()),
             ),
         ]);
-        let encoded = encode_values(&[val.clone()]);
+        let encoded = encode_values(std::slice::from_ref(&val));
         let decoded = decode_values(&encoded).unwrap();
         assert_eq!(decoded, vec![val]);
     }
@@ -331,7 +331,7 @@ mod tests {
             ("height".to_string(), AmfValue::Number(1080.0)),
             ("framerate".to_string(), AmfValue::Number(30.0)),
         ]);
-        let encoded = encode_values(&[val.clone()]);
+        let encoded = encode_values(std::slice::from_ref(&val));
         let decoded = decode_values(&encoded).unwrap();
         assert_eq!(decoded, vec![val]);
     }

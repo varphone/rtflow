@@ -68,7 +68,7 @@ impl PublishAuthenticator for StreamKeyAuthenticator {
             return true; // Open mode
         }
         let key = format!("{app}/{stream_name}");
-        self.allowed_keys.iter().any(|k| *k == key)
+        self.allowed_keys.contains(&key)
     }
 }
 
@@ -97,6 +97,11 @@ impl Default for RtmpSessionConfig {
 }
 
 /// Session state.
+///
+/// Fields not read yet belong to the experimental RTMP session machine
+/// (publish/play wiring is partially implemented); kept so the shape is
+/// complete for the remaining work.
+#[allow(dead_code)]
 enum SessionState {
     /// Waiting for connect command.
     Init,
@@ -338,71 +343,66 @@ pub async fn serve_rtmp_session(
                         base_timestamp,
                         ..
                     } = &mut state
+                        && let Some(video_data) = flv::parse_video_tag(&msg.payload)
                     {
-                        if let Some(video_data) = flv::parse_video_tag(&msg.payload) {
-                            match video_data {
-                                VideoData::AvcSequenceHeader(data) => {
-                                    *video_seq_header = Some(data.clone());
-                                    if let Ok(mut headers) =
-                                        mount_handle.inner.rtmp_seq_headers.lock()
-                                    {
-                                        headers.insert(0, data);
-                                    }
-                                    *video_codec = Some(Codec::H264);
-                                    *has_video = true;
+                        match video_data {
+                            VideoData::AvcSequenceHeader(data) => {
+                                *video_seq_header = Some(data.clone());
+                                if let Ok(mut headers) = mount_handle.inner.rtmp_seq_headers.lock()
+                                {
+                                    headers.insert(0, data);
                                 }
-                                VideoData::HevcSequenceHeader(data) => {
-                                    *video_seq_header = Some(data.clone());
-                                    if let Ok(mut headers) =
-                                        mount_handle.inner.rtmp_seq_headers.lock()
-                                    {
-                                        headers.insert(0, data);
-                                    }
-                                    *video_codec = Some(Codec::H265);
-                                    *has_video = true;
+                                *video_codec = Some(Codec::H264);
+                                *has_video = true;
+                            }
+                            VideoData::HevcSequenceHeader(data) => {
+                                *video_seq_header = Some(data.clone());
+                                if let Ok(mut headers) = mount_handle.inner.rtmp_seq_headers.lock()
+                                {
+                                    headers.insert(0, data);
                                 }
-                                VideoData::AvcNalu {
-                                    data,
-                                    is_keyframe,
-                                    composition_time,
-                                } => {
-                                    let base = *base_timestamp.get_or_insert(msg.timestamp);
-                                    let ts_ms = msg.timestamp.wrapping_sub(base);
-                                    let pts_ms =
-                                        (ts_ms as i64 + composition_time as i64).max(0) as u32;
+                                *video_codec = Some(Codec::H265);
+                                *has_video = true;
+                            }
+                            VideoData::AvcNalu {
+                                data,
+                                is_keyframe,
+                                composition_time,
+                            } => {
+                                let base = *base_timestamp.get_or_insert(msg.timestamp);
+                                let ts_ms = msg.timestamp.wrapping_sub(base);
+                                let pts_ms = (ts_ms as i64 + composition_time as i64).max(0) as u32;
 
-                                    let unit = AccessUnit {
-                                        track_id: 0,
-                                        codec: Codec::H264,
-                                        pts: Duration::from_millis(pts_ms as u64),
-                                        dts: Some(Duration::from_millis(ts_ms as u64)),
-                                        rtp_timestamp: ts_ms.wrapping_mul(90),
-                                        is_keyframe,
-                                        data,
-                                    };
-                                    let _ = publisher.push(unit);
-                                }
-                                VideoData::HevcNalu {
-                                    data,
+                                let unit = AccessUnit {
+                                    track_id: 0,
+                                    codec: Codec::H264,
+                                    pts: Duration::from_millis(pts_ms as u64),
+                                    dts: Some(Duration::from_millis(ts_ms as u64)),
+                                    rtp_timestamp: ts_ms.wrapping_mul(90),
                                     is_keyframe,
-                                    composition_time,
-                                } => {
-                                    let base = *base_timestamp.get_or_insert(msg.timestamp);
-                                    let ts_ms = msg.timestamp.wrapping_sub(base);
-                                    let pts_ms =
-                                        (ts_ms as i64 + composition_time as i64).max(0) as u32;
+                                    data,
+                                };
+                                let _ = publisher.push(unit);
+                            }
+                            VideoData::HevcNalu {
+                                data,
+                                is_keyframe,
+                                composition_time,
+                            } => {
+                                let base = *base_timestamp.get_or_insert(msg.timestamp);
+                                let ts_ms = msg.timestamp.wrapping_sub(base);
+                                let pts_ms = (ts_ms as i64 + composition_time as i64).max(0) as u32;
 
-                                    let unit = AccessUnit {
-                                        track_id: 0,
-                                        codec: Codec::H265,
-                                        pts: Duration::from_millis(pts_ms as u64),
-                                        dts: Some(Duration::from_millis(ts_ms as u64)),
-                                        rtp_timestamp: ts_ms.wrapping_mul(90),
-                                        is_keyframe,
-                                        data,
-                                    };
-                                    let _ = publisher.push(unit);
-                                }
+                                let unit = AccessUnit {
+                                    track_id: 0,
+                                    codec: Codec::H265,
+                                    pts: Duration::from_millis(pts_ms as u64),
+                                    dts: Some(Duration::from_millis(ts_ms as u64)),
+                                    rtp_timestamp: ts_ms.wrapping_mul(90),
+                                    is_keyframe,
+                                    data,
+                                };
+                                let _ = publisher.push(unit);
                             }
                         }
                     }
@@ -417,38 +417,36 @@ pub async fn serve_rtmp_session(
                         base_timestamp,
                         ..
                     } = &mut state
+                        && let Some(audio_data) = flv::parse_audio_tag(&msg.payload)
                     {
-                        if let Some(audio_data) = flv::parse_audio_tag(&msg.payload) {
-                            match audio_data {
-                                AudioData::AacSequenceHeader(data) => {
-                                    *audio_seq_header = Some(data.clone());
-                                    let track_id: u8 = if *has_video { 1 } else { 0 };
-                                    if let Ok(mut headers) =
-                                        mount_handle.inner.rtmp_seq_headers.lock()
-                                    {
-                                        headers.insert(track_id, data);
-                                    }
-                                    *has_audio = true;
+                        match audio_data {
+                            AudioData::AacSequenceHeader(data) => {
+                                *audio_seq_header = Some(data.clone());
+                                let track_id: u8 = if *has_video { 1 } else { 0 };
+                                if let Ok(mut headers) = mount_handle.inner.rtmp_seq_headers.lock()
+                                {
+                                    headers.insert(track_id, data);
                                 }
-                                AudioData::AacRaw(data) => {
-                                    let base = *base_timestamp.get_or_insert(msg.timestamp);
-                                    let ts_ms = msg.timestamp.wrapping_sub(base);
-                                    let track_id: u8 = if *has_video { 1 } else { 0 };
+                                *has_audio = true;
+                            }
+                            AudioData::AacRaw(data) => {
+                                let base = *base_timestamp.get_or_insert(msg.timestamp);
+                                let ts_ms = msg.timestamp.wrapping_sub(base);
+                                let track_id: u8 = if *has_video { 1 } else { 0 };
 
-                                    let unit = AccessUnit {
-                                        track_id,
-                                        codec: Codec::Aac,
-                                        pts: Duration::from_millis(ts_ms as u64),
-                                        dts: None,
-                                        // 44.1/48/32kHz from ms: use 64-bit
-                                        // intermediate so 44100/1000 is not
-                                        // truncated to an integer ×44.
-                                        rtp_timestamp: ((ts_ms as u64 * 44100) / 1000) as u32,
-                                        is_keyframe: true,
-                                        data,
-                                    };
-                                    let _ = publisher.push(unit);
-                                }
+                                let unit = AccessUnit {
+                                    track_id,
+                                    codec: Codec::Aac,
+                                    pts: Duration::from_millis(ts_ms as u64),
+                                    dts: None,
+                                    // 44.1/48/32kHz from ms: use 64-bit
+                                    // intermediate so 44100/1000 is not
+                                    // truncated to an integer ×44.
+                                    rtp_timestamp: ((ts_ms as u64 * 44100) / 1000) as u32,
+                                    is_keyframe: true,
+                                    data,
+                                };
+                                let _ = publisher.push(unit);
                             }
                         }
                     }
@@ -585,22 +583,22 @@ async fn handle_command(
             };
 
             // Authenticate publish request
-            if let Some(ref auth) = config.authenticator {
-                if !auth.authorize_publish(&app, stream_name) {
-                    warn!("RTMP: publish denied for /{app}/{stream_name}");
-                    let error_payload = command::error_response(
-                        *transaction_id,
-                        "NetStream.Publish.Denied",
-                        "Authentication failed: publish not authorized.",
-                    );
-                    return Some(vec![RtmpMessage {
-                        chunk_stream_id: 5,
-                        timestamp: 0,
-                        msg_type: MessageType::CommandAmf0 as u8,
-                        msg_stream_id: 1,
-                        payload: error_payload,
-                    }]);
-                }
+            if let Some(ref auth) = config.authenticator
+                && !auth.authorize_publish(&app, stream_name)
+            {
+                warn!("RTMP: publish denied for /{app}/{stream_name}");
+                let error_payload = command::error_response(
+                    *transaction_id,
+                    "NetStream.Publish.Denied",
+                    "Authentication failed: publish not authorized.",
+                );
+                return Some(vec![RtmpMessage {
+                    chunk_stream_id: 5,
+                    timestamp: 0,
+                    msg_type: MessageType::CommandAmf0 as u8,
+                    msg_stream_id: 1,
+                    payload: error_payload,
+                }]);
             }
 
             let mount_path = format!("/{app}/{stream_name}");
@@ -727,22 +725,22 @@ async fn handle_command(
             info!("RTMP: play {mount_path}");
 
             // Authenticate play (same policy as publish by default)
-            if let Some(ref auth) = config.authenticator {
-                if !auth.authorize_play(&app, stream_name) {
-                    warn!("RTMP: play denied for /{app}/{stream_name}");
-                    let error_payload = command::error_response(
-                        *transaction_id,
-                        "NetStream.Play.Denied",
-                        "Authentication failed: play not authorized.",
-                    );
-                    return Some(vec![RtmpMessage {
-                        chunk_stream_id: 5,
-                        timestamp: 0,
-                        msg_type: MessageType::CommandAmf0 as u8,
-                        msg_stream_id: 1,
-                        payload: error_payload,
-                    }]);
-                }
+            if let Some(ref auth) = config.authenticator
+                && !auth.authorize_play(&app, stream_name)
+            {
+                warn!("RTMP: play denied for /{app}/{stream_name}");
+                let error_payload = command::error_response(
+                    *transaction_id,
+                    "NetStream.Play.Denied",
+                    "Authentication failed: play not authorized.",
+                );
+                return Some(vec![RtmpMessage {
+                    chunk_stream_id: 5,
+                    timestamp: 0,
+                    msg_type: MessageType::CommandAmf0 as u8,
+                    msg_stream_id: 1,
+                    payload: error_payload,
+                }]);
             }
 
             let mount_handle = match mounts.get_handle(&mount_path) {

@@ -124,10 +124,10 @@ impl WebRtcSdpAttributes {
                 attrs.setup = Some(value.to_string());
             } else if line == "a=rtcp-mux" {
                 attrs.rtcp_mux = true;
-            } else if let Some(value) = line.strip_prefix("a=candidate:") {
-                if let Some(candidate) = IceCandidate::from_sdp(value) {
-                    attrs.candidates.push(candidate);
-                }
+            } else if let Some(value) = line.strip_prefix("a=candidate:")
+                && let Some(candidate) = IceCandidate::from_sdp(value)
+            {
+                attrs.candidates.push(candidate);
             }
         }
 

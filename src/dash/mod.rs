@@ -190,21 +190,22 @@ pub fn create_dash_handlers(
             let mut unit = unit;
             // Detect publisher reconnection: large backward PTS jump means a new
             // timestamp epoch.  Reset normalization base and DASH timeline state.
-            if let Some(base) = base_pts {
-                if unit.pts < base && base - unit.pts > Duration::from_secs(5) {
-                    tracing::info!(
-                        old_base_ms = base.as_millis() as u64,
-                        new_pts_ms = unit.pts.as_millis() as u64,
-                        "DASH timestamp discontinuity detected (publisher reconnect?), resetting"
-                    );
-                    base_pts = None;
-                    state_clone.reset_timeline();
-                    segmenter.reset_after_discontinuity();
-                    awaiting_keyframe = has_video;
-                    // Skip non-keyframe data until we get a clean starting point
-                    if has_video && !unit.is_keyframe {
-                        continue;
-                    }
+            if let Some(base) = base_pts
+                && unit.pts < base
+                && base - unit.pts > Duration::from_secs(5)
+            {
+                tracing::info!(
+                    old_base_ms = base.as_millis() as u64,
+                    new_pts_ms = unit.pts.as_millis() as u64,
+                    "DASH timestamp discontinuity detected (publisher reconnect?), resetting"
+                );
+                base_pts = None;
+                state_clone.reset_timeline();
+                segmenter.reset_after_discontinuity();
+                awaiting_keyframe = has_video;
+                // Skip non-keyframe data until we get a clean starting point
+                if has_video && !unit.is_keyframe {
+                    continue;
                 }
             }
             let base = *base_pts.get_or_insert(unit.pts);

@@ -41,6 +41,7 @@ impl Default for MpdConfig {
 ///
 /// Uses `SegmentTimeline` to explicitly enumerate available segments, which is
 /// the most reliable approach for a sliding-window live server.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_mpd(
     segments: &[Segment],
     description: &MediaDescription,
@@ -75,6 +76,8 @@ fn query_suffix(_asset_prefix: &str, query: &str) -> String {
     }
 }
 
+/// Query-suffixed variant of [`generate_mpd`] (e.g. `?token=...`).
+#[allow(clippy::too_many_arguments)]
 pub fn generate_mpd_q(
     segments: &[Segment],
     description: &MediaDescription,
@@ -206,8 +209,8 @@ pub fn generate_mpd_q(
             .map(|(w, h)| (w as u32, h as u32))
             .unwrap_or_else(|| {
                 (
-                    video_track.width.unwrap_or(1920) as u32,
-                    video_track.height.unwrap_or(1080) as u32,
+                    video_track.width.unwrap_or(1920),
+                    video_track.height.unwrap_or(1080),
                 )
             });
         let frame_rate = video_track

@@ -89,6 +89,12 @@ pub struct Dechunker {
     overflowed: bool,
 }
 
+impl Default for Dechunker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Dechunker {
     pub fn new() -> Self {
         Self {
@@ -336,12 +342,21 @@ impl Dechunker {
 #[derive(Debug)]
 enum ChunkError {
     NeedMoreData,
+    // Protocol-level failure (experimental RTMP; kept for the state
+    // machine shape even though no path constructs it yet).
+    #[allow(dead_code)]
     Protocol,
 }
 
 /// Chunker: splits messages into chunks for sending.
 pub struct Chunker {
     chunk_size: u32,
+}
+
+impl Default for Chunker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Chunker {
@@ -412,7 +427,7 @@ impl Chunker {
             out.put_u8(((csid >> 8) & 0xFF) as u8);
         } else if csid >= 64 {
             // 2-byte form
-            out.put_u8((fmt << 6) | 0);
+            out.put_u8(fmt << 6);
             out.put_u8((csid - 64) as u8);
         } else {
             out.put_u8((fmt << 6) | (csid as u8));

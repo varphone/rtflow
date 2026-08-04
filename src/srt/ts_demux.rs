@@ -224,29 +224,29 @@ impl TsStreamDemuxer {
                 _ => None,
             };
 
-            if let Some(codec) = codec {
-                if !self.tracks.contains_key(&elementary_pid) {
-                    let track_id = self.next_track_id;
-                    self.next_track_id += 1;
+            if let Some(codec) = codec
+                && !self.tracks.contains_key(&elementary_pid)
+            {
+                let track_id = self.next_track_id;
+                self.next_track_id += 1;
 
-                    let (clock_rate, channels) = match codec {
-                        Codec::H264 | Codec::H265 => (90000, None),
-                        Codec::Aac => (44100, Some(2)),
-                        _ => (90000, None),
-                    };
+                let (clock_rate, channels) = match codec {
+                    Codec::H264 | Codec::H265 => (90000, None),
+                    Codec::Aac => (44100, Some(2)),
+                    _ => (90000, None),
+                };
 
-                    self.tracks.insert(
-                        elementary_pid,
-                        TrackInfo {
-                            track_id,
-                            codec,
-                            clock_rate,
-                            channels,
-                            last_pts: None,
-                            last_dts: None,
-                        },
-                    );
-                }
+                self.tracks.insert(
+                    elementary_pid,
+                    TrackInfo {
+                        track_id,
+                        codec,
+                        clock_rate,
+                        channels,
+                        last_pts: None,
+                        last_dts: None,
+                    },
+                );
             }
 
             pos += 5 + es_info_length;

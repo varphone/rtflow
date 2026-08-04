@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn session_id_generation() {
         let id1 = generate_session_id();
-        let id2 = generate_session_id();
+        let _id2 = generate_session_id();
         assert_eq!(id1.len(), 16);
         // IDs should be different (unless called in same nanosecond)
         // Just check format

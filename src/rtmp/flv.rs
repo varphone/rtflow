@@ -19,12 +19,18 @@ const ENHANCED_RTMP_FLAG: u8 = 0x80;
 /// Enhanced RTMP packet types (bits 3-0 when enhanced flag is set)
 const ENHANCED_PACKET_SEQUENCE_START: u8 = 0;
 const ENHANCED_PACKET_CODED_FRAMES: u8 = 1;
+// Sequence-end packet type documented for completeness; not emitted yet.
+#[allow(dead_code)]
 const ENHANCED_PACKET_SEQUENCE_END: u8 = 2;
 const ENHANCED_PACKET_CODED_FRAMES_X: u8 = 3; // no composition time
 
 /// Enhanced RTMP FourCC codes
 const FOURCC_HEVC: &[u8; 4] = b"hvc1";
+// AV1/VP9 FourCCs documented for the enhanced-RTMP mapping; HEVC is the
+// only codec actually muxed today.
+#[allow(dead_code)]
 const FOURCC_AV1: &[u8; 4] = b"av01";
+#[allow(dead_code)]
 const FOURCC_VP9: &[u8; 4] = b"vp09";
 
 /// FLV audio codec IDs
@@ -216,12 +222,12 @@ pub fn avcc_to_annexb(data: &[u8], sps_pps: Option<&[u8]>) -> Bytes {
     let start_code = [0x00, 0x00, 0x00, 0x01];
 
     // If we have SPS/PPS from sequence header, prepend them for keyframes
-    if let Some(config) = sps_pps {
-        if let Some(params) = extract_sps_pps_from_avcc_config(config) {
-            for param in &params {
-                out.put_slice(&start_code);
-                out.put_slice(param);
-            }
+    if let Some(config) = sps_pps
+        && let Some(params) = extract_sps_pps_from_avcc_config(config)
+    {
+        for param in &params {
+            out.put_slice(&start_code);
+            out.put_slice(param);
         }
     }
 
@@ -338,10 +344,10 @@ pub fn split_annexb(data: &[u8]) -> Vec<&[u8]> {
         pos += 1;
     }
 
-    if let Some(start) = nalu_start {
-        if start < data.len() {
-            nalus.push(&data[start..]);
-        }
+    if let Some(start) = nalu_start
+        && start < data.len()
+    {
+        nalus.push(&data[start..]);
     }
 
     nalus
@@ -408,18 +414,15 @@ pub fn build_video_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
 pub fn build_audio_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
     let mut buf = BytesMut::with_capacity(unit.data.len() + 8);
 
-    match unit.codec {
-        Codec::Aac => {
-            // Sound format AAC (10), rate 44kHz (3), 16-bit (1), stereo (1)
-            buf.put_u8((FLV_AUDIO_AAC << 4) | 0x0F);
-            if is_sequence_header {
-                buf.put_u8(AAC_SEQUENCE_HEADER);
-            } else {
-                buf.put_u8(AAC_RAW);
-            }
-            buf.put_slice(&unit.data);
+    if unit.codec == Codec::Aac {
+        // Sound format AAC (10), rate 44kHz (3), 16-bit (1), stereo (1)
+        buf.put_u8((FLV_AUDIO_AAC << 4) | 0x0F);
+        if is_sequence_header {
+            buf.put_u8(AAC_SEQUENCE_HEADER);
+        } else {
+            buf.put_u8(AAC_RAW);
         }
-        _ => {}
+        buf.put_slice(&unit.data);
     }
 
     buf.freeze()
@@ -513,7 +516,7 @@ pub fn tracks_from_rtmp(
                 format!(
                     "profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config={:02x}{:02x}",
                     audio_config.map(|c| c[0]).unwrap_or(0x12),
-                    audio_config.map(|c| c.get(1).copied()).flatten().unwrap_or(0x10),
+                    audio_config.and_then(|c| c.get(1).copied()).unwrap_or(0x10),
                 )
                 .into(),
             ),

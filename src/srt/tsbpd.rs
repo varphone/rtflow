@@ -196,13 +196,8 @@ impl TsbpdBuffer {
         let now = Instant::now();
         let mut ready = Vec::new();
 
-        loop {
-            // Find the smallest sequence in the buffer
-            let (&seq, packet) = match self.buffer.iter().next() {
-                Some(entry) => entry,
-                None => break,
-            };
-
+        // Find the smallest sequence in the buffer.
+        while let Some((&seq, packet)) = self.buffer.iter().next() {
             if seq == self.next_deliver_seq {
                 // In-order: release once the sender-clock delivery time is
                 // reached (this absorbs network jitter).
