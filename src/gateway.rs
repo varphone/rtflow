@@ -166,7 +166,16 @@ impl Gateway {
                 description: description.clone(),
             },
             frames: tx,
-            stats: crate::mount::StreamCounters::default(),
+            stats: {
+                // R12: mirror frame counters into the global metrics
+                // registry (same wiring as MountRegistry::register).
+                let mut counters = crate::mount::StreamCounters::default();
+                #[cfg(feature = "metrics")]
+                if let Some(registry) = crate::metrics::registry_from_sink(&event_sink) {
+                    counters.attach_global(registry);
+                }
+                counters
+            },
             #[cfg(feature = "server")]
             startup_cache: Mutex::new(crate::proxy::KeyframeCache::new(
                 &description,

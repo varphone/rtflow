@@ -81,6 +81,9 @@ pub struct RtmpSessionConfig {
     pub chunk_size: u32,
     /// Window acknowledgement size.
     pub window_ack_size: u32,
+    /// Per-write deadline for the playback path (R21): a frozen peer
+    /// must not pin the writer task forever.
+    pub write_timeout: Duration,
     /// Optional publish authenticator. If `None`, all publishes are allowed.
     pub authenticator: Option<Arc<dyn PublishAuthenticator>>,
 }
@@ -91,6 +94,7 @@ impl Default for RtmpSessionConfig {
             default_app: "live".to_string(),
             chunk_size: 4096,
             window_ack_size: 2_500_000,
+            write_timeout: Duration::from_secs(30),
             authenticator: None,
         }
     }
@@ -198,8 +202,14 @@ pub async fn serve_rtmp_session(
                 msg = rx.recv() => {
                     let Some(msg) = msg else { break };
                     chunker.encode_into(&msg, &mut out);
-                    if write_stream.write_all(&out).await.is_err() {
-                        break;
+                    let write_result = tokio::time::timeout(
+                        config.write_timeout,
+                        write_stream.write_all(&out),
+                    )
+                    .await;
+                    match write_result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(_)) | Err(_) => break,
                     }
                     let _ = write_stream.flush().await;
                 }

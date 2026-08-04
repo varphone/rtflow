@@ -343,7 +343,17 @@ impl RtspServer {
         let connection_rate_limiter =
             ConnectionRateLimiter::new(config.security.connection_rate_limit)?;
         let state = Arc::new(State {
-            mounts: Arc::new(MountRegistry::new(config.resource_limits.max_mounts)),
+            mounts: {
+                let mut registry = MountRegistry::new(config.resource_limits.max_mounts);
+                // R12: mirrors per-mount frame counters into the global
+                // metrics registry so RTMP/SRT/gateway-registered mounts
+                // appear in /metrics too, not just RtspServer mounts.
+                #[cfg(feature = "metrics")]
+                if let Some(registry_ref) = crate::metrics::registry_from_sink(&config.event_sink) {
+                    registry.attach_global(registry_ref);
+                }
+                Arc::new(registry)
+            },
             session_slots: Arc::new(Semaphore::new(config.max_sessions)),
             next_session: AtomicU64::new(1),
             cancel: supervisor.cancellation_token(),

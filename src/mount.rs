@@ -698,6 +698,12 @@ impl Drop for LocalPublisher {
 pub struct MountRegistry {
     mounts: RwLock<HashMap<Arc<str>, Arc<Mount>>>,
     max_mounts: usize,
+    /// Global metrics registry mirrored by every mount created through
+    /// this registry (R12: frame counters were previously only wired for
+    /// mounts registered via RtspServer, leaving RTMP/SRT/gateway mounts
+    /// invisible in /metrics).
+    #[cfg(feature = "metrics")]
+    global: Option<Arc<crate::metrics::MetricsRegistry>>,
 }
 
 impl MountRegistry {
@@ -705,7 +711,16 @@ impl MountRegistry {
         Self {
             mounts: RwLock::new(HashMap::new()),
             max_mounts,
+            #[cfg(feature = "metrics")]
+            global: None,
         }
+    }
+
+    /// Mirror per-mount frame counters into a global metrics registry.
+    /// Must be called before mounts are registered.
+    #[cfg(feature = "metrics")]
+    pub fn attach_global(&mut self, registry: Arc<crate::metrics::MetricsRegistry>) {
+        self.global = Some(registry);
     }
 
     /// Insert a pre-built mount. Returns error on conflict or limit.
@@ -826,7 +841,14 @@ impl MountRegistry {
             id: MountId::from(path.clone()),
             config,
             frames: tx,
-            stats: StreamCounters::default(),
+            stats: {
+                let mut counters = StreamCounters::default();
+                #[cfg(feature = "metrics")]
+                if let Some(global) = &self.global {
+                    counters.attach_global(global.clone());
+                }
+                counters
+            },
             #[cfg(feature = "server")]
             startup_cache: Mutex::new(startup_cache),
             bootstrap: Mutex::new(std::array::from_fn(|_| None)),
