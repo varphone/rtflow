@@ -123,6 +123,20 @@ async fn setup() -> (
     std::net::SocketAddr,
     rtflow::mount::LocalPublisher,
 ) {
+    setup_with_config(WsFlvConfig {
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        ..Default::default()
+    })
+    .await
+}
+
+async fn setup_with_config(
+    ws_config: WsFlvConfig,
+) -> (
+    RtspServer,
+    std::net::SocketAddr,
+    rtflow::mount::LocalPublisher,
+) {
     let server = RtspServer::bind(
         ServerConfig::builder("127.0.0.1:0".parse().unwrap())
             .build()
@@ -145,15 +159,9 @@ async fn setup() -> (
         .unwrap();
     let publisher = mount.publisher().unwrap();
 
-    let ws = WsFlvServer::bind(
-        WsFlvConfig {
-            bind_addr: "127.0.0.1:0".parse().unwrap(),
-            ..Default::default()
-        },
-        server.registry(),
-    )
-    .await
-    .unwrap();
+    let ws = WsFlvServer::bind(ws_config, server.registry())
+        .await
+        .unwrap();
     let ws_addr = ws.local_addr();
     tokio::spawn(async move { ws.run().await });
     // Give the accept loop a moment to start.
@@ -290,6 +298,102 @@ async fn handshake_requires_version_13() {
         !head.starts_with("HTTP/1.1 101"),
         "no 101 for bad version: {head}"
     );
+    drop(stream);
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn heartbeat_pings_silent_client_and_reaps_it() {
+    // Server heartbeat: a silent client gets a ping after one interval and
+    // is disconnected after a second silent interval (dead-peer reaping).
+    let (server, ws_addr, _publisher) = setup_with_config(WsFlvConfig {
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        ping_interval: Some(Duration::from_millis(200)),
+        ..Default::default()
+    })
+    .await;
+
+    let mut stream = ws_connect(ws_addr, "/live/stream.flv").await;
+    // Drain buffered FLV frames until the heartbeat ping arrives.
+    let mut saw_ping = false;
+    for _ in 0..10 {
+        match tokio::time::timeout(Duration::from_secs(2), read_ws_frame(&mut stream)).await {
+            Ok((op, payload)) if op == 0x9 => {
+                assert_eq!(payload, b"rtflow-ping");
+                saw_ping = true;
+                break;
+            }
+            Ok((_op, _payload)) => continue, // FLV data frames
+            Err(_) => break,
+        }
+    }
+    assert!(saw_ping, "server must ping after an idle interval");
+
+    // Stay silent (no pong): the next interval must close the connection.
+    let mut buf = [0u8; 4096];
+    let mut eof = false;
+    for _ in 0..20 {
+        match tokio::time::timeout(Duration::from_secs(2), stream.get_mut().read(&mut buf)).await {
+            Ok(Ok(0)) | Err(_) => {
+                eof = true;
+                break;
+            }
+            Ok(Ok(_)) => continue, // buffered data before the close
+            Ok(Err(_)) => {
+                eof = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        eof,
+        "silent client must be disconnected after unanswered ping"
+    );
+    drop(stream);
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn client_pong_keeps_connection_alive() {
+    // A client that answers the heartbeat stays connected past the second
+    // interval.
+    let (server, ws_addr, _publisher) = setup_with_config(WsFlvConfig {
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        ping_interval: Some(Duration::from_millis(200)),
+        ..Default::default()
+    })
+    .await;
+
+    let mut stream = ws_connect(ws_addr, "/live/stream.flv").await;
+    // Consume frames; when a server ping arrives, answer with a pong.
+    for _ in 0..12 {
+        match tokio::time::timeout(Duration::from_secs(2), read_ws_frame(&mut stream)).await {
+            Ok((op, payload)) if op == 0x9 => {
+                // Pong with the same payload (masked client frame).
+                let stream = stream.get_mut();
+                let mask = [0x11, 0x22, 0x33, 0x44];
+                let mut hdr = vec![0x80 | 0xA, 0x80 | payload.len() as u8];
+                hdr.extend_from_slice(&mask);
+                hdr.extend_from_slice(
+                    &payload
+                        .iter()
+                        .enumerate()
+                        .map(|(i, b)| b ^ mask[i % 4])
+                        .collect::<Vec<_>>(),
+                );
+                stream.write_all(&hdr).await.unwrap();
+            }
+            Ok((_op, _payload)) => continue,
+            Err(_) => break,
+        }
+    }
+    // The connection must still be alive (not EOF).
+    let mut buf = [0u8; 4096];
+    let n = tokio::time::timeout(Duration::from_secs(2), stream.get_mut().read(&mut buf))
+        .await
+        .unwrap()
+        .unwrap_or(0);
+    assert_ne!(n, 0, "ponging client must not be disconnected");
     drop(stream);
     server.shutdown().await.unwrap();
 }

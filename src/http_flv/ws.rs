@@ -45,6 +45,14 @@ pub struct WsFlvConfig {
     pub max_connections: usize,
     /// Timeout for the HTTP upgrade handshake.
     pub handshake_timeout: Duration,
+    /// Heartbeat interval: when no client frame arrives within this
+    /// period the server sends a ping; a second silent interval closes
+    /// the connection (~2× this value to reap dead peers). `None`
+    /// disables heartbeats (connections then live until TCP fails).
+    ///
+    /// Default 30 s → dead viewers are reaped within ~60 s, which keeps
+    /// embedded gateways from leaking sockets/fds on flaky Wi-Fi links.
+    pub ping_interval: Option<Duration>,
 }
 
 impl Default for WsFlvConfig {
@@ -53,6 +61,7 @@ impl Default for WsFlvConfig {
             bind_addr: "0.0.0.0:8088".parse().unwrap(),
             max_connections: 64,
             handshake_timeout: Duration::from_secs(5),
+            ping_interval: Some(Duration::from_secs(30)),
         }
     }
 }
@@ -93,6 +102,9 @@ impl WsFlvServer {
         } = self;
         loop {
             let (stream, peer) = listener.accept().await?;
+            // Low-latency streaming: disable Nagle so each WS-FLV frame is
+            // sent immediately (tokio defaults to true, but be explicit).
+            let _ = stream.set_nodelay(true);
             if ACTIVE_VIEWERS.load(Ordering::Relaxed) >= config.max_connections {
                 tracing::debug!("ws-flv {peer}: connection limit reached");
                 drop(stream);
@@ -164,13 +176,15 @@ async fn handle_connection(
     let (read_half, write_half) = stream.into_split();
     let write_half = Arc::new(Mutex::new(write_half));
 
-    // Reader task: answer pings with pongs, exit on close/disconnect.
+    // Reader task: answer pings with pongs, run the heartbeat (server ping
+    // + dead-peer reaping), exit on close/disconnect.
     let done = Arc::new(AtomicBool::new(false));
     {
         let write_half = write_half.clone();
         let done = done.clone();
+        let ping_interval = config.ping_interval;
         tokio::spawn(async move {
-            let _ = read_control_loop(read_half, write_half).await;
+            let _ = read_control_loop(read_half, write_half, ping_interval).await;
             done.store(true, Ordering::Relaxed);
         });
     }
@@ -391,64 +405,105 @@ async fn handshake(mut stream: TcpStream, timeout: Duration) -> Result<(String, 
 }
 
 /// Write one server frame: FIN + opcode, unmasked (RFC 6455 §5.1).
+/// The frame header is built on a stack array (no per-frame allocation).
 async fn write_ws_frame<W: AsyncWrite + Unpin>(
     w: &mut W,
     opcode: u8,
     payload: &[u8],
 ) -> Result<()> {
-    let mut hdr = Vec::with_capacity(10);
-    hdr.push(0x80 | opcode);
+    let mut hdr = [0u8; 14];
+    hdr[0] = 0x80 | opcode;
     let len = payload.len();
-    if len < 126 {
-        hdr.push(len as u8);
+    let hdr_len = if len < 126 {
+        hdr[1] = len as u8;
+        2
     } else if len <= 0xffff {
-        hdr.push(126);
-        hdr.extend_from_slice(&(len as u16).to_be_bytes());
+        hdr[1] = 126;
+        hdr[2..4].copy_from_slice(&(len as u16).to_be_bytes());
+        4
     } else {
-        hdr.push(127);
-        hdr.extend_from_slice(&(len as u64).to_be_bytes());
-    }
-    w.write_all(&hdr).await?;
+        hdr[1] = 127;
+        hdr[2..10].copy_from_slice(&(len as u64).to_be_bytes());
+        10
+    };
+    w.write_all(&hdr[..hdr_len]).await?;
     w.write_all(payload).await?;
     Ok(())
 }
 
+/// Read one client frame: FIN+opcode byte, length (7/16/64-bit), mask key
+/// and unmasked payload. Returns (opcode, payload).
+async fn read_client_frame(r: &mut (impl AsyncRead + Unpin)) -> Result<(u8, Vec<u8>)> {
+    let mut hdr = [0u8; 2];
+    r.read_exact(&mut hdr).await?;
+    let opcode = hdr[0] & 0x0f;
+    let masked = hdr[1] & 0x80 != 0;
+    let mut len = (hdr[1] & 0x7f) as u64;
+    if len == 126 {
+        let mut b = [0u8; 2];
+        r.read_exact(&mut b).await?;
+        len = u16::from_be_bytes(b) as u64;
+    } else if len == 127 {
+        let mut b = [0u8; 8];
+        r.read_exact(&mut b).await?;
+        len = u64::from_be_bytes(b);
+    }
+    if len > MAX_FRAME_PAYLOAD {
+        return Err(crate::Error::Rtsp("ws-flv: frame too large".into()));
+    }
+    // Mask key precedes the payload (RFC 6455 §5.2); client frames
+    // are always masked.
+    let mut mask = [0u8; 4];
+    if masked {
+        r.read_exact(&mut mask).await?;
+    }
+    let mut payload = vec![0u8; len as usize];
+    r.read_exact(&mut payload).await?;
+    if masked {
+        for (i, byte) in payload.iter_mut().enumerate() {
+            *byte ^= mask[i % 4];
+        }
+    }
+    Ok((opcode, payload))
+}
+
 /// Read client frames: answer pings with pongs, return on close/disconnect.
+/// With heartbeats enabled, a silent interval triggers a server ping and a
+/// second silent interval closes the connection (dead-peer reaping).
 async fn read_control_loop(
     mut r: impl AsyncRead + Unpin,
     w: Arc<Mutex<impl AsyncWrite + Unpin>>,
+    ping_interval: Option<Duration>,
 ) -> Result<()> {
+    // Set when the previous interval ended without any client frame; the
+    // next silent interval means the ping went unanswered -> dead peer.
+    let mut ping_pending = false;
     loop {
-        let mut hdr = [0u8; 2];
-        r.read_exact(&mut hdr).await?;
-        let opcode = hdr[0] & 0x0f;
-        let masked = hdr[1] & 0x80 != 0;
-        let mut len = (hdr[1] & 0x7f) as u64;
-        if len == 126 {
-            let mut b = [0u8; 2];
-            r.read_exact(&mut b).await?;
-            len = u16::from_be_bytes(b) as u64;
-        } else if len == 127 {
-            let mut b = [0u8; 8];
-            r.read_exact(&mut b).await?;
-            len = u64::from_be_bytes(b);
-        }
-        if len > MAX_FRAME_PAYLOAD {
-            return Err(crate::Error::Rtsp("ws-flv: frame too large".into()));
-        }
-        // Mask key precedes the payload (RFC 6455 §5.2); client frames
-        // are always masked.
-        let mut mask = [0u8; 4];
-        if masked {
-            r.read_exact(&mut mask).await?;
-        }
-        let mut payload = vec![0u8; len as usize];
-        r.read_exact(&mut payload).await?;
-        if masked {
-            for (i, byte) in payload.iter_mut().enumerate() {
-                *byte ^= mask[i % 4];
-            }
-        }
+        let frame = match ping_interval {
+            Some(interval) => match tokio::time::timeout(interval, read_client_frame(&mut r)).await
+            {
+                Ok(result) => result?,
+                Err(_elapsed) => {
+                    if ping_pending {
+                        return Err(crate::Error::Rtsp(
+                            "ws-flv: client unresponsive to heartbeat".into(),
+                        ));
+                    }
+                    ping_pending = true;
+                    // Heartbeat: ping the peer; any client frame (pong,
+                    // ping, close, ...) within the next interval proves
+                    // the peer is alive.
+                    let mut guard = w.lock().await;
+                    write_ws_frame(&mut *guard, 0x9, b"rtflow-ping").await?;
+                    guard.flush().await?;
+                    continue;
+                }
+            },
+            None => read_client_frame(&mut r).await?,
+        };
+        // Any client activity answers the heartbeat.
+        ping_pending = false;
+        let (opcode, payload) = frame;
         match opcode {
             0x9 => {
                 // Ping -> pong with the same payload.
