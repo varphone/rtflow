@@ -385,7 +385,14 @@ pub fn build_video_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
             } else {
                 buf.put_u8(AVC_NALU);
             }
-            let cts = 0i32;
+            // Same composition-time (PTS-DTS) computation as H.264:
+            // enhanced-RTMP players expect B-frame offset here too.
+            let cts = if let (Some(dts), pts) = (unit.dts, unit.pts) {
+                let diff = pts.as_millis() as i32 - dts.as_millis() as i32;
+                diff.clamp(-0x800000, 0x7FFFFF)
+            } else {
+                0
+            };
             buf.put_u8((cts >> 16) as u8);
             buf.put_u8((cts >> 8) as u8);
             buf.put_u8(cts as u8);

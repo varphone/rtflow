@@ -109,6 +109,11 @@ impl Dechunker {
         self.chunk_size = size.min(MAX_CHUNK_SIZE);
     }
 
+    /// Number of bytes buffered waiting for a complete message.
+    pub fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
     /// Feed raw bytes from the network.
     pub fn feed(&mut self, data: &[u8]) {
         if self.overflowed {
@@ -132,7 +137,26 @@ impl Dechunker {
         let mut messages = Vec::new();
         loop {
             match self.try_read_chunk() {
-                Ok(Some(msg)) => messages.push(msg),
+                Ok(Some(msg)) => {
+                    // A SetChunkSize control message takes effect immediately
+                    // after itself (RTMP spec): later messages in the same
+                    // buffer must be parsed with the new chunk size. Without
+                    // this, parsing depends on TCP segmentation — a peer
+                    // that coalesces SetChunkSize with a large message
+                    // leaves the large message truncated.
+                    if msg.msg_type == MessageType::SetChunkSize as u8 && msg.payload.len() >= 4 {
+                        let size = u32::from_be_bytes([
+                            msg.payload[0],
+                            msg.payload[1],
+                            msg.payload[2],
+                            msg.payload[3],
+                        ]);
+                        if (1..=MAX_CHUNK_SIZE).contains(&size) {
+                            self.chunk_size = size;
+                        }
+                    }
+                    messages.push(msg);
+                }
                 Ok(None) => {} // chunk consumed but message incomplete, continue
                 Err(ChunkError::NeedMoreData) => break,
                 Err(ChunkError::Protocol) => {
@@ -227,6 +251,10 @@ impl Dechunker {
                     let ext = &data[header_start + 11..header_start + 15];
                     state.timestamp = u32::from_be_bytes([ext[0], ext[1], ext[2], ext[3]]);
                     state.extended_timestamp = true;
+                    // fmt0 carries an absolute timestamp: the delta from any
+                    // previous fmt1/2/3 header must not leak into the next
+                    // delta-based header.
+                    state.timestamp_delta = 0;
                 } else {
                     state.timestamp = ts;
                     state.timestamp_delta = 0;
