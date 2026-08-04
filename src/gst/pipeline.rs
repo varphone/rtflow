@@ -87,6 +87,13 @@ pub(super) fn build_video_chain(
     config: &VideoSourceConfig,
     enc: &EncoderConfig,
 ) -> Result<ChainElements, PipelineError> {
+    // Only H.264 encoding is implemented; claiming a different codec in
+    // the SDP while emitting H.264 would produce an undecodable stream.
+    if enc.codec != crate::media::Codec::H264 {
+        return Err(PipelineError(
+            "GStreamer video encoder supports H.264 only".into(),
+        ));
+    }
     let src = gst::ElementFactory::make("v4l2src")
         .property("device", &config.device)
         .build()?;

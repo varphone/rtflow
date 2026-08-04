@@ -18,17 +18,10 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-/// GStreamer source with push or pull mode.
+/// GStreamer source (push-mode appsink capture).
 pub struct GStreamerSource {
     pipeline: gst::Pipeline,
     tracks: Vec<TrackInfo>,
-    _mode: StreamMode,
-}
-
-#[allow(dead_code)]
-enum StreamMode {
-    Push,
-    Pull,
 }
 
 /// Builder for constructing a GStreamerSource.
@@ -37,7 +30,6 @@ pub struct GstPipelineBuilder {
     audio: Option<AudioSourceConfig>,
     video_encoder: Option<EncoderConfig>,
     audio_encoder: Option<EncoderConfig>,
-    pull_mode: bool,
 }
 
 impl GstPipelineBuilder {
@@ -47,7 +39,6 @@ impl GstPipelineBuilder {
             audio: None,
             video_encoder: None,
             audio_encoder: None,
-            pull_mode: false,
         }
     }
 
@@ -80,11 +71,6 @@ impl GstPipelineBuilder {
 
     pub fn audio_encoder(mut self, config: EncoderConfig) -> Self {
         self.audio_encoder = Some(config);
-        self
-    }
-
-    pub fn pull_mode(mut self) -> Self {
-        self.pull_mode = true;
         self
     }
 
@@ -130,11 +116,6 @@ impl GstPipelineBuilder {
         Ok(GStreamerSource {
             pipeline,
             tracks,
-            _mode: if self.pull_mode {
-                StreamMode::Pull
-            } else {
-                StreamMode::Push
-            },
         })
     }
 }
