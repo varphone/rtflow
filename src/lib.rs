@@ -26,15 +26,15 @@ pub mod identity;
 pub mod media;
 #[cfg(feature = "metrics")]
 pub mod metrics;
+pub mod mount;
 #[cfg(feature = "multicast")]
 pub mod multicast;
-pub mod mount;
 pub mod observe;
 #[path = "media/pipeline.rs"]
 pub mod pipeline;
+pub mod protocol_trait;
 #[cfg(feature = "server")]
 pub mod proxy;
-pub mod protocol_trait;
 pub mod rtcp;
 #[cfg(feature = "rtmp")]
 pub mod rtmp;
