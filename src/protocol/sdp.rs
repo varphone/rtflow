@@ -58,6 +58,9 @@ impl SdpCrypto {
 pub fn parse(data: &[u8]) -> Result<MediaDescription> {
     let text = std::str::from_utf8(data).map_err(|_| Error::Rtsp("SDP is not UTF-8".into()))?;
     let mut name = Arc::<str>::from("RTSP stream");
+    // Session-level a=control (RFC 2326) seen before any m= line; media
+    // controls are resolved relative to it.
+    let mut session_control: Option<String> = None;
     #[cfg(feature = "multicast")]
     let mut connection: Option<SdpConnection> = None;
     let mut tracks = Vec::new();
@@ -148,10 +151,20 @@ pub fn parse(data: &[u8]) -> Result<MediaDescription> {
                     track.fmtp = Some(Arc::from(fmtp));
                 }
             }
-        } else if let Some(value) = line.strip_prefix("a=control:")
-            && let Some(track) = current.as_mut()
-        {
-            track.control = Arc::from(value)
+        } else if let Some(value) = line.strip_prefix("a=control:") {
+            if let Some(track) = current.as_mut() {
+                // Media control URLs are relative to the session-level
+                // control when one exists (RFC 2326 §C.1).
+                let control = match &session_control {
+                    Some(base) if !value.starts_with('/') && !value.contains("://") && value != "*" => {
+                        format!("{}/{}", base.trim_end_matches('/'), value)
+                    }
+                    _ => value.to_string(),
+                };
+                track.control = Arc::from(control);
+            } else if session_control.is_none() {
+                session_control = Some(value.to_string());
+            }
         } else if let Some(_value) = line.strip_prefix("a=crypto:")
             && let Some(_track) = current.as_mut()
         {
@@ -260,6 +273,8 @@ pub fn encode(description: &MediaDescription) -> String {
         "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns={}\r\nt=0 0\r\n",
         description.session_name
     );
+    // RFC 2326 §C.1: a unicast SDP should carry a c= line too (0.0.0.0
+    // means "this host"); multicast uses the explicit connection.
     #[cfg(feature = "multicast")]
     if let Some(conn) = &description.connection {
         let ttl_str = conn.ttl.map(|t| format!("/{t}")).unwrap_or_default();
@@ -267,7 +282,11 @@ pub fn encode(description: &MediaDescription) -> String {
             "c=IN {} {}{}\r\n",
             conn.addr_type, conn.address, ttl_str
         ));
+    } else {
+        output.push_str("c=IN IP4 0.0.0.0\r\n");
     }
+    #[cfg(not(feature = "multicast"))]
+    output.push_str("c=IN IP4 0.0.0.0\r\n");
     for track in &description.tracks {
         let media = match track.kind {
             MediaKind::Video => "video",
