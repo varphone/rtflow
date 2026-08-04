@@ -31,6 +31,12 @@ pub trait PublishAuthenticator: Send + Sync + std::fmt::Debug {
     ///
     /// Returns `true` if the publish is authorized.
     fn authorize_publish(&self, app: &str, stream_name: &str) -> bool;
+
+    /// Check if playing `stream_name` on `app` is allowed. Defaults to the
+    /// publish policy so a configured key list protects both directions.
+    fn authorize_play(&self, app: &str, stream_name: &str) -> bool {
+        self.authorize_publish(app, stream_name)
+    }
 }
 
 /// A simple authenticator that validates stream keys against a static list.
@@ -121,11 +127,33 @@ enum SessionState {
 }
 
 /// Serve a single RTMP connection.
+/// Mirrors RTMP publisher/player session counts into the global metrics
+/// registry for the lifetime of the session (RAII).
+#[cfg(feature = "metrics")]
+struct RtmpSessionMetrics {
+    metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
+    is_publisher: bool,
+}
+#[cfg(feature = "metrics")]
+impl Drop for RtmpSessionMetrics {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        if let Some(metrics) = &self.metrics {
+            if self.is_publisher {
+                metrics.rtmp_publishers_active.fetch_sub(1, Ordering::Relaxed);
+            } else {
+                metrics.rtmp_players_active.fetch_sub(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
 pub async fn serve_rtmp_session(
     mut stream: TcpStream,
     mounts: Arc<MountRegistry>,
     config: RtmpSessionConfig,
     cancel: CancellationToken,
+    #[cfg(feature = "metrics")] metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
 ) -> Result<()> {
     let peer = stream.peer_addr().ok();
     debug!(?peer, "RTMP: new connection");
@@ -284,6 +312,8 @@ pub async fn serve_rtmp_session(
                             &tx,
                             &mut subscriber_task,
                             &cancel,
+                            #[cfg(feature = "metrics")]
+                            &metrics,
                         )
                         .await;
 
@@ -469,6 +499,7 @@ async fn handle_command(
     tx: &mpsc::Sender<RtmpMessage>,
     subscriber_task: &mut Option<tokio::task::JoinHandle<()>>,
     cancel: &CancellationToken,
+    #[cfg(feature = "metrics")] metrics: &Option<Arc<crate::metrics::MetricsRegistry>>,
 ) -> Option<Vec<RtmpMessage>> {
     match cmd {
         RtmpCommand::Connect {
@@ -630,6 +661,14 @@ async fn handle_command(
                 }
             };
 
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = &metrics {
+                use std::sync::atomic::Ordering;
+                metrics.rtmp_publishers_active.fetch_add(1, Ordering::Relaxed);
+            }
+            #[cfg(feature = "metrics")]
+            let _session_metrics = RtmpSessionMetrics { metrics: metrics.clone(), is_publisher: true };
+
             *state = SessionState::Publishing {
                 app,
                 stream_name: stream_name.clone(),
@@ -677,6 +716,25 @@ async fn handle_command(
             let mount_path = format!("/{app}/{stream_name}");
             info!("RTMP: play {mount_path}");
 
+            // Authenticate play (same policy as publish by default)
+            if let Some(ref auth) = config.authenticator {
+                if !auth.authorize_play(&app, stream_name) {
+                    warn!("RTMP: play denied for /{app}/{stream_name}");
+                    let error_payload = command::error_response(
+                        *transaction_id,
+                        "NetStream.Play.Denied",
+                        "Authentication failed: play not authorized.",
+                    );
+                    return Some(vec![RtmpMessage {
+                        chunk_stream_id: 5,
+                        timestamp: 0,
+                        msg_type: MessageType::CommandAmf0 as u8,
+                        msg_stream_id: 1,
+                        payload: error_payload,
+                    }]);
+                }
+            }
+
             let mount_handle = match mounts.get_handle(&mount_path) {
                 Some(handle) => handle,
                 None => {
@@ -694,6 +752,14 @@ async fn handle_command(
                     }]);
                 }
             };
+
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = &metrics {
+                use std::sync::atomic::Ordering;
+                metrics.rtmp_players_active.fetch_add(1, Ordering::Relaxed);
+            }
+            #[cfg(feature = "metrics")]
+            let _session_metrics = RtmpSessionMetrics { metrics: metrics.clone(), is_publisher: false };
 
             *state = SessionState::Playing {
                 app,
@@ -893,9 +959,25 @@ async fn handle_command(
             Some(responses)
         }
 
-        RtmpCommand::DeleteStream { .. } | RtmpCommand::CloseStream { .. } => {
-            // Cleanup handled on disconnect
-            Some(vec![])
+        RtmpCommand::DeleteStream { transaction_id, .. }
+        | RtmpCommand::CloseStream { transaction_id, .. } => {
+            // A player that calls deleteStream/closeStream expects media to
+            // stop; previously playback continued until TCP disconnect.
+            if let Some(task) = subscriber_task.take() {
+                task.abort();
+            }
+            if let SessionState::Playing { app, .. } = state {
+                *state = SessionState::Connected {
+                    app: app.clone(),
+                };
+            }
+            Some(vec![RtmpMessage {
+                chunk_stream_id: 5,
+                timestamp: 0,
+                msg_type: MessageType::CommandAmf0 as u8,
+                msg_stream_id: 1,
+                payload: command::null_result(*transaction_id),
+            }])
         }
 
         RtmpCommand::MetaData { .. } => None,
