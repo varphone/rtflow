@@ -109,6 +109,32 @@ impl Segmenter {
         self.tx.subscribe()
     }
 
+    /// Update track fmtp parameters (e.g., from a late ANNOUNCE SDP).
+    ///
+    /// If a track's `codec_config` has not yet been extracted from the stream,
+    /// this also attempts to initialize it from `sprop-parameter-sets` in the fmtp.
+    pub fn update_fmtp(&mut self, fmtp_map: &HashMap<u8, std::sync::Arc<str>>) {
+        for track_desc in &mut self.description.tracks {
+            if let Some(fmtp) = fmtp_map.get(&track_desc.id) {
+                track_desc.fmtp = Some(fmtp.clone());
+            }
+        }
+        // Try to initialize codec_config from fmtp for tracks that don't have it yet
+        for (i, track_desc) in self.description.tracks.iter().enumerate() {
+            if let Some(state) = self.tracks.get_mut(i) {
+                if state.codec_config.is_none() {
+                    state.codec_config = codec_config_from_fmtp(track_desc);
+                    tracing::debug!(
+                        track_id = track_desc.id,
+                        codec_config_len =
+                            state.codec_config.as_ref().map(|c| c.len()).unwrap_or(0),
+                        "Segmenter update_fmtp codec_config"
+                    );
+                }
+            }
+        }
+    }
+
     /// Push an AccessUnit into the segmenter. Segments are cut immediately before
     /// the first keyframe at or after the target duration, so every new video
     /// segment begins at a random access point.
@@ -118,10 +144,29 @@ impl Segmenter {
         };
         let pts = unit.pts;
         let starts_new_segment = self.current_segment_pts.is_some_and(|start| {
-            pts >= start
-                && pts.saturating_sub(start) >= self.config.segment_duration
-                && unit.is_keyframe
-                && matches!(unit.codec, Codec::H264 | Codec::H265)
+            if pts < start {
+                // Timestamp wrap or source reset: force a cut and mark the
+                // next segment as a discontinuity instead of never rotating.
+                self.next_discontinuity = true;
+                return true;
+            }
+            let elapsed = pts.saturating_sub(start);
+            if elapsed < self.config.segment_duration {
+                return false;
+            }
+            let hard_limit = self
+                .config
+                .segment_duration
+                .saturating_mul(2)
+                .max(Duration::from_millis(1));
+            if elapsed >= hard_limit {
+                // Hard time-based cut: audio-only streams never produce a
+                // video keyframe, and a video stream without IDR frames must
+                // not accumulate samples forever.
+                return true;
+            }
+            // Regular cut: align with a video random-access point.
+            unit.is_keyframe && matches!(unit.codec, Codec::H264 | Codec::H265)
         });
         if unit.is_keyframe && matches!(unit.codec, Codec::H264 | Codec::H265) {
             tracing::debug!(?pts, ?self.current_segment_pts, "HLS video random-access point");
@@ -274,11 +319,22 @@ fn build_init_segment(description: &MediaDescription, tracks: &[TrackState]) -> 
     buf.freeze()
 }
 
-/// Build fMP4 media segment (moof + mdat).
+/// Build fMP4 media segment (styp + moof + mdat).
 fn build_media_segment(tracks: &mut [TrackState], sequence: u64) -> Bytes {
-    let mut buf = BytesMut::with_capacity(64 * 1024);
+    // Pre-size the buffer: the mdat payload total is known up front, and
+    // high-bitrate segments far exceed the old fixed 64 KiB start (which
+    // forced repeated geometric reallocations of the whole segment).
+    let payload_total: usize = tracks
+        .iter()
+        .flat_map(|t| t.samples.iter())
+        .map(|s| s.data.len())
+        .sum();
+    let mut buf = BytesMut::with_capacity(64 * 1024 + payload_total);
 
-    // Calculate total mdat data size
+    // styp box (segment type, required by DASH-IF and Chrome MSE)
+    write_styp(&mut buf);
+
+    // moof box
     write_moof(&mut buf, tracks, sequence);
 
     // mdat box
@@ -328,6 +384,13 @@ fn annex_b_nals(data: &[u8]) -> Vec<&[u8]> {
 }
 
 fn annex_b_to_length_prefixed(codec: Codec, data: &Bytes) -> Bytes {
+    // Fast path: already length-prefixed (RTMP ingest delivers AVCC/HVCC).
+    // Reference-count clone only; no full-frame scan or rebuild.
+    if data.len() >= 4
+        && u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize == data.len() - 4
+    {
+        return data.clone();
+    }
     let nals = annex_b_nals(data);
     if nals.is_empty() {
         return data.clone();
@@ -409,8 +472,14 @@ fn codec_config_from_fmtp(track: &crate::media::TrackDescription) -> Option<Byte
 
 fn build_avcc(sps: &[u8], pps: &[u8]) -> Option<Bytes> {
     if sps.len() < 4 || pps.is_empty() {
+        tracing::warn!(
+            sps_len = sps.len(),
+            pps_len = pps.len(),
+            "build_avcc: invalid input"
+        );
         return None;
     }
+    tracing::debug!(sps_len = sps.len(), pps_len = pps.len(), "build_avcc");
     let mut config = BytesMut::with_capacity(11 + sps.len() + pps.len());
     config.put_u8(1);
     config.put_u8(sps[1]);
@@ -455,14 +524,36 @@ fn build_hvcc(vps: &[u8], sps: &[u8], pps: &[u8]) -> Option<Bytes> {
 }
 
 fn write_ftyp(buf: &mut BytesMut) {
-    let compatible = [b"isom".as_ref(), b"iso6".as_ref(), b"mp41".as_ref()];
+    let compatible = [b"iso5".as_ref(), b"iso6".as_ref(), b"mp41".as_ref()];
     let compatible_len: usize = compatible.iter().map(|b| b.len()).sum();
     let box_size = 8 + 4 + 4 + compatible_len; // header + major + minor + compatible
 
     buf.put_u32(box_size as u32);
     buf.put_slice(b"ftyp");
-    buf.put_slice(b"isom"); // major brand
+    buf.put_slice(b"iso5"); // major brand (ISO BMFF v5, required for fMP4/DASH)
     buf.put_u32(0x200); // minor version
+    for brand in &compatible {
+        buf.put_slice(brand);
+    }
+}
+
+/// Write styp (segment type) box for media segments.
+/// Required by DASH-IF IOP and Chrome MSE for identifying fMP4 segments.
+fn write_styp(buf: &mut BytesMut) {
+    // DASH-IF IOP requires msdh or msix brand for media segments
+    let compatible = [
+        b"msdh".as_ref(),
+        b"msix".as_ref(),
+        b"iso5".as_ref(),
+        b"iso6".as_ref(),
+    ];
+    let compatible_len: usize = compatible.iter().map(|b| b.len()).sum();
+    let box_size = 8 + 4 + 4 + compatible_len;
+
+    buf.put_u32(box_size as u32);
+    buf.put_slice(b"styp");
+    buf.put_slice(b"msdh"); // major brand (DASH-IF media segment)
+    buf.put_u32(0); // minor version
     for brand in &compatible {
         buf.put_slice(brand);
     }
@@ -547,8 +638,22 @@ fn write_trak(
     buf.put_u32(0); // placeholder
     buf.put_slice(b"trak");
 
+    // Extract dimensions for video tracks
+    let dimensions = if track.kind == MediaKind::Video {
+        match track.codec {
+            Codec::H265 => codec_config.and_then(|c| h265_dimensions_from_hvcc(c)),
+            Codec::H264 => codec_config.and_then(|c| h264_dimensions_from_avcc(c)),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     // tkhd box
-    write_tkhd(buf, track, track_id);
+    write_tkhd(buf, track, track_id, dimensions);
+
+    // edts box (edit list) - required by some players (Firefox)
+    write_edts(buf);
 
     // mdia box
     write_mdia(buf, track, track_id, codec_config);
@@ -557,14 +662,19 @@ fn write_trak(
     buf[trak_start..trak_start + 4].copy_from_slice(&trak_size.to_be_bytes());
 }
 
-fn write_tkhd(buf: &mut BytesMut, _track: &crate::media::TrackDescription, track_id: u32) {
+fn write_tkhd(
+    buf: &mut BytesMut,
+    _track: &crate::media::TrackDescription,
+    track_id: u32,
+    dimensions: Option<(u16, u16)>,
+) {
     let box_size = 92; // tkhd v0
     buf.put_u32(box_size);
     buf.put_slice(b"tkhd");
     buf.put_u32(0x00000003); // version=0, flags=track_enabled|track_in_movie
     buf.put_u32(0); // creation time
     buf.put_u32(0); // modification time
-    buf.put_u32(track_id);
+    buf.put_u32(track_id + 1); // 1-based track_ID (ISOBMFF requires non-zero)
     buf.put_u32(0); // reserved
     buf.put_u32(0); // duration
     buf.put_u32(0); // reserved
@@ -577,8 +687,26 @@ fn write_tkhd(buf: &mut BytesMut, _track: &crate::media::TrackDescription, track
     for &v in &[0x00010000u32, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000] {
         buf.put_u32(v);
     }
-    buf.put_u32(0); // width (0 for audio)
-    buf.put_u32(0); // height
+    // width and height as 16.16 fixed-point
+    buf.put_u32(dimensions.map_or(0, |(w, _)| (w as u32) << 16));
+    buf.put_u32(dimensions.map_or(0, |(_, h)| (h as u32) << 16));
+}
+
+/// Write edts (edit) box with an empty edit list.
+/// Some players (notably Firefox) require this box for proper fMP4 playback.
+fn write_edts(buf: &mut BytesMut) {
+    // edts box: 8 (header) + 28 (elst) = 36
+    buf.put_u32(36);
+    buf.put_slice(b"edts");
+    // elst box: 8 (header) + 4 (version/flags) + 4 (entry_count) + 12 (one entry) = 28
+    buf.put_u32(28);
+    buf.put_slice(b"elst");
+    buf.put_u32(0); // version=0, flags=0
+    buf.put_u32(1); // entry_count
+    // Edit list entry: segment_duration=0 (entire track), media_time=0, media_rate=1.0
+    buf.put_u32(0); // segment_duration
+    buf.put_u32(0); // media_time
+    buf.put_u32(0x00010000); // media_rate (1.0 in 16.16 fixed-point)
 }
 
 fn write_mdia(
@@ -674,9 +802,10 @@ fn write_minf(
 
 fn write_dinf(buf: &mut BytesMut) {
     // dref box inside dinf
-    let dref_data_len = 12; // one entry
-    let dref_size = 8 + 8 + dref_data_len;
-    let dinf_size = 8 + dref_size;
+    // dref = header(8) + version_flags(4) + entry_count(4) + url_entry(12) = 28
+    let dref_size: u32 = 28;
+    // dinf = header(8) + dref(28) = 36
+    let dinf_size: u32 = 36;
 
     buf.put_u32(dinf_size);
     buf.put_slice(b"dinf");
@@ -786,6 +915,127 @@ impl<'a> BitReader<'a> {
     }
 }
 
+/// Extract H.264 dimensions from an avcC configuration record.
+fn h264_dimensions_from_avcc(config: &[u8]) -> Option<(u16, u16)> {
+    // avcC: [version, profile, compat, level, 0xFF, numSPS|0xE0, spsLen(2), sps...]
+    if config.len() < 8 || config[0] != 1 {
+        return None;
+    }
+    let num_sps = (config[5] & 0x1f) as usize;
+    if num_sps == 0 {
+        return None;
+    }
+    let sps_len = u16::from_be_bytes([config[6], config[7]]) as usize;
+    let sps = config.get(8..8 + sps_len)?;
+    h264_dimensions_from_sps(sps)
+}
+
+/// Parse an H.264 SPS NAL to extract coded picture dimensions.
+fn h264_dimensions_from_sps(sps: &[u8]) -> Option<(u16, u16)> {
+    if sps.len() < 4 {
+        return None;
+    }
+    // Remove emulation prevention bytes (skip NAL header byte[0])
+    let mut rbsp = Vec::with_capacity(sps.len());
+    let mut zeros = 0usize;
+    for &byte in &sps[1..] {
+        if zeros >= 2 && byte == 3 {
+            zeros = 0;
+            continue;
+        }
+        rbsp.push(byte);
+        zeros = if byte == 0 { zeros + 1 } else { 0 };
+    }
+    let mut bits = BitReader {
+        data: &rbsp,
+        bit: 0,
+    };
+    let profile_idc = bits.read_bits(8)? as u8;
+    bits.read_bits(8)?; // constraint flags + reserved
+    bits.read_bits(8)?; // level_idc
+    bits.read_ue()?; // seq_parameter_set_id
+
+    if matches!(
+        profile_idc,
+        100 | 110 | 122 | 244 | 44 | 83 | 86 | 118 | 128 | 138 | 139 | 134
+    ) {
+        let chroma_format_idc = bits.read_ue()?;
+        if chroma_format_idc == 3 {
+            bits.read_bits(1)?; // separate_colour_plane_flag
+        }
+        bits.read_ue()?; // bit_depth_luma_minus8
+        bits.read_ue()?; // bit_depth_chroma_minus8
+        bits.read_bits(1)?; // qpprime_y_zero_transform_bypass_flag
+        let seq_scaling_matrix_present = bits.read_bits(1)? != 0;
+        if seq_scaling_matrix_present {
+            let count = if chroma_format_idc != 3 { 8 } else { 12 };
+            for i in 0..count {
+                let present = bits.read_bits(1)? != 0;
+                if present {
+                    let size = if i < 6 { 16 } else { 64 };
+                    skip_scaling_list(&mut bits, size)?;
+                }
+            }
+        }
+    }
+
+    bits.read_ue()?; // log2_max_frame_num_minus4
+    let pic_order_cnt_type = bits.read_ue()?;
+    if pic_order_cnt_type == 0 {
+        bits.read_ue()?; // log2_max_pic_order_cnt_lsb_minus4
+    } else if pic_order_cnt_type == 1 {
+        bits.read_bits(1)?; // delta_pic_order_always_zero_flag
+        bits.read_ue()?; // offset_for_non_ref_pic
+        bits.read_ue()?; // offset_for_top_to_bottom_field
+        let num_ref = bits.read_ue()?;
+        for _ in 0..num_ref {
+            bits.read_ue()?;
+        }
+    }
+    bits.read_ue()?; // max_num_ref_frames
+    bits.read_bits(1)?; // gaps_in_frame_num_value_allowed_flag
+    let pic_width_in_mbs = bits.read_ue()? + 1;
+    let pic_height_in_map_units = bits.read_ue()? + 1;
+    let frame_mbs_only = bits.read_bits(1)? != 0;
+    if !frame_mbs_only {
+        bits.read_bits(1)?; // mb_adaptive_frame_field_flag
+    }
+    bits.read_bits(1)?; // direct_8x8_inference_flag
+    let frame_cropping = bits.read_bits(1)? != 0;
+    let (crop_left, crop_right, crop_top, crop_bottom) = if frame_cropping {
+        (
+            bits.read_ue()?,
+            bits.read_ue()?,
+            bits.read_ue()?,
+            bits.read_ue()?,
+        )
+    } else {
+        (0, 0, 0, 0)
+    };
+
+    let width = pic_width_in_mbs * 16 - (crop_left + crop_right) * 2;
+    let height =
+        (2 - frame_mbs_only as u64) * pic_height_in_map_units * 16 - (crop_top + crop_bottom) * 2;
+    Some((u16::try_from(width).ok()?, u16::try_from(height).ok()?))
+}
+
+fn skip_scaling_list(bits: &mut BitReader, size: usize) -> Option<()> {
+    let mut last_scale: i64 = 8;
+    let mut next_scale: i64 = 8;
+    for _ in 0..size {
+        if next_scale != 0 {
+            let delta = bits.read_ue()? as i64;
+            next_scale = (last_scale + delta + 256) % 256;
+        }
+        last_scale = if next_scale == 0 {
+            last_scale
+        } else {
+            next_scale
+        };
+    }
+    Some(())
+}
+
 fn h265_dimensions_from_hvcc(config: &[u8]) -> Option<(u16, u16)> {
     if config.len() < 23 || config[0] != 1 {
         return None;
@@ -886,6 +1136,13 @@ fn write_video_entry(
 ) {
     let config_from_fmtp = codec_config_from_fmtp(track);
     let codec_config = codec_config.or(config_from_fmtp.as_ref());
+    tracing::debug!(
+        codec = ?track.codec,
+        from_state = codec_config.is_some(),
+        from_fmtp_fallback = config_from_fmtp.is_some(),
+        config_len = codec_config.map(|c| c.len()).unwrap_or(0),
+        "write_video_entry"
+    );
     let entry_start = buf.len();
     buf.put_u32(0);
     match track.codec {
@@ -902,6 +1159,7 @@ fn write_video_entry(
     buf.put_u32(0);
     let dimensions = match track.codec {
         Codec::H265 => codec_config.and_then(|config| h265_dimensions_from_hvcc(config)),
+        Codec::H264 => codec_config.and_then(|config| h264_dimensions_from_avcc(config)),
         _ => None,
     };
     buf.put_u16(dimensions.map_or(0, |(width, _)| width));
@@ -931,6 +1189,19 @@ fn write_video_entry(
     let config_size = (buf.len() - config_start) as u32;
     buf[config_start..config_start + 4].copy_from_slice(&config_size.to_be_bytes());
 
+    // pasp box (pixel aspect ratio) - required by some players (Firefox)
+    buf.put_u32(16);
+    buf.put_slice(b"pasp");
+    buf.put_u32(1); // hSpacing
+    buf.put_u32(1); // vSpacing
+
+    // btrt box (bitrate) - required by Firefox MSE for init segment validation
+    buf.put_u32(20);
+    buf.put_slice(b"btrt");
+    buf.put_u32(0); // bufferSizeDB
+    buf.put_u32(2_000_000); // maxBitrate
+    buf.put_u32(2_000_000); // avgBitrate
+
     let entry_size = (buf.len() - entry_start) as u32;
     buf[entry_start..entry_start + 4].copy_from_slice(&entry_size.to_be_bytes());
 }
@@ -952,7 +1223,13 @@ fn write_audio_entry(buf: &mut BytesMut, track: &crate::media::TrackDescription)
     buf.put_u16(16); // samplesize
     buf.put_u16(0); // pre-defined
     buf.put_u16(0); // reserved
-    buf.put_u32(track.clock_rate << 16); // samplerate (fixed point)
+    buf.put_u32(if track.clock_rate > 0xFFFF {
+        // 16.16 fixed point cannot represent rates above 65535 Hz
+        // (e.g. 96 kHz AAC); 0 lets decoders fall back to the esds config.
+        0
+    } else {
+        track.clock_rate << 16
+    }); // samplerate (fixed point)
 
     // esds box for AAC
     if track.codec == Codec::Aac {
@@ -977,9 +1254,15 @@ fn aac_config_from_fmtp(track: &crate::media::TrackDescription) -> Option<Bytes>
     if value.len() % 2 != 0 {
         return None;
     }
+    // Slice by byte range via `get` so a multi-byte UTF-8 sequence in the
+    // fmtp (which arrives unvalidated from ANNOUNCE SDP) cannot panic on a
+    // non-char-boundary index; an invalid pair simply fails the whole parse.
     let bytes: Option<Vec<u8>> = (0..value.len())
         .step_by(2)
-        .map(|index| u8::from_str_radix(&value[index..index + 2], 16).ok())
+        .map(|index| {
+            let pair = value.as_bytes().get(index..index + 2)?;
+            u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()
+        })
         .collect();
     bytes.filter(|bytes| !bytes.is_empty()).map(Bytes::from)
 }
@@ -1039,7 +1322,7 @@ fn write_moof(buf: &mut BytesMut, tracks: &[TrackState], sequence: u64) {
     buf.put_u32(16);
     buf.put_slice(b"mfhd");
     buf.put_u32(0);
-    buf.put_u32(sequence as u32 + 1);
+    buf.put_u32((sequence as u32).wrapping_add(1));
 
     let mut data_offset_positions = Vec::new();
     for (track_id, track) in tracks.iter().enumerate() {
@@ -1088,20 +1371,28 @@ fn write_traf(buf: &mut BytesMut, track: &TrackState, track_id: u32) -> usize {
     buf.put_u64(base_dts_ticks);
 
     let sample_count = track.samples.len() as u32;
+    // trun flags: data-offset-present(0x01) | sample-duration(0x100) | sample-size(0x200)
+    //           | sample-flags(0x400) | sample-cts-offset(0x800) = 0x0F01
+    // NOTE: do NOT set first-sample-flags-present(0x10000) unless we write first_sample_flags
     let trun_size = 20 + sample_count * 16;
     buf.put_u32(trun_size);
     buf.put_slice(b"trun");
-    buf.put_u32(0x010f01);
+    buf.put_u32(0x000f01);
     buf.put_u32(sample_count);
     let data_offset_position = buf.len();
     buf.put_u32(0);
     for sample in &track.samples {
         buf.put_u32(duration_to_ticks(sample.duration, track.timescale).max(1) as u32);
         buf.put_u32(sample.data.len() as u32);
+        // ISO 14496-12 sample_flags:
+        //   bits 24-25: sample_depends_on (2=does not depend, 1=depends)
+        //   bit 16: sample_is_non_sync_sample
+        // Keyframes: 0x02000000 (does not depend on others)
+        // Non-keyframes: 0x01010000 (depends on others + non-sync)
         let flags = if track.kind == MediaKind::Video && !sample.is_keyframe {
-            0x0001_0000
+            0x0101_0000
         } else {
-            0
+            0x0200_0000
         };
         buf.put_u32(flags);
         let composition_offset = composition_offset_ticks(sample.pts, sample.dts, track.timescale);
@@ -1121,7 +1412,13 @@ fn write_mdat(buf: &mut BytesMut, tracks: &[TrackState]) {
         .sum();
 
     let mdat_size = 8 + mdat_payload_size;
-    buf.put_u32(mdat_size as u32);
+    // `mdat_size as u32` would silently wrap for segments > 4 GiB; the
+    // hard time-based cut keeps segments small, but clamp defensively.
+    let mdat_size_field = u32::try_from(mdat_size).unwrap_or_else(|_| {
+        tracing::warn!("hls: media segment exceeds 4 GiB, clamping mdat size");
+        u32::MAX
+    });
+    buf.put_u32(mdat_size_field);
     buf.put_slice(b"mdat");
 
     for track in tracks {

@@ -59,6 +59,9 @@ pub fn create_hls_handlers(
     tokio::spawn(async move {
         let mut segmenter = Segmenter::new(seg_config, &description);
         let mut segments = segmenter.subscribe();
+        // Skip broadcast replays of frames the startup snapshot already
+        // delivered (duplicate keyframes would corrupt segment timing).
+        let startup_keys = crate::mount::startup_dedup_keys(&startup);
         let mut startup = VecDeque::from(startup);
         let has_video = description
             .tracks
@@ -92,6 +95,11 @@ pub fn create_hls_handlers(
                     continue;
                 }
                 awaiting_keyframe = false;
+            }
+            // Skip broadcast replays of frames the startup snapshot already
+            // delivered (duplicate keyframes would corrupt segment timing).
+            if startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
+                continue;
             }
             segmenter.push(unit);
             while let Ok(segment) = segments.try_recv() {

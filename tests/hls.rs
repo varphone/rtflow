@@ -133,15 +133,28 @@ fn segmenter_produces_media_segment() {
         !segment.data.is_empty(),
         "media segment should not be empty"
     );
-    // Media segment should start with moof box
-    let moof_size = u32::from_be_bytes([
+    // Media segment should start with styp box, then moof box
+    assert_eq!(
+        &segment.data[4..8],
+        b"styp",
+        "segment should start with styp"
+    );
+    let styp_size = u32::from_be_bytes([
         segment.data[0],
         segment.data[1],
         segment.data[2],
         segment.data[3],
+    ]) as usize;
+    // moof follows styp
+    let moof_offset = styp_size;
+    let moof_size = u32::from_be_bytes([
+        segment.data[moof_offset],
+        segment.data[moof_offset + 1],
+        segment.data[moof_offset + 2],
+        segment.data[moof_offset + 3],
     ]);
     assert!(moof_size > 8, "moof size should be > 8");
-    assert_eq!(&segment.data[4..8], b"moof");
+    assert_eq!(&segment.data[moof_offset + 4..moof_offset + 8], b"moof");
     let mdat = segment
         .data
         .windows(4)
@@ -332,4 +345,58 @@ fn segmenter_keyframe_alignment() {
         second.starts_with_keyframe,
         "next segment should start with keyframe"
     );
+}
+
+#[test]
+fn segmenter_rotates_audio_only_stream_by_time() {
+    // Audio-only streams never carry a video keyframe; segments must still
+    // be produced by the time-based hard cut instead of buffering forever.
+    let desc = MediaDescription {
+        session_name: Arc::from("audio"),
+        tracks: vec![TrackDescription {
+            id: 0,
+            kind: MediaKind::Audio,
+            codec: Codec::Aac,
+            clock_rate: 48_000,
+            channels: Some(2),
+            payload_type: 97,
+            fmtp: Some(Arc::from("config=1210")),
+            control: Arc::from("trackID=0"),
+            #[cfg(feature = "srtp")]
+            crypto: None,
+            width: None,
+            height: None,
+            frame_rate: None,
+        }],
+        #[cfg(feature = "multicast")]
+        connection: None,
+    };
+    let config = SegmenterConfig {
+        segment_duration: Duration::from_millis(100),
+        lookback_count: 5,
+    };
+    let mut segmenter = Segmenter::new(config, &desc);
+    let mut rx = segmenter.subscribe();
+
+    for i in 0..12u32 {
+        segmenter.push(AccessUnit {
+            track_id: 0,
+            codec: Codec::Aac,
+            pts: Duration::from_millis(i as u64 * 40),
+            dts: None,
+            rtp_timestamp: i * 480,
+            is_keyframe: false,
+            data: Bytes::from_static(&[0x21, 0x10, 0x00, 0x01]),
+        });
+    }
+    segmenter.flush();
+
+    let first = rx
+        .try_recv()
+        .expect("audio-only stream must produce segments");
+    assert!(!first.data.is_empty());
+    let second = rx
+        .try_recv()
+        .expect("audio-only stream must rotate segments");
+    assert!(!second.data.is_empty());
 }

@@ -44,7 +44,17 @@ impl SegmentRing {
     /// Get a specific segment by sequence number.
     pub fn get(&self, sequence: u64) -> Option<Segment> {
         let segments = self.segments.read().unwrap();
-        segments.iter().find(|s| s.sequence == sequence).cloned()
+        let first = segments.front()?.sequence;
+        let last = segments.back()?.sequence;
+        if sequence < first || sequence > last {
+            return None;
+        }
+        // Sequences are contiguous; index directly instead of a linear scan.
+        let index = (sequence - first) as usize;
+        segments
+            .get(index)
+            .filter(|s| s.sequence == sequence)
+            .cloned()
     }
 
     /// Number of segments currently stored.
