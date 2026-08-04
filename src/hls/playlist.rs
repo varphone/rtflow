@@ -22,7 +22,9 @@ pub fn write_live_playlist_at(
     asset_prefix: &str,
 ) -> String {
     if segments.is_empty() {
-        return String::new();
+        // A valid but empty playlist: players poll it until segments
+        // appear (an empty 200 body would be rejected by strict parsers).
+        return String::from("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:1\n");
     }
 
     let target_secs = segments
@@ -43,7 +45,13 @@ pub fn write_live_playlist_at(
         playlist.push_str(&format!("#EXT-X-MEDIA-SEQUENCE:{}\n", first.sequence));
     }
 
-    playlist.push_str("#EXT-X-DISCONTINUITY-SEQUENCE:0\n");
+    let discontinuity_sequence = segments
+        .iter()
+        .find_map(|segment| segment.discontinuity_sequence)
+        .unwrap_or(0);
+    playlist.push_str(&format!(
+        "#EXT-X-DISCONTINUITY-SEQUENCE:{discontinuity_sequence}\n"
+    ));
     playlist.push_str(&format!(
         "#EXT-X-MAP:URI=\"{}\"\n",
         asset_uri(asset_prefix, "init.m4s")
@@ -123,6 +131,7 @@ mod tests {
             data: Bytes::new(),
             starts_with_keyframe: true,
             discontinuity: false,
+            discontinuity_sequence: None,
             timestamp: Duration::from_millis(sequence * 2000),
         }
     }
@@ -160,8 +169,11 @@ mod tests {
 
     #[test]
     fn empty_playlist() {
+        // An empty window still yields a valid (header-only) playlist so
+        // strict parsers do not reject the response.
         let playlist = write_live_playlist(&[], Duration::from_secs(2));
-        assert!(playlist.is_empty());
+        assert!(playlist.starts_with("#EXTM3U"));
+        assert!(!playlist.is_empty());
     }
 
     #[test]

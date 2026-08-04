@@ -29,6 +29,7 @@ fn h264_description() -> MediaDescription {
         }],
         #[cfg(feature = "multicast")]
         connection: None,
+
     }
 }
 
@@ -174,6 +175,7 @@ fn segment_ring_push_and_get() {
         data: Bytes::from_static(b"data0"),
         starts_with_keyframe: true,
         discontinuity: false,
+        discontinuity_sequence: None,
         timestamp: Duration::ZERO,
     });
     ring.push(Segment {
@@ -183,6 +185,7 @@ fn segment_ring_push_and_get() {
         data: Bytes::from_static(b"data1"),
         starts_with_keyframe: true,
         discontinuity: false,
+        discontinuity_sequence: None,
         timestamp: Duration::from_secs(2),
     });
 
@@ -204,6 +207,7 @@ fn segment_ring_eviction() {
             data: Bytes::from(format!("data{i}")),
             starts_with_keyframe: true,
             discontinuity: false,
+            discontinuity_sequence: None,
             timestamp: Duration::from_secs(i * 2),
         });
     }
@@ -227,6 +231,7 @@ fn live_playlist_format() {
             data: Bytes::new(),
             starts_with_keyframe: true,
             discontinuity: false,
+            discontinuity_sequence: None,
             timestamp: Duration::ZERO,
         },
         Segment {
@@ -236,6 +241,7 @@ fn live_playlist_format() {
             data: Bytes::new(),
             starts_with_keyframe: true,
             discontinuity: false,
+            discontinuity_sequence: None,
             timestamp: Duration::from_millis(2000),
         },
     ];
@@ -262,6 +268,7 @@ fn vod_playlist_format() {
         data: Bytes::new(),
         starts_with_keyframe: true,
         discontinuity: false,
+        discontinuity_sequence: None,
         timestamp: Duration::ZERO,
     }];
     let playlist = playlist::write_vod_playlist(&segments);
@@ -370,6 +377,7 @@ fn segmenter_rotates_audio_only_stream_by_time() {
         }],
         #[cfg(feature = "multicast")]
         connection: None,
+
     };
     let config = SegmenterConfig {
         segment_duration: Duration::from_millis(100),

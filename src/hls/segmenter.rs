@@ -38,6 +38,9 @@ pub struct Segment {
     pub starts_with_keyframe: bool,
     /// Whether a decoder discontinuity precedes this segment.
     pub discontinuity: bool,
+    /// Global discontinuity sequence number of this segment (Some when
+    /// `discontinuity`), for EXT-X-DISCONTINUITY-SEQUENCE alignment.
+    pub discontinuity_sequence: Option<u32>,
     /// Timestamp of the first sample in the segment.
     pub timestamp: Duration,
 }
@@ -68,6 +71,8 @@ pub struct Segmenter {
     tx: broadcast::Sender<Segment>,
     init_segment: Option<Bytes>,
     next_discontinuity: bool,
+    /// Monotonic counter of discontinuities ever generated.
+    discontinuity_counter: u32,
 }
 
 impl Segmenter {
@@ -101,6 +106,7 @@ impl Segmenter {
             tx,
             init_segment: None,
             next_discontinuity: false,
+            discontinuity_counter: 0,
         }
     }
 
@@ -145,10 +151,16 @@ impl Segmenter {
         let pts = unit.pts;
         let starts_new_segment = self.current_segment_pts.is_some_and(|start| {
             if pts < start {
-                // Timestamp wrap or source reset: force a cut and mark the
-                // next segment as a discontinuity instead of never rotating.
-                self.next_discontinuity = true;
-                return true;
+                // A large backward jump is a timestamp wrap or source
+                // reset: force a cut and mark the next segment as a
+                // discontinuity. Small backward deltas are just the
+                // difference between track start baselines (audio vs
+                // video) and must not cut a segment.
+                if start.saturating_sub(pts) > Duration::from_secs(30) {
+                    self.next_discontinuity = true;
+                    return true;
+                }
+                return false;
             }
             let elapsed = pts.saturating_sub(start);
             if elapsed < self.config.segment_duration {
@@ -227,13 +239,21 @@ impl Segmenter {
                     .is_some_and(|sample| sample.is_keyframe)
         });
 
+        let discontinuity_flag = std::mem::take(&mut self.next_discontinuity);
+        let segment_discontinuity_sequence = if discontinuity_flag {
+            self.discontinuity_counter += 1;
+            Some(self.discontinuity_counter)
+        } else {
+            None
+        };
         let segment = Segment {
             sequence: self.sequence,
             duration: segment_duration,
             init: self.init_segment.clone().unwrap_or_default(),
             data: segment_data,
             starts_with_keyframe,
-            discontinuity: std::mem::take(&mut self.next_discontinuity),
+            discontinuity: discontinuity_flag,
+            discontinuity_sequence: segment_discontinuity_sequence,
             timestamp: segment_pts,
         };
 
@@ -281,6 +301,13 @@ impl Segmenter {
             .map(|sample| sample.pts.saturating_add(sample.duration))
             .max()
             .unwrap_or(segment_pts);
+        let discontinuity_flag = std::mem::take(&mut self.next_discontinuity);
+        let segment_discontinuity_sequence = if discontinuity_flag {
+            self.discontinuity_counter += 1;
+            Some(self.discontinuity_counter)
+        } else {
+            None
+        };
         let segment = Segment {
             sequence: self.sequence,
             duration: end_pts.saturating_sub(segment_pts),
@@ -293,7 +320,8 @@ impl Segmenter {
                         .first()
                         .is_some_and(|sample| sample.is_keyframe)
             }),
-            discontinuity: std::mem::take(&mut self.next_discontinuity),
+            discontinuity: discontinuity_flag,
+            discontinuity_sequence: segment_discontinuity_sequence,
             timestamp: segment_pts,
         };
 
@@ -344,8 +372,13 @@ fn build_media_segment(tracks: &mut [TrackState], sequence: u64) -> Bytes {
 }
 
 fn duration_to_ticks(duration: Duration, timescale: u32) -> u64 {
+    // Round to nearest tick instead of truncating: repeated truncation of
+    // µs-resolution durations drifts the fMP4 timeline (tfdt) relative to
+    // the RTP timeline over long streams.
     duration.as_secs().saturating_mul(u64::from(timescale))
-        + u64::from(duration.subsec_nanos()).saturating_mul(u64::from(timescale)) / 1_000_000_000
+        + (u64::from(duration.subsec_nanos()).saturating_mul(u64::from(timescale))
+            + 500_000_000)
+            / 1_000_000_000
 }
 
 fn composition_offset_ticks(pts: Duration, dts: Duration, timescale: u32) -> i32 {
