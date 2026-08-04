@@ -211,7 +211,10 @@ fn run_writer(
         match command {
             Command::Unit(unit) => {
                 let rotate = segment.as_ref().is_some_and(|writer| {
-                    unit.pts.saturating_sub(writer.start_pts) >= config.segment_duration
+                    // A timestamp wrap (pts < start) must also force a cut,
+                    // otherwise time-based rotation stops forever.
+                    unit.pts < writer.start_pts
+                        || unit.pts.saturating_sub(writer.start_pts) >= config.segment_duration
                         || writer.bytes >= config.max_segment_bytes
                 });
                 if rotate && let Some(writer) = segment.take() {
@@ -237,6 +240,13 @@ fn run_writer(
                     && writer.write_unit(&unit).is_err()
                 {
                     report.dropped_units += 1;
+                    // A failed write leaves a truncated record inside the
+                    // segment; continuing to append would poison the whole
+                    // recording directory. Discard the segment and let the
+                    // next unit start a fresh one.
+                    if let Some(corrupt) = segment.take() {
+                        corrupt.abort();
+                    }
                 }
             }
             Command::Shutdown(reply) => {
@@ -294,7 +304,12 @@ impl SegmentWriter {
             .create_new(true)
             .open(&partial)?;
         let mut writer = BufWriter::new(file);
-        write_description(&mut writer, description)?;
+        if let Err(e) = write_description(&mut writer, description) {
+            // Don't leave a partial file behind when the header write fails.
+            drop(writer);
+            let _ = std::fs::remove_file(&partial);
+            return Err(e);
+        }
         let bytes = writer.stream_position()?;
         Ok(Self {
             writer,
@@ -327,16 +342,33 @@ impl SegmentWriter {
     }
 
     fn finalize(mut self, sync: bool) -> Result<u64> {
-        self.writer.flush()?;
+        // Every failure point cleans up the partial file: a leftover
+        // .partial would otherwise accumulate and confuse recovery.
+        if let Err(e) = self.writer.flush() {
+            let _ = std::fs::remove_file(&self.partial);
+            return Err(e.into());
+        }
         if sync {
-            self.writer.get_ref().sync_all()?;
+            if let Err(e) = self.writer.get_ref().sync_all() {
+                let _ = std::fs::remove_file(&self.partial);
+                return Err(e.into());
+            }
         }
         drop(self.writer);
-        fs::rename(&self.partial, &self.final_path)?;
+        if let Err(e) = fs::rename(&self.partial, &self.final_path) {
+            let _ = std::fs::remove_file(&self.partial);
+            return Err(e.into());
+        }
         if sync && let Some(parent) = self.final_path.parent() {
             File::open(parent)?.sync_all()?;
         }
         Ok(self.bytes)
+    }
+
+    /// Discard the in-progress segment and remove its partial file.
+    fn abort(self) {
+        drop(self.writer);
+        let _ = std::fs::remove_file(&self.partial);
     }
 }
 
@@ -387,7 +419,18 @@ impl RecordingCatalog {
         let mut description = None;
         let mut segments = Vec::new();
         for path in paths {
-            let (candidate, info) = inspect_segment(&path, max_sample_size)?;
+            // A corrupt segment must not make the whole directory VOD
+            // unavailable; skip it and keep the rest.
+            let (candidate, info) = match inspect_segment(&path, max_sample_size) {
+                Ok(result) => result,
+                Err(e) => {
+                    tracing::warn!(
+                        "recording scan: skipping corrupt segment {}: {e}",
+                        path.display()
+                    );
+                    continue;
+                }
+            };
             if description
                 .as_ref()
                 .is_some_and(|current| current != &candidate)
@@ -537,13 +580,24 @@ impl SegmentReader {
             return Err(Error::Media("invalid recording record".into()));
         }
         let mut fixed = [0u8; 28];
-        self.reader.read_exact(&mut fixed)?;
+        match self.reader.read_exact(&mut fixed) {
+            Ok(()) => {}
+            // A truncated trailing record (e.g. after a disk-full aborted
+            // segment) ends the segment gracefully instead of failing the
+            // whole directory scan.
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+            Err(error) => return Err(error.into()),
+        }
         let length = u32::from_be_bytes([fixed[24], fixed[25], fixed[26], fixed[27]]) as usize;
         if length > self.max_sample_size {
             return Err(Error::Limit("recorded access unit"));
         }
         let mut data = vec![0; length];
-        self.reader.read_exact(&mut data)?;
+        match self.reader.read_exact(&mut data) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+            Err(error) => return Err(error.into()),
+        }
         let dts = u64::from_be_bytes([
             fixed[12], fixed[13], fixed[14], fixed[15], fixed[16], fixed[17], fixed[18], fixed[19],
         ]);
@@ -584,8 +638,13 @@ fn inspect_segment(path: &Path, max_sample_size: usize) -> Result<(MediaDescript
 }
 
 fn prune(config: &RecordingConfig) -> Result<()> {
-    let Ok(catalog) = RecordingCatalog::scan(&config.directory, usize::MAX) else {
-        return Ok(());
+    let catalog = match RecordingCatalog::scan(&config.directory, usize::MAX) {
+        Ok(catalog) => catalog,
+        Err(e) => {
+            // A failed scan must not silently disable disk-limit enforcement.
+            tracing::warn!("recording prune: catalog scan failed: {e}");
+            return Ok(());
+        }
     };
     let mut bytes = catalog
         .segments
@@ -597,7 +656,12 @@ fn prune(config: &RecordingConfig) -> Result<()> {
         if bytes <= config.max_disk_bytes && count <= config.max_segments {
             break;
         }
-        fs::remove_file(&segment.path)?;
+        if let Err(e) = fs::remove_file(&segment.path) {
+            tracing::warn!(
+                "recording prune: failed to remove {}: {e}",
+                segment.path.display()
+            );
+        }
         bytes = bytes.saturating_sub(segment.bytes);
         count -= 1;
     }

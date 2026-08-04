@@ -339,6 +339,7 @@ fn demux_worker(
     let mut generation = 0u32;
     loop {
         demuxer.seek(options.start_position)?;
+        let mut samples_this_round = 0u64;
         loop {
             if cancel.is_cancelled() {
                 return Ok(());
@@ -346,6 +347,7 @@ fn demux_worker(
             let Some(sample) = demuxer.next_sample()? else {
                 break;
             };
+            samples_this_round = samples_this_round.saturating_add(1);
             let sample_size = sample.unit.data.len();
             if sample_size > options.max_sample_size {
                 return Err(Error::Limit("file media sample size"));
@@ -373,6 +375,11 @@ fn demux_worker(
         };
         if !repeat || cancel.is_cancelled() {
             return Ok(());
+        }
+        if samples_this_round == 0 {
+            // Empty media (or a start position past the end) would otherwise
+            // busy-spin the worker at 100% CPU forever.
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
         generation = generation
             .checked_add(1)
@@ -508,9 +515,7 @@ pub(crate) fn track_description(
         Codec::Pcmu => 0,
         Codec::Pcma => 8,
         Codec::Opus => 111,
-        Codec::H264 | Codec::H265 | Codec::Aac | Codec::Vp8 | Codec::Vp9 => {
-            96u8.saturating_add(id)
-        }
+        Codec::H264 | Codec::H265 | Codec::Aac | Codec::Vp8 | Codec::Vp9 => 96u8.saturating_add(id),
     };
     TrackDescription {
         id,

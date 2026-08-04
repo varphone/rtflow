@@ -642,6 +642,12 @@ impl WavDemuxer {
                 b"data" => data = Some((offset, size)),
                 _ => {}
             }
+            if size == 0 {
+                // A zero-length chunk before fmt/data were both found is
+                // malformed: the seek below would reposition onto the same
+                // header and loop forever.
+                return Err(Error::Media("WAVE file has a zero-length chunk".into()));
+            }
             file.seek(SeekFrom::Start(offset + size + (size & 1)))?;
             if format.is_some() && data.is_some() {
                 break;

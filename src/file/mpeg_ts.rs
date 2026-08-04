@@ -130,10 +130,16 @@ impl MpegTsDemuxer {
             let packet = self.reader.next_packet()?;
             let Some(packet) = packet else {
                 if self.eof_flushed {
-                    if self.tracks.iter().any(|track| !track.aac_buffer.is_empty()) {
-                        return Err(Error::Media(
-                            "truncated AAC ADTS frame at MPEG-TS EOF".into(),
-                        ));
+                    // A trailing partial AAC frame (truncated recording) is
+                    // common and must not fail the whole playback.
+                    for track in self.tracks.iter_mut() {
+                        if !track.aac_buffer.is_empty() {
+                            tracing::warn!(
+                                "mpeg-ts: discarding {} trailing bytes of an incomplete AAC frame at EOF",
+                                track.aac_buffer.len()
+                            );
+                            track.aac_buffer.clear();
+                        }
                     }
                     return Ok(None);
                 }
