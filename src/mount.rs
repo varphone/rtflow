@@ -241,6 +241,15 @@ impl Mount {
                 cache.push(&frame);
             }
         }
+        self.update_bootstrap(&frame);
+        self.frames.send(frame)
+    }
+
+    /// Keep the latest (key)frame per track for RTP-Info/SDP timing even
+    /// while no subscriber is attached: PLAY answers need a rtptime base
+    /// the moment a client connects, before the first GOP lands in the
+    /// startup cache.
+    pub fn update_bootstrap(&self, frame: &AccessUnit) {
         if frame.data.len() <= self.max_queued_bytes_per_session
             && (!matches!(
                 frame.codec,
@@ -250,7 +259,6 @@ impl Mount {
         {
             bootstrap[frame.track_id as usize] = Some(frame.clone());
         }
-        self.frames.send(frame)
     }
 
     pub fn subscribe_with_startup(
@@ -486,6 +494,10 @@ impl LocalPublisher {
     pub fn push(&self, frame: AccessUnit) -> Result<PushResult> {
         if self.inner.frames.receiver_count() == 0 {
             self.inner.stats.add_dropped(1);
+            // No subscribers: still keep the latest keyframe so a PLAY
+            // that arrives right after SETUP has an RTP-Info rtptime base
+            // (VLC's progress bar depends on it).
+            self.inner.update_bootstrap(&frame);
             return Ok(PushResult::DroppedNoSubscribers);
         }
         match self.inner.publish_cached(frame) {
@@ -517,6 +529,10 @@ impl LocalPublisher {
         }
         if self.inner.frames.receiver_count() == 0 {
             self.inner.stats.add_dropped(1);
+            // No subscribers: still keep the latest keyframe so a PLAY
+            // that arrives right after SETUP has an RTP-Info rtptime base
+            // (VLC's progress bar depends on it).
+            self.inner.update_bootstrap(&frame);
             return Ok(PushResult::DroppedNoSubscribers);
         }
         match self.inner.publish_cached(frame) {

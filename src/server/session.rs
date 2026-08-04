@@ -635,7 +635,7 @@ pub(super) async fn serve_connection(
                             .or_insert_with(|| Arc::new(AtomicU16::new(0)))
                             .clone();
                         let input = live_sender_input(mount, track.id, sequence);
-                        if let Some(entry) = rtp_info_entry(&req.uri, track, &input) {
+                        if let Some(entry) = rtp_info_entry(mount, &req.uri, track, &input) {
                             rtp_info.push(entry);
                         }
                         live_interleaved_inputs.push(input);
@@ -646,7 +646,7 @@ pub(super) async fn serve_connection(
                             .or_insert_with(|| Arc::new(AtomicU16::new(0)))
                             .clone();
                         let input = live_sender_input(mount, track.id, sequence);
-                        if let Some(entry) = rtp_info_entry(&req.uri, track, &input) {
+                        if let Some(entry) = rtp_info_entry(mount, &req.uri, track, &input) {
                             rtp_info.push(entry);
                         }
                         live_udp_inputs.push(input);
@@ -1082,18 +1082,52 @@ fn live_sender_input(mount: &Arc<Mount>, track_id: u8, sequence: Arc<AtomicU16>)
 }
 
 fn rtp_info_entry(
+    mount: &Arc<Mount>,
     play_uri: &str,
     track: &crate::media::TrackDescription,
     input: &SenderInput,
 ) -> Option<String> {
+    // Preferred base: the first keyframe of the startup snapshot. If the
+    // client's PLAY arrives before the first GOP lands in the cache (a
+    // fresh publisher + immediate SETUP→PLAY), fall back to the latest
+    // keyframe the publisher pushed — the NPT offset is then a fraction
+    // of a second instead of missing entirely (VLC shows no progress bar
+    // without RTP-Info).
     let first = input.startup.iter().find(|unit| {
         unit.track_id == track.id
             && unit.codec == track.codec
             && (track.kind != crate::media::MediaKind::Video || unit.is_keyframe)
-    })?;
-    let url = sdp::control_uri(play_uri, &track.control).ok()?;
+    });
+    let bootstrap_frame = mount
+        .bootstrap
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(track.id as usize)
+        .cloned()
+        .flatten();
+    let first = first.or(bootstrap_frame.as_ref());
+    let first = match first {
+        Some(unit) => unit,
+        None => {
+            tracing::debug!(
+                "rtp-info: no base frame for track {} (startup={} frames, codec={:?})",
+                track.id,
+                input.startup.len(),
+                track.codec,
+            );
+            return None;
+        }
+    };
+    // `url` is optional (RFC 2326 §12.33): when the PLAY request used a
+    // relative URI (ffmpeg sends "/live/") control_uri cannot resolve an
+    // absolute url — omit it instead of dropping RTP-Info entirely.
+    // Clients pair the entry with the session/track by seq+rtptime.
+    let url = sdp::control_uri(play_uri, &track.control).ok();
+    let prefix = url
+        .map(|url| format!("url={url};"))
+        .unwrap_or_default();
     Some(format!(
-        "url={url};seq={};rtptime={}",
+        "{prefix}seq={};rtptime={}",
         input.sequence.load(Ordering::Relaxed),
         first.rtp_timestamp
     ))
