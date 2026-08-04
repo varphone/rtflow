@@ -136,6 +136,9 @@ struct VideoDemuxer {
     frame_index: u64,
     pending_nal: Option<Bytes>,
     pending_sample: Option<DemuxedSample>,
+    /// Parameter sets (SPS/PPS/VPS) collected from the stream, prepended
+    /// to keyframes so decoders can initialize from mid-stream seeks.
+    parameter_sets: Vec<Bytes>,
 }
 
 impl VideoDemuxer {
@@ -156,6 +159,7 @@ impl VideoDemuxer {
             frame_index: 0,
             pending_nal: None,
             pending_sample: None,
+            parameter_sets: Vec::new(),
         })
     }
 
@@ -169,8 +173,35 @@ impl VideoDemuxer {
                 None => self.reader.next_nal()?,
             };
             let Some(nal) = nal else {
-                return Ok((!output.is_empty()).then_some((output.freeze(), is_keyframe)));
+                let data = if is_keyframe && !self.parameter_sets.is_empty() {
+                    // Prepend parameter sets so a decoder that joins at
+                    // this keyframe (mid-stream seek) can initialize.
+                    let mut merged = BytesMut::with_capacity(
+                        output.len() + self.parameter_sets.iter().map(|p| p.len() + 4).sum::<usize>(),
+                    );
+                    for parameter_set in &self.parameter_sets {
+                        merged.extend_from_slice(START_CODE);
+                        merged.extend_from_slice(parameter_set);
+                    }
+                    merged.extend_from_slice(&output);
+                    merged.freeze()
+                } else {
+                    output.freeze()
+                };
+                let has_data = !data.is_empty();
+                return Ok(has_data.then_some((data, is_keyframe)));
             };
+            // Collect parameter sets (H.264 SPS/PPS; H.265 VPS/SPS/PPS).
+            let nal_type = match self.codec {
+                Codec::H264 => nal.first().map(|byte| byte & 0x1F),
+                Codec::H265 => nal.first().map(|byte| (byte >> 1) & 0x3F),
+                _ => None,
+            };
+            let is_parameter_set = matches!(nal_type, Some(7 | 8))
+                || matches!(nal_type, Some(32..=34));
+            if is_parameter_set && self.parameter_sets.len() < 8 {
+                self.parameter_sets.push(nal.clone());
+            }
             let (is_vcl, starts_picture, starts_prefix, keyframe) =
                 nal_properties(self.codec, &nal);
             let boundary = !output.is_empty()

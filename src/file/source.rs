@@ -60,6 +60,9 @@ pub struct FileSourceOptions {
     pub raw_g711_sample_rate: u32,
     pub raw_g711_channels: u8,
     pub raw_g711_frame_duration: Duration,
+    /// Which audio track to expose (0-based index among audio tracks).
+    /// `None` (default) exposes all audio tracks.
+    pub audio_track: Option<usize>,
 }
 
 impl Default for FileSourceOptions {
@@ -76,6 +79,7 @@ impl Default for FileSourceOptions {
             raw_g711_sample_rate: 8_000,
             raw_g711_channels: 1,
             raw_g711_frame_duration: Duration::from_millis(20),
+            audio_track: None,
         }
     }
 }
@@ -97,6 +101,8 @@ pub struct FileSource {
     path: PathBuf,
     options: FileSourceOptions,
     demuxer: Box<dyn Demuxer>,
+    /// Description with the configured audio-track selection applied.
+    filtered: std::sync::OnceLock<MediaDescription>,
 }
 
 impl FileSource {
@@ -126,6 +132,7 @@ impl FileSource {
             path,
             options,
             demuxer,
+            filtered: std::sync::OnceLock::new(),
         })
     }
 
@@ -147,6 +154,7 @@ impl FileSource {
             path: name.into(),
             options,
             demuxer,
+            filtered: std::sync::OnceLock::new(),
         })
     }
 
@@ -154,8 +162,30 @@ impl FileSource {
         &self.path
     }
 
+    /// Media description with the configured audio-track selection applied
+    /// (all video tracks are kept; audio keeps only `options.audio_track`
+    /// when set).
     pub fn description(&self) -> &MediaDescription {
-        self.demuxer.description()
+        self.filtered.get_or_init(|| {
+            let mut description = self.demuxer.description().clone();
+            if let Some(selected) = self.options.audio_track {
+                let mut audio_seen = 0usize;
+                description.tracks.retain(|track| {
+                    if track.kind == crate::media::MediaKind::Audio {
+                        let keep = audio_seen == selected;
+                        audio_seen += 1;
+                        keep
+                    } else {
+                        true
+                    }
+                });
+                // Rebuild track ids to stay contiguous.
+                for (index, track) in description.tracks.iter_mut().enumerate() {
+                    track.id = index as u8;
+                }
+            }
+            description
+        })
     }
 
     pub fn duration(&self) -> Option<Duration> {

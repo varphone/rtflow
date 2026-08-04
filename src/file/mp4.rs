@@ -40,6 +40,9 @@ struct TrackState {
     samples: Vec<SampleInfo>,
     next_sample: usize,
     video_config: Option<VideoConfig>,
+    /// Edit-list media_time offset in timescale ticks (elst) applied to
+    /// every sample timestamp.
+    edit_offset: i64,
 }
 
 impl Mp4Demuxer {
@@ -130,6 +133,13 @@ impl Mp4Demuxer {
                 samples.duration,
                 u64::from(samples.timescale),
             ));
+            let edit_offset = edit_media_time(trak);
+            if edit_offset > 0 {
+                tracing::debug!(
+                    "mp4: track {track_id} edit list media_time={edit_offset} ticks (timescale {})",
+                    samples.timescale
+                );
+            }
             tracks.push(TrackState {
                 track_id,
                 codec,
@@ -138,6 +148,7 @@ impl Mp4Demuxer {
                 samples: samples.samples,
                 next_sample: 0,
                 video_config,
+                edit_offset,
             });
         }
         if tracks.is_empty() {
@@ -195,8 +206,16 @@ impl Mp4Demuxer {
         self.reader.seek(SeekFrom::Start(sample.file_offset))?;
         let mut bytes = vec![0u8; size];
         self.reader.read_exact(&mut bytes)?;
-        let dts = duration_from_ticks(sample.dts, u64::from(track.timescale));
-        let pts = duration_from_ticks(sample.pts, u64::from(track.timescale));
+        // Apply the edit list: timestamps start after the leading edit
+        // (media_time), e.g. an initial audio delay in ffmpeg output.
+        let dts = duration_from_ticks(
+            sample.dts.saturating_sub(track.edit_offset.max(0) as u64),
+            u64::from(track.timescale),
+        );
+        let pts = duration_from_ticks(
+            sample.pts.saturating_sub(track.edit_offset.max(0) as u64),
+            u64::from(track.timescale),
+        );
         let duration = duration_from_ticks(u64::from(sample.duration), u64::from(track.timescale));
         let data = Bytes::from(bytes);
         let data = match &track.video_config {
@@ -280,6 +299,22 @@ fn track_id(trak: &IsoBox) -> Option<u32> {
         return None;
     };
     Some(data.track_id)
+}
+
+/// First non-empty edit list media_time (in media timescale ticks) for a
+/// track, or 0 when there is no edit list / no usable entry. Negative
+/// media_time marks an empty edit (leading gap) and is skipped.
+fn edit_media_time(trak: &IsoBox) -> i64 {
+    let Some(edts) = find_descendant(trak, "elst") else {
+        return 0;
+    };
+    let Some(StructuredData::EditList(data)) = edts.structured_data.as_ref() else {
+        return 0;
+    };
+    data.entries
+        .iter()
+        .find_map(|entry| (entry.media_time >= 0).then_some(entry.media_time))
+        .unwrap_or(0)
 }
 
 fn sample_entry(trak: &IsoBox) -> Option<&mp4box::SampleEntry> {

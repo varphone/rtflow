@@ -536,7 +536,14 @@ impl Demuxer for RecordingDemuxer {
         self.reader = None;
         self.pending = None;
         while let Some(sample) = self.next_sample()? {
-            if sample.unit.pts >= position {
+            // Align to the next keyframe once past the requested position:
+            // starting on a non-keyframe would black-screen until the next
+            // IDR (and the sender drops those frames anyway).
+            if sample.unit.pts >= position
+                && (sample.unit.codec != crate::media::Codec::H264
+                    && sample.unit.codec != crate::media::Codec::H265
+                    || sample.unit.is_keyframe)
+            {
                 self.pending = Some(sample.unit);
                 break;
             }
