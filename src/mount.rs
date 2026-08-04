@@ -518,9 +518,15 @@ impl LocalPublisher {
     pub fn push(&self, frame: AccessUnit) -> Result<PushResult> {
         if self.inner.frames.receiver_count() == 0 {
             self.inner.stats.add_dropped(1);
-            // No subscribers: still keep the latest keyframe so a PLAY
-            // that arrives right after SETUP has an RTP-Info rtptime base
-            // (VLC's progress bar depends on it).
+            // No subscribers: still keep the startup keyframe cache fresh
+            // (plus the per-track bootstrap for the RTP-Info rtptime base).
+            // Otherwise the snapshot a new PLAY sees is frozen at the last
+            // disconnect — replaying it jumps straight from stale frames
+            // to the live edge, which stalls VLC for seconds.
+            #[cfg(feature = "server")]
+            if let Ok(mut cache) = self.inner.startup_cache.try_lock() {
+                cache.push(&frame);
+            }
             self.inner.update_bootstrap(&frame);
             return Ok(PushResult::DroppedNoSubscribers);
         }
@@ -553,9 +559,15 @@ impl LocalPublisher {
         }
         if self.inner.frames.receiver_count() == 0 {
             self.inner.stats.add_dropped(1);
-            // No subscribers: still keep the latest keyframe so a PLAY
-            // that arrives right after SETUP has an RTP-Info rtptime base
-            // (VLC's progress bar depends on it).
+            // No subscribers: still keep the startup keyframe cache fresh
+            // (plus the per-track bootstrap for the RTP-Info rtptime base).
+            // Otherwise the snapshot a new PLAY sees is frozen at the last
+            // disconnect — replaying it jumps straight from stale frames
+            // to the live edge, which stalls VLC for seconds.
+            #[cfg(feature = "server")]
+            if let Ok(mut cache) = self.inner.startup_cache.try_lock() {
+                cache.push(&frame);
+            }
             self.inner.update_bootstrap(&frame);
             return Ok(PushResult::DroppedNoSubscribers);
         }
