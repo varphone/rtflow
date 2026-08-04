@@ -216,7 +216,13 @@ pub fn startup_dedup_keys(startup: &[AccessUnit]) -> std::collections::HashSet<(
 /// How far back a new subscriber may start relative to the newest cached
 /// frame. Bounding the startup window keeps the on-screen delay close to
 /// the real-time edge instead of replaying the whole cache.
-pub const STARTUP_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+///
+/// Low-latency trade-off: a fresh player first replays this window (paced
+/// at media rate), so the on-screen delay equals roughly the window length
+/// until it catches the live edge. 500ms keeps startup delay in the
+/// sub-second range (VLC + zerolatency encoder total ~300-800ms); the
+/// window still starts at the nearest keyframe so decoding is immediate.
+pub const STARTUP_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
 
 impl Mount {
     /// Cancellation token for this mount's data plane (cancelled on
