@@ -576,7 +576,7 @@ impl Depacketizer {
                 if size < 2 || offset + size > p.len() {
                     return Err(Error::Media("invalid H265 AP".into()));
                 }
-                keyframe |= size >= 2 && matches!((p[offset] >> 1) & 0x3F, 16..=21);
+                keyframe |= size >= 2 && crate::media::bitstream::is_h265_random_access(&p[offset..offset + size]);
                 output.extend_from_slice(&[0, 0, 0, 1]);
                 output.extend_from_slice(&p[offset..offset + size]);
                 offset += size;
@@ -587,7 +587,7 @@ impl Depacketizer {
             return Ok(Some((output.freeze(), keyframe)));
         }
         if typ != 49 {
-            let keyframe = matches!((p[0] >> 1) & 0x3F, 16..=21);
+            let keyframe = crate::media::bitstream::is_h265_random_access(&p[..2.min(p.len())]);
             return Ok(Some((p, keyframe)));
         }
         if p.len() < 3 {

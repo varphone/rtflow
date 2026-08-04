@@ -35,7 +35,7 @@ pub fn setup_push_callback(
                     .map(|t| Duration::from_nanos(t.nseconds()))
                     .unwrap_or_default();
 
-                let rtp_timestamp = (pts.as_secs_f64() * f64::from(clock_rate)) as u32;
+                let rtp_timestamp = crate::media::clock::duration_to_ticks(pts, clock_rate) as u32;
 
                 let unit = AccessUnit {
                     track_id,

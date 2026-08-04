@@ -521,17 +521,11 @@ pub(crate) fn duration_from_ticks(value: u64, rate: u64) -> Duration {
     if rate == 0 {
         return Duration::ZERO;
     }
-    let seconds = value / rate;
-    let nanos = ((value % rate) as u128 * 1_000_000_000u128 / rate as u128) as u32;
-    Duration::new(seconds, nanos)
+    crate::media::clock::ticks_to_duration(value, rate as u32)
 }
 
 pub(crate) fn rtp_timestamp(pts: Duration, clock_rate: u32) -> u32 {
-    let ticks = pts
-        .as_secs()
-        .wrapping_mul(u64::from(clock_rate))
-        .wrapping_add(u64::from(pts.subsec_nanos()) * u64::from(clock_rate) / 1_000_000_000);
-    ticks as u32
+    crate::media::clock::duration_to_ticks(pts, clock_rate) as u32
 }
 
 pub(crate) fn track_description(

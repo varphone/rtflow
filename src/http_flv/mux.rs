@@ -225,148 +225,30 @@ impl FlvMuxer {
             .unwrap_or(Duration::from_millis(40))
     }
 
-    /// Build an AVCDecoderConfigurationRecord from Annex-B H.264 data (SPS + PPS).
+    /// Build an AVCDecoderConfigurationRecord from Annex-B H.264 data
+    /// (SPS + PPS extracted via [`crate::media::bitstream::h264_parameter_sets`]).
     pub fn build_avc_sequence_header(annex_b_data: &Bytes) -> Option<Bytes> {
-        let nals: Vec<Vec<u8>> = crate::media::bitstream::annex_b_nals(annex_b_data)
-            .into_iter()
-            .map(<[u8]>::to_vec)
-            .collect();
-        let mut sps = None;
-        let mut pps = None;
-        for nal in &nals {
-            if nal.is_empty() {
-                continue;
-            }
-            match nal[0] & 0x1f {
-                7 => sps = Some(nal.clone()),
-                8 => pps = Some(nal.clone()),
-                _ => {}
-            }
-        }
-        let sps = sps?;
-        let pps = pps?;
-
-        let mut buf = BytesMut::new();
-        // AVCDecoderConfigurationRecord
-        buf.put_u8(1); // configurationVersion
-        buf.put_u8(sps[1]); // AVCProfileIndication
-        buf.put_u8(sps[2]); // profile_compatibility
-        buf.put_u8(sps[3]); // AVCLevelIndication
-        buf.put_u8(0xff); // lengthSizeMinus1 = 3 (4 bytes)
-        buf.put_u8(0xe1); // numOfSequenceParameterSets = 1
-        buf.put_u16(sps.len() as u16); // SPS length
-        buf.put_slice(&sps);
-        buf.put_u8(1); // numOfPictureParameterSets = 1
-        buf.put_u16(pps.len() as u16); // PPS length
-        buf.put_slice(&pps);
-        Some(buf.freeze())
+        let sets = crate::media::bitstream::h264_parameter_sets(annex_b_data);
+        crate::media::bitstream::build_avc_config_record(
+            sets.sps.as_deref()?,
+            sets.pps.as_deref()?,
+        )
     }
 
-    /// Build a HEVCDecoderConfigurationRecord from Annex-B H.265 data (VPS + SPS + PPS).
+    /// Build a HEVCDecoderConfigurationRecord from Annex-B H.265 data
+    /// (VPS/SPS/PPS extracted via [`crate::media::bitstream::h265_parameter_sets`]).
     pub fn build_h265_sequence_header(annex_b_data: &Bytes) -> Option<Bytes> {
-        let nals: Vec<Vec<u8>> = crate::media::bitstream::annex_b_nals(annex_b_data)
-            .into_iter()
-            .map(<[u8]>::to_vec)
-            .collect();
-        let mut vps = None;
-        let mut sps = None;
-        let mut pps = None;
-        for nal in &nals {
-            if nal.len() < 2 {
-                continue;
-            }
-            // H.265 NAL unit type is in bits [1..6] of the first byte
-            let nal_type = (nal[0] >> 1) & 0x3f;
-            match nal_type {
-                32 => vps = Some(nal.clone()), // VPS
-                33 => sps = Some(nal.clone()), // SPS
-                34 => pps = Some(nal.clone()), // PPS
-                _ => {}
-            }
-        }
-        let vps = vps?;
-        let sps = sps?;
-        let pps = pps?;
-
-        // Extract profile_tier_level fields from SPS RBSP.
-        // After the 2-byte NAL header, SPS RBSP starts with:
-        //   sps_video_parameter_set_id (4 bits)
-        //   sps_max_sub_layers_minus1 (3 bits)
-        //   sps_temporal_id_nesting_flag (1 bit)
-        // Then profile_tier_level() begins after that first RBSP byte.
-        // profile_tier_level layout:
-        //   [0]  general_profile_space(2) + general_tier_flag(1) + general_profile_idc(5)
-        //   [1..4] general_profile_compatibility_flags (4 bytes)
-        //   [5..10] general_constraint_indicator_flags (6 bytes)
-        //   [11] general_level_idc
-
-        let p = if sps.len() > 14 {
-            &sps[2..]
-        } else {
-            return None;
-        };
-
-        // p[0] is the SPS header (vps_id, max_sub_layers_minus1 and
-        // temporal_id_nesting_flag), not part of profile_tier_level().
-        let general_profile_space_tier_idc = p[1];
-        let general_profile_compatibility_flags = [p[2], p[3], p[4], p[5]];
-        let general_constraint_indicator_flags = [p[6], p[7], p[8], p[9], p[10], p[11]];
-        let general_level_idc = p[12];
-
-        let mut buf = BytesMut::with_capacity(128);
-        buf.put_u8(1); // configurationVersion
-        buf.put_u8(general_profile_space_tier_idc);
-        buf.put_slice(&general_profile_compatibility_flags);
-        buf.put_slice(&general_constraint_indicator_flags);
-        buf.put_u8(general_level_idc);
-        buf.put_u16(0xf000); // min_spatial_segmentation_idc (reserved)
-        buf.put_u8(0xfc); // parallelismType (reserved)
-        buf.put_u8(0xfd); // chromaFormatIdc = 1 (4:2:0)
-        buf.put_u8(0xf8); // bitDepthLumaMinus8 = 0
-        buf.put_u8(0xf8); // bitDepthChromaMinus8 = 0
-        buf.put_u16(0); // avgFrameRate
-        buf.put_u8(0x0f); // constantFrameRate(0) + numTemporalLayers(1) + temporalIdNested(1) + lengthSizeMinus1(3)
-        buf.put_u8(3); // numOfArrays (VPS + SPS + PPS)
-
-        // VPS array: array_completeness=1, reserved=1, NAL_unit_type=32
-        buf.put_u8(0xa0); // 0b10100000 = complete(1) + reserved(1) + type(32)
-        buf.put_u16(1);
-        buf.put_u16(vps.len() as u16);
-        buf.put_slice(&vps);
-
-        // SPS array: array_completeness=1, reserved=1, NAL_unit_type=33
-        buf.put_u8(0xa1); // 0b10100001
-        buf.put_u16(1);
-        buf.put_u16(sps.len() as u16);
-        buf.put_slice(&sps);
-
-        // PPS array: array_completeness=1, reserved=1, NAL_unit_type=34
-        buf.put_u8(0xa2); // 0b10100010
-        buf.put_u16(1);
-        buf.put_u16(pps.len() as u16);
-        buf.put_slice(&pps);
-
-        Some(buf.freeze())
+        let sets = crate::media::bitstream::h265_parameter_sets(annex_b_data);
+        crate::media::bitstream::build_hevc_config_record(
+            sets.vps.as_deref()?,
+            sets.sps.as_deref()?,
+            sets.pps.as_deref()?,
+        )
     }
 
     /// Build an AVCDecoderConfigurationRecord from pre-extracted SPS/PPS NALs.
     pub fn build_avc_sequence_header_from_nals(sps: &[u8], pps: &[u8]) -> Option<Bytes> {
-        if sps.len() < 4 || pps.is_empty() {
-            return None;
-        }
-        let mut buf = BytesMut::new();
-        buf.put_u8(1);
-        buf.put_u8(sps[1]);
-        buf.put_u8(sps[2]);
-        buf.put_u8(sps[3]);
-        buf.put_u8(0xff);
-        buf.put_u8(0xe1);
-        buf.put_u16(sps.len() as u16);
-        buf.put_slice(sps);
-        buf.put_u8(1);
-        buf.put_u16(pps.len() as u16);
-        buf.put_slice(pps);
-        Some(buf.freeze())
+        crate::media::bitstream::build_avc_config_record(sps, pps)
     }
 
     /// Build a HEVCDecoderConfigurationRecord from pre-extracted VPS/SPS/PPS NALs.
@@ -375,37 +257,7 @@ impl FlvMuxer {
         sps: &[u8],
         pps: &[u8],
     ) -> Option<Bytes> {
-        if vps.len() < 2 || sps.len() <= 14 || pps.len() < 2 {
-            return None;
-        }
-        let p = &sps[2..];
-        let mut buf = BytesMut::with_capacity(128);
-        buf.put_u8(1);
-        buf.put_u8(p[1]);
-        buf.put_slice(&p[2..6]);
-        buf.put_slice(&p[6..12]);
-        buf.put_u8(p[12]);
-        buf.put_u16(0xf000);
-        buf.put_u8(0xfc);
-        buf.put_u8(0xfd);
-        buf.put_u8(0xf8);
-        buf.put_u8(0xf8);
-        buf.put_u16(0);
-        buf.put_u8(0x0f);
-        buf.put_u8(3);
-        buf.put_u8(0xa0);
-        buf.put_u16(1);
-        buf.put_u16(vps.len() as u16);
-        buf.put_slice(vps);
-        buf.put_u8(0xa1);
-        buf.put_u16(1);
-        buf.put_u16(sps.len() as u16);
-        buf.put_slice(sps);
-        buf.put_u8(0xa2);
-        buf.put_u16(1);
-        buf.put_u16(pps.len() as u16);
-        buf.put_slice(pps);
-        Some(buf.freeze())
+        crate::media::bitstream::build_hevc_config_record(vps, sps, pps)
     }
 
     /// Parse AAC AudioSpecificConfig from an fmtp string.
@@ -488,6 +340,96 @@ fn write_h264_video_tag(
 
     let tag_total_size = FLV_TAG_HEADER_SIZE + data.len() + 5;
     buf.put_u32(tag_total_size as u32);
+}
+
+/// audio frames) would otherwise be mistaken for a 3-byte Annex-B start
+/// code and corrupted by conversion.
+fn is_length_prefixed_chain(data: &[u8]) -> bool {
+    let mut pos = 0usize;
+    while pos + 4 <= data.len() {
+        let len =
+            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
+        if len == 0 {
+            return false; // empty NAL: not a valid AVCC chain
+        }
+        pos += 4 + len;
+        if pos == data.len() {
+            return true;
+        }
+        if pos > data.len() {
+            return false;
+        }
+    }
+    false
+}
+
+/// Converted AVCC/HVCC (length-prefixed) size of `data`, or `None` when
+/// `data` is already length-prefixed (AVCC/HVCC, e.g. from RTMP ingest).
+///
+/// Detection: length-prefixed chains pass through untouched; payloads
+/// starting with an Annex-B start code are converted (single scan, no
+/// allocation); anything else (raw single NAL without framing) also
+/// passes through, matching the pre-optimization behaviour.
+fn annex_b_avcc_size(data: &Bytes) -> Option<usize> {
+    let bytes = data.as_ref();
+    if is_length_prefixed_chain(bytes) {
+        return None;
+    }
+    let starts_with_start_code = bytes.len() >= 4
+        && ((bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 1)
+            || (bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 0 && bytes[3] == 1));
+    if !starts_with_start_code {
+        return None;
+    }
+    let mut total = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        let Some(start) = find_start_code(bytes, i) else {
+            break;
+        };
+        let nal_end = find_start_code(bytes, start + 3).unwrap_or(bytes.len());
+        let nal_data_start = if start + 3 < bytes.len() && bytes[start + 2] == 0x01 {
+            start + 3
+        } else if start + 4 < bytes.len() && bytes[start + 3] == 0x01 {
+            start + 4
+        } else {
+            start + 3
+        };
+        if nal_data_start < nal_end {
+            total += 4 + (nal_end - nal_data_start);
+        }
+        i = nal_end;
+    }
+    Some(total)
+}
+
+/// Append `data` to `buf` as length-prefixed NALs (Annex-B → AVCC).
+/// Already length-prefixed payloads are copied verbatim. No allocation.
+fn write_annex_b_avcc(buf: &mut BytesMut, data: &Bytes) {
+    if annex_b_avcc_size(data).is_none() {
+        buf.put_slice(data);
+        return;
+    }
+    let bytes = data.as_ref();
+    let mut i = 0;
+    while i < bytes.len() {
+        let Some(start) = find_start_code(bytes, i) else {
+            break;
+        };
+        let nal_end = find_start_code(bytes, start + 3).unwrap_or(bytes.len());
+        let nal_data_start = if start + 3 < bytes.len() && bytes[start + 2] == 0x01 {
+            start + 3
+        } else if start + 4 < bytes.len() && bytes[start + 3] == 0x01 {
+            start + 4
+        } else {
+            start + 3
+        };
+        if nal_data_start < nal_end {
+            buf.put_u32((nal_end - nal_data_start) as u32);
+            buf.put_slice(&bytes[nal_data_start..nal_end]);
+        }
+        i = nal_end;
+    }
 }
 
 /// H.264 video tag with Annex-B → AVCC conversion performed directly into
@@ -578,199 +520,50 @@ fn write_h265_video_tag_inplace(buf: &mut BytesMut, unit: &AccessUnit, data: &By
 
 fn write_composition_time(buf: &mut BytesMut, unit: &AccessUnit) {
     let dts = unit.dts.unwrap_or(unit.pts);
-    let offset_ms = if unit.pts >= dts {
-        unit.pts.saturating_sub(dts).as_millis() as i64
-    } else {
-        -(dts.saturating_sub(unit.pts).as_millis() as i64)
-    }
-    .clamp(-0x80_0000, 0x7f_ffff) as i32;
-    let encoded = (offset_ms as u32) & 0x00ff_ffff;
-    buf.put_u8((encoded >> 16) as u8);
-    buf.put_u8((encoded >> 8) as u8);
-    buf.put_u8(encoded as u8);
+    crate::media::flv::write_composition_time(
+        buf,
+        crate::media::flv::composition_time_ms(unit.pts, Some(dts)),
+    );
 }
 
-/// Write the FLV tag header (common for all tag types).
+/// Write the FLV video tag header.
 fn write_flv_tag_header(buf: &mut BytesMut, unit: &AccessUnit, body_size: usize) {
     let timestamp = unit.dts.unwrap_or(unit.pts).as_millis() as u32;
-    let timestamp_ext = (timestamp >> 24) as u8;
-    let timestamp_base = timestamp & 0x00FFFFFF;
-
-    buf.put_u8(0x09); // tag type: video
-    buf.put_u8((body_size >> 16) as u8);
-    buf.put_u8((body_size >> 8) as u8);
-    buf.put_u8(body_size as u8);
-    buf.put_u8((timestamp_base >> 16) as u8);
-    buf.put_u8((timestamp_base >> 8) as u8);
-    buf.put_u8(timestamp_base as u8);
-    buf.put_u8(timestamp_ext);
-    buf.put_u8(0); // stream id (always 0)
-    buf.put_u8(0);
-    buf.put_u8(0);
+    crate::media::flv::write_tag_header(buf, crate::media::flv::TAG_TYPE_VIDEO, body_size, timestamp);
 }
 
 /// Write an audio FLV tag (AAC).
 fn write_audio_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_sequence_header: bool) {
     let timestamp = unit.pts.as_millis() as u32;
-    let timestamp_ext = (timestamp >> 24) as u8;
-    let timestamp_base = timestamp & 0x00FFFFFF;
-
     let data_size = data.len() + 2; // +2 for audio tag header bytes
+    crate::media::flv::write_tag_header(buf, crate::media::flv::TAG_TYPE_AUDIO, data_size, timestamp);
 
-    // FLV tag header
-    buf.put_u8(0x08); // tag type: audio
-    buf.put_u8((data_size >> 16) as u8);
-    buf.put_u8((data_size >> 8) as u8);
-    buf.put_u8(data_size as u8);
-    buf.put_u8((timestamp_base >> 16) as u8);
-    buf.put_u8((timestamp_base >> 8) as u8);
-    buf.put_u8(timestamp_base as u8);
-    buf.put_u8(timestamp_ext);
-    buf.put_u8(0);
-    buf.put_u8(0);
-    buf.put_u8(0);
-
-    // AAC: sound_format=10, rate=3(44kHz), size=1(16-bit), type=1(stereo)
-    buf.put_u8(0xAF);
-
+    // AAC: sound_format=10, rate=3 (44 kHz), size=1 (16-bit), type=1 (stereo).
+    buf.put_u8(crate::media::flv::AAC_SOUND_HEADER);
     buf.put_u8(if is_sequence_header { 0 } else { 1 });
-
     buf.put_slice(data);
 
-    let tag_total_size = FLV_TAG_HEADER_SIZE + data_size;
+    let tag_total_size = crate::media::flv::FLV_TAG_HEADER_SIZE + data_size;
     buf.put_u32(tag_total_size as u32);
 }
 
 /// Write a G.711 audio FLV tag.
 fn write_g711_audio_tag(buf: &mut BytesMut, unit: &AccessUnit) {
     let timestamp = unit.pts.as_millis() as u32;
-    let timestamp_ext = (timestamp >> 24) as u8;
-    let timestamp_base = timestamp & 0x00FFFFFF;
-
     let data_size = unit.data.len() + 1; // +1 for audio tag header byte
-
-    // FLV tag header
-    buf.put_u8(0x08);
-    buf.put_u8((data_size >> 16) as u8);
-    buf.put_u8((data_size >> 8) as u8);
-    buf.put_u8(data_size as u8);
-    buf.put_u8((timestamp_base >> 16) as u8);
-    buf.put_u8((timestamp_base >> 8) as u8);
-    buf.put_u8(timestamp_base as u8);
-    buf.put_u8(timestamp_ext);
-    buf.put_u8(0);
-    buf.put_u8(0);
-    buf.put_u8(0);
+    crate::media::flv::write_tag_header(buf, crate::media::flv::TAG_TYPE_AUDIO, data_size, timestamp);
 
     let sound_format = match unit.codec {
-        Codec::Pcma => 7u8,
-        Codec::Pcmu => 8u8,
+        Codec::Pcma => crate::media::flv::SOUND_FORMAT_ALAW,
+        Codec::Pcmu => crate::media::flv::SOUND_FORMAT_ULAW,
         _ => unreachable!(),
     };
     // Sound rate/size/type bits: 44kHz (3), 16-bit (1), stereo (1).
-    // Zero rate bits would claim 5.5kHz and break ffmpeg's FLV demuxer.
     buf.put_u8((sound_format << 4) | 0x0F);
-
     buf.put_slice(&unit.data);
 
-    let tag_total_size = FLV_TAG_HEADER_SIZE + data_size;
+    let tag_total_size = crate::media::flv::FLV_TAG_HEADER_SIZE + data_size;
     buf.put_u32(tag_total_size as u32);
-}
-
-/// Convert Annex-B NALUs (with start codes) to AVCC/HVCC format (4-byte length prefix).
-/// True when `data` parses as an exact chain of 4-byte length-prefixed
-/// NALs covering the whole buffer (AVCC/HVCC layout).
-///
-/// This is much more discriminative than a start-code prefix check: an
-/// AVCC NAL whose length field is `00 00 01 XX` (256–511-byte NALs, e.g.
-/// audio frames) would otherwise be mistaken for a 3-byte Annex-B start
-/// code and corrupted by conversion.
-fn is_length_prefixed_chain(data: &[u8]) -> bool {
-    let mut pos = 0usize;
-    while pos + 4 <= data.len() {
-        let len =
-            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
-        if len == 0 {
-            return false; // empty NAL: not a valid AVCC chain
-        }
-        pos += 4 + len;
-        if pos == data.len() {
-            return true;
-        }
-        if pos > data.len() {
-            return false;
-        }
-    }
-    false
-}
-
-/// Converted AVCC/HVCC (length-prefixed) size of `data`, or `None` when
-/// `data` is already length-prefixed (AVCC/HVCC, e.g. from RTMP ingest).
-///
-/// Detection: length-prefixed chains pass through untouched; payloads
-/// starting with an Annex-B start code are converted (single scan, no
-/// allocation); anything else (raw single NAL without framing) also
-/// passes through, matching the pre-optimization behaviour.
-fn annex_b_avcc_size(data: &Bytes) -> Option<usize> {
-    let bytes = data.as_ref();
-    if is_length_prefixed_chain(bytes) {
-        return None;
-    }
-    let starts_with_start_code = bytes.len() >= 4
-        && ((bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 1)
-            || (bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 0 && bytes[3] == 1));
-    if !starts_with_start_code {
-        return None;
-    }
-    let mut total = 0usize;
-    let mut i = 0;
-    while i < bytes.len() {
-        let Some(start) = find_start_code(bytes, i) else {
-            break;
-        };
-        let nal_end = find_start_code(bytes, start + 3).unwrap_or(bytes.len());
-        let nal_data_start = if start + 3 < bytes.len() && bytes[start + 2] == 0x01 {
-            start + 3
-        } else if start + 4 < bytes.len() && bytes[start + 3] == 0x01 {
-            start + 4
-        } else {
-            start + 3
-        };
-        if nal_data_start < nal_end {
-            total += 4 + (nal_end - nal_data_start);
-        }
-        i = nal_end;
-    }
-    Some(total)
-}
-
-/// Append `data` to `buf` as length-prefixed NALs (Annex-B → AVCC).
-/// Already length-prefixed payloads are copied verbatim. No allocation.
-fn write_annex_b_avcc(buf: &mut BytesMut, data: &Bytes) {
-    if annex_b_avcc_size(data).is_none() {
-        buf.put_slice(data);
-        return;
-    }
-    let bytes = data.as_ref();
-    let mut i = 0;
-    while i < bytes.len() {
-        let Some(start) = find_start_code(bytes, i) else {
-            break;
-        };
-        let nal_end = find_start_code(bytes, start + 3).unwrap_or(bytes.len());
-        let nal_data_start = if start + 3 < bytes.len() && bytes[start + 2] == 0x01 {
-            start + 3
-        } else if start + 4 < bytes.len() && bytes[start + 3] == 0x01 {
-            start + 4
-        } else {
-            start + 3
-        };
-        if nal_data_start < nal_end {
-            buf.put_u32((nal_end - nal_data_start) as u32);
-            buf.put_slice(&bytes[nal_data_start..nal_end]);
-        }
-        i = nal_end;
-    }
 }
 
 /// Reference implementation kept for tests: Annex-B → AVCC conversion
@@ -870,7 +663,7 @@ mod tests {
                     id: 0,
                     kind: MediaKind::Video,
                     codec: Codec::H264,
-                    clock_rate: 90000,
+                    clock_rate: crate::media::clock::VIDEO_CLOCK_RATE,
                     channels: None,
                     payload_type: 96,
                     fmtp: None,
@@ -909,7 +702,7 @@ mod tests {
                 id: 0,
                 kind: MediaKind::Video,
                 codec: Codec::H265,
-                clock_rate: 90000,
+                clock_rate: crate::media::clock::VIDEO_CLOCK_RATE,
                 channels: None,
                 payload_type: 96,
                 fmtp: None,
@@ -1123,7 +916,7 @@ mod tests {
                 id: 0,
                 kind: MediaKind::Video,
                 codec: Codec::H264,
-                clock_rate: 90_000,
+                clock_rate: crate::media::clock::VIDEO_CLOCK_RATE,
                 channels: None,
                 payload_type: 96,
                 fmtp: None,

@@ -15,7 +15,7 @@ use std::{
     time::Duration,
 };
 
-const TS_SIZE: usize = 188;
+const TS_SIZE: usize = crate::media::TS_PACKET_SIZE;
 const PTS_MODULUS: u64 = 1 << 33;
 
 pub(crate) struct MpegTsDemuxer {

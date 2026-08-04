@@ -157,7 +157,7 @@ impl Default for StartupCacheConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            max_bytes: 4 * 1024 * 1024,
+            max_bytes: crate::mount::DEFAULT_MAX_QUEUED_BYTES_PER_SESSION,
             max_frames_per_track: 256,
         }
     }
@@ -322,11 +322,12 @@ fn pop_front(track: &mut TrackCache) {
 }
 
 fn duration_to_ticks(duration: Duration, clock_rate: u32) -> u32 {
-    (duration.as_secs_f64() * f64::from(clock_rate)).clamp(1.0, u32::MAX as f64) as u32
+    crate::media::clock::duration_to_ticks(duration, clock_rate)
+        .clamp(1, u64::from(u32::MAX)) as u32
 }
 
 fn ticks_to_duration(ticks: u32, clock_rate: u32) -> Duration {
-    Duration::from_secs_f64(f64::from(ticks) / f64::from(clock_rate))
+    crate::media::clock::ticks_to_duration(u64::from(ticks), clock_rate)
 }
 
 fn duration_ns(value: Duration) -> i128 {
@@ -352,7 +353,7 @@ mod tests {
                 id: 0,
                 kind: MediaKind::Video,
                 codec,
-                clock_rate: 90_000,
+                clock_rate: crate::media::clock::VIDEO_CLOCK_RATE,
                 channels: None,
                 payload_type: 96,
                 fmtp: None,

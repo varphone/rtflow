@@ -27,7 +27,7 @@ impl Default for MpdConfig {
             min_buffer_time: Duration::from_secs(2),
             time_shift_buffer_depth: Duration::from_secs(30),
             segment_duration: Duration::from_secs(2),
-            timescale: 90000,
+            timescale: crate::media::clock::VIDEO_CLOCK_RATE,
             suggested_presentation_delay: None,
         }
     }
@@ -293,11 +293,7 @@ pub fn generate_mpd_q(
 
 /// Convert a Duration to ticks at the given timescale.
 fn duration_to_ticks(d: Duration, timescale: u32) -> u64 {
-    d.as_secs()
-        .saturating_mul(u64::from(timescale))
-        .saturating_add(
-            u64::from(d.subsec_nanos()).saturating_mul(u64::from(timescale)) / 1_000_000_000,
-        )
+    crate::media::clock::duration_to_ticks(d, timescale)
 }
 
 fn format_duration(d: Duration) -> String {
@@ -385,7 +381,7 @@ mod tests {
                     id: 0,
                     kind: MediaKind::Video,
                     codec: Codec::H264,
-                    clock_rate: 90000,
+                    clock_rate: crate::media::clock::VIDEO_CLOCK_RATE,
                     channels: None,
                     payload_type: 96,
                     fmtp: None,

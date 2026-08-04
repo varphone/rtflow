@@ -402,9 +402,7 @@ fn duration_to_ticks(duration: Duration, timescale: u32) -> u64 {
     // Round to nearest tick instead of truncating: repeated truncation of
     // µs-resolution durations drifts the fMP4 timeline (tfdt) relative to
     // the RTP timeline over long streams.
-    duration.as_secs().saturating_mul(u64::from(timescale))
-        + (u64::from(duration.subsec_nanos()).saturating_mul(u64::from(timescale)) + 500_000_000)
-            / 1_000_000_000
+    crate::media::clock::duration_to_ticks_rounded(duration, timescale)
 }
 
 fn composition_offset_ticks(pts: Duration, dts: Duration, timescale: u32) -> i32 {
@@ -416,32 +414,6 @@ fn composition_offset_ticks(pts: Duration, dts: Duration, timescale: u32) -> i32
     ticks.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
-fn annex_b_nals(data: &[u8]) -> Vec<&[u8]> {
-    let mut marks = Vec::new();
-    let mut index = 0;
-    while index + 3 <= data.len() {
-        let size = if data[index..].starts_with(&[0, 0, 1]) {
-            3
-        } else if index + 4 <= data.len() && data[index..].starts_with(&[0, 0, 0, 1]) {
-            4
-        } else {
-            index += 1;
-            continue;
-        };
-        marks.push((index, size));
-        index += size;
-    }
-    marks
-        .iter()
-        .enumerate()
-        .filter_map(|(index, (offset, size))| {
-            let start = offset + size;
-            let end = marks.get(index + 1).map_or(data.len(), |next| next.0);
-            (start < end).then_some(&data[start..end])
-        })
-        .collect()
-}
-
 fn annex_b_to_length_prefixed(codec: Codec, data: &Bytes) -> Bytes {
     // Fast path: already length-prefixed (RTMP ingest delivers AVCC/HVCC).
     // Reference-count clone only; no full-frame scan or rebuild.
@@ -450,7 +422,7 @@ fn annex_b_to_length_prefixed(codec: Codec, data: &Bytes) -> Bytes {
     {
         return data.clone();
     }
-    let nals = annex_b_nals(data);
+    let nals = crate::media::bitstream::annex_b_nals(data);
     if nals.is_empty() {
         return data.clone();
     }
@@ -473,7 +445,7 @@ fn annex_b_to_length_prefixed(codec: Codec, data: &Bytes) -> Bytes {
 }
 
 fn codec_config_from_annex_b(codec: Codec, data: &Bytes) -> Option<Bytes> {
-    let nals = annex_b_nals(data);
+    let nals = crate::media::bitstream::annex_b_nals(data);
     match codec {
         Codec::H264 => {
             let sps = nals
@@ -530,56 +502,11 @@ fn codec_config_from_fmtp(track: &crate::media::TrackDescription) -> Option<Byte
 }
 
 fn build_avcc(sps: &[u8], pps: &[u8]) -> Option<Bytes> {
-    if sps.len() < 4 || pps.is_empty() {
-        tracing::warn!(
-            sps_len = sps.len(),
-            pps_len = pps.len(),
-            "build_avcc: invalid input"
-        );
-        return None;
-    }
-    tracing::debug!(sps_len = sps.len(), pps_len = pps.len(), "build_avcc");
-    let mut config = BytesMut::with_capacity(11 + sps.len() + pps.len());
-    config.put_u8(1);
-    config.put_u8(sps[1]);
-    config.put_u8(sps[2]);
-    config.put_u8(sps[3]);
-    config.put_u8(0xff);
-    config.put_u8(0xe1);
-    config.put_u16(sps.len() as u16);
-    config.put_slice(sps);
-    config.put_u8(1);
-    config.put_u16(pps.len() as u16);
-    config.put_slice(pps);
-    Some(config.freeze())
+    crate::media::bitstream::build_avc_config_record(sps, pps)
 }
 
 fn build_hvcc(vps: &[u8], sps: &[u8], pps: &[u8]) -> Option<Bytes> {
-    if vps.len() < 2 || sps.len() <= 14 || pps.len() < 2 {
-        return None;
-    }
-    let profile = &sps[2..];
-    let mut config = BytesMut::with_capacity(128);
-    config.put_u8(1);
-    config.put_u8(profile[1]);
-    config.put_slice(&profile[2..6]);
-    config.put_slice(&profile[6..12]);
-    config.put_u8(profile[12]);
-    config.put_u16(0xf000);
-    config.put_u8(0xfc);
-    config.put_u8(0xfd);
-    config.put_u8(0xf8);
-    config.put_u8(0xf8);
-    config.put_u16(0);
-    config.put_u8(0x0f);
-    config.put_u8(3);
-    for (kind, nal) in [(32u8, vps), (33, sps), (34, pps)] {
-        config.put_u8(0x80 | kind);
-        config.put_u16(1);
-        config.put_u16(nal.len() as u16);
-        config.put_slice(nal);
-    }
-    Some(config.freeze())
+    crate::media::bitstream::build_hevc_config_record(vps, sps, pps)
 }
 
 fn write_ftyp(buf: &mut BytesMut) {
@@ -1347,18 +1274,7 @@ fn aac_config_from_fmtp(track: &crate::media::TrackDescription) -> Option<Bytes>
 }
 
 fn default_aac_config(clock_rate: u32, channels: u8) -> Bytes {
-    let sample_rates = [
-        96_000, 88_200, 64_000, 48_000, 44_100, 32_000, 24_000, 22_050, 16_000, 12_000, 11_025,
-        8_000, 7_350,
-    ];
-    let index = sample_rates
-        .iter()
-        .position(|rate| *rate == clock_rate)
-        .unwrap_or(4) as u8;
-    Bytes::from(vec![
-        (2 << 3) | (index >> 1),
-        ((index & 1) << 7) | ((channels.min(7)) << 3),
-    ])
+    crate::media::bitstream::aac_audio_specific_config_bytes(clock_rate, channels)
 }
 
 fn write_esds(buf: &mut BytesMut, config: &Bytes) {

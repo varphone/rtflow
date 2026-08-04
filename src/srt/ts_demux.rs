@@ -4,11 +4,10 @@
 //! AccessUnits suitable for pushing to a mount.
 use bytes::BytesMut;
 use std::collections::HashMap;
-use std::time::Duration;
 
 use crate::media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription};
 
-const TS_PACKET_SIZE: usize = 188;
+const TS_PACKET_SIZE: usize = crate::media::TS_PACKET_SIZE;
 const TS_SYNC_BYTE: u8 = 0x47;
 const PTS_MODULUS: u64 = 1 << 33;
 /// Per-PID cap for PES accumulation (a PES packet larger than this is
@@ -325,8 +324,8 @@ impl TsStreamDemuxer {
         let normalized_dts = (dts_ticks + PTS_MODULUS - origin) % PTS_MODULUS;
         let normalized_pts = (pts_ticks + PTS_MODULUS - origin) % PTS_MODULUS;
 
-        let dts_duration = Duration::from_secs_f64(normalized_dts as f64 / 90000.0);
-        let pts_duration = Duration::from_secs_f64(normalized_pts as f64 / 90000.0);
+        let dts_duration = crate::media::clock::ticks_to_duration(normalized_dts, 90_000);
+        let pts_duration = crate::media::clock::ticks_to_duration(normalized_pts, 90_000);
 
         track.last_pts = Some(normalized_pts);
         track.last_dts = Some(normalized_dts);
@@ -388,6 +387,7 @@ fn is_h264_keyframe(data: &[u8]) -> bool {
             };
             if start < data.len() {
                 let nal_type = data[start] & 0x1F;
+                // IDR slice (5), or an SPS (7) that precedes it.
                 if nal_type == 5 || nal_type == 7 {
                     return true;
                 }
@@ -411,8 +411,9 @@ fn is_h265_keyframe(data: &[u8]) -> bool {
                 continue;
             };
             if start < data.len() {
-                let nal_type = (data[start] >> 1) & 0x3F;
-                if (16..=23).contains(&nal_type) {
+                // Random access point: IDR/CRA/BLA (16–21); reserved
+                // types 22/23 are not keyframes.
+                if crate::media::bitstream::is_h265_random_access(&data[start..]) {
                     return true;
                 }
             }

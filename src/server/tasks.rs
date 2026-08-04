@@ -630,7 +630,7 @@ mod tests {
     fn rtp_ntp_clock_advances_at_the_media_clock_rate() {
         let mut clock = RtpNtpClock {
             anchor_ntp: NTP_UNIX_EPOCH_OFFSET_SECS << 32,
-            clock_rate: 90_000,
+            clock_rate: crate::media::clock::VIDEO_CLOCK_RATE,
             last_rtp: 90_000,
             extended_delta: 0,
         };

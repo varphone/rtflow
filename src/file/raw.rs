@@ -198,8 +198,8 @@ impl VideoDemuxer {
             };
             // Collect parameter sets (H.264 SPS/PPS; H.265 VPS/SPS/PPS).
             let nal_type = match self.codec {
-                Codec::H264 => nal.first().map(|byte| byte & 0x1F),
-                Codec::H265 => nal.first().map(|byte| (byte >> 1) & 0x3F),
+                Codec::H264 => crate::media::bitstream::nal_type_h264(&nal),
+                Codec::H265 => crate::media::bitstream::nal_type_h265(&nal),
                 _ => None,
             };
             let is_parameter_set =

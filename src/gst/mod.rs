@@ -85,7 +85,7 @@ impl GstPipelineBuilder {
             tracks.push(TrackInfo {
                 kind: MediaKind::Video,
                 codec: enc.codec,
-                clock_rate: 90_000,
+                clock_rate: crate::media::clock::VIDEO_CLOCK_RATE,
                 channels: None,
                 payload_type: 96,
                 caps: chain.caps,

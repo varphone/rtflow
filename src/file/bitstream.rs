@@ -194,11 +194,10 @@ pub(crate) fn length_prefixed_to_annex_b(
 }
 
 pub(crate) fn is_keyframe(codec: Codec, data: &[u8]) -> bool {
+    use crate::media::bitstream::{is_h264_idr, is_h265_random_access};
     let matches = |nal: &[u8]| match codec {
-        Codec::H264 => nal.first().is_some_and(|byte| byte & 0x1f == 5),
-        Codec::H265 => nal
-            .first()
-            .is_some_and(|byte| matches!((byte >> 1) & 0x3f, 19..=21)),
+        Codec::H264 => is_h264_idr(nal),
+        Codec::H265 => is_h265_random_access(nal),
         Codec::Aac | Codec::Pcma | Codec::Pcmu | Codec::Opus | Codec::Vp8 | Codec::Vp9 => true,
     };
     let mut nals = annex_b_nals(data).peekable();

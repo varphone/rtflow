@@ -317,16 +317,10 @@ pub fn build_video_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
             } else {
                 buf.put_u8(AVC_NALU);
             }
-            // Composition time offset (0 for now, could be computed from PTS-DTS)
-            let cts = if let (Some(dts), pts) = (unit.dts, unit.pts) {
-                let diff = pts.as_millis() as i32 - dts.as_millis() as i32;
-                diff.clamp(-0x800000, 0x7FFFFF)
-            } else {
-                0
-            };
-            buf.put_u8((cts >> 16) as u8);
-            buf.put_u8((cts >> 8) as u8);
-            buf.put_u8(cts as u8);
+            crate::media::flv::write_composition_time(
+                &mut buf,
+                crate::media::flv::composition_time_ms(unit.pts, unit.dts),
+            );
             buf.put_slice(&unit.data);
         }
         Codec::H265 => {
@@ -338,15 +332,10 @@ pub fn build_video_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
             }
             // Same composition-time (PTS-DTS) computation as H.264:
             // enhanced-RTMP players expect B-frame offset here too.
-            let cts = if let (Some(dts), pts) = (unit.dts, unit.pts) {
-                let diff = pts.as_millis() as i32 - dts.as_millis() as i32;
-                diff.clamp(-0x800000, 0x7FFFFF)
-            } else {
-                0
-            };
-            buf.put_u8((cts >> 16) as u8);
-            buf.put_u8((cts >> 8) as u8);
-            buf.put_u8(cts as u8);
+            crate::media::flv::write_composition_time(
+                &mut buf,
+                crate::media::flv::composition_time_ms(unit.pts, unit.dts),
+            );
             buf.put_slice(&unit.data);
         }
         _ => {}
@@ -391,49 +380,28 @@ pub fn build_audio_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
 
 /// Build an AVCC decoder configuration record from SPS/PPS.
 pub fn build_avc_sequence_header(sps: &[u8], pps: &[u8]) -> Bytes {
-    let mut buf = BytesMut::with_capacity(sps.len() + pps.len() + 16);
-    buf.put_u8(1); // configurationVersion
-    if sps.len() >= 4 {
-        buf.put_u8(sps[1]); // AVCProfileIndication
-        buf.put_u8(sps[2]); // profile_compatibility
-        buf.put_u8(sps[3]); // AVCLevelIndication
-    } else {
-        buf.put_u8(0x42); // baseline
-        buf.put_u8(0x00);
-        buf.put_u8(0x1E); // level 3.0
-    }
-    buf.put_u8(0xFF); // lengthSizeMinusOne = 3 (4 bytes)
-    buf.put_u8(0xE1); // numOfSPS = 1
-    buf.put_u16(sps.len() as u16);
-    buf.put_slice(sps);
-    buf.put_u8(1); // numOfPPS
-    buf.put_u16(pps.len() as u16);
-    buf.put_slice(pps);
-    buf.freeze()
+    crate::media::bitstream::build_avc_config_record(sps, pps).unwrap_or_else(|| {
+        // Degenerate SPS: fall back to baseline profile / level 3.0 so the
+        // RTMP pipeline still produces a parseable record.
+        let mut buf = BytesMut::with_capacity(sps.len() + pps.len() + 16);
+        buf.put_u8(1); // configurationVersion
+        buf.put_u8(0x42); // AVCProfileIndication (baseline)
+        buf.put_u8(0x00); // profile_compatibility
+        buf.put_u8(0x1E); // AVCLevelIndication (3.0)
+        buf.put_u8(0xFF); // lengthSizeMinusOne = 3 (4 bytes)
+        buf.put_u8(0xE1); // numOfSPS = 1
+        buf.put_u16(sps.len() as u16);
+        buf.put_slice(sps);
+        buf.put_u8(1); // numOfPPS
+        buf.put_u16(pps.len() as u16);
+        buf.put_slice(pps);
+        buf.freeze()
+    })
 }
 
 /// Build an AAC AudioSpecificConfig for the given sample rate and channels.
 pub fn build_aac_sequence_header(sample_rate: u32, channels: u8) -> Bytes {
-    let freq_index = match sample_rate {
-        96000 => 0,
-        88200 => 1,
-        64000 => 2,
-        48000 => 3,
-        44100 => 4,
-        32000 => 5,
-        24000 => 6,
-        22050 => 7,
-        16000 => 8,
-        12000 => 9,
-        11025 => 10,
-        8000 => 11,
-        7350 => 12,
-        _ => 4, // default 44100
-    };
-    // AudioSpecificConfig: 5 bits objectType (2=AAC-LC) + 4 bits freqIndex + 4 bits channels
-    let byte0 = (2u8 << 3) | ((freq_index >> 1) & 0x07);
-    let byte1 = ((freq_index & 0x01) << 7) | ((channels & 0x0F) << 3);
-    Bytes::from(vec![byte0, byte1])
+    crate::media::bitstream::aac_audio_specific_config_bytes(sample_rate, channels)
 }
 
 /// Build MediaDescription tracks from RTMP metadata + sequence headers.
@@ -451,7 +419,7 @@ pub fn tracks_from_rtmp(
             id: 0,
             kind: MediaKind::Video,
             codec,
-            clock_rate: 90000,
+            clock_rate: crate::media::clock::VIDEO_CLOCK_RATE,
             channels: None,
             payload_type: 96,
             fmtp: None,
@@ -494,35 +462,21 @@ pub fn tracks_from_rtmp(
 }
 
 fn parse_aac_config(config: Option<&[u8]>) -> (u32, u8) {
+    use crate::media::bitstream::aac_sample_rate_for_index;
     match config {
         Some(c) if c.len() >= 2 => {
             let freq_index = ((c[0] & 0x07) << 1) | ((c[1] >> 7) & 0x01);
             let channels = (c[1] >> 3) & 0x0F;
-            let sample_rate = match freq_index {
-                0 => 96000,
-                1 => 88200,
-                2 => 64000,
-                3 => 48000,
-                4 => 44100,
-                5 => 32000,
-                6 => 24000,
-                7 => 22050,
-                8 => 16000,
-                9 => 12000,
-                10 => 11025,
-                11 => 8000,
-                12 => 7350,
-                _ => 44100,
-            };
+            let sample_rate = aac_sample_rate_for_index(freq_index).unwrap_or(44_100);
             (sample_rate, channels.max(1))
         }
-        _ => (44100, 2),
+        _ => (44_100, 2),
     }
 }
 
 /// Compute RTP timestamp from Duration and clock rate.
 pub fn duration_to_rtp_timestamp(d: Duration, clock_rate: u32) -> u32 {
-    (d.as_secs_f64() * clock_rate as f64) as u32
+    crate::media::clock::duration_to_ticks(d, clock_rate) as u32
 }
 
 /// Compute Duration from RTMP timestamp (milliseconds) and clock rate.
