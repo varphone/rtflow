@@ -111,10 +111,11 @@ impl FlvMuxer {
         buf.put_u8(0x12); // AMF0 script tag
         let len = payload.len() as u32;
         buf.put_slice(&len.to_be_bytes()[1..]); // 24-bit
-        buf.put_slice(&0u32.to_be_bytes()[1..]); // timestamp
-        buf.put_u8(0);
-        buf.put_u8(0);
-        buf.put_u32(0); // stream id
+        buf.put_slice(&0u32.to_be_bytes()[1..]); // timestamp (3 bytes)
+        buf.put_u8(0); // timestamp extension
+        // FLV tag header is 11 bytes: type(1) + size(3) + ts(3) + ext(1)
+        // + stream id(3). One extra byte here shifts every following tag.
+        buf.put_slice(&0u32.to_be_bytes()[1..]); // stream id (3 bytes)
         buf.put_slice(&payload);
         buf.put_u32((payload.len() + 11) as u32); // previous tag size
         Some(buf.freeze())
@@ -149,6 +150,15 @@ impl FlvMuxer {
         // must use the same base or a cached video keyframe can move DTS backward.
         let base = *self.first_pts.get_or_insert(unit.pts);
         let normalized_pts = unit.pts.saturating_sub(base);
+        if unit.codec == Codec::Aac && tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                "mux: aac pts={:?} rtp_ts={} base={:?} norm={:?}",
+                unit.pts,
+                unit.rtp_timestamp,
+                base,
+                normalized_pts
+            );
+        }
         let mut normalized = unit.clone();
         normalized.pts = normalized_pts;
         if matches!(normalized.codec, Codec::H264 | Codec::H265) {
@@ -775,7 +785,6 @@ mod tests {
             ],
             #[cfg(feature = "multicast")]
             connection: None,
-
         }
     }
 
@@ -799,7 +808,6 @@ mod tests {
             }],
             #[cfg(feature = "multicast")]
             connection: None,
-
         }
     }
 
@@ -832,7 +840,6 @@ mod tests {
             }],
             #[cfg(feature = "multicast")]
             connection: None,
-
         };
         let muxer = FlvMuxer::new(&desc);
         let header = muxer.flv_header();

@@ -59,13 +59,16 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
             ],
         )
         .await?;
+    tracing::debug!("flv: writing header ({} bytes)", muxer.flv_header().len());
     writer.write_raw(&muxer.flv_header()).await?;
     // onMetaData script tag: legacy Flash-era/Android players need it to
     // bootstrap the stream.
     if let Some(metadata) = muxer.metadata_tag() {
+        tracing::debug!("flv: writing metadata ({} bytes)", metadata.len());
         writer.write_raw(&metadata).await?;
     }
     writer.flush().await?;
+    tracing::debug!("flv: header flushed");
 
     let startup: Vec<AccessUnit> = startup_keyframe_pts
         .map(|keyframe_pts| {
@@ -85,9 +88,19 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
     // leading pictures must not be sent to a newly joined decoder.
     let mut dropping_h265_cra_leading_pictures = false;
     loop {
+        // Snapshot frames bypass the dedup check: `startup_keys` is meant to
+        // filter BROADCAST replays of frames the snapshot already delivered,
+        // not the snapshot itself (which would empty the fast-start window).
+        let in_startup = !startup.is_empty();
         let unit = if let Some(unit) = startup.pop_front() {
+            tracing::debug!(
+                "flv: startup frame track={} key={}",
+                unit.track_id,
+                unit.is_keyframe
+            );
             unit
         } else {
+            tracing::debug!("flv: startup exhausted, waiting on broadcast");
             match receiver.recv().await {
                 Ok(unit) => unit,
                 Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -104,12 +117,16 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
         };
         // Skip broadcast replays of frames the startup snapshot already
         // delivered (duplicate keyframes break FLV timestamp continuity).
-        if startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
+        if !in_startup && startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
             continue;
         }
         let is_video = matches!(unit.codec, Codec::H264 | Codec::H265);
         if awaiting_video_keyframe {
             if !is_video || !unit.is_keyframe {
+                tracing::debug!(
+                    "flv: skip non-keyframe (awaiting IDR) key={}",
+                    unit.is_keyframe
+                );
                 continue;
             }
             awaiting_video_keyframe = false;
@@ -127,9 +144,8 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
         }
         // CRA is a random-access point, hence always a keyframe; skip the
         // full-frame scan on every other frame.
-        let starts_h265_cra = unit.is_keyframe
-            && unit.codec == Codec::H265
-            && h265_random_access_is_cra(&unit.data);
+        let starts_h265_cra =
+            unit.is_keyframe && unit.codec == Codec::H265 && h265_random_access_is_cra(&unit.data);
         if video_seq_pending || audio_seq_pending {
             configure_sequence_headers(
                 &mut muxer,
@@ -165,6 +181,12 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
             dropping_h265_cra_leading_pictures = true;
         }
         if !tags.is_empty() {
+            tracing::debug!(
+                "flv: writing tags {}B for track {} key={}",
+                tags.len(),
+                unit.track_id,
+                unit.is_keyframe
+            );
             if let Err(e) = writer.write_raw(&tags).await {
                 tracing::debug!("flv write: {e}");
                 break;
@@ -178,7 +200,7 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
     Ok(writer)
 }
 
-fn configure_sequence_headers(
+pub(crate) fn configure_sequence_headers(
     muxer: &mut FlvMuxer,
     description: &MediaDescription,
     announce_fmtp: &std::collections::HashMap<u8, std::sync::Arc<str>>,
@@ -234,13 +256,13 @@ fn configure_sequence_headers(
     }
 }
 
-fn h265_random_access_is_cra(data: &[u8]) -> bool {
+pub(crate) fn h265_random_access_is_cra(data: &[u8]) -> bool {
     h265_nal_types(data)
         .into_iter()
         .any(|nal_type| nal_type == 21)
 }
 
-fn h265_vcl_nal_type(data: &[u8]) -> Option<u8> {
+pub(crate) fn h265_vcl_nal_type(data: &[u8]) -> Option<u8> {
     h265_nal_types(data)
         .into_iter()
         .find(|nal_type| *nal_type <= 31)
