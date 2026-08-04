@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPC 实时视频</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
+                 "Microsoft YaHei", sans-serif;
+    margin: 0; padding: 16px; background: #111; color: #eee;
+  }
+  header { max-width: 960px; margin: 0 auto 12px; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  select, button {
+    background: #222; color: #eee; border: 1px solid #444;
+    border-radius: 6px; padding: 8px 12px; font-size: 14px; cursor: pointer;
+  }
+  button.mode.active { background: #2a6df4; border-color: #2a6df4; }
+  button.mode:disabled { opacity: .4; cursor: not-allowed; }
+  main { max-width: 960px; margin: 0 auto; }
+  video {
+    width: 100%; max-height: 70vh; background: #000; border-radius: 8px;
+    display: block;
+  }
+  .status { margin-top: 10px; font-size: 14px; min-height: 1.2em; }
+  .status.error { color: #ff6b6b; }
+  .status.ok { color: #51cf66; }
+  .stats { margin-top: 6px; font-size: 12px; color: #999;
+           font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .hint { margin-top: 8px; font-size: 13px; color: #bbb; line-height: 1.5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>IPC 实时视频</h1>
+  <div class="controls">
+    <select id="mount-select" title="选择通道"></select>
+    <button id="mode-ws" class="mode" data-mode="ws">WS-FLV 低延迟</button>
+    <button id="mode-http" class="mode" data-mode="http">HTTP-FLV</button>
+    <button id="mode-hls" class="mode" data-mode="hls">HLS 兼容</button>
+  </div>
+</header>
+<main>
+  <video id="video" autoplay muted playsinline controls></video>
+  <div id="status" class="status">正在加载播放器…</div>
+  <div id="stats" class="stats"></div>
+  <div class="hint" id="hint"></div>
+</main>
+
+<script>
+"use strict";
+
+/* ---- 服务端注入的占位数据 ---- */
+const MOUNTS = __MOUNTS_JSON__;          // [{path,name,video,audio,width,height}]
+const WS_FLV_PORT = "__WS_FLV_PORT__";   // "" 或端口号字符串
+const DEFAULT_MODE = "__DEFAULT_MODE__"; // ws | http | hls
+
+const video = document.getElementById("video");
+const statusEl = document.getElementById("status");
+const statsEl = document.getElementById("stats");
+const hintEl = document.getElementById("hint");
+const mountSelect = document.getElementById("mount-select");
+const modeButtons = document.querySelectorAll("button.mode");
+
+let player = null;        // mpegts.js 播放器实例
+let hls = null;           // hls.js 实例
+let statsTimer = null;
+let retryDelay = 1000;    // 重连退避，1s 起、30s 封顶
+let active = false;       // 手动停止后不再自动重连
+let currentMode = DEFAULT_MODE;
+
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = "status" + (kind ? " " + kind : "");
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => { s.remove(); reject(new Error("加载失败: " + src)); };
+    document.head.appendChild(s);
+  });
+}
+
+/* CDN 主备：jsdelivr 失败时回退 unpkg（离线环境可自行替换为本地文件） */
+async function loadLibs() {
+  const cdn = (lib, ver, file) => [
+    "https://cdn.jsdelivr.net/npm/" + lib + "@" + ver + "/" + file,
+    "https://unpkg.com/" + lib + "@" + ver + "/" + file,
+  ];
+  if (typeof mpegts === "undefined") {
+    const urls = cdn("mpegts.js", "1.7.3", "dist/mpegts.js");
+    for (const u of urls) { try { await loadScript(u); break; } catch (e) {} }
+    if (typeof mpegts === "undefined") {
+      throw new Error("无法加载 mpegts.js，请检查网络或改用本地文件");
+    }
+  }
+  if (typeof Hls === "undefined" && !video.canPlayType("application/vnd.apple.mpegurl")) {
+    const urls = cdn("hls.js", "1.5.13", "dist/hls.min.js");
+    for (const u of urls) { try { await loadScript(u); break; } catch (e) {} }
+  }
+}
+
+function streamUrl(mount, mode) {
+  const path = mount.path;
+  if (mode === "ws") {
+    const scheme = location.protocol === "https:" ? "wss://" : "ws://";
+    return scheme + location.hostname + ":" + WS_FLV_PORT + path + ".flv";
+  }
+  if (mode === "http") return location.origin + path + ".flv";
+  return location.origin + path + ".m3u8"; // hls
+}
+
+function destroyPlayer() {
+  if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
+  if (player) {
+    try { player.pause(); player.unload(); player.destroy(); } catch (e) {}
+    player = null;
+  }
+  if (hls) {
+    try { hls.destroy(); } catch (e) {}
+    hls = null;
+  }
+  video.removeAttribute("src");
+  video.load();
+}
+
+function refreshStats() {
+  statsEl.textContent = "";
+  if (player && player.statisticsInfo) {
+    const s = player.statisticsInfo();
+    statsEl.textContent =
+      "解码 fps: " + (s.decodedFPS || 0) +
+      " | 缓冲: " + (s.bufferSize || 0) + "B" +
+      " | 丢包: " + (s.droppedFrames || 0) +
+      " | 总帧: " + (s.totalFrames || 0);
+  }
+}
+
+function scheduleReconnect(reason) {
+  setStatus("连接断开（" + reason + "），" + (retryDelay / 1000).toFixed(1) +
+            " 秒后自动重连…", "error");
+  destroyPlayer();
+  if (!active) return;
+  setTimeout(startPlayback, retryDelay);
+  retryDelay = Math.min(retryDelay * 2, 30000);
+}
+
+function startPlayback() {
+  if (!active) return;
+  const mount = MOUNTS[mountSelect.selectedIndex];
+  if (!mount) { setStatus("没有可用通道", "error"); return; }
+  let mode = currentMode;
+  // WS mode disabled (no listener / HTTPS page): fall back to HTTP-FLV.
+  if (mode === "ws" && document.getElementById("mode-ws").disabled) {
+    mode = "http";
+  }
+  const url = streamUrl(mount, mode);
+  destroyPlayer();
+  setStatus("正在连接 " + url + " …");
+
+  if (mode === "hls" && typeof Hls !== "undefined" && Hls.isSupported()) {
+    hls = new Hls({ liveDurationInfinity: true, liveSyncDurationCount: 3 });
+    hls.loadSource(url);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.ERROR, (_e, data) => {
+      if (data.fatal) scheduleReconnect(data.type + "/" + data.details);
+    });
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      setStatus("HLS 播放中（" + mount.name + "）", "ok");
+      retryDelay = 1000;
+      video.play().catch(() => {});
+    });
+    return;
+  }
+  if (mode === "hls" && video.canPlayType("application/vnd.apple.mpegurl")) {
+    // Safari 原生 HLS
+    video.src = url;
+    video.addEventListener("error", () => scheduleReconnect("native hls"), { once: true });
+    setStatus("HLS 播放中（" + mount.name + "）", "ok");
+    retryDelay = 1000;
+    return;
+  }
+  if (typeof mpegts === "undefined") {
+    setStatus("mpegts.js 不可用，无法播放 " + mode, "error");
+    return;
+  }
+  player = mpegts.createPlayer(
+    { type: "flv", isLive: true, url: url },
+    {
+      enableWorker: true,
+      enableStashBuffer: false,       // 直播低延迟
+      autoCleanupSourceBuffer: true,
+      liveBufferLatencyChasing: true,
+      isLive: true,
+    }
+  );
+  player.on(mpegts.Events.ERROR, (_t, detail) => scheduleReconnect(String(detail)));
+  player.on(mpegts.Events.MEDIA_INFO, () => {
+    setStatus("播放中（" + mount.name + "，" + mode + "）", "ok");
+    retryDelay = 1000;
+  });
+  player.attachMediaElement(video);
+  player.load();
+  player.play().catch(() => {});
+  statsTimer = setInterval(refreshStats, 1000);
+}
+
+function updateHint(mount) {
+  let text = "";
+  if (!mount) { hintEl.textContent = ""; return; }
+  const videoCodec = mount.video || "未知";
+  const audioCodec = mount.audio || "无音频";
+  const size = mount.width > 0 ? " " + mount.width + "x" + mount.height : "";
+  text = "通道 " + mount.path + "（" + videoCodec + size + "，音频 " + audioCodec + "）";
+  if (videoCodec === "H.265") {
+    text += "。注意：H.265 在浏览器中需要硬件/软件解码支持，若黑屏请改用 HLS 模式（Safari 原生支持 HEVC）。";
+  }
+  hintEl.textContent = text;
+}
+
+function init() {
+  if (MOUNTS.length === 0) {
+    setStatus("暂无可用通道（mount 列表为空）", "error");
+    mountSelect.innerHTML = "<option>（无）</option>";
+    return;
+  }
+  for (const m of MOUNTS) {
+    const opt = document.createElement("option");
+    opt.value = m.path;
+    opt.textContent = m.name + "（" + (m.video || "?") + "）";
+    mountSelect.appendChild(opt);
+  }
+  const wsBtn = document.getElementById("mode-ws");
+  const pageIsHttps = location.protocol === "https:";
+  if (!WS_FLV_PORT || pageIsHttps) {
+    // No WS-FLV listener, or the page is served over HTTPS while the
+    // WS-FLV listener is plaintext (browsers block ws:// mixed content).
+    wsBtn.disabled = true;
+    wsBtn.title = pageIsHttps
+      ? "HTTPS 页面无法连接明文 WS-FLV（需 wss:// + TLS 支持）"
+      : "未启用 WS-FLV 服务";
+  }
+  const buttons = { ws: "mode-ws", http: "mode-http", hls: "mode-hls" };
+  for (const [mode, id] of Object.entries(buttons)) {
+    document.getElementById(id).addEventListener("click", () => {
+      currentMode = mode;
+      for (const b of modeButtons) b.classList.remove("active");
+      document.getElementById(id).classList.add("active");
+      if (mode === "ws" && !WS_FLV_PORT) return;
+      retryDelay = 1000;
+      startPlayback();
+    });
+  }
+  document.getElementById(buttons[DEFAULT_MODE]).classList.add("active");
+  mountSelect.addEventListener("change", () => {
+    updateHint(MOUNTS[mountSelect.selectedIndex]);
+    retryDelay = 1000;
+    startPlayback();
+  });
+  updateHint(MOUNTS[0]);
+  setStatus("准备播放，点击视频画面开启声音");
+  startPlayback();
+  video.addEventListener("click", () => { video.muted = false; });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && active && !player && !hls) startPlayback();
+  });
+}
+
+loadLibs().then(init).catch((e) => setStatus(String(e), "error"));
+</script>
+</body>
+</html>
