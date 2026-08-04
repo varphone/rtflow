@@ -41,7 +41,7 @@ use handshake::{
 };
 use packet::{
     ControlType, SrtPacket, ack_packet, encode_control_packet, keepalive_packet, nak_packet,
-    parse_packet,
+    parse_packet_borrowed,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -215,13 +215,20 @@ impl SrtServer {
 
     /// Run the server receive loop until cancelled.
     pub async fn run(self) -> Result<()> {
-        let mut buf = vec![0u8; 2048];
+        let mut buf = bytes::BytesMut::with_capacity(2048);
         let mut connections: HashMap<SocketAddr, SrtConnection> = HashMap::new();
         let mut next_socket_id: u32 = 1;
         let mut ack_seq_counter: u32 = 1;
         let mut tick_interval = tokio::time::interval(Duration::from_millis(10));
 
         loop {
+            // Keep room for one full datagram: after split_to() the buffer
+            // is short by the previous packet length, so this re-grows only
+            // that many zero bytes. The payload handed to SrtPacket is a
+            // shared view (Bytes), so once a packet is still referenced the
+            // buffer reallocates via CoW — but the datagram itself is never
+            // memcpy'd a second time.
+            buf.resize(2048, 0);
             tokio::select! {
                 _ = self.cancel.cancelled() => {
                     info!("SRT server shutting down");
@@ -240,8 +247,12 @@ impl SrtServer {
                         }
                     };
 
-                    let data = &buf[..n];
-                    let Some(srt_packet) = parse_packet(data) else {
+                    // Take ownership of the received bytes without a copy;
+                    // parse_packet_borrowed turns the payload into a shared
+                    // view, so the datagram is memcpy'd exactly once (UDP
+                    // kernel → user space).
+                    let data = buf.split_to(n).freeze();
+                    let Some(srt_packet) = parse_packet_borrowed(data) else {
                         debug!("SRT: failed to parse packet from {peer}");
                         continue;
                     };

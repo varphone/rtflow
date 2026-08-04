@@ -96,39 +96,116 @@ pub fn parse_packet(data: &[u8]) -> Option<SrtPacket> {
     }
 }
 
-fn parse_data_packet(data: &[u8], first_word: u32) -> Option<SrtPacket> {
+/// Zero-copy parse variant for the receive loop: the payload becomes a
+/// shared view (`Bytes::slice`) into the received buffer instead of a
+/// per-packet copy. SRT payloads are typically 1316 bytes, so the hot
+/// path saves one memcpy per packet.
+pub fn parse_packet_borrowed(data: Bytes) -> Option<SrtPacket> {
+    if data.len() < SRT_HEADER_SIZE {
+        return None;
+    }
+    let first_word = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+    let is_control = (first_word >> 31) & 1 == 1;
+    if is_control {
+        parse_control_fields(&data, first_word).map(|(f, _)| {
+            SrtPacket::Control(ControlPacket {
+                control_type: f.control_type,
+                type_specific: f.type_specific,
+                additional_info: f.additional_info,
+                timestamp: f.timestamp,
+                socket_id: f.socket_id,
+                data: data.slice(SRT_HEADER_SIZE..),
+            })
+        })
+    } else {
+        parse_data_fields(&data, first_word).map(|(f, _)| {
+            SrtPacket::Data(DataPacket {
+                sequence: f.sequence,
+                position: f.position,
+                message_number: f.message_number,
+                timestamp: f.timestamp,
+                socket_id: f.socket_id,
+                payload: data.slice(SRT_HEADER_SIZE..),
+            })
+        })
+    }
+}
+
+struct DataFields {
+    sequence: u32,
+    position: u8,
+    message_number: u32,
+    timestamp: u32,
+    socket_id: u32,
+}
+
+struct ControlFields {
+    control_type: ControlType,
+    type_specific: u16,
+    additional_info: u32,
+    timestamp: u32,
+    socket_id: u32,
+}
+
+fn parse_data_fields(data: &[u8], first_word: u32) -> Option<(DataFields, &[u8])> {
     let sequence = first_word & 0x7FFF_FFFF;
     let second_word = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
     let position = ((second_word >> 30) & 0x03) as u8;
     let message_number = second_word & 0x03FF_FFFF;
     let timestamp = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
     let socket_id = u32::from_be_bytes([data[12], data[13], data[14], data[15]]);
-
-    Some(SrtPacket::Data(DataPacket {
-        sequence,
-        position,
-        message_number,
-        timestamp,
-        socket_id,
-        payload: Bytes::copy_from_slice(&data[SRT_HEADER_SIZE..]),
-    }))
+    Some((
+        DataFields {
+            sequence,
+            position,
+            message_number,
+            timestamp,
+            socket_id,
+        },
+        &data[SRT_HEADER_SIZE..],
+    ))
 }
 
-fn parse_control_packet(data: &[u8], first_word: u32) -> Option<SrtPacket> {
+fn parse_control_fields(data: &[u8], first_word: u32) -> Option<(ControlFields, &[u8])> {
     let type_field = ((first_word >> 16) & 0x7FFF) as u16;
     let control_type = ControlType::from_u16(type_field)?;
     let type_specific = (first_word & 0xFFFF) as u16;
     let additional_info = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
     let timestamp = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
     let socket_id = u32::from_be_bytes([data[12], data[13], data[14], data[15]]);
+    Some((
+        ControlFields {
+            control_type,
+            type_specific,
+            additional_info,
+            timestamp,
+            socket_id,
+        },
+        &data[SRT_HEADER_SIZE..],
+    ))
+}
 
+fn parse_data_packet(data: &[u8], first_word: u32) -> Option<SrtPacket> {
+    let (f, payload) = parse_data_fields(data, first_word)?;
+    Some(SrtPacket::Data(DataPacket {
+        sequence: f.sequence,
+        position: f.position,
+        message_number: f.message_number,
+        timestamp: f.timestamp,
+        socket_id: f.socket_id,
+        payload: Bytes::copy_from_slice(payload),
+    }))
+}
+
+fn parse_control_packet(data: &[u8], first_word: u32) -> Option<SrtPacket> {
+    let (f, payload) = parse_control_fields(data, first_word)?;
     Some(SrtPacket::Control(ControlPacket {
-        control_type,
-        type_specific,
-        additional_info,
-        timestamp,
-        socket_id,
-        data: Bytes::copy_from_slice(&data[SRT_HEADER_SIZE..]),
+        control_type: f.control_type,
+        type_specific: f.type_specific,
+        additional_info: f.additional_info,
+        timestamp: f.timestamp,
+        socket_id: f.socket_id,
+        data: Bytes::copy_from_slice(payload),
     }))
 }
 
