@@ -36,6 +36,7 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
         &mut muxer,
         &description,
         &fmtp_snapshot,
+        &fmtp_source,
         &mut video_seq_pending,
         &mut audio_seq_pending,
     );
@@ -59,6 +60,11 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
         )
         .await?;
     writer.write_raw(&muxer.flv_header()).await?;
+    // onMetaData script tag: legacy Flash-era/Android players need it to
+    // bootstrap the stream.
+    if let Some(metadata) = muxer.metadata_tag() {
+        writer.write_raw(&metadata).await?;
+    }
     writer.flush().await?;
 
     let startup: Vec<AccessUnit> = startup_keyframe_pts
@@ -129,6 +135,7 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
                 &mut muxer,
                 &description,
                 &fmtp_snapshot,
+                &fmtp_source,
                 &mut video_seq_pending,
                 &mut audio_seq_pending,
             );
@@ -175,6 +182,7 @@ fn configure_sequence_headers(
     muxer: &mut FlvMuxer,
     description: &MediaDescription,
     announce_fmtp: &std::collections::HashMap<u8, std::sync::Arc<str>>,
+    mount: &crate::mount::MountHandle,
     video_seq_pending: &mut bool,
     audio_seq_pending: &mut bool,
 ) {
@@ -208,6 +216,16 @@ fn configure_sequence_headers(
             Codec::Aac if *audio_seq_pending => {
                 if let Some(seq) = FlvMuxer::parse_aac_config_from_fmtp(fmtp) {
                     muxer.set_aac_sequence_header(seq);
+                    *audio_seq_pending = false;
+                }
+            }
+            Codec::Aac if *audio_seq_pending => {
+                // Fallback: RTMP publishers store the raw AudioSpecificConfig
+                // on the mount even without an ANNOUNCE fmtp.
+                if let Ok(headers) = mount.inner.rtmp_seq_headers.lock()
+                    && let Some(seq) = headers.get(&track.id)
+                {
+                    muxer.set_aac_sequence_header(seq.clone());
                     *audio_seq_pending = false;
                 }
             }

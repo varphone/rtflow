@@ -53,8 +53,15 @@ pub fn generate_mpd(
 ) -> String {
     let mut xml = String::with_capacity(4096);
 
-    // Fixed availability start time (when the stream went live)
-    let ast_duration = availability_start
+    // Fixed availability start time (when the stream went live). Before
+    // the first segment exists the state is UNIX_EPOCH; emitting
+    // 1970-01-01 would break player time math, so fall back to now.
+    let effective_start = if availability_start == SystemTime::UNIX_EPOCH {
+        SystemTime::now()
+    } else {
+        availability_start
+    };
+    let ast_duration = effective_start
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
     let availability_start_str = iso8601_from_duration(ast_duration);
@@ -302,7 +309,10 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 fn video_codec_string(codec: crate::media::Codec) -> &'static str {
     match codec {
         crate::media::Codec::H264 => "avc1.42E01E",
-        crate::media::Codec::H265 => "hev1.1.6.L93.B0",
+        // fMP4 sample entry is hvc1 (parameter sets in-band), so the codecs
+        // string must match: hev1 would make Chrome/Safari reject the
+        // stream as mislabeled.
+        crate::media::Codec::H265 => "hvc1.1.6.L93.B0",
         _ => "avc1.42E01E",
     }
 }
@@ -358,6 +368,7 @@ mod tests {
             ],
             #[cfg(feature = "multicast")]
             connection: None,
+
         }
     }
 
@@ -371,6 +382,7 @@ mod tests {
                 data: Bytes::new(),
                 starts_with_keyframe: true,
                 discontinuity: false,
+                discontinuity_sequence: None,
                 timestamp: Duration::ZERO,
             },
             Segment {
@@ -380,6 +392,7 @@ mod tests {
                 data: Bytes::new(),
                 starts_with_keyframe: true,
                 discontinuity: false,
+                discontinuity_sequence: None,
                 timestamp: Duration::from_secs(2),
             },
         ];

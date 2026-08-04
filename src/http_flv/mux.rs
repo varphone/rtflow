@@ -67,6 +67,59 @@ impl FlvMuxer {
         buf.freeze()
     }
 
+    /// onMetaData script tag (width/height/framerate/duration). Some legacy
+    /// Flash-era and Android players refuse to start without it. AMF0 is
+    /// encoded inline so http-flv does not depend on the rtmp feature.
+    pub fn metadata_tag(&self) -> Option<Bytes> {
+        let mut payload = BytesMut::with_capacity(128);
+        // "onMetaData" string
+        payload.put_u8(0x02);
+        payload.put_u16(10);
+        payload.put_slice(b"onMetaData");
+        // ECMA array
+        let mut props: Vec<(&str, f64)> = vec![("server", 0.0), ("duration", 0.0)];
+        let mut bool_props: Vec<(&str, bool)> = Vec::new();
+        if self.has_video {
+            props.push(("videocodecid", 7.0));
+            props.push(("framerate", 30.0));
+            props.push(("width", 0.0));
+            props.push(("height", 0.0));
+        }
+        if self.has_audio {
+            props.push(("audiocodecid", 10.0));
+            props.push(("audiosamplerate", 44100.0));
+            props.push(("audiosamplesize", 16.0));
+            bool_props.push(("stereo", true));
+        }
+        let count = (props.len() + bool_props.len()) as u32;
+        payload.put_u8(0x08);
+        payload.put_u32(count);
+        for (key, value) in props {
+            payload.put_u16(key.len() as u16);
+            payload.put_slice(key.as_bytes());
+            payload.put_u8(0x00); // number
+            payload.put_f64(value);
+        }
+        for (key, value) in bool_props {
+            payload.put_u16(key.len() as u16);
+            payload.put_slice(key.as_bytes());
+            payload.put_u8(0x01); // boolean
+            payload.put_u8(value as u8);
+        }
+        payload.put_u32(0x0000_0009); // ECMA array end marker
+        let mut buf = BytesMut::with_capacity(payload.len() + 16);
+        buf.put_u8(0x12); // AMF0 script tag
+        let len = payload.len() as u32;
+        buf.put_slice(&len.to_be_bytes()[1..]); // 24-bit
+        buf.put_slice(&0u32.to_be_bytes()[1..]); // timestamp
+        buf.put_u8(0);
+        buf.put_u8(0);
+        buf.put_u32(0); // stream id
+        buf.put_slice(&payload);
+        buf.put_u32((payload.len() + 11) as u32); // previous tag size
+        Some(buf.freeze())
+    }
+
     /// Set the video sequence header (AVCDecoderConfigurationRecord or HEVCDecoderConfigurationRecord).
     pub fn set_video_sequence_header(&mut self, data: Bytes) {
         self.video_sequence_header = Some(data);
@@ -558,7 +611,9 @@ fn write_g711_audio_tag(buf: &mut BytesMut, unit: &AccessUnit) {
         Codec::Pcmu => 8u8,
         _ => unreachable!(),
     };
-    buf.put_u8(sound_format << 4);
+    // Sound rate/size/type bits: 44kHz (3), 16-bit (1), stereo (1).
+    // Zero rate bits would claim 5.5kHz and break ffmpeg's FLV demuxer.
+    buf.put_u8((sound_format << 4) | 0x0F);
 
     buf.put_slice(&unit.data);
 
@@ -720,6 +775,7 @@ mod tests {
             ],
             #[cfg(feature = "multicast")]
             connection: None,
+
         }
     }
 
@@ -743,6 +799,7 @@ mod tests {
             }],
             #[cfg(feature = "multicast")]
             connection: None,
+
         }
     }
 
@@ -775,6 +832,7 @@ mod tests {
             }],
             #[cfg(feature = "multicast")]
             connection: None,
+
         };
         let muxer = FlvMuxer::new(&desc);
         let header = muxer.flv_header();
