@@ -196,6 +196,13 @@ fn annex_b_nals(data: &Bytes) -> Vec<Bytes> {
     }
     n
 }
+
+/// Upper bound for a reassembled access unit (FU fragments + multi-NAL
+/// aggregation). A malicious or broken peer must not be able to grow
+/// per-connection buffers without limit; 16 MB covers 8K HEVC frames with
+/// headroom while bounding each session's memory.
+const MAX_ASSEMBLY_BYTES: usize = 16 * 1024 * 1024;
+
 #[derive(Debug)]
 pub struct Depacketizer {
     codec: Codec,
@@ -208,6 +215,9 @@ pub struct Depacketizer {
     /// latched here until the FU end packet completes the NAL.
     assembling_is_keyframe: bool,
     access_unit: Vec<Bytes>,
+    /// Bytes accumulated in `access_unit` (avoids O(n) re-scans on every
+    /// packet for the assembly limit check).
+    access_unit_bytes: usize,
     current_timestamp: Option<u32>,
     expected_sequence: Option<u16>,
     damaged_timestamp: Option<u32>,
@@ -228,6 +238,7 @@ impl Depacketizer {
             assembling: None,
             assembling_is_keyframe: false,
             access_unit: Vec::new(),
+            access_unit_bytes: 0,
             current_timestamp: None,
             expected_sequence: None,
             damaged_timestamp: None,
@@ -275,6 +286,7 @@ impl Depacketizer {
         if matches!(self.codec, Codec::H264 | Codec::H265) {
             if self.current_timestamp.is_some_and(|v| v != timestamp) {
                 self.access_unit.clear();
+                self.access_unit_bytes = 0;
                 self.assembled_is_keyframe = false;
                 self.assembling = None;
                 self.assembling_is_keyframe = false;
@@ -283,12 +295,28 @@ impl Depacketizer {
             let nal = match self.codec {
                 Codec::H264 => self.h264(p.payload)?,
                 Codec::H265 => self.h265(p.payload)?,
-                _ => unreachable!(),
+                other => {
+                    return Err(Error::Media(format!(
+                        "depacketization not implemented for {other:?}"
+                    )));
+                }
             };
             if let Some((nal, keyframe_nal)) = nal {
+                if self.access_unit_bytes.saturating_add(nal.len()) > MAX_ASSEMBLY_BYTES {
+                    self.access_unit.clear();
+                    self.access_unit_bytes = 0;
+                    self.assembled_is_keyframe = false;
+                    self.assembling = None;
+                    self.assembling_is_keyframe = false;
+                    self.damaged_timestamp = Some(timestamp);
+                    return Err(Error::Media(format!(
+                        "access unit exceeds {MAX_ASSEMBLY_BYTES} bytes"
+                    )));
+                }
                 // Keyframe classification happens inside h264/h265 while the
                 // NAL headers are already being parsed — no second scan.
                 self.assembled_is_keyframe |= keyframe_nal;
+                self.access_unit_bytes += nal.len();
                 self.access_unit.push(nal);
             }
             if !marker || self.assembling.is_some() || self.access_unit.is_empty() {
@@ -296,6 +324,7 @@ impl Depacketizer {
             }
             if self.damaged_timestamp == Some(timestamp) {
                 self.access_unit.clear();
+                self.access_unit_bytes = 0;
                 self.assembled_is_keyframe = false;
                 self.current_timestamp = None;
                 self.damaged_timestamp = None;
@@ -314,6 +343,7 @@ impl Depacketizer {
                     output.extend_from_slice(&[0, 0, 0, 1]);
                     output.extend_from_slice(&nal);
                 }
+                self.access_unit_bytes = 0;
                 output.freeze()
             };
             let is_keyframe = self.assembled_is_keyframe;
@@ -366,7 +396,7 @@ impl Depacketizer {
                 }
                 Ok(units)
             }
-            Codec::Pcma | Codec::Pcmu => {
+            Codec::Pcma | Codec::Pcmu | Codec::Opus => {
                 let pts = self.pts_from_timestamp(timestamp);
                 Ok(vec![AccessUnit {
                     track_id: self.track_id,
@@ -378,7 +408,12 @@ impl Depacketizer {
                     data: p.payload,
                 }])
             }
-            _ => unreachable!(),
+            // Never panic on an unhandled codec: a future SDP/feature
+            // extension must fail this session cleanly instead of killing
+            // the tokio task (and with it the whole stream).
+            other => Err(Error::Media(format!(
+                "depacketization not implemented for {other:?}"
+            ))),
         }
     }
     fn h264(&mut self, p: Bytes) -> Result<Option<(Bytes, bool)>> {
@@ -435,6 +470,13 @@ impl Depacketizer {
             .assembling
             .as_mut()
             .ok_or_else(|| Error::Media("H264 FU continuation without start".into()))?;
+        if b.len().saturating_add(p.len() - 2) > MAX_ASSEMBLY_BYTES {
+            self.assembling = None;
+            self.assembling_is_keyframe = false;
+            return Err(Error::Media(format!(
+                "H264 FU assembly exceeds {MAX_ASSEMBLY_BYTES} bytes"
+            )));
+        }
         b.extend_from_slice(&p[2..]);
         if end {
             let keyframe = std::mem::take(&mut self.assembling_is_keyframe);
@@ -494,6 +536,13 @@ impl Depacketizer {
             .assembling
             .as_mut()
             .ok_or_else(|| Error::Media("H265 FU continuation without start".into()))?;
+        if b.len().saturating_add(p.len() - 3) > MAX_ASSEMBLY_BYTES {
+            self.assembling = None;
+            self.assembling_is_keyframe = false;
+            return Err(Error::Media(format!(
+                "H265 FU assembly exceeds {MAX_ASSEMBLY_BYTES} bytes"
+            )));
+        }
         b.extend_from_slice(&p[3..]);
         if end {
             let keyframe = std::mem::take(&mut self.assembling_is_keyframe);
@@ -838,5 +887,43 @@ mod fu_keyframe_tests {
         let units = d.push(packet(31, ts, true, &fu_end)).unwrap();
         assert_eq!(units.len(), 1);
         assert!(units[0].is_keyframe, "H265 FU IDR must be a keyframe");
+    }
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    fn opus_packet(payload: &[u8]) -> RtpPacket {
+        RtpPacket {
+            header: RtpHeader {
+                marker: true,
+                payload_type: 120,
+                sequence: 1,
+                timestamp: 1,
+                ssrc: 0,
+            },
+            payload: Bytes::copy_from_slice(payload),
+        }
+    }
+
+    #[test]
+    fn opus_depacketizes_single_packet() {
+        let mut dep = Depacketizer::new(Codec::Opus, 0, 48_000);
+        let unit = dep.push(opus_packet(&[0xf8, 0xff, 0xfe, 0x00])).unwrap();
+        assert_eq!(unit.len(), 1);
+        assert_eq!(unit[0].data.as_ref(), &[0xf8, 0xff, 0xfe, 0x00]);
+        assert!(unit[0].is_keyframe);
+    }
+
+    /// Unsupported codecs must surface a typed error, never a panic.
+    #[test]
+    fn unsupported_codec_returns_error_not_panic() {
+        let mut dep = Depacketizer::new(Codec::Vp8, 0, 90_000);
+        let err = dep.push(opus_packet(&[0x80])).unwrap_err();
+        assert!(
+            matches!(err, Error::Media(_)),
+            "typed error for unsupported codec: {err:?}"
+        );
     }
 }

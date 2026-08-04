@@ -35,6 +35,9 @@ const FOURCC_VP9: &[u8; 4] = b"vp09";
 
 /// FLV audio codec IDs
 const FLV_AUDIO_AAC: u8 = 10;
+// FLV sound formats: 7 = A-law, 8 = μ-law.
+const FLV_AUDIO_ALAW: u8 = 7;
+const FLV_AUDIO_ULAW: u8 = 8;
 
 /// AVC packet types
 const AVC_SEQUENCE_HEADER: u8 = 0;
@@ -414,14 +417,30 @@ pub fn build_video_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
 pub fn build_audio_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
     let mut buf = BytesMut::with_capacity(unit.data.len() + 8);
 
-    if unit.codec == Codec::Aac {
-        // Sound format AAC (10), rate 44kHz (3), 16-bit (1), stereo (1)
-        buf.put_u8((FLV_AUDIO_AAC << 4) | 0x0F);
-        if is_sequence_header {
-            buf.put_u8(AAC_SEQUENCE_HEADER);
-        } else {
-            buf.put_u8(AAC_RAW);
+    match unit.codec {
+        Codec::Aac => {
+            // Sound format AAC (10), rate 44kHz (3), 16-bit (1), stereo (1)
+            buf.put_u8((FLV_AUDIO_AAC << 4) | 0x0F);
+            if is_sequence_header {
+                buf.put_u8(AAC_SEQUENCE_HEADER);
+            } else {
+                buf.put_u8(AAC_RAW);
+            }
+            buf.put_slice(&unit.data);
         }
+        // FLV sound formats 7 (A-law) and 8 (μ-law), one byte of payload
+        // header: rate bits 0x0F keep ffmpeg's demuxer happy (it rejects a
+        // zero rate, same convention as the HTTP-FLV muxer).
+        Codec::Pcma => buf.put_u8((FLV_AUDIO_ALAW << 4) | 0x0F),
+        Codec::Pcmu => buf.put_u8((FLV_AUDIO_ULAW << 4) | 0x0F),
+        Codec::Opus | Codec::Vp8 | Codec::Vp9 | Codec::H264 | Codec::H265 => {
+            // FLV does not carry these in the RTMP play path today.
+            return Bytes::new();
+        }
+    }
+    // G.711 has no sequence-header concept; the payload follows the
+    // one-byte audio header directly (AAC already appended its payload).
+    if !matches!(unit.codec, Codec::Aac) {
         buf.put_slice(&unit.data);
     }
 

@@ -289,7 +289,10 @@ impl Mount {
         else {
             return;
         };
-        if codec != crate::media::Codec::H264 && codec != crate::media::Codec::H265 {
+        if !matches!(
+            codec,
+            crate::media::Codec::H264 | crate::media::Codec::H265 | crate::media::Codec::Opus
+        ) {
             return;
         }
         {
@@ -323,6 +326,8 @@ impl Mount {
                     _ => None,
                 }
             }
+            // RFC 7587: same parameters the WebRTC path announces.
+            crate::media::Codec::Opus => Some("minptime=10;useinbandfec=1".to_string()),
             _ => None,
         };
         if let Some(fmtp) = fmtp {
@@ -784,8 +789,10 @@ impl MountRegistry {
         let (tx, _) = broadcast::channel(256);
         #[cfg(feature = "server")]
         let startup_cache =
-            KeyframeCache::new(&description, crate::proxy::StartupCacheConfig::default())
-                .unwrap_or_else(|_| {
+            match KeyframeCache::new(&description, crate::proxy::StartupCacheConfig::default()) {
+                Ok(cache) => cache,
+                Err(_) => {
+                    // Degenerate fallback: a disabled cache never fails.
                     KeyframeCache::new(
                         &MediaDescription {
                             session_name: "".into(),
@@ -799,8 +806,22 @@ impl MountRegistry {
                             max_frames_per_track: 0,
                         },
                     )
-                    .expect("disabled cache always succeeds")
-                });
+                    .unwrap_or_else(|e| {
+                        tracing::error!(%e, "failed to construct disabled startup cache");
+                        // Unreachable in practice (disabled config validates
+                        // as Ok); construct via the public default path.
+                        KeyframeCache::new(
+                            &description,
+                            crate::proxy::StartupCacheConfig {
+                                enabled: false,
+                                max_bytes: 0,
+                                max_frames_per_track: 0,
+                            },
+                        )
+                        .expect("disabled startup cache always validates")
+                    })
+                }
+            };
         let mount = Arc::new(Mount {
             id: MountId::from(path.clone()),
             config,

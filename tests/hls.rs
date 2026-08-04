@@ -543,3 +543,37 @@ fn segmenter_detects_real_track_reset() {
     let last = segments.last().expect("segment after restart");
     assert!(last.discontinuity, "segment after restart is flagged");
 }
+
+/// G.711 μ-law audio must be labeled `ulaw` (not `alaw`) in the fMP4
+/// sample entry — a regression guard for the codec-label mapping.
+#[test]
+fn pcmu_segment_uses_ulaw_sample_entry() {
+    let desc =
+        MediaDescription::from_tracks("pcmu", vec![TrackDescription::pcmu_audio(1, 8_000, 1)]);
+    let config = SegmenterConfig {
+        segment_duration: Duration::from_millis(100),
+        lookback_count: 5,
+    };
+    let mut segmenter = Segmenter::new(config, &desc);
+    let mut rx = segmenter.subscribe();
+
+    for i in 0..4u32 {
+        segmenter.push(AccessUnit {
+            track_id: 1,
+            codec: Codec::Pcmu,
+            pts: Duration::from_millis(i as u64 * 20),
+            dts: None,
+            rtp_timestamp: i * 160,
+            is_keyframe: false,
+            data: Bytes::from(vec![0xff; 40]),
+        });
+    }
+    segmenter.flush();
+
+    let segment = rx.try_recv().expect("segment produced");
+    assert!(
+        segment.init.as_ref().windows(4).any(|w| w == b"ulaw"),
+        "init segment must carry a ulaw sample entry: {:?}",
+        &segment.init[..segment.init.len().min(256)]
+    );
+}

@@ -1270,7 +1270,8 @@ fn write_audio_entry(buf: &mut BytesMut, track: &crate::media::TrackDescription)
     buf.put_u32(0); // placeholder
     match track.codec {
         Codec::Aac => buf.put_slice(b"mp4a"),
-        Codec::Pcma | Codec::Pcmu => buf.put_slice(b"alaw"),
+        Codec::Pcma => buf.put_slice(b"alaw"),
+        Codec::Pcmu => buf.put_slice(b"ulaw"),
         _ => buf.put_slice(b"mp4a"),
     }
     buf.put_u32(0); // reserved

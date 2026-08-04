@@ -200,7 +200,7 @@ impl FlvMuxer {
                 write_audio_tag(&mut self.tag_buffer, &normalized, &normalized.data, false);
             }
             Codec::Pcma | Codec::Pcmu => {
-                write_g711_audio_tag(&mut self.tag_buffer, unit);
+                write_g711_audio_tag(&mut self.tag_buffer, &normalized);
             }
             Codec::Opus | Codec::Vp8 | Codec::Vp9 => {
                 // FLV does not support these codecs; skip silently.
@@ -1204,5 +1204,54 @@ mod tests {
             annex_b_to_avcc(&unit.data).as_ref(),
             "frame payload is AVCC"
         );
+    }
+    /// G.711 audio tags must use the normalized PTS (0-based), not the raw
+    /// unit PTS — a regression guard for the FLV timestamp base.
+    #[test]
+    fn g711_tag_pts_normalized_to_zero() {
+        let desc = MediaDescription {
+            session_name: Arc::from("t"),
+            tracks: vec![TrackDescription {
+                id: 0,
+                kind: MediaKind::Audio,
+                codec: Codec::Pcma,
+                clock_rate: 8000,
+                channels: Some(1),
+                payload_type: 8,
+                fmtp: None,
+                control: Arc::from("trackID=0"),
+                #[cfg(feature = "srtp")]
+                crypto: None,
+                width: None,
+                height: None,
+                frame_rate: None,
+            }],
+            #[cfg(feature = "multicast")]
+            connection: None,
+        };
+        let mut muxer = FlvMuxer::new(&desc);
+        let first = AccessUnit {
+            track_id: 0,
+            codec: Codec::Pcma,
+            pts: Duration::from_millis(500),
+            dts: None,
+            rtp_timestamp: 4000,
+            is_keyframe: true,
+            data: Bytes::from_static(&[0x55; 40]),
+        };
+        let second = AccessUnit {
+            pts: Duration::from_millis(520),
+            rtp_timestamp: 4160,
+            ..first.clone()
+        };
+        let tag1 = muxer.encode(&first);
+        let tag2 = muxer.encode(&second);
+        // FLV tag timestamp: 3 bytes + 1 extension byte at offset 4..8.
+        let ts =
+            |tag: &Bytes| (u32::from(tag[4]) << 16) | (u32::from(tag[5]) << 8) | u32::from(tag[6]);
+        assert_eq!(ts(&tag1), 0, "first tag timestamp normalized to 0");
+        assert_eq!(ts(&tag2), 20, "second tag timestamp is base-relative (ms)");
+        // Sound format bits: A-law (7) << 4 | 0x0F.
+        assert_eq!(tag1[11] >> 4, 7, "sound format A-law");
     }
 }

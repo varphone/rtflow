@@ -11,6 +11,11 @@ use crate::media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescript
 const TS_PACKET_SIZE: usize = 188;
 const TS_SYNC_BYTE: u8 = 0x47;
 const PTS_MODULUS: u64 = 1 << 33;
+/// Per-PID cap for PES accumulation (a PES packet larger than this is
+/// dropped instead of buffered; see `handle_pes`). Aligned with the RTP
+/// access-unit assembly cap so 8K IDR frames (which can reach several MB)
+/// are never misclassified as runaway buffers.
+const MAX_PES_BUFFER_BYTES: usize = 16 * 1024 * 1024;
 
 /// Streaming MPEG-TS demuxer.
 pub struct TsStreamDemuxer {
@@ -263,6 +268,14 @@ impl TsStreamDemuxer {
             // is split out zero-copy in process_pes_packet.
             self.pes_buffers.insert(pid, BytesMut::from(payload));
         } else if let Some(buffer) = self.pes_buffers.get_mut(&pid) {
+            // Bound the per-PID accumulation: a broken or malicious TS
+            // sender that never sets payload_unit_start must not be able
+            // to grow this buffer without limit (1 MB cap).
+            if buffer.len().saturating_add(payload.len()) > MAX_PES_BUFFER_BYTES {
+                tracing::warn!(pid, bytes = buffer.len(), "dropping oversized PES buffer");
+                self.pes_buffers.remove(&pid);
+                return;
+            }
             buffer.extend_from_slice(payload);
         }
     }

@@ -95,15 +95,20 @@ pub fn create_webrtc_handlers(
     };
 
     // Periodically reap expired sessions so abandoned WHIP/WHEP sessions
-    // cannot accumulate in the registry.
+    // cannot accumulate in the registry. The task exits when the last
+    // strong reference to the registry is dropped (server shutdown), so
+    // it does not leak a worker slot indefinitely.
     {
-        let cleanup_sessions = sessions.clone();
+        let cleanup_sessions = Arc::downgrade(&sessions);
         let cleanup_interval = (config.session_timeout / 2).max(Duration::from_secs(1));
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(cleanup_interval);
             loop {
                 ticker.tick().await;
-                let removed = cleanup_sessions.cleanup_expired().await;
+                let Some(sessions) = cleanup_sessions.upgrade() else {
+                    break; // registry dropped: nothing left to reap
+                };
+                let removed = sessions.cleanup_expired().await;
                 if removed > 0 {
                     tracing::info!("WebRTC: reaped {removed} expired session(s)");
                 }

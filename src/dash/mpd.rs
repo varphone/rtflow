@@ -364,6 +364,9 @@ fn audio_codec_string(codec: crate::media::Codec) -> &'static str {
     match codec {
         crate::media::Codec::Aac => "mp4a.40.2",
         crate::media::Codec::Opus => "opus",
+        // RFC 6381 audio object types for G.711.
+        crate::media::Codec::Pcma => "alaw",
+        crate::media::Codec::Pcmu => "ulaw",
         _ => "mp4a.40.2",
     }
 }

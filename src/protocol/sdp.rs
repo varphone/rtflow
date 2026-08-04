@@ -133,6 +133,7 @@ pub fn parse(data: &[u8]) -> Result<MediaDescription> {
                     "MPEG4-GENERIC" => Codec::Aac,
                     "PCMA" => Codec::Pcma,
                     "PCMU" => Codec::Pcmu,
+                    "OPUS" => Codec::Opus,
                     _ => return Err(Error::Rtsp("unsupported SDP codec".into())),
                 };
                 track.clock_rate = parts
