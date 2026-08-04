@@ -166,7 +166,7 @@ async fn joining_near_keyframe_starts_immediately() {
 
     // A subscriber must be attached while pushing for the startup cache
     // to fill: keep a warm client connected.
-    let mut warm = RtspClient::connect(
+    let _warm = RtspClient::connect(
         Url::parse(&format!("rtsp://{}/gop2", server.local_addr())).unwrap(),
         ClientOptions {
             transport: UpstreamTransport::TcpInterleaved,

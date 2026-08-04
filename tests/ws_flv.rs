@@ -318,7 +318,7 @@ async fn heartbeat_pings_silent_client_and_reaps_it() {
     let mut saw_ping = false;
     for _ in 0..10 {
         match tokio::time::timeout(Duration::from_secs(2), read_ws_frame(&mut stream)).await {
-            Ok((op, payload)) if op == 0x9 => {
+            Ok((0x9, payload)) => {
                 assert_eq!(payload, b"rtflow-ping");
                 saw_ping = true;
                 break;
@@ -368,7 +368,7 @@ async fn client_pong_keeps_connection_alive() {
     // Consume frames; when a server ping arrives, answer with a pong.
     for _ in 0..12 {
         match tokio::time::timeout(Duration::from_secs(2), read_ws_frame(&mut stream)).await {
-            Ok((op, payload)) if op == 0x9 => {
+            Ok((0x9, payload)) => {
                 // Pong with the same payload (masked client frame).
                 let stream = stream.get_mut();
                 let mask = [0x11, 0x22, 0x33, 0x44];

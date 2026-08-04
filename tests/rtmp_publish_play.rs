@@ -82,25 +82,24 @@ async fn read_messages(
                     tokio::time::sleep(Duration::from_millis(20)).await;
                     if let Ok(Ok(n)) =
                         tokio::time::timeout(Duration::from_millis(20), stream.read(&mut buf)).await
+                        && n > 0
                     {
-                        if n > 0 {
-                            dechunker.feed(&buf[..n]);
-                            let extra = dechunker.poll_messages();
-                            for msg in &extra {
-                                if msg.msg_type == MessageType::SetChunkSize as u8
-                                    && msg.payload.len() >= 4
-                                {
-                                    let size = u32::from_be_bytes([
-                                        msg.payload[0],
-                                        msg.payload[1],
-                                        msg.payload[2],
-                                        msg.payload[3],
-                                    ]) & 0x7FFF_FFFF;
-                                    dechunker.set_chunk_size(size);
-                                }
+                        dechunker.feed(&buf[..n]);
+                        let extra = dechunker.poll_messages();
+                        for msg in &extra {
+                            if msg.msg_type == MessageType::SetChunkSize as u8
+                                && msg.payload.len() >= 4
+                            {
+                                let size = u32::from_be_bytes([
+                                    msg.payload[0],
+                                    msg.payload[1],
+                                    msg.payload[2],
+                                    msg.payload[3],
+                                ]) & 0x7FFF_FFFF;
+                                dechunker.set_chunk_size(size);
                             }
-                            all_msgs.extend(extra);
                         }
+                        all_msgs.extend(extra);
                     }
                     break;
                 }
@@ -114,14 +113,13 @@ async fn read_messages(
 }
 
 /// Helper: find a command response by name.
-fn find_command<'a>(msgs: &'a [RtmpMessage], name: &str) -> Option<Vec<AmfValue>> {
+fn find_command(msgs: &[RtmpMessage], name: &str) -> Option<Vec<AmfValue>> {
     for msg in msgs {
-        if msg.msg_type == MessageType::CommandAmf0 as u8 {
-            if let Ok(values) = decode_values(&msg.payload) {
-                if values.first().and_then(|v| v.as_str()) == Some(name) {
-                    return Some(values);
-                }
-            }
+        if msg.msg_type == MessageType::CommandAmf0 as u8
+            && let Ok(values) = decode_values(&msg.payload)
+            && values.first().and_then(|v| v.as_str()) == Some(name)
+        {
+            return Some(values);
         }
     }
     None

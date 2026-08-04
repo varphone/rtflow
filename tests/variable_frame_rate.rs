@@ -3,8 +3,6 @@
 //! must be delivered losslessly with RTP timestamps that stay linear in
 //! PTS — no frame-rate assumptions anywhere in the publish path.
 use rtflow::client::{ClientOptions, RtspClient};
-use rtflow::media::bitstream::is_idr;
-use rtflow::media::clock::RtpClock;
 use rtflow::media::{AccessUnit, Codec, MediaDescription, TrackDescription};
 use rtflow::protocol::transport::UpstreamTransport;
 use rtflow::{MountConfig, RtspServer, ServerConfig};
@@ -34,8 +32,8 @@ fn frame(index: u64) -> AccessUnit {
         dts: None,
         // Published with a VFR-aware clock: delta-based, monotonic.
         rtp_timestamp: (pts.as_micros() as u64 * 90_000 / 1_000_000) as u32,
-        is_keyframe: index % 25 == 0,
-        data: if index % 25 == 0 {
+        is_keyframe: index.is_multiple_of(25),
+        data: if index.is_multiple_of(25) {
             vec![0, 0, 0, 1, 0x65, 0x88, 0x84].into()
         } else {
             vec![0, 0, 0, 1, 0x41, 0x9a].into()
@@ -88,9 +86,8 @@ async fn vfr_frames_are_delivered_losslessly_with_linear_timestamps() {
     });
 
     // Expect all 200 frames, in order, with rtp_timestamp linear in pts.
-    let mut expected_index = 0u64;
     let mut last_ts: Option<u32> = None;
-    for _ in 0..200 {
+    for expected_index in 0..200u64 {
         let unit = tokio::time::timeout(Duration::from_secs(10), client.next())
             .await
             .expect("frame within timeout")
@@ -116,7 +113,6 @@ async fn vfr_frames_are_delivered_losslessly_with_linear_timestamps() {
             );
         }
         last_ts = Some(unit.rtp_timestamp);
-        expected_index += 1;
     }
     let _ = pusher.await;
     drop(client);

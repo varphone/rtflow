@@ -45,14 +45,12 @@ fn vm_stat() -> (u64, u64) {
         for line in status.lines() {
             if let Some(v) = line.strip_prefix("VmRSS:") {
                 rss = v
-                    .trim()
                     .split_whitespace()
                     .next()
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
             } else if let Some(v) = line.strip_prefix("VmHWM:") {
                 hwm = v
-                    .trim()
                     .split_whitespace()
                     .next()
                     .and_then(|s| s.parse().ok())
@@ -66,7 +64,7 @@ fn vm_stat() -> (u64, u64) {
 fn frame(seq: u64) -> AccessUnit {
     // Synthetic ~16KB H.264-ish frame (1080p@4Mbps reference size).
     let mut data = Vec::with_capacity(16 * 1024);
-    data.extend_from_slice(if seq % 30 == 0 {
+    data.extend_from_slice(if seq.is_multiple_of(30) {
         &[0, 0, 0, 1, 0x65, 0x88, 0x84]
     } else {
         &[0, 0, 0, 1, 0x41, 0x9a]
@@ -80,7 +78,7 @@ fn frame(seq: u64) -> AccessUnit {
         pts: Duration::from_micros(seq * 33_333),
         dts: None,
         rtp_timestamp: (seq * 3_000) as u32,
-        is_keyframe: seq % 30 == 0,
+        is_keyframe: seq.is_multiple_of(30),
         data: data.into(),
     }
 }

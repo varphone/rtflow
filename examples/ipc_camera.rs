@@ -85,7 +85,7 @@ struct Args {
 /// Minimal synthetic H.264 access unit. The first IDR includes SPS/PPS
 /// (NAL 7/8); later IDRs are slice-only, like separated VENC output.
 fn synthetic_h264_frame(index: u64, gop: u32) -> (Vec<u8>, bool) {
-    let is_idr = index % u64::from(gop) == 0;
+    let is_idr = index.is_multiple_of(u64::from(gop));
     let mut data = Vec::new();
     if is_idr {
         if index == 0 {
@@ -332,7 +332,7 @@ async fn main() -> rtflow::Result<()> {
     for (mount, config) in mounts.iter().zip(stream_configs.iter()) {
         let stop = stop.clone();
         let mount = mount.clone();
-        let config = config.clone();
+        let config = *config;
         handles.push(tokio::spawn(async move {
             publish_stream(&mount, &config, args.fps, args.gop, stop).await
         }));

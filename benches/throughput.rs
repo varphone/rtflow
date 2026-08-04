@@ -1,10 +1,11 @@
 use bytes::{Bytes, BytesMut};
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use rtflow::{
     AccessUnit, Codec,
     rtp::{Packetizer, RtpPacket},
     srtp::{SrtpContext, SrtpProfile},
 };
+use std::hint::black_box;
 
 fn bench_rtp_packetize_h264(c: &mut Criterion) {
     let unit = AccessUnit {
