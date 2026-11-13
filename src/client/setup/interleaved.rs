@@ -61,6 +61,7 @@ pub(super) async fn connect_interleaved(
         } else {
             "RTP/AVP/TCP"
         };
+        let require = options.require_headers();
         let mut extra = if request_mux {
             format!("Transport: {profile};unicast;interleaved={channel};rtcp-mux\r\n")
         } else {
@@ -70,6 +71,9 @@ pub(super) async fn connect_interleaved(
                 channel.saturating_add(1)
             )
         };
+        if let Some(require) = require.as_deref() {
+            extra.push_str(require);
+        }
         if let Some(session) = &session_id {
             extra.push_str(&format!("Session: {session}\r\n"));
         }
@@ -178,6 +182,9 @@ pub(super) async fn connect_interleaved(
         }));
     };
     let mut extra = format!("Session: {session_id}\r\n");
+    if let Some(require) = options.require_headers() {
+        extra.push_str(&require);
+    }
     if let Some(range) = options.play_range {
         extra.push_str(&format!("Range: {}\r\n", range.render()));
     }
@@ -242,6 +249,8 @@ pub(super) async fn connect_interleaved(
     let reader_queued = queued_bytes.clone();
     let byte_limit = options.max_output_bytes;
     let media_for_control = tx.clone();
+    let redirect_id = id;
+    let redirect_sink = options.event_sink.clone();
     let reader_task = tokio::spawn(async move {
         let mut framer = ConnectionFramer::new(16 * 1024, 256 * 1024, 65_536);
         let mut scratch = [0u8; 4096];
@@ -473,7 +482,48 @@ pub(super) async fn connect_interleaved(
                                     return;
                                 }
                             }
-                            Ok(Some(InboundFrame::Rtsp(_))) => continue,
+                            Ok(Some(InboundFrame::Rtsp(crate::rtsp::Message::Request(
+                                request,
+                            )))) => {
+                                let cseq = request.headers.get("cseq").cloned().unwrap_or_default();
+                                let redirect = request.method == crate::rtsp::Method::Redirect;
+                                let location =
+                                    request.headers.get("location").cloned().unwrap_or_default();
+                                let mut headers = std::collections::BTreeMap::new();
+                                if !cseq.is_empty() {
+                                    headers.insert("cseq".into(), cseq);
+                                }
+                                let response = crate::rtsp::Response {
+                                    status: if redirect { 200 } else { 501 },
+                                    reason: if redirect {
+                                        "OK".into()
+                                    } else {
+                                        "Not Implemented".into()
+                                    },
+                                    headers,
+                                    body: Vec::new(),
+                                };
+                                let _ = rtcp_writer
+                                    .lock()
+                                    .await
+                                    .write_all(&crate::rtsp::encode_response(&response))
+                                    .await;
+                                if redirect {
+                                    emit_client_event(
+                                        &redirect_sink,
+                                        ClientEvent::Redirect {
+                                            id: redirect_id,
+                                            location: location.clone(),
+                                        },
+                                    );
+                                    let _ = tx.try_send(Err(if location.is_empty() {
+                                        Error::Rtsp("server REDIRECT without Location".into())
+                                    } else {
+                                        Error::Redirect(location)
+                                    }));
+                                    return;
+                                }
+                            }
                             Ok(None) => break,
                             Err(error) => {
                                 let _ = tx.send(Err(error)).await;

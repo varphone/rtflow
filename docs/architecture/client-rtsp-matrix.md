@@ -16,7 +16,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 | GET_PARAMETER | ✅ | `ClientSession::get_parameter`, keep-alive |
 | SET_PARAMETER | ✅ | `ClientSession::set_parameter` (text/parameters body) |
 | ANNOUNCE / RECORD | ✅ | `RtspClient::publish` + `PublisherSession::push`; UDP and TCP interleaved, multi-track |
-| REDIRECT | ⚠️ | 3xx `Location` on OPTIONS/DESCRIBE is followed; server-initiated `REDIRECT` requests are not handled |
+| REDIRECT | ✅ | 3xx `Location` on OPTIONS/DESCRIBE is followed; server-initiated `REDIRECT` is acknowledged with 200 and surfaced as `Error::Redirect`/`ClientEvent::Redirect` for the application to reconnect |
 | UNSUPPORTED | ⚠️ | parsed as a method but no client-side `Require` negotiation |
 
 ## Headers and behaviour
@@ -29,7 +29,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 | Transport | ✅ UDP, TCP interleaved, multicast, SRTP/RTSPS; fallback on 461/IO; publishing UDP and interleaved |
 | Range/RTP-Info | `Range` sent; `RTP-Info` `seq` primes the jitter buffer; `rtptime` anchors PTS when a non-zero NPT range is returned |
 | Scale/Speed | ✅ sent on PLAY (`PlayRequest`) |
-| `Require`/`Proxy-Require` | ❌ not emitted; 551 `Unsupported` surfaces as `RtspStatus` |
+| `Require`/`Proxy-Require` | ✅ `ClientOptions::require`/`proxy_require`; 551 `Unsupported` surfaces as `RtspStatus` |
 | Content-* | ✅ request/response lengths; `Content-Base` |
 | 1xx/3xx/4xx/5xx | 3xx redirect (limited origin), 4xx/5xx typed `RtspStatus`, 401 retry |
 | Pipelining | ❌ one outstanding control request per session |
@@ -51,8 +51,8 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 ## Known gaps / next increments
 
 1. Publisher RTCP (SR/RR) and SRTP publishing.
-2. Server-initiated `REDIRECT` request handling.
-3. `Require`/`Proxy-Require` negotiation and `551 Unsupported` details.
+2. Automatic reconnect after `REDIRECT` (currently the application receives the location).
+3. `551 Unsupported` token-level reporting (status is surfaced, tokens are not split out).
 4. Byte-bounded output queue (currently frame-count bounded; a small number of
    very large frames can still consume significant memory).
 5. RTSP-over-HTTP tunnelling and RTSP 2.0 are explicitly out of scope.

@@ -99,6 +99,7 @@ pub(super) async fn connect_udp(
         #[cfg(not(feature = "srtp"))]
         let secure = false;
         let profile = if secure { "RTP/SAVP" } else { "RTP/AVP" };
+        let require = options.require_headers();
         let mut extra = if request_mux {
             format!("Transport: {profile};unicast;client_port={port};rtcp-mux\r\n")
         } else {
@@ -108,6 +109,9 @@ pub(super) async fn connect_udp(
                 port.saturating_add(1)
             )
         };
+        if let Some(require) = require.as_deref() {
+            extra.push_str(require);
+        }
         if let Some(session) = &session_id {
             extra.push_str(&format!("Session: {session}\r\n"));
         }
@@ -268,6 +272,9 @@ pub(super) async fn connect_udp(
         }));
     };
     let mut extra = format!("Session: {session_id}\r\n");
+    if let Some(require) = options.require_headers() {
+        extra.push_str(&require);
+    }
     if let Some(range) = options.play_range {
         extra.push_str(&format!("Range: {}\r\n", range.render()));
     }

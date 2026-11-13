@@ -63,7 +63,10 @@
 - [x] `ClientOptions::low_memory()` 有界预设
 - [x] 32 路并发客户端集成测试、控制面方法测试
 - [x] 消费 PLAY `RTP-Info`：seq 预置 jitter、rtptime 锚定非零 NPT 范围 PTS
-- [ ] 发布客户端（ANNOUNCE/RECORD）、server-initiated REDIRECT、RTP-Info/Require
+- [x] 发布客户端（ANNOUNCE/RECORD，UDP/interleaved）
+- [x] server-initiated REDIRECT：回 200 并上抛 `Error::Redirect`/事件
+- [x] `Require`/`Proxy-Require` 头与 551 上抛
+- [x] RTP-Info seq/rtptime 消费
 
 ### Backlog
 

@@ -25,6 +25,10 @@ pub struct ClientOptions {
     /// server's SDP advertisement, `Some(true)` requests it unconditionally
     /// and `Some(false)` disables it.
     pub rtcp_mux: Option<bool>,
+    /// `Require` feature tokens sent on OPTIONS/DESCRIBE/PLAY/SETUP.
+    pub require: Vec<String>,
+    /// `Proxy-Require` feature tokens (for proxy deployments).
+    pub proxy_require: Vec<String>,
 }
 impl Default for ClientOptions {
     fn default() -> Self {
@@ -42,6 +46,8 @@ impl Default for ClientOptions {
             event_sink: None,
             udp_recv_buffer: None,
             rtcp_mux: None,
+            require: Vec::new(),
+            proxy_require: Vec::new(),
         }
     }
 }
@@ -121,10 +127,32 @@ pub(super) fn validate_options(options: &ClientOptions) -> Result<()> {
     if options.request_timeout == Duration::ZERO {
         return Err(Error::Limit("client request timeout"));
     }
+    for token in options.require.iter().chain(options.proxy_require.iter()) {
+        if token.is_empty() || token.contains(['\r', '\n', ' ']) {
+            return Err(Error::InvalidConfig(
+                "RTSP Require token must be a non-empty token".into(),
+            ));
+        }
+    }
     Ok(())
 }
 
 impl ClientOptions {
+    pub(super) fn require_headers(&self) -> Option<String> {
+        let mut headers = String::new();
+        if !self.require.is_empty() {
+            headers.push_str("Require: ");
+            headers.push_str(&self.require.join(", "));
+            headers.push_str("\r\n");
+        }
+        if !self.proxy_require.is_empty() {
+            headers.push_str("Proxy-Require: ");
+            headers.push_str(&self.proxy_require.join(", "));
+            headers.push_str("\r\n");
+        }
+        (!headers.is_empty()).then_some(headers)
+    }
+
     pub fn builder() -> ClientOptionsBuilder {
         ClientOptionsBuilder {
             options: Self::default(),
@@ -200,6 +228,26 @@ impl ClientOptionsBuilder {
     /// Force RTCP multiplexing on (`true`) or off (`false`); omit for auto.
     pub fn rtcp_mux(mut self, value: bool) -> Self {
         self.options.rtcp_mux = Some(value);
+        self
+    }
+
+    /// Add `Require` feature tokens.
+    pub fn require<I, S>(mut self, tokens: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.options.require = tokens.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Add `Proxy-Require` feature tokens.
+    pub fn proxy_require<I, S>(mut self, tokens: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.options.proxy_require = tokens.into_iter().map(Into::into).collect();
         self
     }
 

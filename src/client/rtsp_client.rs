@@ -16,12 +16,13 @@ impl RtspClient {
     pub async fn options(url: url::Url, options: ClientOptions) -> Result<ServerCapabilities> {
         validate_options(&options)?;
         let (mut stream, uri) = open_control(&url, &options).await?;
+        let require = options.require_headers();
         let response = request(
             &mut stream,
             "OPTIONS",
             &uri,
             1,
-            None,
+            require.as_deref(),
             options.request_timeout,
             options.credentials.as_ref(),
         )
@@ -452,12 +453,13 @@ async fn open_and_describe_once(
     options: &ClientOptions,
 ) -> Result<DescribeOutcome> {
     let (mut stream, uri) = open_control(url, options).await?;
+    let require = options.require_headers();
     let response = request(
         &mut stream,
         "OPTIONS",
         &uri,
         1,
-        None,
+        require.as_deref(),
         options.request_timeout,
         options.credentials.as_ref(),
     )
@@ -469,12 +471,16 @@ async fn open_and_describe_once(
         return Err(status_error("OPTIONS", response.status));
     }
     let capabilities = ServerCapabilities::from_response(&response);
+    let describe_headers = format!(
+        "Accept: application/sdp\r\n{}",
+        require.as_deref().unwrap_or_default()
+    );
     let response = request(
         &mut stream,
         "DESCRIBE",
         &uri,
         2,
-        Some("Accept: application/sdp\r\n"),
+        Some(&describe_headers),
         options.request_timeout,
         options.credentials.as_ref(),
     )

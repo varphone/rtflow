@@ -72,6 +72,8 @@ pub enum Error {
     #[cfg(feature = "tls")]
     #[error("TLS error: {0}")]
     Tls(String),
+    #[error("RTSP redirect to {0}")]
+    Redirect(String),
     #[error("session closed")]
     Closed,
     #[error("resource limit exceeded: {0}")]
@@ -112,6 +114,7 @@ impl Error {
             Self::Io(_) | Self::Tls(_) => ErrorCode::Io,
             #[cfg(not(feature = "tls"))]
             Self::Io(_) => ErrorCode::Io,
+            Self::Redirect(_) => ErrorCode::InvalidState,
             Self::Closed => ErrorCode::Closed,
             Self::Limit(_) => ErrorCode::ResourceExhausted,
             Self::NotFound(_) | Self::Conflict(_) => ErrorCode::InvalidState,
@@ -150,6 +153,7 @@ impl Error {
             {
                 RetryClass::Backoff
             }
+            Self::Redirect(_) => RetryClass::Never,
             Self::Closed => RetryClass::Immediate,
             Self::RtspStatus {
                 status: 500..=599 | 408 | 453 | 461,
@@ -169,6 +173,7 @@ impl Error {
             Self::NotFound(_) => 404,
             Self::Conflict(_) => 455,
             Self::Limit(_) => 453,
+            Self::Redirect(_) => 503,
             Self::Rtsp(_) | Self::Media(_) => 400,
             Self::Http(_) | Self::InvalidConfig(_) => 500,
             Self::Unsupported(_) => 501,

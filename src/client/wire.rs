@@ -250,13 +250,34 @@ pub(super) async fn send_request_body(
     let mut temporary = [0u8; 4096];
     loop {
         if let Some(message) = rtsp::parse(stream.read_ahead_mut(), 16 * 1024, 256 * 1024)? {
-            return match message {
+            match message {
                 Message::Response(response) => {
                     validate_response_cseq(&response, cseq)?;
-                    Ok(response)
+                    return Ok(response);
                 }
-                _ => Err(Error::Rtsp("server sent request".into())),
-            };
+                Message::Request(request) => {
+                    let cseq_header = request.headers.get("cseq").cloned().unwrap_or_default();
+                    if request.method == super::Method::Redirect {
+                        let location = request.headers.get("location").cloned().unwrap_or_default();
+                        let reply = format!("RTSP/1.0 200 OK\r\nCSeq: {cseq_header}\r\n\r\n");
+                        timeout(wait, stream.write_all(reply.as_bytes()))
+                            .await
+                            .map_err(|_| Error::Rtsp("RTSP write timeout".into()))??;
+                        return Err(if location.is_empty() {
+                            Error::Rtsp("server REDIRECT without Location".into())
+                        } else {
+                            Error::Redirect(location)
+                        });
+                    }
+                    // Unknown server request: answer 501 and keep waiting for
+                    // the response to our own request (RFC 2326 §10.10).
+                    let reply =
+                        format!("RTSP/1.0 501 Not Implemented\r\nCSeq: {cseq_header}\r\n\r\n");
+                    timeout(wait, stream.write_all(reply.as_bytes()))
+                        .await
+                        .map_err(|_| Error::Rtsp("RTSP write timeout".into()))??;
+                }
+            }
         }
         let size = timeout(wait, stream.read_transport(&mut temporary))
             .await

@@ -51,7 +51,11 @@ pub(super) async fn connect_multicast(
         #[cfg(not(feature = "srtp"))]
         let secure = false;
         let profile = if secure { "RTP/SAVP" } else { "RTP/AVP" };
+        let require = options.require_headers();
         let mut extra = format!("Transport: {profile};multicast\r\n");
+        if let Some(require) = require.as_deref() {
+            extra.push_str(require);
+        }
         if let Some(session) = &session_id {
             extra.push_str(&format!("Session: {session}\r\n"));
         }
@@ -121,6 +125,9 @@ pub(super) async fn connect_multicast(
         }));
     };
     let mut extra = format!("Session: {session_id}\r\n");
+    if let Some(require) = options.require_headers() {
+        extra.push_str(&require);
+    }
     if let Some(range) = options.play_range {
         extra.push_str(&format!("Range: {}\r\n", range.render()));
     }

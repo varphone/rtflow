@@ -67,6 +67,7 @@
 - RTSP 客户端发布支持 TCP interleaved；输出队列增加字节上限
   (`ClientOptions::max_output_bytes`，低内存预设 2 MiB)。
 - RTSP 客户端消费 PLAY `RTP-Info`：seq 预置 jitter buffer，rtptime 锚定非零 NPT 范围的 PTS；新增解析/单测。
+- RTSP 客户端支持 `Require`/`Proxy-Require`，并处理 server-initiated `REDIRECT`（回 200、上抛 `Error::Redirect` / `ClientEvent::Redirect`）。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

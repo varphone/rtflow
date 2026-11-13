@@ -320,6 +320,7 @@ impl EventSink for MetricsEventSink {
                 ClientEvent::Failed { code, .. } => {
                     self.registry.record_error(*code);
                 }
+                ClientEvent::Redirect { .. } => {}
             },
             FrameworkEvent::Runtime(RuntimeEvent::TaskFailed { code, .. }) => {
                 self.registry.record_error(*code);

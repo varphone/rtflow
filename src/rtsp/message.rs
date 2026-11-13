@@ -14,6 +14,7 @@ pub enum Method {
     Teardown,
     GetParameter,
     SetParameter,
+    Redirect,
     Unsupported,
 }
 impl Method {
@@ -29,6 +30,7 @@ impl Method {
             Self::Teardown => "TEARDOWN",
             Self::GetParameter => "GET_PARAMETER",
             Self::SetParameter => "SET_PARAMETER",
+            Self::Redirect => "REDIRECT",
             Self::Unsupported => "UNSUPPORTED",
         }
     }
@@ -47,6 +49,7 @@ impl FromStr for Method {
             "TEARDOWN" => Ok(Self::Teardown),
             "GET_PARAMETER" => Ok(Self::GetParameter),
             "SET_PARAMETER" => Ok(Self::SetParameter),
+            "REDIRECT" => Ok(Self::Redirect),
             _ => Ok(Self::Unsupported),
         }
     }

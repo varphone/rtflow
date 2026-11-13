@@ -239,3 +239,112 @@ async fn options_reports_public_methods() {
     assert!(capabilities.supports("PLAY"));
     assert!(!capabilities.supports("RECORD"));
 }
+
+#[tokio::test]
+async fn require_tokens_are_sent_and_551_surfaces() {
+    let seen = Arc::new(Mutex::new(None::<String>));
+    let sink = seen.clone();
+    let server = RawRtspServer::start(Box::new(move |request| {
+        if request.method == rtflow::rtsp::Method::Options {
+            *sink.lock().unwrap() = request.headers.get("require").cloned();
+            ServerReply::Response(with_header(
+                reply(request, 551, "Option Not Supported"),
+                "unsupported",
+                "com.example.feature",
+            ))
+        } else {
+            ServerReply::Response(reply(request, 200, "OK"))
+        }
+    }))
+    .await;
+    let options = ClientOptions::builder()
+        .transport(UpstreamTransport::TcpInterleaved)
+        .require(["com.example.feature"])
+        .build()
+        .unwrap();
+    let error = RtspClient::options(server.url("/stream"), options)
+        .await
+        .expect_err("551 must surface");
+    assert!(matches!(
+        error,
+        Error::RtspStatus {
+            method: "OPTIONS",
+            status: 551
+        }
+    ));
+    assert_eq!(
+        seen.lock().unwrap().as_deref(),
+        Some("com.example.feature"),
+        "Require header missing from OPTIONS"
+    );
+}
+
+#[test]
+fn require_tokens_reject_header_injection() {
+    let error = match ClientOptions::builder()
+        .require(["bad\r\nX-Injected: 1"])
+        .build()
+    {
+        Ok(_) => panic!("CRLF in Require token must be rejected"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, Error::InvalidConfig(_)));
+}
+
+#[tokio::test]
+async fn server_redirect_request_surfaces_as_error() {
+    let description = single_h264();
+    let server = RawRtspServer::start(Box::new(move |request| match request.method {
+        rtflow::rtsp::Method::Options => ServerReply::Response(reply(request, 200, "OK")),
+        rtflow::rtsp::Method::Describe => ServerReply::Response(describe_reply(request, &description)),
+        rtflow::rtsp::Method::Setup => ServerReply::Response(interleaved(request)),
+        rtflow::rtsp::Method::Play => {
+            let cseq = request.headers.get("cseq").cloned().unwrap_or_default();
+            ServerReply::Raw(
+                format!(
+                    "REDIRECT rtsp://127.0.0.1:554/moved RTSP/1.0\r\nCSeq: {cseq}\r\nLocation: rtsp://127.0.0.1:554/moved\r\n\r\n"
+                )
+                .into_bytes(),
+            )
+        }
+        _ => ServerReply::Response(reply(request, 200, "OK")),
+    }))
+    .await;
+    let error = match RtspClient::connect(server.url("/stream"), tcp_options()).await {
+        Ok(_) => panic!("REDIRECT request must fail the session"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, Error::Redirect(ref url) if url.ends_with("/moved")));
+}
+
+#[tokio::test]
+async fn interleaved_redirect_during_control_surfaces_on_media() {
+    let description = single_h264();
+    let server = RawRtspServer::start(Box::new(move |request| match request.method {
+        rtflow::rtsp::Method::Options => ServerReply::Response(reply(request, 200, "OK")),
+        rtflow::rtsp::Method::Describe => ServerReply::Response(describe_reply(request, &description)),
+        rtflow::rtsp::Method::Setup => ServerReply::Response(interleaved(request)),
+        rtflow::rtsp::Method::Play => ServerReply::Response(reply(request, 200, "OK")),
+        rtflow::rtsp::Method::Pause => {
+            let cseq = request.headers.get("cseq").cloned().unwrap_or_default();
+            ServerReply::Raw(
+                format!(
+                    "REDIRECT rtsp://127.0.0.1:554/moved RTSP/1.0\r\nCSeq: {cseq}\r\nLocation: rtsp://127.0.0.1:554/moved\r\n\r\n"
+                )
+                .into_bytes(),
+            )
+        }
+        _ => ServerReply::Response(reply(request, 200, "OK")),
+    }))
+    .await;
+    let mut session = RtspClient::connect(server.url("/stream"), tcp_options())
+        .await
+        .unwrap();
+    let _ = session.pause().await;
+    let error = tokio::time::timeout(Duration::from_secs(2), session.next())
+        .await
+        .expect("redirect should surface")
+        .expect("media channel closed")
+        .expect_err("media must carry a redirect error");
+    assert!(matches!(error, Error::Redirect(ref url) if url.ends_with("/moved")));
+}

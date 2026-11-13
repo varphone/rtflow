@@ -106,6 +106,10 @@ pub enum ClientEvent {
         id: SessionId,
         consecutive: u32,
     },
+    Redirect {
+        id: SessionId,
+        location: String,
+    },
     Failed {
         id: SessionId,
         code: ErrorCode,

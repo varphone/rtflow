@@ -137,8 +137,9 @@ async fn announce(
 ) -> Result<()> {
     let body = sdp::encode(description).into_bytes();
     let headers = format!(
-        "Content-Type: application/sdp\r\nContent-Length: {}\r\n",
-        body.len()
+        "Content-Type: application/sdp\r\nContent-Length: {}\r\n{}",
+        body.len(),
+        options.require_headers().unwrap_or_default()
     );
     let sequence = *cseq;
     *cseq = cseq.wrapping_add(1);
@@ -169,7 +170,10 @@ async fn record(
     options: &ClientOptions,
     cseq: &mut u32,
 ) -> Result<()> {
-    let headers = format!("Session: {session_id}\r\n");
+    let mut headers = format!("Session: {session_id}\r\n");
+    if let Some(require) = options.require_headers() {
+        headers.push_str(&require);
+    }
     let sequence = *cseq;
     *cseq = cseq.wrapping_add(1);
     let response = request(
@@ -210,12 +214,13 @@ pub(super) async fn connect(
     let (stream, uri) = super::rtsp_client::open_control(url, options).await?;
     let mut stream = stream;
     let mut cseq = 1u32;
+    let require = options.require_headers();
     let response = request(
         &mut stream,
         "OPTIONS",
         &uri,
         cseq,
-        None,
+        require.as_deref(),
         options.request_timeout,
         options.credentials.as_ref(),
     )
@@ -267,6 +272,9 @@ pub(super) async fn connect(
                 port.saturating_add(1)
             )
         };
+        if let Some(require) = options.require_headers() {
+            headers.push_str(&require);
+        }
         if let Some(session) = &session_id {
             headers.push_str(&format!("Session: {session}\r\n"));
         }
