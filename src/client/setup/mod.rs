@@ -1,0 +1,191 @@
+use super::{
+    control::{ControlTransport, control_task, effective_keep_alive},
+    emit_client_event,
+    options::ClientOptions,
+    session::{ClientSession, SessionParts},
+    wire::{
+        drain_jitter, receive_rtp_packet, request, response_session_id, response_session_timeout,
+    },
+};
+use crate::{
+    Error, Result,
+    identity::SessionId,
+    media::{AccessUnit, MediaDescription},
+    observe::ClientEvent,
+    rtcp::{Packet as RtcpPacket, RtcpSession},
+    rtp::{Depacketizer, JitterBuffer, RtpPacket},
+    runtime::framing::{ConnectionFramer, InboundFrame},
+    runtime::io::ControlConnection,
+    transport::{InterleavedFrame, TransportSpec, UdpPair},
+};
+use std::{collections::HashMap, sync::Arc};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::{Mutex, mpsc},
+};
+use tokio_util::sync::CancellationToken;
+
+/// A SETUP/PLAY-phase rejection: the negotiation failed at the RTSP status
+/// level, but the control connection and the parsed SDP are still healthy,
+/// so the caller can retry with a different transport without redoing
+/// OPTIONS+DESCRIBE (audit RT-9).
+pub(super) struct SetupFailure {
+    pub(super) error: Error,
+    pub(super) stream: ControlConnection,
+    pub(super) setup_base: String,
+    pub(super) description: MediaDescription,
+}
+
+pub(super) async fn connect(
+    stream: ControlConnection,
+    uri: String,
+    setup_base: String,
+    description: MediaDescription,
+    options: ClientOptions,
+    id: SessionId,
+) -> std::result::Result<ClientSession, Box<SetupFailure>> {
+    match options.transport {
+        crate::transport::UpstreamTransport::Udp => {
+            connect_udp(stream, uri, setup_base, description, options, id).await
+        }
+        crate::transport::UpstreamTransport::TcpInterleaved => {
+            connect_interleaved(stream, uri, setup_base, description, options, id).await
+        }
+        crate::transport::UpstreamTransport::Auto => Err(Box::new(SetupFailure {
+            error: Error::Rtsp(
+                "automatic transport selection must be resolved before SETUP".into(),
+            ),
+            stream,
+            setup_base,
+            description,
+        })),
+    }
+}
+
+mod interleaved;
+mod udp;
+
+use interleaved::connect_interleaved;
+use udp::connect_udp;
+
+/// Sleep until the jitter buffer's next release deadline. Never fires while
+/// nothing is buffered, replacing the old 1–10ms poll tick (audit RT-17).
+async fn wait_for_deadline(deadline: Option<std::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Non-blocking delivery into the frame channel: a full queue drops the
+/// frame instead of stalling the receive loop (audit RT-17). Returns false
+/// when the consumer is gone.
+fn try_deliver(
+    tx: &mpsc::Sender<Result<AccessUnit>>,
+    result: Result<AccessUnit>,
+    dropped: &mut u64,
+) -> bool {
+    match tx.try_send(result) {
+        Ok(()) => true,
+        Err(mpsc::error::TrySendError::Closed(_)) => false,
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            *dropped += 1;
+            if *dropped % 64 == 1 {
+                tracing::debug!(
+                    dropped = *dropped,
+                    "client output queue full; dropping frame"
+                );
+            }
+            true
+        }
+    }
+}
+
+pub(super) fn client_ssrc(track_id: u8) -> u32 {
+    0x434c_4e54 ^ u32::from(track_id)
+}
+
+async fn observe_quality(
+    quality: &Mutex<HashMap<u8, RtcpSession>>,
+    track_id: u8,
+    clock_rate: u32,
+    local_ssrc: u32,
+    packet: &RtpPacket,
+) -> Result<()> {
+    let now = tokio::time::Instant::now();
+    let mut quality = quality.lock().await;
+    let session = match quality.entry(track_id) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(entry) => entry.insert(RtcpSession::new(
+            local_ssrc,
+            packet.header.ssrc,
+            clock_rate,
+            bytes::Bytes::from_static(b"rtsp-client"),
+            std::time::Duration::from_secs(5),
+            now,
+        )?),
+    };
+    if session.on_rtp(packet, now).is_err() {
+        *session = RtcpSession::new(
+            local_ssrc,
+            packet.header.ssrc,
+            clock_rate,
+            bytes::Bytes::from_static(b"rtsp-client"),
+            std::time::Duration::from_secs(5),
+            now,
+        )?;
+        session.on_rtp(packet, now)?;
+    }
+    Ok(())
+}
+
+async fn quality_report(
+    quality: &Mutex<HashMap<u8, RtcpSession>>,
+    track_id: u8,
+    clock_rate: u32,
+    local_ssrc: u32,
+    packets: &[RtcpPacket],
+) -> Result<Option<crate::rtcp::CompoundPacket>> {
+    let now = tokio::time::Instant::now();
+    let mut quality = quality.lock().await;
+    if !quality.contains_key(&track_id)
+        && let Some(remote_ssrc) = packets.iter().find_map(|packet| match packet {
+            RtcpPacket::SenderReport { ssrc, .. }
+            | RtcpPacket::SenderReportWithReports { ssrc, .. } => Some(*ssrc),
+            _ => None,
+        })
+    {
+        quality.insert(
+            track_id,
+            RtcpSession::new(
+                local_ssrc,
+                remote_ssrc,
+                clock_rate,
+                bytes::Bytes::from_static(b"rtsp-client"),
+                std::time::Duration::from_secs(5),
+                now,
+            )?,
+        );
+    }
+    let Some(session) = quality.get_mut(&track_id) else {
+        return Ok(None);
+    };
+    for packet in packets {
+        session.on_rtcp(packet, now);
+    }
+    session.report_now(now).map(Some)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_ssrc_is_deterministic_and_distinct_per_track() {
+        for track_id in 0..=255u8 {
+            assert_eq!(client_ssrc(track_id), client_ssrc(track_id));
+        }
+        let first = client_ssrc(0);
+        assert!((1..=255u8).all(|track_id| client_ssrc(track_id) != first));
+    }
+}

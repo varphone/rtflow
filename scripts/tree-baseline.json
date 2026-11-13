@@ -1,8 +1,6 @@
 {
   "path_attributes": [],
   "oversized_files": [
-    "src/client/mod.rs (1531 lines)",
-    "src/client/setup.rs (885 lines)",
     "src/file/mpeg_ts.rs (857 lines)",
     "src/server/session.rs (1362 lines)",
     "src/storage/recording.rs (811 lines)"
