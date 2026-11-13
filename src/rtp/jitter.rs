@@ -29,6 +29,7 @@ pub struct JitterBuffer {
     config: JitterBufferConfig,
     next: Option<u16>,
     pending: BTreeMap<u16, (Instant, RtpPacket)>,
+    primed: bool,
 }
 impl JitterBuffer {
     pub fn new(config: JitterBufferConfig) -> Self {
@@ -36,11 +37,30 @@ impl JitterBuffer {
             config,
             next: None,
             pending: BTreeMap::new(),
+            primed: false,
+        }
+    }
+
+    /// Hint the expected first sequence from RTSP `RTP-Info` so the first
+    /// packet is released immediately instead of being treated as a gap.
+    pub fn prime(&mut self, sequence: u16) {
+        if self.next.is_none() {
+            self.next = Some(sequence);
+            self.primed = true;
         }
     }
 
     pub fn push(&mut self, packet: RtpPacket) -> Vec<RtpPacket> {
         let sequence = packet.header.sequence;
+        // RTP-Info is a hint, not a hard drop rule: if the first packet does
+        // not use the announced sequence (stale cache, restarted sender),
+        // fall back to normal "first packet wins" behaviour.
+        if self.primed {
+            self.primed = false;
+            if self.next != Some(sequence) {
+                self.next = Some(sequence);
+            }
+        }
         let expected = *self.next.get_or_insert(sequence);
         let distance = sequence.wrapping_sub(expected);
         if distance >= 0x8000 || self.pending.contains_key(&sequence) {

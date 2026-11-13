@@ -48,6 +48,8 @@ pub struct Depacketizer {
     /// Wrap-free RTP timestamp clock (units of `clock_rate` ticks).
     extended_ts: u64,
     av1: super::av1::Av1State,
+    /// NPT base added to the RTP-timestamp-derived PTS.
+    pts_base: std::time::Duration,
 }
 impl Depacketizer {
     pub fn new(codec: Codec, track_id: TrackId, clock_rate: u32) -> Self {
@@ -68,6 +70,7 @@ impl Depacketizer {
             last_rtp_ts: 0,
             extended_ts: 0,
             av1: super::av1::Av1State::default(),
+            pts_base: std::time::Duration::ZERO,
         }
     }
 
@@ -75,6 +78,15 @@ impl Depacketizer {
     /// without extension the PTS resets to zero every ~13.1h at 90kHz.
     /// The delta is interpreted as signed so out-of-order timestamps and
     /// wrap-arounds both extend correctly.
+    /// Anchor the RTP timestamp clock and PTS to the PLAY `RTP-Info`
+    /// `rtptime`/`Range` response, so the first access unit starts at the
+    /// requested NPT position rather than at an arbitrary RTP tick.
+    pub fn set_time_base(&mut self, rtp_base: u32, pts_base: std::time::Duration) {
+        self.last_rtp_ts = rtp_base;
+        self.extended_ts = 0;
+        self.pts_base = pts_base;
+    }
+
     fn pts_from_timestamp(&mut self, rtp_ts: u32) -> std::time::Duration {
         if self.clock_rate == 0 {
             return std::time::Duration::ZERO;
@@ -82,9 +94,10 @@ impl Depacketizer {
         let raw_delta = rtp_ts.wrapping_sub(self.last_rtp_ts) as i32 as i64;
         self.extended_ts = self.extended_ts.wrapping_add(raw_delta as u64);
         self.last_rtp_ts = rtp_ts;
-        std::time::Duration::from_micros(
-            self.extended_ts.saturating_mul(1_000_000) / u64::from(self.clock_rate),
-        )
+        self.pts_base
+            + std::time::Duration::from_micros(
+                self.extended_ts.saturating_mul(1_000_000) / u64::from(self.clock_rate),
+            )
     }
     pub fn push(&mut self, p: RtpPacket) -> Result<Vec<AccessUnit>> {
         let timestamp = p.header.timestamp;

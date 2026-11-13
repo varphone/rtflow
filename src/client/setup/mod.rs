@@ -14,6 +14,7 @@ use crate::{
     observe::ClientEvent,
     rtcp::{Packet as RtcpPacket, RtcpSession},
     rtp::{Depacketizer, JitterBuffer, RtpPacket},
+    rtsp::Response,
     runtime::framing::{ConnectionFramer, InboundFrame},
     runtime::io::ControlConnection,
     transport::{InterleavedFrame, TransportSpec, UdpPair},
@@ -24,6 +25,74 @@ use tokio::{
     sync::{Mutex, mpsc},
 };
 use tokio_util::sync::CancellationToken;
+
+/// Parsed per-track `RTP-Info` entry from a PLAY response.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct RtpInfo {
+    pub sequence: Option<u16>,
+    pub rtptime: Option<u32>,
+}
+
+/// Parse `RTP-Info` and pair entries with tracks by control URI, falling back
+/// to declaration order when the server omits `url`.
+pub(super) fn parse_rtp_info(
+    response: &Response,
+    description: &MediaDescription,
+    setup_base: &str,
+) -> HashMap<u8, RtpInfo> {
+    let Some(value) = response.headers.get("rtp-info") else {
+        return HashMap::new();
+    };
+    let mut entries = Vec::new();
+    for entry in value.split(',') {
+        let mut url = None;
+        let mut sequence = None;
+        let mut rtptime = None;
+        for part in entry.split(';') {
+            let Some((key, value)) = part.split_once('=') else {
+                continue;
+            };
+            match key.trim().to_ascii_lowercase().as_str() {
+                "url" => url = Some(value.trim().to_owned()),
+                "seq" => sequence = value.trim().parse().ok(),
+                "rtptime" => rtptime = value.trim().parse().ok(),
+                _ => {}
+            }
+        }
+        if sequence.is_some() || rtptime.is_some() {
+            entries.push((url, RtpInfo { sequence, rtptime }));
+        }
+    }
+    let mut out = HashMap::new();
+    for (index, (url, info)) in entries.into_iter().enumerate() {
+        let track = url
+            .as_deref()
+            .and_then(|url| {
+                description.tracks.iter().find(|track| {
+                    crate::rtsp::sdp::control_uri(setup_base, &track.control)
+                        .is_ok_and(|control| control == url)
+                })
+            })
+            .or_else(|| description.tracks.get(index));
+        if let Some(track) = track {
+            out.insert(track.id, info);
+        }
+    }
+    out
+}
+
+/// NPT base from the PLAY `Range` response (live `now` and absent ranges are 0).
+pub(super) fn play_pts_base(response: &Response) -> std::time::Duration {
+    response
+        .headers
+        .get("range")
+        .and_then(|value| crate::rtsp::range::NptRange::parse(value).ok())
+        .map(|range| match range.start {
+            crate::rtsp::range::NptPosition::Time(value) => value,
+            crate::rtsp::range::NptPosition::Now => std::time::Duration::ZERO,
+        })
+        .unwrap_or(std::time::Duration::ZERO)
+}
 
 /// A SETUP/PLAY-phase rejection: the negotiation failed at the RTSP status
 /// level, but the control connection and the parsed SDP are still healthy,

@@ -27,7 +27,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 | Session / timeout | ✅ `Session`, `timeout=`, keep-alive capped at half timeout |
 | Authentication | ✅ Basic/Digest for OPTIONS/DESCRIBE/SETUP and control; interleaved control retries Digest |
 | Transport | ✅ UDP, TCP interleaved, multicast, SRTP/RTSPS; fallback on 461/IO; publishing UDP and interleaved |
-| Range/RTP-Info | Range sent; `RTP-Info` response not consumed (server keyframe cache supplies startup) |
+| Range/RTP-Info | `Range` sent; `RTP-Info` `seq` primes the jitter buffer; `rtptime` anchors PTS when a non-zero NPT range is returned |
 | Scale/Speed | ✅ sent on PLAY (`PlayRequest`) |
 | `Require`/`Proxy-Require` | ❌ not emitted; 551 `Unsupported` surfaces as `RtspStatus` |
 | Content-* | ✅ request/response lengths; `Content-Base` |
@@ -51,7 +51,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 ## Known gaps / next increments
 
 1. Publisher RTCP (SR/RR) and SRTP publishing.
-2. Server-initiated `REDIRECT` request and `RTP-Info`/`Range` response handling.
+2. Server-initiated `REDIRECT` request handling.
 3. `Require`/`Proxy-Require` negotiation and `551 Unsupported` details.
 4. Byte-bounded output queue (currently frame-count bounded; a small number of
    very large frames can still consume significant memory).

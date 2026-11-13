@@ -62,6 +62,7 @@
 - [x] interleaved 控制通道 Digest 401 重试
 - [x] `ClientOptions::low_memory()` 有界预设
 - [x] 32 路并发客户端集成测试、控制面方法测试
+- [x] 消费 PLAY `RTP-Info`：seq 预置 jitter、rtptime 锚定非零 NPT 范围 PTS
 - [ ] 发布客户端（ANNOUNCE/RECORD）、server-initiated REDIRECT、RTP-Info/Require
 
 ### Backlog

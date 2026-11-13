@@ -6,6 +6,8 @@ struct ReceiverSpec {
     rtp_target: std::net::SocketAddr,
     rtcp_target: std::net::SocketAddr,
     rtcp_mux: bool,
+    rtp_info: super::RtpInfo,
+    pts_base: std::time::Duration,
     #[cfg(feature = "srtp")]
     srtp: Option<crate::srtp::SrtpContext>,
     #[cfg(feature = "srtp")]
@@ -247,6 +249,8 @@ pub(super) async fn connect_udp(
             rtp_target,
             rtcp_target,
             rtcp_mux: negotiated_mux,
+            rtp_info: super::RtpInfo::default(),
+            pts_base: std::time::Duration::ZERO,
             #[cfg(feature = "srtp")]
             srtp,
             #[cfg(feature = "srtp")]
@@ -300,6 +304,14 @@ pub(super) async fn connect_udp(
             description,
         }));
     }
+    let rtp_info = super::parse_rtp_info(&response, &description, &setup_base);
+    let pts_base = super::play_pts_base(&response);
+    for spec in &mut receivers {
+        if let Some(info) = rtp_info.get(&spec.track.id) {
+            spec.rtp_info = *info;
+        }
+        spec.pts_base = pts_base;
+    }
     let (tx, rx) = mpsc::channel(options.output_queue_capacity);
     let cancel = CancellationToken::new();
     let quality = Arc::new(Mutex::new(HashMap::new()));
@@ -312,6 +324,8 @@ pub(super) async fn connect_udp(
             rtp_target,
             rtcp_target,
             rtcp_mux,
+            rtp_info,
+            pts_base,
             #[cfg(feature = "srtp")]
             srtp,
             #[cfg(feature = "srtp")]
@@ -344,6 +358,14 @@ pub(super) async fn connect_udp(
             // handling — a restarted server reconnects instead of mixing).
             let mut expected_ssrc: Option<u32> = None;
             let mut depacketizer = Depacketizer::new(track.codec, track.id, track.clock_rate);
+            if let Some(sequence) = rtp_info.sequence {
+                jitter.prime(sequence);
+            }
+            if pts_base > std::time::Duration::ZERO
+                && let Some(rtptime) = rtp_info.rtptime
+            {
+                depacketizer.set_time_base(rtptime, pts_base);
+            }
             let mut buffer = bytes::BytesMut::zeroed(65_536);
             let mut dropped = 0u64;
             loop {

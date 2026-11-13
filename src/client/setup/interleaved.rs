@@ -214,6 +214,20 @@ pub(super) async fn connect_interleaved(
             description,
         }));
     }
+    let rtp_info = super::parse_rtp_info(&response, &description, &setup_base);
+    let pts_base = super::play_pts_base(&response);
+    for (jitter, depacketizer, track_id, ..) in tracks.values_mut() {
+        if let Some(info) = rtp_info.get(track_id) {
+            if let Some(sequence) = info.sequence {
+                jitter.prime(sequence);
+            }
+            if pts_base > std::time::Duration::ZERO
+                && let Some(rtptime) = info.rtptime
+            {
+                depacketizer.set_time_base(rtptime, pts_base);
+            }
+        }
+    }
     let peer = stream.peer_addr();
     let (mut reader, writer) = tokio::io::split(stream);
     let writer = Arc::new(Mutex::new(writer));

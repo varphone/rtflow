@@ -213,6 +213,8 @@ pub(super) async fn connect_multicast(
             }
         }
     }
+    let rtp_info = super::parse_rtp_info(&response, &description, &setup_base);
+    let pts_base = super::play_pts_base(&response);
     let (tx, rx) = mpsc::channel(options.output_queue_capacity);
     let cancel = CancellationToken::new();
     let quality = Arc::new(Mutex::new(HashMap::new()));
@@ -234,11 +236,23 @@ pub(super) async fn connect_multicast(
         rr_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut active: HashMap<u8, (JitterBuffer, Depacketizer, u8, u32, u32)> = HashMap::new();
         for track in track_list {
+            let mut jitter = JitterBuffer::new(crate::rtp::JitterBufferConfig::default());
+            let mut depacketizer = Depacketizer::new(track.codec, track.id, track.clock_rate);
+            if let Some(info) = rtp_info.get(&track.id) {
+                if let Some(sequence) = info.sequence {
+                    jitter.prime(sequence);
+                }
+                if pts_base > std::time::Duration::ZERO
+                    && let Some(rtptime) = info.rtptime
+                {
+                    depacketizer.set_time_base(rtptime, pts_base);
+                }
+            }
             active.insert(
                 track.payload_type,
                 (
-                    JitterBuffer::new(crate::rtp::JitterBufferConfig::default()),
-                    Depacketizer::new(track.codec, track.id, track.clock_rate),
+                    jitter,
+                    depacketizer,
                     track.id,
                     track.clock_rate,
                     client_ssrc(track.id),

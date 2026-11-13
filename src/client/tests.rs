@@ -323,3 +323,60 @@ fn low_memory_preset_is_bounded() {
     invalid.max_output_bytes = 0;
     assert!(invalid.validate().is_err());
 }
+
+#[test]
+fn rtp_info_pairs_tracks_by_control_url_and_order() {
+    let description = crate::media::MediaDescription {
+        session_name: "info".into(),
+        tracks: vec![
+            crate::media::TrackDescription::h264_video(0, &[], &[], 176, 144, 25),
+            crate::media::TrackDescription::aac_audio(1, 48_000, 2),
+        ],
+        #[cfg(feature = "multicast")]
+        connection: None,
+    };
+    let response = response_with_headers(
+        200,
+        vec![(
+            "rtp-info",
+            "url=rtsp://host/stream/trackID=0;seq=1000;rtptime=90000,\
+             url=rtsp://host/stream/trackID=1;seq=2000;rtptime=48000",
+        )],
+    );
+    let info = super::setup::parse_rtp_info(&response, &description, "rtsp://host/stream/");
+    assert_eq!(info.get(&0).unwrap().sequence, Some(1000));
+    assert_eq!(info.get(&0).unwrap().rtptime, Some(90_000));
+    assert_eq!(info.get(&1).unwrap().sequence, Some(2000));
+
+    let response = response_with_headers(200, vec![("rtp-info", "seq=7;rtptime=8")]);
+    let info = super::setup::parse_rtp_info(&response, &description, "rtsp://host/stream/");
+    assert_eq!(info.get(&0).unwrap().sequence, Some(7), "order fallback");
+}
+
+#[test]
+fn play_range_sets_npt_pts_base() {
+    let response = response_with_headers(200, vec![("range", "npt=12.5-20")]);
+    assert_eq!(
+        super::setup::play_pts_base(&response),
+        Duration::from_millis(12_500)
+    );
+    let live = response_with_headers(200, vec![("range", "npt=now-")]);
+    assert_eq!(super::setup::play_pts_base(&live), Duration::ZERO);
+}
+
+#[test]
+fn jitter_prime_accepts_the_first_hinted_sequence() {
+    let mut jitter = crate::rtp::JitterBuffer::new(Default::default());
+    jitter.prime(500);
+    let packet = crate::rtp::RtpPacket {
+        header: crate::rtp::RtpHeader {
+            marker: true,
+            payload_type: 96,
+            sequence: 500,
+            timestamp: 0,
+            ssrc: 1,
+        },
+        payload: bytes::Bytes::from_static(b"x"),
+    };
+    assert_eq!(jitter.push(packet).len(), 1);
+}
