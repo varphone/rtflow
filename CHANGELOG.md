@@ -98,6 +98,7 @@
 - MountRegistry 以 `MountId` 为键（`paths()` 返回 `Vec<MountId>`），路径字符串仅保留在 URI/展示边界。
 - 会话类型主名称改为 `PlaySession`/`RecordSession`/`ReconnectingPlaySession`，旧名保留为类型别名。
 - 客户端重连/keepalive 抖动改为进程内原子 PRNG 的独立采样，避免多个客户端按 attempt 同步重连。
+- RTMP chunk stream 数上限 4096，避免仅发头部造成每连接状态膨胀；新增回归测试。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

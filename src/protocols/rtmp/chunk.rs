@@ -18,6 +18,10 @@ pub const MAX_CHUNK_SIZE: u32 = 16 * 1024 * 1024;
 pub const MAX_PENDING_BYTES: usize = MAX_CHUNK_SIZE as usize + 4096;
 /// Total reassembly budget across all chunk streams on one connection.
 pub const MAX_REASSEMBLY_BYTES: usize = 32 * 1024 * 1024;
+/// Maximum concurrent chunk streams. RTMP permits 65,536 CSIDs, but a real
+/// publisher uses a handful; keeping the map bounded avoids per-connection
+/// state growth from a peer that only sends headers.
+pub const MAX_CHUNK_STREAMS: usize = 4096;
 
 /// RTMP message type IDs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -248,6 +252,10 @@ impl Dechunker {
         }
 
         // Get or create chunk stream state
+        if !self.streams.contains_key(&csid) && self.streams.len() >= MAX_CHUNK_STREAMS {
+            self.overflowed = true;
+            return Err(ChunkError::Protocol);
+        }
         let state = self.streams.entry(csid).or_default();
 
         // Parse header fields
@@ -534,6 +542,24 @@ pub fn user_control_message(event_type: u16, data: u32) -> RtmpMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunk_stream_state_is_bounded() {
+        let chunker = Chunker::new();
+        let mut dechunker = Dechunker::new();
+        for csid in 0..(MAX_CHUNK_STREAMS as u32 + 2) {
+            let msg = RtmpMessage {
+                chunk_stream_id: csid + 4,
+                timestamp: 0,
+                msg_type: MessageType::CommandAmf0 as u8,
+                msg_stream_id: 1,
+                payload: Bytes::from_static(&[0]),
+            };
+            dechunker.feed(&chunker.encode(&msg));
+            let _ = dechunker.poll_messages();
+        }
+        assert!(dechunker.overflowed);
+    }
 
     #[test]
     fn chunk_and_dechunk_roundtrip() {

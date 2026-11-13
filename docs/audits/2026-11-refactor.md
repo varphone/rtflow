@@ -63,7 +63,7 @@ experimental 测试；不 push、不运行 CI。
 
 ```text
 cargo test --no-fail-fast                         346 passed / 0 failed
-cargo test --features experimental-protocols      411 passed / 0 failed
+cargo test --features experimental-protocols      412 passed / 0 failed
 cargo test --features "srtp,multicast"            346 passed / 0 failed
 cargo clippy --all-targets --features ... -D warnings  通过
 cargo test --all-features --no-run                通过
