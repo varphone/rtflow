@@ -131,6 +131,10 @@ pub fn track(id: u8, codec: Codec) -> TrackDescription {
         Codec::G726_24 => (MediaKind::Audio, 8_000, Some(1), 102, None),
         Codec::G726_32 => (MediaKind::Audio, 8_000, Some(1), 103, None),
         Codec::G726_40 => (MediaKind::Audio, 8_000, Some(1), 104, None),
+        Codec::Av1 => (MediaKind::Video, 90_000, None, 105, None),
+        Codec::Jpeg => (MediaKind::Video, 90_000, None, 106, None),
+        Codec::H263 => (MediaKind::Video, 90_000, None, 107, None),
+        Codec::Mpeg4 => (MediaKind::Video, 90_000, None, 108, None),
         _ => (MediaKind::Audio, 8_000, Some(1), 120, None),
     };
     TrackDescription {
@@ -167,6 +171,10 @@ pub fn sample_unit(track: &TrackDescription, frame: u64, fps: u32) -> AccessUnit
         Codec::G726_24 => Bytes::from_static(&[0x55; 60]),
         Codec::G726_32 => Bytes::from_static(&[0x55; 80]),
         Codec::G726_40 => Bytes::from_static(&[0x55; 100]),
+        Codec::Av1 => Bytes::from_static(&[0x00, 0x01, 0x02, 0x03, 0x04, 0x05]),
+        Codec::Jpeg => Bytes::from_static(&[0xff, 0xd8, 0xff, 0xda, 0x01, 0x02, 0xff, 0xd9]),
+        Codec::H263 => Bytes::from_static(&[0x00, 0x00, 0x80, 0x01, 0x02]),
+        Codec::Mpeg4 => Bytes::from_static(&[0x00, 0x00, 0x01, 0xb6, 0x00, 0x01]),
         _ => Bytes::from_static(&[0; 4]),
     };
     let frame_duration = Duration::from_secs_f64(1.0 / f64::from(fps));

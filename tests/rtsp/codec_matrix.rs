@@ -65,6 +65,10 @@ async fn all_codecs_round_trip_over_udp_and_tcp() {
             Codec::G726_24,
             Codec::G726_32,
             Codec::G726_40,
+            Codec::Av1,
+            Codec::Jpeg,
+            Codec::H263,
+            Codec::Mpeg4,
         ] {
             round_trip(codec, transport).await;
         }

@@ -62,6 +62,7 @@ impl GstPipelineBuilder {
                 self.audio_encoder = Some(config)
             }
             Codec::Mp3 | Codec::G726_16 | Codec::G726_24 | Codec::G726_32 | Codec::G726_40 => {}
+            Codec::Av1 | Codec::Jpeg | Codec::H263 | Codec::Mpeg4 => {}
         }
         self
     }

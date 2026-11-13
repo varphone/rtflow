@@ -81,6 +81,10 @@ impl Packetizer {
             }
             Codec::Vp8 => self.vp8(frame),
             Codec::Vp9 => self.vp9(frame),
+            Codec::Av1 => self.av1(frame),
+            Codec::Jpeg => self.jpeg(frame),
+            Codec::H263 => self.h263(frame),
+            Codec::Mpeg4 => self.mpeg4(frame),
         }
     }
     /// VP9 payload descriptor (draft-ietf-payload-vp9, the format used by
@@ -265,6 +269,110 @@ impl Packetizer {
         }
         Ok(out)
     }
+    fn av1(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        if f.data.is_empty() {
+            return Err(Error::Media("empty AV1 access unit".into()));
+        }
+        let max = self.mtu.saturating_sub(12);
+        if max <= 1 {
+            return Err(Error::Media("MTU too small for AV1".into()));
+        }
+        let chunk = max - 1;
+        let total = f.data.len().div_ceil(chunk);
+        let mut buffer = BytesMut::with_capacity(f.data.len() + total);
+        let mut out = Vec::with_capacity(total);
+        for (index, data) in f.data.chunks(chunk).enumerate() {
+            let first = index == 0;
+            // Z=first packet of the frame, Y=keyframe, W=0, N=0.
+            let header = if first {
+                0x80 | if f.is_keyframe { 0x40 } else { 0 }
+            } else {
+                0
+            };
+            buffer.put_u8(header);
+            buffer.extend_from_slice(data);
+            let length = buffer.len();
+            let payload = buffer.split_to(length).freeze();
+            out.push(self.packet(payload, f.rtp_timestamp, index + 1 == total));
+        }
+        Ok(out)
+    }
+
+    fn jpeg(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        if f.data.is_empty() {
+            return Err(Error::Media("empty JPEG access unit".into()));
+        }
+        let max = self.mtu.saturating_sub(12);
+        if max <= 8 {
+            return Err(Error::Media("MTU too small for JPEG".into()));
+        }
+        let chunk = max - 8;
+        let total = f.data.len().div_ceil(chunk);
+        let mut buffer = BytesMut::with_capacity(f.data.len() + 8 * total);
+        let mut out = Vec::with_capacity(total);
+        for (index, data) in f.data.chunks(chunk).enumerate() {
+            let offset = (index * chunk) as u32;
+            buffer.extend_from_slice(&[
+                1,
+                ((offset >> 16) & 0xff) as u8,
+                ((offset >> 8) & 0xff) as u8,
+                (offset & 0xff) as u8,
+                1,
+                128,
+                0,
+                0,
+            ]);
+            buffer.extend_from_slice(data);
+            let length = buffer.len();
+            let payload = buffer.split_to(length).freeze();
+            out.push(self.packet(payload, f.rtp_timestamp, index + 1 == total));
+        }
+        Ok(out)
+    }
+
+    fn h263(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        if f.data.is_empty() {
+            return Err(Error::Media("empty H263 access unit".into()));
+        }
+        let max = self.mtu.saturating_sub(12);
+        if max <= 2 {
+            return Err(Error::Media("MTU too small for H263".into()));
+        }
+        let chunk = max - 2;
+        let total = f.data.len().div_ceil(chunk);
+        let mut buffer = BytesMut::with_capacity(f.data.len() + 2 * total);
+        let mut out = Vec::with_capacity(total);
+        for (index, data) in f.data.chunks(chunk).enumerate() {
+            // P=1 on the first packet of the picture, V=0, PLEN=0.
+            buffer.extend_from_slice(&[if index == 0 { 0x80 } else { 0x00 }, 0x00]);
+            buffer.extend_from_slice(data);
+            let length = buffer.len();
+            let payload = buffer.split_to(length).freeze();
+            out.push(self.packet(payload, f.rtp_timestamp, index + 1 == total));
+        }
+        Ok(out)
+    }
+
+    fn mpeg4(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        if f.data.is_empty() {
+            return Err(Error::Media("empty MPEG-4 access unit".into()));
+        }
+        let max = self.mtu.saturating_sub(12);
+        if max == 0 {
+            return Err(Error::Media("MTU too small for MPEG-4".into()));
+        }
+        let total = f.data.len().div_ceil(max);
+        let mut out = Vec::with_capacity(total);
+        for (index, data) in f.data.chunks(max).enumerate() {
+            out.push(self.packet(
+                Bytes::copy_from_slice(data),
+                f.rtp_timestamp,
+                index + 1 == total,
+            ));
+        }
+        Ok(out)
+    }
+
     fn aac(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
         let size_bytes = f.data.len();
         if size_bytes > 0x1fff {

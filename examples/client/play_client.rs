@@ -81,6 +81,10 @@ impl Consumer {
                     Codec::Opus => "opus",
                     Codec::Vp8 => "vp8",
                     Codec::Vp9 => "vp9",
+                    Codec::Av1 => "av1",
+                    Codec::Jpeg => "mjpg",
+                    Codec::H263 => "h263",
+                    Codec::Mpeg4 => "m4v",
                     _ => "bin",
                 };
                 let path = directory.join(format!("track-{}.{}", unit.track_id, extension));

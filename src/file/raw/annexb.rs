@@ -269,7 +269,11 @@ pub(super) fn nal_properties(codec: Codec, nal: &[u8]) -> (bool, bool, bool, boo
         | Codec::G726_16
         | Codec::G726_24
         | Codec::G726_32
-        | Codec::G726_40 => (true, true, false, true),
+        | Codec::G726_40
+        | Codec::Av1
+        | Codec::Jpeg
+        | Codec::H263
+        | Codec::Mpeg4 => (true, true, false, true),
     }
 }
 

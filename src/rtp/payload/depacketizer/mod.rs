@@ -92,7 +92,14 @@ impl Depacketizer {
             .is_some_and(|e| e != p.header.sequence)
             && matches!(
                 self.codec,
-                Codec::H264 | Codec::H265 | Codec::Vp8 | Codec::Vp9
+                Codec::H264
+                    | Codec::H265
+                    | Codec::Vp8
+                    | Codec::Vp9
+                    | Codec::Av1
+                    | Codec::Jpeg
+                    | Codec::H263
+                    | Codec::Mpeg4
             )
         {
             let d = self.current_timestamp == Some(timestamp);
@@ -114,6 +121,12 @@ impl Depacketizer {
         }
         if matches!(self.codec, Codec::Vp8 | Codec::Vp9) {
             return self.vp9_depacketize(&p);
+        }
+        if matches!(
+            self.codec,
+            Codec::Av1 | Codec::Jpeg | Codec::H263 | Codec::Mpeg4
+        ) {
+            return self.opaque_video(p);
         }
         if matches!(self.codec, Codec::H264 | Codec::H265) {
             if self.current_timestamp.is_some_and(|v| v != timestamp) {
@@ -193,5 +206,76 @@ impl Depacketizer {
             }]);
         }
         self.audio(p)
+    }
+
+    fn opaque_video(&mut self, packet: RtpPacket) -> Result<Vec<AccessUnit>> {
+        let timestamp = packet.header.timestamp;
+        if self
+            .current_timestamp
+            .is_some_and(|value| value != timestamp)
+        {
+            self.access_unit.clear();
+            self.access_unit_bytes = 0;
+            self.assembled_is_keyframe = false;
+        }
+        self.current_timestamp = Some(timestamp);
+        let payload = packet.payload;
+        let (data, keyframe) = match self.codec {
+            Codec::Av1 => {
+                if payload.is_empty() {
+                    return Err(Error::Media("short AV1 payload".into()));
+                }
+                (payload.slice(1..), payload[0] & 0x40 != 0)
+            }
+            Codec::Jpeg => {
+                if payload.len() < 8 {
+                    return Err(Error::Media("short JPEG payload header".into()));
+                }
+                (payload.slice(8..), true)
+            }
+            Codec::H263 => {
+                if payload.len() < 2 {
+                    return Err(Error::Media("short H263 payload header".into()));
+                }
+                (payload.slice(2..), true)
+            }
+            Codec::Mpeg4 => {
+                let keyframe =
+                    payload.len() >= 5 && payload[..4] == [0, 0, 1, 0xb6] && payload[4] >> 6 == 0;
+                (payload, keyframe)
+            }
+            _ => return Err(Error::Media("not an opaque video codec".into())),
+        };
+        if self.access_unit_bytes.saturating_add(data.len()) > MAX_ASSEMBLY_BYTES {
+            self.access_unit.clear();
+            self.access_unit_bytes = 0;
+            self.assembled_is_keyframe = false;
+            return Err(Error::Media(format!(
+                "access unit exceeds {MAX_ASSEMBLY_BYTES} bytes"
+            )));
+        }
+        self.assembled_is_keyframe |= keyframe;
+        self.access_unit_bytes += data.len();
+        self.access_unit.push(data);
+        if !packet.header.marker {
+            return Ok(Vec::new());
+        }
+        let mut output = BytesMut::with_capacity(self.access_unit_bytes);
+        for chunk in self.access_unit.drain(..) {
+            output.extend_from_slice(&chunk);
+        }
+        let is_keyframe = self.assembled_is_keyframe;
+        self.access_unit_bytes = 0;
+        self.assembled_is_keyframe = false;
+        self.current_timestamp = None;
+        Ok(vec![AccessUnit {
+            track_id: self.track_id,
+            codec: self.codec,
+            pts: self.pts_from_timestamp(timestamp),
+            dts: None,
+            rtp_timestamp: timestamp,
+            is_keyframe,
+            data: output.freeze(),
+        }])
     }
 }

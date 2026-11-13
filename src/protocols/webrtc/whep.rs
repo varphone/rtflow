@@ -290,6 +290,10 @@ fn mime_for(codec: Codec) -> &'static str {
         Codec::Mp3 | Codec::G726_16 | Codec::G726_24 | Codec::G726_32 | Codec::G726_40 => {
             "application/octet-stream"
         }
+        Codec::Av1 => "video/AV1",
+        Codec::Jpeg => "image/JPEG",
+        Codec::H263 => "video/H263",
+        Codec::Mpeg4 => "video/MP4V-ES",
     }
 }
 

@@ -49,6 +49,14 @@ pub enum Codec {
     G726_32,
     /// G.726 at 40 kbit/s.
     G726_40,
+    /// AV1 video (draft-ietf-payload-av1).
+    Av1,
+    /// Motion JPEG (RFC 2435).
+    Jpeg,
+    /// H.263 (RFC 4629, `H263-1998`).
+    H263,
+    /// MPEG-4 Part 2 Visual (RFC 3016, `MP4V-ES`).
+    Mpeg4,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MediaKind {
@@ -107,7 +115,14 @@ impl AccessUnit {
     /// Determine the media kind from the codec.
     pub fn kind(&self) -> MediaKind {
         match self.codec {
-            Codec::H264 | Codec::H265 | Codec::Vp8 | Codec::Vp9 => MediaKind::Video,
+            Codec::H264
+            | Codec::H265
+            | Codec::Vp8
+            | Codec::Vp9
+            | Codec::Av1
+            | Codec::Jpeg
+            | Codec::H263
+            | Codec::Mpeg4 => MediaKind::Video,
             Codec::Aac
             | Codec::Pcma
             | Codec::Pcmu
@@ -383,6 +398,48 @@ impl TrackDescription {
 
     pub fn g726_40_audio(id: TrackId) -> Self {
         Self::g726_audio(id, Codec::G726_40)
+    }
+
+    /// AV1 video track (90 kHz clock, dynamic payload type).
+    pub fn av1_video(id: TrackId, width: u32, height: u32) -> Self {
+        Self::video_track(id, Codec::Av1, width, height)
+    }
+
+    /// Motion JPEG video track (90 kHz clock, dynamic payload type).
+    pub fn jpeg_video(id: TrackId, width: u32, height: u32) -> Self {
+        Self::video_track(id, Codec::Jpeg, width, height)
+    }
+
+    /// H.263 video track (`H263-1998`, 90 kHz clock).
+    pub fn h263_video(id: TrackId, width: u32, height: u32) -> Self {
+        Self::video_track(id, Codec::H263, width, height)
+    }
+
+    /// MPEG-4 Part 2 Visual track (`MP4V-ES`, 90 kHz clock).
+    pub fn mpeg4_video(id: TrackId, width: u32, height: u32) -> Self {
+        Self::video_track(id, Codec::Mpeg4, width, height)
+    }
+
+    fn video_track(id: TrackId, codec: Codec, width: u32, height: u32) -> Self {
+        Self {
+            id,
+            kind: MediaKind::Video,
+            codec,
+            clock_rate: 90_000,
+            channels: None,
+            payload_type: 96u8.saturating_add(id),
+            fmtp: None,
+            control: Arc::from(format!("track{id}")),
+            width: Some(width),
+            height: Some(height),
+            frame_rate: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
+            #[cfg(feature = "srtp")]
+            crypto: None,
+        }
     }
 
     /// G.711 μ-law audio track (8 kHz, 1 channel; no fmtp needed).

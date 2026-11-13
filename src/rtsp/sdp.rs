@@ -121,6 +121,7 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                 (MediaKind::Audio, 0) => (Codec::Pcmu, 8_000, Some(1)),
                 (MediaKind::Audio, 8) => (Codec::Pcma, 8_000, Some(1)),
                 (MediaKind::Audio, 14) => (Codec::Mp3, 90_000, None),
+                (MediaKind::Video, 34) => (Codec::H263, 90_000, None),
                 (MediaKind::Video, value) if value >= 96 => (Codec::H264, 90_000, None),
                 (MediaKind::Audio, value) if value >= 96 => (Codec::Aac, 48_000, Some(2)),
                 _ => {
@@ -174,6 +175,10 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                     "G726-24" => Codec::G726_24,
                     "G726-32" => Codec::G726_32,
                     "G726-40" => Codec::G726_40,
+                    "AV1" => Codec::Av1,
+                    "JPEG" => Codec::Jpeg,
+                    "H263-1998" | "H263" => Codec::H263,
+                    "MP4V-ES" => Codec::Mpeg4,
                     _ => return Err(Error::Rtsp("unsupported SDP codec".into())),
                 };
                 track.clock_rate = parts
@@ -404,6 +409,10 @@ pub fn encode_with(
             Codec::G726_24 => "G726-24",
             Codec::G726_32 => "G726-32",
             Codec::G726_40 => "G726-40",
+            Codec::Av1 => "AV1",
+            Codec::Jpeg => "JPEG",
+            Codec::H263 => "H263-1998",
+            Codec::Mpeg4 => "MP4V-ES",
         };
         #[cfg(feature = "multicast")]
         let media_port = description
@@ -606,6 +615,45 @@ mod tests {
             assert!(encoded.contains(name), "{encoded}");
             let parsed = parse(encoded.as_bytes()).unwrap();
             assert_eq!(parsed.tracks[0].codec, codec);
+        }
+    }
+
+    #[test]
+    fn legacy_and_av1_video_names_round_trip() {
+        for (codec, name) in [
+            (Codec::Av1, "AV1"),
+            (Codec::Jpeg, "JPEG"),
+            (Codec::H263, "H263-1998"),
+            (Codec::Mpeg4, "MP4V-ES"),
+        ] {
+            let track = TrackDescription {
+                id: 0,
+                kind: MediaKind::Video,
+                codec,
+                clock_rate: 90_000,
+                channels: None,
+                payload_type: 96,
+                fmtp: None,
+                control: Arc::from("trackID=0"),
+                width: None,
+                height: None,
+                frame_rate: None,
+                direction: None,
+                ptime: None,
+                rtcp: None,
+                bandwidth_as: None,
+                #[cfg(feature = "srtp")]
+                crypto: None,
+            };
+            let description = MediaDescription {
+                session_name: Arc::from("video"),
+                tracks: vec![track],
+                #[cfg(feature = "multicast")]
+                connection: None,
+            };
+            let encoded = encode(&description);
+            assert!(encoded.contains(name), "{encoded}");
+            assert_eq!(parse(encoded.as_bytes()).unwrap().tracks[0].codec, codec);
         }
     }
 

@@ -84,6 +84,10 @@ fn codec_label(codec: Codec) -> &'static str {
         Codec::G726_24 => "G.726-24",
         Codec::G726_32 => "G.726-32",
         Codec::G726_40 => "G.726-40",
+        Codec::Av1 => "AV1",
+        Codec::Jpeg => "MJPEG",
+        Codec::H263 => "H.263",
+        Codec::Mpeg4 => "MPEG-4",
     }
 }
 

@@ -208,7 +208,11 @@ pub(crate) fn is_keyframe(codec: Codec, data: &[u8]) -> bool {
         | Codec::G726_16
         | Codec::G726_24
         | Codec::G726_32
-        | Codec::G726_40 => true,
+        | Codec::G726_40
+        | Codec::Av1
+        | Codec::Jpeg
+        | Codec::H263
+        | Codec::Mpeg4 => true,
     };
     let mut nals = annex_b_nals(data).peekable();
     if nals.peek().is_none() {

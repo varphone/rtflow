@@ -155,5 +155,27 @@ fn payload(codec: Codec, frame: u64, keyframe: bool) -> Bytes {
         Codec::G726_24 => Bytes::from(vec![0x55; 60]),
         Codec::G726_32 => Bytes::from(vec![0x55; 80]),
         Codec::G726_40 => Bytes::from(vec![0x55; 100]),
+        Codec::Av1 => {
+            let mut out = vec![0x0a, seed, 0x00];
+            out.extend_from_slice(&[0x55; 16]);
+            Bytes::from(out)
+        }
+        Codec::Jpeg => {
+            let mut out = vec![0xff, 0xd8, 0xff, 0xda, seed];
+            out.extend_from_slice(&[0x33; 16]);
+            out.push(0xff);
+            out.push(0xd9);
+            Bytes::from(out)
+        }
+        Codec::H263 => {
+            let mut out = vec![0x80, seed, 0x00];
+            out.extend_from_slice(&[0x44; 16]);
+            Bytes::from(out)
+        }
+        Codec::Mpeg4 => {
+            let mut out = vec![0x00, 0x00, 0x01, 0xb6, 0x00, seed];
+            out.extend_from_slice(&[0x66; 16]);
+            Bytes::from(out)
+        }
     }
 }

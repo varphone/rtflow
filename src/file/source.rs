@@ -536,7 +536,11 @@ pub(crate) fn track_description(
         | Codec::G726_16
         | Codec::G726_24
         | Codec::G726_32
-        | Codec::G726_40 => 96u8.saturating_add(id),
+        | Codec::G726_40
+        | Codec::Av1
+        | Codec::Jpeg
+        | Codec::H263
+        | Codec::Mpeg4 => 96u8.saturating_add(id),
     };
     TrackDescription {
         id,

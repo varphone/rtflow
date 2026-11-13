@@ -373,7 +373,11 @@ pub fn build_audio_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
         | Codec::G726_16
         | Codec::G726_24
         | Codec::G726_32
-        | Codec::G726_40 => {
+        | Codec::G726_40
+        | Codec::Av1
+        | Codec::Jpeg
+        | Codec::H263
+        | Codec::Mpeg4 => {
             // FLV does not carry these in the RTMP play path today.
             return Bytes::new();
         }
