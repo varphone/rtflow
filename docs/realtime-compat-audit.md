@@ -62,9 +62,9 @@ WebRTC 系列（CP-3/CP-28/CP-29 等 7 条）：按用户决策降级处理—�
 
 ## 中
 
-- **RT-7. proxy keepalive 与帧消费共路串行**：`src/client/mod.rs:249-264`——20s 到期后 `keep_alive().await` 串行执行完整 RTSP 往返（最坏 `request_timeout` 5s），期间媒体帧停止消费、mpsc(64) 填满、上游积压；慢响应上游使订阅端周期性停顿。修复：keepalive 独立 task。
-- **RT-8. RTSP UDP 模式 keepalive 被媒体流抢占**：`src/client/mod.rs:252-258`——`sleep_until` 到期后与 33ms 一帧的媒体分支竞争（tokio 公平 select 下最多延迟数个帧周期），配合服务端 60s session 超时，半开控制连接可能到期才被发现。修复：控制面独立 task 或 `select!` 中 `biased` 媒体优先 + keepalive 专用间隔。
-- **RT-9. proxy 冷启动首帧 = 4+N 个 RTT + GOP 剩余**：`src/server/session.rs:656-694`（PLAY 先响应后连上游）、`src/server/proxy_runtime.rs:121-183`、`src/client/mod.rs:502-576`（无条件 OPTIONS+DESCRIBE，SDP 已缓存仍重取）——公网首帧延迟 2-4s。修复：SETUP 阶段预热、跳过冗余 DESCRIBE。
+- **RT-7. proxy keepalive 与帧消费共路串行**：`src/client/mod.rs:249-264`——20s 到期后 `keep_alive().await` 串行执行完整 RTSP 往返（最坏 `request_timeout` 5s），期间媒体帧停止消费、mpsc(64) 填满、上游积压；慢响应上游使订阅端周期性停顿。修复：keepalive 独立 task。（已列入 `docs/client-roadmap.md` M4）
+- **RT-8. RTSP UDP 模式 keepalive 被媒体流抢占**：`src/client/mod.rs:252-258`——`sleep_until` 到期后与 33ms 一帧的媒体分支竞争（tokio 公平 select 下最多延迟数个帧周期），配合服务端 60s session 超时，半开控制连接可能到期才被发现。修复：控制面独立 task 或 `select!` 中 `biased` 媒体优先 + keepalive 专用间隔。（已列入 `docs/client-roadmap.md` M4）
+- **RT-9. proxy 冷启动首帧 = 4+N 个 RTT + GOP 剩余**：`src/server/session.rs:656-694`（PLAY 先响应后连上游）、`src/server/proxy_runtime.rs:121-183`、`src/client/mod.rs:502-576`（无条件 OPTIONS+DESCRIBE，SDP 已缓存仍重取）——公网首帧延迟 2-4s。修复：SETUP 阶段预热、跳过冗余 DESCRIBE。（客户端侧回退复用连接已列入 `docs/client-roadmap.md` M2）
 - **RT-10. 上游 jitter buffer 固定 max_delay=100ms**：`src/rtp/jitter.rs:19`、`src/client/setup.rs:58-66`——公网乱序/丢包时稳态增加 100ms 且突发。修复：直播场景 20-40ms 或事件驱动释放。
 - **RT-11. 无订阅者 5s 后 proxy 停止，间歇观众每次冷启动**：`src/server/proxy_runtime.rs:100-119,209-234`、`src/server/mod.rs:72`。修复：常连配置或保留关键帧快速恢复。
 - **RT-12. HLS/DASH Lagged 后丢弃全部帧等 GOP**：`src/hls/mod.rs:91-95`、`src/dash/mod.rs:138-145`——一次 lag 导致最长一个 GOP 的输出中断。修复：等待关键帧前先回放缓存关键帧。
@@ -75,7 +75,7 @@ WebRTC 系列（CP-3/CP-28/CP-29 等 7 条）：按用户决策降级处理—�
 
 ## 低
 
-- **RT-17. jitter drain 用 1-10ms 轮询 tick 且与收包同 task**：`src/client/setup.rs:121-145,343-405`——乱序恢复帧平均多等 5ms；`tx.send().await` 满时阻塞收包。修复：`next_deadline()` 事件驱动 + 满时丢弃。
+- **RT-17. jitter drain 用 1-10ms 轮询 tick 且与收包同 task**：`src/client/setup.rs:121-145,343-405`——乱序恢复帧平均多等 5ms；`tx.send().await` 满时阻塞收包。修复：`next_deadline()` 事件驱动 + 满时丢弃。（已列入 `docs/client-roadmap.md` M4）
 - **RT-18. bootstrap 单帧启动黑屏**：`src/mount.rs:255-265`——startup 缓存空时新订阅者仅得 1 个孤立关键帧，之后 `awaiting_key` 丢 P 帧等下一 GOP。修复：缓存完整 GOP。
 - **RT-19. TSBPD 10ms tick 量化**：`src/srt/mod.rs:197`——投递时刻被量化到 10ms 网格。
 - **RT-20. HTTP-FLV 每帧 flush**：`src/http_flv/handler.rs`（`write_all` + 每帧 flush）——小包 syscall 放大。修复：按 16-32KB 或 50ms 聚合。

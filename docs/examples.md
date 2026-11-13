@@ -14,6 +14,24 @@ cargo run --example play_client -- \
 
 `local_source` 模拟硬件编码器回调，把已编码的 `Bytes` 直接交给 `LocalPublisher`。示例载荷用于协议联调，不代替实际编码器。
 
+## 播放客户端（play_client）
+
+`play_client` 是 `rtflow::client::RtspClient` 的独立演示：连接、拉流、可选落盘。
+
+```bash
+# 传输选择：udp / tcp / auto（默认 udp；auto 在 SETUP 被 461 拒绝时自动回退 TCP interleaved）
+cargo run --example play_client -- rtsp://127.0.0.1:8554/camera --transport tcp
+
+# 断线自动重连（connect_reconnecting，指数退避；永久性错误如 401 会立即终止）
+cargo run --example play_client -- rtsp://127.0.0.1:8554/camera --reconnect --duration 60
+
+# 认证 + 限时拉取 + 落盘
+cargo run --example play_client -- rtsp://127.0.0.1:8554/secure \
+  --username viewer --password viewer-secret --duration 10 --output-dir /tmp/out
+```
+
+非重连模式下每 5 秒打印一次 RTCP 质量快照（每轨道收包/丢包数）；日志加上 `RUST_LOG=rtflow=debug` 可看到会话 ID、传输协商与 keep-alive 细节。
+
 ## 文件转 RTSP
 
 ```bash
