@@ -102,18 +102,19 @@ impl Packetizer {
         let mut buffer = BytesMut::with_capacity(f.data.len() + 3 * total);
         let mut out = Vec::with_capacity(total);
         for (index, chunk) in f.data.chunks(fragment_size).enumerate() {
-            let mut payload = BytesMut::with_capacity(3 + chunk.len());
             let first = index == 0;
             let last = index + 1 == total;
             // I=1 (picture ID present), M=1 (15-bit picture ID), B/E flags.
             // Always using the 15-bit form keeps the descriptor 3 bytes
             // regardless of the picture-ID value, which every conformant
             // decoder (libwebrtc, ffmpeg) accepts.
-            payload.put_u8(0x80 | ((first as u8) << 2) | ((last as u8) << 1));
-            payload.put_u8(0x80 | ((picture_id >> 8) & 0x7f) as u8);
-            payload.put_u8((picture_id & 0xff) as u8);
-            payload.extend_from_slice(chunk);
-            out.push(self.packet(payload.freeze(), f.rtp_timestamp, last));
+            buffer.put_u8(0x80 | ((first as u8) << 2) | ((last as u8) << 1));
+            buffer.put_u8(0x80 | ((picture_id >> 8) & 0x7f) as u8);
+            buffer.put_u8((picture_id & 0xff) as u8);
+            buffer.extend_from_slice(chunk);
+            let length = buffer.len();
+            let payload = buffer.split_to(length).freeze();
+            out.push(self.packet(payload, f.rtp_timestamp, last));
         }
         Ok(out)
     }
