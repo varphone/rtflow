@@ -47,6 +47,7 @@ pub struct Depacketizer {
     last_rtp_ts: u32,
     /// Wrap-free RTP timestamp clock (units of `clock_rate` ticks).
     extended_ts: u64,
+    av1: super::av1::Av1State,
 }
 impl Depacketizer {
     pub fn new(codec: Codec, track_id: TrackId, clock_rate: u32) -> Self {
@@ -66,6 +67,7 @@ impl Depacketizer {
             assembled_is_keyframe: false,
             last_rtp_ts: 0,
             extended_ts: 0,
+            av1: super::av1::Av1State::default(),
         }
     }
 
@@ -122,10 +124,10 @@ impl Depacketizer {
         if matches!(self.codec, Codec::Vp8 | Codec::Vp9) {
             return self.vp9_depacketize(&p);
         }
-        if matches!(
-            self.codec,
-            Codec::Av1 | Codec::Jpeg | Codec::H263 | Codec::Mpeg4
-        ) {
+        if self.codec == Codec::Av1 {
+            return self.av1_depacketize(p);
+        }
+        if matches!(self.codec, Codec::Jpeg | Codec::H263 | Codec::Mpeg4) {
             return self.opaque_video(p);
         }
         if matches!(self.codec, Codec::H264 | Codec::H265) {
@@ -206,6 +208,25 @@ impl Depacketizer {
             }]);
         }
         self.audio(p)
+    }
+
+    fn av1_depacketize(&mut self, packet: RtpPacket) -> Result<Vec<AccessUnit>> {
+        let timestamp = packet.header.timestamp;
+        let Some((data, keyframe)) = self
+            .av1
+            .depacketize(&packet.payload, packet.header.marker)?
+        else {
+            return Ok(Vec::new());
+        };
+        Ok(vec![AccessUnit {
+            track_id: self.track_id,
+            codec: Codec::Av1,
+            pts: self.pts_from_timestamp(timestamp),
+            dts: None,
+            rtp_timestamp: timestamp,
+            is_keyframe: keyframe,
+            data,
+        }])
     }
 
     fn opaque_video(&mut self, packet: RtpPacket) -> Result<Vec<AccessUnit>> {

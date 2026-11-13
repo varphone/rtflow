@@ -96,11 +96,15 @@ UDP 接收缓冲 4 MiB/socket。
 | MPEG-4 Part 2 | **通过** | 通过（rtpmp4vdepay/avdec_mpeg4） | 首帧关键帧识别已修正 |
 | JPEG | **通过**（RTP/JPEG Q=80、块尺寸与分片偏移修正后） | 通过（rtpjpegdepay/jpegdec） | ffmpeg/GStreamer 均通过 |
 | H.263 | **通过**（H263-2000 推流，H263/PT34 拉流） | **通过**（rtph263depay/avdec_h263） | 出口按 RFC 2190 mode A 打包，入口兼容 RFC 4629 |
-| AV1 | 不可测：FFmpeg 6.1 无 `rtpdec_av1`/`rtpenc_av1` | 不可测：GStreamer 1.24 无 `rtpav1pay/depay` | 内部 17-codec 回环通过；工具链限制 |
+| AV1 | **通过**（FFmpeg master/8.x，`-strict -2`） | 不可测：GStreamer 1.24 无 `rtpav1pay/depay` | AV1 RTP v1.0 聚合/OBU 重组已实现 |
 | H.264/AAC | 既有测试通过 | 既有测试通过 | — |
 
 VLC 3.0（snap）可以连接并订阅 rtflow 的 RTSP mount，但在 `-I dummy`
 + 无显示环境下 H.264 解码出现 `buffer deadlock prevented`，未作为自动化断言。
+
+AV1 真实互操作使用用户目录的 FFmpeg master（2026-11）验证：
+`FFMPEG=~/.local/opt/ffmpeg/ffmpeg cargo test --test interop ffmpeg_round_trips_av1 -- --ignored`。
+系统 FFmpeg 6.1 没有 AV1 RTP，默认测试中该用例保持 ignore。
 
 ## 7. 已确认的验证结果（2026-11）
 

@@ -178,3 +178,17 @@ fn two_track_round_trip() {
     assert_eq!(parsed.tracks.len(), 2);
     assert_eq!(parse(encode(&parsed).as_bytes()).unwrap().tracks.len(), 2);
 }
+
+#[test]
+fn parse_ffmpeg_av1_announce() {
+    let text = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\na=tool:libavformat 63.20.101\r\nm=video 0 RTP/AVP 96\r\na=framerate:10\r\na=rtpmap:96 AV1/90000\r\na=fmtp:96 profile=0;level-idx=0;tier=0\r\na=control:streamid=0\r\n";
+    let description = parse(text.as_bytes()).expect("parse AV1 ANNOUNCE");
+    assert_eq!(description.tracks.len(), 1);
+    assert_eq!(description.tracks[0].codec, Codec::Av1);
+    assert_eq!(description.tracks[0].clock_rate, 90_000);
+    assert_eq!(description.tracks[0].payload_type, 96);
+    assert_eq!(
+        description.tracks[0].fmtp.as_deref(),
+        Some("profile=0;level-idx=0;tier=0")
+    );
+}

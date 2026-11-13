@@ -2,8 +2,19 @@
 
 use rtflow::{Codec, MountConfig, RtspServer, ServerConfig};
 use rtflow_testkit::{description, wait_until};
-use std::{process::Stdio, sync::Arc, time::Duration};
+use std::{path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 use tokio::process::Command;
+
+fn ffmpeg_bin() -> PathBuf {
+    std::env::var_os("FFMPEG")
+        .map(PathBuf::from)
+        .or_else(|| {
+            let home = std::env::var_os("HOME")?;
+            let path = PathBuf::from(home).join(".local/opt/ffmpeg/ffmpeg");
+            path.exists().then_some(path)
+        })
+        .unwrap_or_else(|| PathBuf::from("ffmpeg"))
+}
 
 fn encoder_args(codec: Codec) -> Vec<&'static str> {
     match codec {
@@ -44,6 +55,9 @@ fn encoder_args(codec: Codec) -> Vec<&'static str> {
 }
 
 async fn run_codec(codec: Codec) {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
     let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
         .await
         .unwrap();
@@ -71,7 +85,7 @@ async fn run_codec(codec: Codec) {
         .await
         .unwrap();
     let location = format!("rtsp://{}/ingest", server.local_addr());
-    let mut publish = Command::new("ffmpeg")
+    let mut publish = Command::new(ffmpeg_bin())
         .args([
             "-hide_banner",
             "-loglevel",
@@ -86,6 +100,11 @@ async fn run_codec(codec: Codec) {
             "12",
         ])
         .args(encoder_args(codec))
+        .args(if codec == Codec::Av1 {
+            vec!["-strict", "-2"]
+        } else {
+            Vec::new()
+        })
         .args([
             "-rtsp_transport",
             "tcp",
@@ -96,7 +115,7 @@ async fn run_codec(codec: Codec) {
             &location,
         ])
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::inherit())
         .kill_on_drop(true)
         .spawn()
         .expect("spawn ffmpeg publisher");
@@ -105,22 +124,24 @@ async fn run_codec(codec: Codec) {
     })
     .await;
 
-    if let Ok(d) = rtflow::client::RtspClient::describe_str(
-        &location,
-        rtflow::client::ClientOptions::default(),
-    )
-    .await
-    {
-        eprintln!("SDP:\n{}", rtflow::rtsp::sdp::encode(&d));
-    }
-    let play = Command::new("ffmpeg")
+    let play = Command::new(ffmpeg_bin())
         .args([
             "-hide_banner",
             "-loglevel",
-            "warning",
+            if codec == Codec::Av1 {
+                "debug"
+            } else {
+                "warning"
+            },
             "-nostdin",
+            "-strict",
+            "-2",
             "-rtsp_transport",
             "tcp",
+            "-analyzeduration",
+            "1000000",
+            "-probesize",
+            "5000000",
             "-i",
             &location,
             "-t",
@@ -143,10 +164,17 @@ async fn run_codec(codec: Codec) {
         "{codec:?} ffmpeg playback failed (accepted={accepted}):\n{stderr}"
     );
     assert!(accepted > 0, "{codec:?}: no frames accepted from ffmpeg");
-    assert!(
-        !stderr.to_ascii_lowercase().contains("decode"),
-        "{codec:?} ffmpeg reported decode errors:\n{stderr}"
-    );
+    if codec == Codec::Av1 {
+        assert!(
+            stderr.contains("Frame "),
+            "Av1 ffmpeg decoded no frames:\n{stderr}"
+        );
+    } else {
+        assert!(
+            !stderr.to_ascii_lowercase().contains("decode"),
+            "{codec:?} ffmpeg reported decode errors:\n{stderr}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -154,4 +182,10 @@ async fn ffmpeg_round_trips_legacy_codecs() {
     for codec in [Codec::Mpeg4, Codec::H263, Codec::Jpeg] {
         run_codec(codec).await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires FFmpeg master/8.x with AV1 RTP support (see FFMPEG env var)"]
+async fn ffmpeg_round_trips_av1() {
+    run_codec(Codec::Av1).await;
 }

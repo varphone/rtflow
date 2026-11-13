@@ -17,6 +17,7 @@ pub struct Packetizer {
     vp9_picture_id: u16,
     width: u16,
     height: u16,
+    av1_sequence_sent: bool,
 }
 impl Packetizer {
     pub fn new(codec: Codec, payload_type: u8, ssrc: u32, mtu: usize) -> Result<Self> {
@@ -37,6 +38,7 @@ impl Packetizer {
             vp9_picture_id: 0,
             width: 0,
             height: 0,
+            av1_sequence_sent: false,
         })
     }
     /// Set the picture dimensions used by RFC 2435 JPEG headers.
@@ -281,30 +283,13 @@ impl Packetizer {
         Ok(out)
     }
     fn av1(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
-        if f.data.is_empty() {
-            return Err(Error::Media("empty AV1 access unit".into()));
-        }
         let max = self.mtu.saturating_sub(12);
-        if max <= 1 {
-            return Err(Error::Media("MTU too small for AV1".into()));
-        }
-        let chunk = max - 1;
-        let total = f.data.len().div_ceil(chunk);
-        let mut buffer = BytesMut::with_capacity(f.data.len() + total);
-        let mut out = Vec::with_capacity(total);
-        for (index, data) in f.data.chunks(chunk).enumerate() {
-            let first = index == 0;
-            // Z=first packet of the frame, Y=keyframe, W=0, N=0.
-            let header = if first {
-                0x80 | if f.is_keyframe { 0x40 } else { 0 }
-            } else {
-                0
-            };
-            buffer.put_u8(header);
-            buffer.extend_from_slice(data);
-            let length = buffer.len();
-            let payload = buffer.split_to(length).freeze();
-            out.push(self.packet(payload, f.rtp_timestamp, index + 1 == total));
+        let mut sent = self.av1_sequence_sent;
+        let payloads = super::av1::packetize(&f.data, max, f.is_keyframe, &mut sent)?;
+        self.av1_sequence_sent = sent;
+        let mut out = Vec::with_capacity(payloads.len());
+        for (payload, marker) in payloads {
+            out.push(self.packet(payload, f.rtp_timestamp, marker));
         }
         Ok(out)
     }

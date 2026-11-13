@@ -272,3 +272,34 @@ fn h263_rfc2190_round_trip_keeps_start_code() {
     assert_eq!(output.len(), 1);
     assert_eq!(output[0].data, data);
 }
+
+#[test]
+fn av1_rtp_aggregates_obus_and_fragments_large_frames() {
+    let mut data = Vec::new();
+    data.extend_from_slice(&[0x0a, 0x02, 0xaa, 0xbb]);
+    data.extend_from_slice(&[0x1a, 0x03, 0x01, 0x02, 0x03]);
+    let tile = [0x55u8; 4000];
+    data.extend_from_slice(&[0x32, 0xa0, 0x1f]);
+    data.extend_from_slice(&tile);
+    let unit = AccessUnit {
+        track_id: 0,
+        codec: Codec::Av1,
+        pts: std::time::Duration::ZERO,
+        dts: None,
+        rtp_timestamp: 90_000,
+        is_keyframe: true,
+        data: Bytes::from(data.clone()),
+    };
+    let mut packetizer = Packetizer::new(Codec::Av1, 96, 1, 1200).unwrap();
+    let packets = packetizer.packetize(&unit).unwrap();
+    assert!(packets.len() > 2);
+    assert!(packets.first().unwrap().payload[0] & 0x08 != 0);
+    let mut depacketizer = Depacketizer::new(Codec::Av1, 0, 90_000);
+    let mut output = Vec::new();
+    for packet in packets {
+        output.extend(depacketizer.push(packet).unwrap());
+    }
+    assert_eq!(output.len(), 1);
+    assert!(output[0].is_keyframe);
+    assert_eq!(output[0].data, data);
+}
