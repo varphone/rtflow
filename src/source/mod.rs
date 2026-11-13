@@ -150,5 +150,10 @@ fn payload(codec: Codec, frame: u64, keyframe: bool) -> Bytes {
         Codec::Opus => Bytes::from(vec![0xfc; 80]),
         Codec::Vp8 => Bytes::from(vec![0x10, seed, 0x00, 0x00]),
         Codec::Vp9 => Bytes::from(vec![0x82, 0x00, seed, 0x00]),
+        Codec::Mp3 => Bytes::from(vec![0xff, 0xfb, 0x90, seed, 0x00, 0x00, 0x00]),
+        Codec::G726_16 => Bytes::from(vec![0x55; 40]),
+        Codec::G726_24 => Bytes::from(vec![0x55; 60]),
+        Codec::G726_32 => Bytes::from(vec![0x55; 80]),
+        Codec::G726_40 => Bytes::from(vec![0x55; 100]),
     }
 }

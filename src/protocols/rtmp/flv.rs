@@ -364,7 +364,16 @@ pub fn build_audio_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
         // zero rate, same convention as the HTTP-FLV muxer).
         Codec::Pcma => buf.put_u8((FLV_AUDIO_ALAW << 4) | 0x0F),
         Codec::Pcmu => buf.put_u8((FLV_AUDIO_ULAW << 4) | 0x0F),
-        Codec::Opus | Codec::Vp8 | Codec::Vp9 | Codec::H264 | Codec::H265 => {
+        Codec::Opus
+        | Codec::Vp8
+        | Codec::Vp9
+        | Codec::H264
+        | Codec::H265
+        | Codec::Mp3
+        | Codec::G726_16
+        | Codec::G726_24
+        | Codec::G726_32
+        | Codec::G726_40 => {
             // FLV does not carry these in the RTMP play path today.
             return Bytes::new();
         }

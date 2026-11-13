@@ -4,6 +4,7 @@ mod tasks;
 #[cfg(feature = "file-storage")]
 mod vod_runtime;
 use session::serve_connection;
+#[cfg(feature = "multicast")]
 use tasks::{MediaCrypto, SenderInput, spawn_udp_sender_from};
 
 // Re-export mount types for backward compatibility (deprecated in 0.3).
@@ -33,13 +34,15 @@ use crate::{
     runtime::{ShutdownReport, TaskSpec, TaskSupervisor, io::ControlConnection},
     security::{ConnectionRateLimiter, SecurityConfig},
 };
+#[cfg(feature = "multicast")]
+use std::sync::atomic::AtomicU16;
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
     ops::RangeInclusive,
     sync::{
         Arc, Mutex, Weak,
-        atomic::{AtomicU16, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };

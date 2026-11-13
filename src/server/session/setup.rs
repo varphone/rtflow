@@ -22,6 +22,8 @@ pub(super) async fn handle_setup(
     multicast_tracks: &mut Vec<(Arc<Mount>, TrackDescription)>,
     phase: &mut ConnectionPhase,
 ) -> Result<()> {
+    #[cfg(not(feature = "multicast"))]
+    let _ = multicast_tracks;
     if setups.len() + interleaved.len() >= state.config.resource_limits.max_tracks_per_session {
         writer
             .lock()

@@ -61,6 +61,7 @@ impl GstPipelineBuilder {
             Codec::Aac | Codec::Pcma | Codec::Pcmu | Codec::Opus => {
                 self.audio_encoder = Some(config)
             }
+            Codec::Mp3 | Codec::G726_16 | Codec::G726_24 | Codec::G726_32 | Codec::G726_40 => {}
         }
         self
     }

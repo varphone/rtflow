@@ -34,6 +34,8 @@
   IPv6 `c=`、绝对 `Content-Base`、`Proxy-Require` 551、随机 128-bit 会话 ID、
   `SET_PARAMETER`、PLAY `Scale/Speed` 551、客户端 3xx REDIRECT 跟随。
 - 码流：VP8/VP9 SDP 往返、MP3（MPA）与 G.726 16/24/32/40 的 RTP/SDP 支持。
+- RTSP 组播（`multicast`）与 SRTP（`srtp`，RTP/SAVP + a=crypto）；两者不再
+  属于默认 `full`，需显式启用。
 - `test-source` feature 与 `rtflow::source::SyntheticSource`（库内实时测试源，
   覆盖全部 codec）。
 - `ServerConfig::{udp_recv_buffer, embedded}` 与

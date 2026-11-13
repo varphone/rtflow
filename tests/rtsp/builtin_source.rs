@@ -54,12 +54,10 @@ async fn synthetic_source_feeds_every_codec_over_rtsp() {
         .await
         .unwrap_or_else(|error| panic!("connect {codec:?}: {error}"));
         let unit = tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                match client.next().await {
-                    Some(Ok(unit)) => break unit,
-                    Some(Err(error)) => panic!("media error for {codec:?}: {error}"),
-                    None => panic!("session ended before a frame for {codec:?}"),
-                }
+            match client.next().await {
+                Some(Ok(unit)) => unit,
+                Some(Err(error)) => panic!("media error for {codec:?}: {error}"),
+                None => panic!("session ended before a frame for {codec:?}"),
             }
         })
         .await

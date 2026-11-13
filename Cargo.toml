@@ -21,13 +21,15 @@ exclude = ["support", "fuzz", "scripts", ".github", "docs/archive"]
 [package.metadata.docs.rs]
 # docs.rs 默认只开 default features；这里叠加实验协议，但排除 gstreamer
 # （需要系统 GStreamer 开发库，docs.rs 构建机不提供）。
-features = ["rtmp", "srt", "dash", "webrtc"]
+features = ["rtmp", "srt", "dash", "webrtc", "srtp", "multicast"]
 
 [features]
 default = ["full"]
+# `full` is the common production set. Security extensions (`srtp`) and
+# `multicast` stay opt-in so embedded builds do not pay for them by default.
 full = [
-    "srtp", "tls", "mp4", "mkv", "client", "server", "file-storage",
-    "metrics", "multicast", "http", "http-flv", "hls", "ws-flv",
+    "tls", "mp4", "mkv", "client", "server", "file-storage",
+    "metrics", "http", "http-flv", "hls", "ws-flv",
 ]
 embedded-gateway = ["client", "server", "tls", "metrics", "http", "http-flv", "hls", "ws-flv"]
 experimental-protocols = ["dash", "rtmp", "srt", "webrtc"]

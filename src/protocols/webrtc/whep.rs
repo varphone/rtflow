@@ -287,6 +287,9 @@ fn mime_for(codec: Codec) -> &'static str {
         Codec::Pcma => "audio/PCMA",
         Codec::Pcmu => "audio/PCMU",
         Codec::Aac => "audio/mp4a.40.2",
+        Codec::Mp3 | Codec::G726_16 | Codec::G726_24 | Codec::G726_32 | Codec::G726_40 => {
+            "application/octet-stream"
+        }
     }
 }
 

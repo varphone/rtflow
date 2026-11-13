@@ -63,6 +63,8 @@ pub(super) async fn connect(
 }
 
 mod interleaved;
+#[cfg(feature = "multicast")]
+mod multicast;
 mod udp;
 
 use interleaved::connect_interleaved;

@@ -28,6 +28,11 @@
 
 HTTP-FLV、WS-FLV 与 HLS 是当前优先维护的 RTSP 输出协议。WS-FLV 走独立 TCP 端口（RFC 6455 服务端握手，路径与 HTTP-FLV 一致：mount `/live/stream` ↔ `/live/stream.flv`），延迟最低，配合 mpegts.js/flv.js 在浏览器播放；HLS 仍是兼容性基线：实际分段长度取决于下一个视频随机访问点，因此要达到 1–3 秒端到端延迟，编码器 GOP/关键帧间隔必须不大于目标分段时长。
 
+RTSP 扩展的当前边界：`srtp` 仅支持 UDP unicast（`RTP/SAVP/TCP` 返回 461），
+客户端 SRTP 会话暂不发送 SRTCP RR，SDP `inline:` 主密钥应配合 RTSPS 使用；
+`multicast` 仅支持 IPv4，服务端每 mount 复用单个 RTP 端口按 PT 分流，客户端
+组播接收不发送 RTCP；RTSP 2.0、AV1/JPEG/H.263/MPEG-4 Part 2 不在支持范围。
+
 `dash`、`rtmp`、`srt`、`webrtc` feature 目前仅保留模块占位，不能视为可用协议实现；它们只通过 `experimental-protocols` 聚合 feature 开启，生产部署不应启用或对外承诺这些能力。其中 `webrtc`（WHIP/WHEP）的 ICE/DTLS/SRTP 媒体管线未实现：信令握手可完成，但浏览器协商后不会有媒体流——**WHIP/WHEP 对外声明为不可用占位**，不要用 `Location` 响应头引导客户端接入。嵌入式 Linux/Yocto 网关建议使用 `embedded-gateway` profile；默认 `full` 为兼容现有 0.2 使用方式，后续主版本再迁移默认 profile。
 
 ## 最小服务端示例
