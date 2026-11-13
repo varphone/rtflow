@@ -87,6 +87,7 @@
 - API/文档：0.3.0 版本对齐；`MediaDescription::new`；`ServerConfig`/`MountOptions` non_exhaustive；`prelude` 补全；`PushResult::Dropped`；README 可编译示例；CI 增加 experimental 测试；矩阵计数更新。
 - API 可诊断性：`ClientOptions`/`ServerConfig`/`MountOptions` 增加脱敏 Debug；`MediaDescription::new`；header 大小写不敏感访问。
 - Proxy 订阅者 watcher：HLS/HTTP-FLV 等非 RTSP 订阅也能触发按需上游；删除未使用的 `TrackKey`；新增 SRTP fuzz target 与 CI protocol clippy。
+- 性能：客户端 RTCP 质量统计改用 std Mutex（移除每包 await），jitter earliest deadline 缓存避免每包/每定时 O(n) 扫描。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

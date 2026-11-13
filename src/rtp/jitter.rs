@@ -29,6 +29,8 @@ pub struct JitterBuffer {
     config: JitterBufferConfig,
     next: Option<u16>,
     pending: BTreeMap<u16, (Instant, RtpPacket)>,
+    /// Cached (arrival + max_delay, sequence) of the earliest deadline.
+    earliest: Option<(Instant, u16)>,
     primed: bool,
 }
 impl JitterBuffer {
@@ -37,6 +39,7 @@ impl JitterBuffer {
             config,
             next: None,
             pending: BTreeMap::new(),
+            earliest: None,
             primed: false,
         }
     }
@@ -66,7 +69,12 @@ impl JitterBuffer {
         if distance >= 0x8000 || self.pending.contains_key(&sequence) {
             return Vec::new();
         }
-        self.pending.insert(sequence, (Instant::now(), packet));
+        let arrival = Instant::now();
+        let deadline = arrival + self.config.max_delay;
+        if self.earliest.is_none_or(|(current, _)| deadline < current) {
+            self.earliest = Some((deadline, sequence));
+        }
+        self.pending.insert(sequence, (arrival, packet));
         if self.pending.len() > self.config.max_packets
             || distance > self.config.max_reorder_window
             || (!self.pending.contains_key(&expected) && self.is_expired())
@@ -93,21 +101,26 @@ impl JitterBuffer {
         if self.pending.contains_key(&expected) {
             return Some(Instant::now());
         }
-        self.pending
-            .values()
-            .map(|(arrival, _)| *arrival + self.config.max_delay)
-            .min()
+        self.earliest.map(|(deadline, _)| deadline)
     }
 
     pub fn reset(&mut self) {
         self.next = None;
         self.pending.clear();
+        self.earliest = None;
     }
 
     fn is_expired(&self) -> bool {
-        self.pending
-            .values()
-            .any(|(arrival, _)| arrival.elapsed() >= self.config.max_delay)
+        self.earliest
+            .is_some_and(|(deadline, _)| deadline <= Instant::now())
+    }
+
+    fn refresh_earliest(&mut self) {
+        self.earliest = self
+            .pending
+            .iter()
+            .map(|(sequence, (arrival, _))| (*arrival + self.config.max_delay, *sequence))
+            .min_by_key(|(deadline, _)| *deadline);
     }
 
     fn advance_to_nearest(&mut self) {
@@ -128,6 +141,9 @@ impl JitterBuffer {
             let Some((_, packet)) = self.pending.remove(&next) else {
                 break;
             };
+            if self.earliest.is_some_and(|(_, sequence)| sequence == next) {
+                self.refresh_earliest();
+            }
             ready.push(packet);
             self.next = Some(next.wrapping_add(1));
         }

@@ -227,7 +227,7 @@ pub(super) async fn connect_multicast(
         options.max_output_bytes,
     );
     let cancel = CancellationToken::new();
-    let quality = Arc::new(Mutex::new(HashMap::new()));
+    let quality = Arc::new(std::sync::Mutex::new(HashMap::new()));
     let mut tasks = Vec::new();
     let track_list: Vec<_> = description.tracks.to_vec();
     let rr_meta: Vec<(u8, u32)> = track_list
@@ -321,8 +321,7 @@ pub(super) async fn connect_multicast(
                 *clock_rate,
                 *local_ssrc,
                 &packet,
-            )
-            .await;
+            );
             let mut dropped = 0u64;
             for result in receive_rtp_packet(packet, jitter, depacketizer) {
                 if !try_deliver(&tx, result, &mut dropped) {

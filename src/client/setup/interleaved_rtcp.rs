@@ -1,7 +1,7 @@
 //! RTCP handling for the client's shared interleaved control connection.
 use std::{collections::HashMap, sync::Arc};
 
-use tokio::{io::AsyncWriteExt, sync::Mutex};
+use tokio::{io::AsyncWriteExt, sync::Mutex as TokioMutex};
 
 use crate::{
     rtcp::{Packet as RtcpPacket, RtcpSession},
@@ -15,11 +15,11 @@ use crate::{
 pub(super) async fn handle_rtcp(
     frame: &InterleavedFrame,
     #[cfg(feature = "srtp")] srtcp: Option<&mut crate::srtp::SrtcpContext>,
-    quality: &Arc<Mutex<HashMap<u8, RtcpSession>>>,
+    quality: &Arc<std::sync::Mutex<HashMap<u8, RtcpSession>>>,
     track_id: u8,
     clock_rate: u32,
     local_ssrc: u32,
-    writer: &Arc<Mutex<ControlWriteHalf>>,
+    writer: &Arc<TokioMutex<ControlWriteHalf>>,
 ) -> bool {
     #[cfg(feature = "srtp")]
     let mut srtcp = srtcp;
@@ -37,7 +37,7 @@ pub(super) async fn handle_rtcp(
         return true;
     };
     let Ok(Some(report)) =
-        super::quality_report(quality, track_id, clock_rate, local_ssrc, &packets).await
+        super::quality_report(quality, track_id, clock_rate, local_ssrc, &packets)
     else {
         return true;
     };

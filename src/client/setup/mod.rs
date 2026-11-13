@@ -22,7 +22,7 @@ use crate::{
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    sync::{Mutex, mpsc},
+    sync::mpsc,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -219,15 +219,17 @@ fn client_cname(local_ssrc: u32) -> bytes::Bytes {
     bytes::Bytes::from(format!("rtflow@{local_ssrc:08x}"))
 }
 
-async fn observe_quality(
-    quality: &Mutex<HashMap<u8, RtcpSession>>,
+fn observe_quality(
+    quality: &std::sync::Mutex<HashMap<u8, RtcpSession>>,
     track_id: u8,
     clock_rate: u32,
     local_ssrc: u32,
     packet: &RtpPacket,
 ) -> Result<()> {
     let now = tokio::time::Instant::now();
-    let mut quality = quality.lock().await;
+    let mut quality = quality
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let session = match quality.entry(track_id) {
         std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
         std::collections::hash_map::Entry::Vacant(entry) => entry.insert(RtcpSession::new(
@@ -253,15 +255,17 @@ async fn observe_quality(
     Ok(())
 }
 
-async fn quality_report(
-    quality: &Mutex<HashMap<u8, RtcpSession>>,
+fn quality_report(
+    quality: &std::sync::Mutex<HashMap<u8, RtcpSession>>,
     track_id: u8,
     clock_rate: u32,
     local_ssrc: u32,
     packets: &[RtcpPacket],
 ) -> Result<Option<crate::rtcp::CompoundPacket>> {
     let now = tokio::time::Instant::now();
-    let mut quality = quality.lock().await;
+    let mut quality = quality
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if !quality.contains_key(&track_id)
         && let Some(remote_ssrc) = packets.iter().find_map(|packet| match packet {
             RtcpPacket::SenderReport { ssrc, .. }

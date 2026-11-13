@@ -1,4 +1,5 @@
 use super::*;
+use tokio::sync::Mutex;
 
 pub(super) async fn connect_interleaved(
     mut stream: ControlConnection,
@@ -246,7 +247,7 @@ pub(super) async fn connect_interleaved(
     let (response_tx, response_rx) = mpsc::channel(8);
     let cancel = CancellationToken::new();
     let reader_cancel = cancel.clone();
-    let quality = Arc::new(Mutex::new(HashMap::new()));
+    let quality = Arc::new(std::sync::Mutex::new(HashMap::new()));
     let reader_quality = quality.clone();
     let media_for_control = tx.clone();
     let redirect_id = id;
@@ -430,9 +431,7 @@ pub(super) async fn connect_interleaved(
                                         *clock_rate,
                                         *local_ssrc,
                                         &packet,
-                                    )
-                                    .await
-                                    {
+                                    ) {
                                         if !try_deliver(&tx, Err(error), &mut dropped) {
                                             return;
                                         }
@@ -455,7 +454,6 @@ pub(super) async fn connect_interleaved(
                                         *local_ssrc,
                                         &packets,
                                     )
-                                    .await
                                     && let Ok(payload) = report.try_encode()
                                 {
                                     let Ok(wire) = (InterleavedFrame {

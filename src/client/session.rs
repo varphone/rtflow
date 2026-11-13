@@ -56,7 +56,7 @@ pub struct ClientSession {
     playing: bool,
     cancel: CancellationToken,
     tasks: Vec<JoinHandle<()>>,
-    quality: Arc<Mutex<HashMap<u8, RtcpSession>>>,
+    quality: Arc<std::sync::Mutex<HashMap<u8, RtcpSession>>>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -76,7 +76,7 @@ pub(super) struct SessionParts {
     pub(super) request_timeout: Duration,
     pub(super) cancel: CancellationToken,
     pub(super) tasks: Vec<JoinHandle<()>>,
-    pub(super) quality: Arc<Mutex<HashMap<u8, RtcpSession>>>,
+    pub(super) quality: Arc<std::sync::Mutex<HashMap<u8, RtcpSession>>>,
 }
 
 impl ClientSession {
@@ -202,7 +202,10 @@ impl ClientSession {
     }
 
     pub async fn quality_snapshot(&self) -> ClientQualitySnapshot {
-        let quality = self.quality.lock().await;
+        let quality = self
+            .quality
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         ClientQualitySnapshot {
             tracks: quality
                 .iter()

@@ -324,7 +324,7 @@ pub(super) async fn connect_udp(
         options.max_output_bytes,
     );
     let cancel = CancellationToken::new();
-    let quality = Arc::new(Mutex::new(HashMap::new()));
+    let quality = Arc::new(std::sync::Mutex::new(HashMap::new()));
     let mut tasks = Vec::new();
     for spec in receivers {
         let ReceiverSpec {
@@ -420,7 +420,6 @@ pub(super) async fn connect_udp(
                                     local_ssrc,
                                     &packets,
                                 )
-                                .await
                                 && let Ok(wire) = report.try_encode()
                             {
                                 #[cfg(feature = "srtp")]
@@ -466,7 +465,6 @@ pub(super) async fn connect_udp(
                         }
                         if let Err(error) =
                             observe_quality(&rtp_quality, track_id, clock_rate, local_ssrc, &packet)
-                                .await
                         {
                             if !try_deliver(&tx, Err(error), &mut dropped) {
                                 return;
@@ -517,7 +515,6 @@ pub(super) async fn connect_udp(
                             local_ssrc,
                             &packets,
                         )
-                        .await
                         && let Ok(report) = report.try_encode()
                     {
                         #[cfg(feature = "srtp")]
