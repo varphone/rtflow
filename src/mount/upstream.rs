@@ -196,6 +196,20 @@ pub enum ProxyState {
     BackingOff { retry_at: Instant, attempts: u32 },
     Stopped,
 }
+fn random_jitter_sample() -> u16 {
+    let mut bytes = [0u8; 2];
+    if getrandom::getrandom(&mut bytes).is_ok() {
+        u16::from_le_bytes(bytes) % 2_001
+    } else {
+        (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_millis() as u16
+            * 2)
+            % 2_001
+    }
+}
+
 #[derive(Clone)]
 pub struct UpstreamConfig {
     pub url: url::Url,
@@ -269,8 +283,8 @@ impl UpstreamConfig {
                 .powi(attempts.saturating_sub(1).min(30) as i32)) as u128;
         let capped = ms.min(self.reconnect.max_delay.as_millis()) as f32;
         let ratio = self.reconnect.jitter_ratio.clamp(0.0, 1.0);
-        let sample = attempts.wrapping_mul(1_103_515_245).wrapping_add(12_345) % 2_001;
-        let centered = sample as f32 / 1_000.0 - 1.0;
+        let sample = random_jitter_sample();
+        let centered = f32::from(sample) / 1_000.0 - 1.0;
         Duration::from_millis(
             (capped * (1.0 + centered * ratio))
                 .max(0.0)
