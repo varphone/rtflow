@@ -49,6 +49,31 @@ impl RtspClient {
 
     pub async fn connect(url: url::Url, options: ClientOptions) -> Result<ClientSession> {
         validate_options(&options)?;
+        let mut current = url;
+        for _ in 0..5 {
+            match Self::connect_once(current.clone(), options.clone()).await {
+                Ok(session) => return Ok(session),
+                Err(Error::Redirect(location)) if options.follow_redirects => {
+                    let next = url::Url::parse(&location).map_err(|error| {
+                        Error::Rtsp(format!("invalid REDIRECT location: {error}"))
+                    })?;
+                    if !options.allow_cross_origin_redirect
+                        && (next.scheme() != current.scheme()
+                            || next.host_str() != current.host_str()
+                            || next.port_or_known_default() != current.port_or_known_default())
+                    {
+                        return Err(Error::Redirect(location));
+                    }
+                    current = next;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(Error::Rtsp("too many RTSP REDIRECTs".into()))
+    }
+
+    async fn connect_once(url: url::Url, options: ClientOptions) -> Result<ClientSession> {
+        validate_options(&options)?;
         let sink = options.event_sink.clone();
         if options.transport != UpstreamTransport::Auto {
             let (stream, uri, setup_base, description, sdp_mux, capabilities) =

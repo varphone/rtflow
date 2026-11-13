@@ -29,6 +29,11 @@ pub struct ClientOptions {
     pub require: Vec<String>,
     /// `Proxy-Require` feature tokens (for proxy deployments).
     pub proxy_require: Vec<String>,
+    /// Follow a server-initiated `REDIRECT` while establishing a session.
+    pub follow_redirects: bool,
+    /// Allow `REDIRECT` to a different scheme/host/port (false by default to
+    /// avoid leaking credentials to another origin).
+    pub allow_cross_origin_redirect: bool,
 }
 impl Default for ClientOptions {
     fn default() -> Self {
@@ -48,6 +53,8 @@ impl Default for ClientOptions {
             rtcp_mux: None,
             require: Vec::new(),
             proxy_require: Vec::new(),
+            follow_redirects: true,
+            allow_cross_origin_redirect: false,
         }
     }
 }
@@ -238,6 +245,16 @@ impl ClientOptionsBuilder {
         S: Into<String>,
     {
         self.options.require = tokens.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn follow_redirects(mut self, value: bool) -> Self {
+        self.options.follow_redirects = value;
+        self
+    }
+
+    pub fn allow_cross_origin_redirect(mut self, value: bool) -> Self {
+        self.options.allow_cross_origin_redirect = value;
         self
     }
 

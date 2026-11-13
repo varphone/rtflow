@@ -348,3 +348,47 @@ async fn interleaved_redirect_during_control_surfaces_on_media() {
         .expect_err("media must carry a redirect error");
     assert!(matches!(error, Error::Redirect(ref url) if url.ends_with("/moved")));
 }
+
+#[tokio::test]
+async fn connect_follows_server_redirect() {
+    let description = single_h264();
+    let redirected = Arc::new(Mutex::new(false));
+    let state = redirected.clone();
+    let server = RawRtspServer::start(Box::new(move |request| {
+        let new_path = request.uri.contains("/new");
+        match request.method {
+            rtflow::rtsp::Method::Options => ServerReply::Response(reply(request, 200, "OK")),
+            rtflow::rtsp::Method::Describe => {
+                ServerReply::Response(describe_reply(request, &description))
+            }
+            rtflow::rtsp::Method::Setup => ServerReply::Response(interleaved(request)),
+            rtflow::rtsp::Method::Play if !new_path => {
+                *state.lock().unwrap() = true;
+                let cseq = request.headers.get("cseq").cloned().unwrap_or_default();
+                ServerReply::Raw(
+                    format!(
+                        "REDIRECT rtsp://{}/new RTSP/1.0\r\nCSeq: {cseq}\r\nLocation: rtsp://{}/new\r\n\r\n",
+                        request.uri.split('/').nth(2).unwrap_or("127.0.0.1"),
+                        request.uri.split('/').nth(2).unwrap_or("127.0.0.1"),
+                    )
+                    .into_bytes(),
+                )
+            }
+            _ => ServerReply::Response(reply(request, 200, "OK")),
+        }
+    }))
+    .await;
+    let session = RtspClient::connect(
+        server.url("/old"),
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .keep_alive_interval(None)
+            .build()
+            .unwrap(),
+    )
+    .await
+    .expect("client should follow REDIRECT");
+    assert_eq!(session.description.tracks.len(), 1);
+    assert!(*redirected.lock().unwrap());
+    session.teardown().await.unwrap();
+}
