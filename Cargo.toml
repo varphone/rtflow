@@ -40,6 +40,7 @@ server = ["client", "file-storage"]
 file-storage = []
 metrics = []
 multicast = []
+test-source = []
 gstreamer = ["dep:gstreamer", "dep:gstreamer-app"]
 http = ["dep:http-crate"]
 http-flv = ["http"]
@@ -74,6 +75,7 @@ path = "examples/server/live_stream_demo.rs"
 [[example]]
 name = "local_source"
 path = "examples/server/local_source.rs"
+required-features = ["test-source", "server"]
 
 [[example]]
 name = "pipeline_server"

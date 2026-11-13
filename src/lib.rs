@@ -63,6 +63,8 @@ pub mod runtime;
 pub mod security;
 #[cfg(feature = "server")]
 pub mod server;
+#[cfg(feature = "test-source")]
+pub mod source;
 #[cfg(feature = "srtp")]
 pub mod srtp;
 #[cfg(feature = "file-storage")]

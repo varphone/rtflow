@@ -27,7 +27,11 @@ examples=(
 )
 
 for example in "${examples[@]}"; do
-  cargo run --quiet --example "$example" -- --help >/dev/null
+  if [[ "$example" == "local_source" ]]; then
+    cargo run --quiet --example "$example" --features test-source -- --help >/dev/null
+  else
+    cargo run --quiet --example "$example" -- --help >/dev/null
+  fi
   printf 'example %s: CLI OK\n' "$example"
 done
 
