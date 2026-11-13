@@ -1,5 +1,5 @@
 use super::options::validate_options;
-use super::reconnect::{ReconnectingClientSession, jittered_backoff};
+use super::reconnect::{ReconnectingPlaySession, jittered_backoff};
 use super::wire::{request, should_fallback_to_tcp, status_error};
 use super::*;
 
@@ -47,7 +47,7 @@ impl RtspClient {
         Self::describe(url, options).await
     }
 
-    pub async fn connect(url: url::Url, options: ClientOptions) -> Result<ClientSession> {
+    pub async fn connect(url: url::Url, options: ClientOptions) -> Result<PlaySession> {
         validate_options(&options)?;
         let mut current = url;
         for _ in 0..5 {
@@ -68,7 +68,7 @@ impl RtspClient {
         Err(Error::Rtsp("too many RTSP REDIRECTs".into()))
     }
 
-    async fn connect_once(url: url::Url, options: ClientOptions) -> Result<ClientSession> {
+    async fn connect_once(url: url::Url, options: ClientOptions) -> Result<PlaySession> {
         validate_options(&options)?;
         let sink = options.event_sink.clone();
         if options.transport != UpstreamTransport::Auto {
@@ -201,7 +201,7 @@ impl RtspClient {
     }
 
     /// Convenience entry accepting a URL string; see [`Self::connect`].
-    pub async fn connect_str(url: &str, options: ClientOptions) -> Result<ClientSession> {
+    pub async fn connect_str(url: &str, options: ClientOptions) -> Result<PlaySession> {
         let url = url::Url::parse(url)
             .map_err(|error| Error::Rtsp(format!("invalid RTSP URL: {error}")))?;
         Self::connect(url, options).await
@@ -209,13 +209,13 @@ impl RtspClient {
 
     /// Publish a stream: OPTIONS + ANNOUNCE + SETUP + RECORD.
     ///
-    /// The returned [`PublisherSession`] owns the UDP RTP sockets and a
-    /// keep-alive task; call [`PublisherSession::push`] for every access unit.
+    /// The returned [`RecordSession`] owns the UDP RTP sockets and a
+    /// keep-alive task; call [`RecordSession::push`] for every access unit.
     pub async fn publish(
         url: url::Url,
         description: MediaDescription,
         options: ClientOptions,
-    ) -> Result<PublisherSession> {
+    ) -> Result<RecordSession> {
         validate_options(&options)?;
         super::publish::connect(&url, description, &options).await
     }
@@ -225,7 +225,7 @@ impl RtspClient {
         url: &str,
         description: MediaDescription,
         options: ClientOptions,
-    ) -> Result<PublisherSession> {
+    ) -> Result<RecordSession> {
         let url = url::Url::parse(url)
             .map_err(|error| Error::Rtsp(format!("invalid RTSP URL: {error}")))?;
         Self::publish(url, description, options).await
@@ -238,7 +238,7 @@ impl RtspClient {
         url: url::Url,
         options: ClientOptions,
         policy: ClientReconnectPolicy,
-    ) -> Result<ReconnectingClientSession> {
+    ) -> Result<ReconnectingPlaySession> {
         policy.validate()?;
         let initial = Self::connect(url.clone(), options.clone()).await?;
         let description = initial.description.clone();
@@ -383,7 +383,7 @@ impl RtspClient {
                 delay = delay.saturating_mul(2).min(policy.max_delay);
             }
         });
-        Ok(ReconnectingClientSession {
+        Ok(ReconnectingPlaySession {
             description,
             id,
             receiver,

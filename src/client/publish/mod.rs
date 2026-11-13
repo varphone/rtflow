@@ -97,7 +97,7 @@ fn ntp_now() -> u64 {
 
 /// A live RTSP publisher. `push` sends one access unit as RTP packets; the
 /// control connection is kept alive in a dedicated task.
-pub struct PublisherSession {
+pub struct RecordSession {
     pub description: MediaDescription,
     id: SessionId,
     control: Arc<PublisherControl>,
@@ -107,7 +107,7 @@ pub struct PublisherSession {
     reader: Option<tokio::task::JoinHandle<()>>,
 }
 
-impl PublisherSession {
+impl RecordSession {
     pub fn session_id(&self) -> SessionId {
         self.id
     }
@@ -168,7 +168,7 @@ impl PublisherSession {
     }
 }
 
-impl Drop for PublisherSession {
+impl Drop for RecordSession {
     fn drop(&mut self) {
         self.cancel.cancel();
         if let Some(task) = self.keepalive.take() {
@@ -277,7 +277,7 @@ pub(super) async fn connect(
     url: &url::Url,
     description: MediaDescription,
     options: &ClientOptions,
-) -> Result<PublisherSession> {
+) -> Result<RecordSession> {
     if options.play_range.is_some() {
         return Err(Error::Rtsp(
             "play_range is not valid for a publisher".into(),
@@ -558,12 +558,12 @@ fn finish(
     cancel: CancellationToken,
     reader: Option<tokio::task::JoinHandle<()>>,
     options: &ClientOptions,
-) -> Result<PublisherSession> {
+) -> Result<RecordSession> {
     if tracks.is_empty() {
         return Err(Error::Rtsp("SDP has no publishable tracks".into()));
     }
     let keepalive = spawn_keepalive(control.clone(), cancel.clone(), options);
-    Ok(PublisherSession {
+    Ok(RecordSession {
         description,
         id: super::next_client_session_id(),
         control,

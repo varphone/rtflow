@@ -7,7 +7,7 @@ pub(super) fn jittered_backoff(delay: Duration, attempt: u32) -> Duration {
     delay.mul_f32(0.75 + 0.5 * sample)
 }
 
-pub struct ReconnectingClientSession {
+pub struct ReconnectingPlaySession {
     pub description: MediaDescription,
     pub(super) id: SessionId,
     pub(super) receiver: super::queue::FrameReceiver,
@@ -15,7 +15,7 @@ pub struct ReconnectingClientSession {
     pub(super) task: JoinHandle<()>,
 }
 
-impl ReconnectingClientSession {
+impl ReconnectingPlaySession {
     /// Stable identifier correlating this session's [`ClientEvent`]s.
     pub fn session_id(&self) -> SessionId {
         self.id
@@ -32,7 +32,7 @@ impl ReconnectingClientSession {
     }
 }
 
-impl Drop for ReconnectingClientSession {
+impl Drop for ReconnectingPlaySession {
     fn drop(&mut self) {
         self.cancel.cancel();
         self.task.abort();

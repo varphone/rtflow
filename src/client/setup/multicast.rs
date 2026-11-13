@@ -9,7 +9,7 @@ pub(super) async fn connect_multicast(
     capabilities: crate::client::ServerCapabilities,
     options: ClientOptions,
     id: SessionId,
-) -> std::result::Result<ClientSession, Box<SetupFailure>> {
+) -> std::result::Result<PlaySession, Box<SetupFailure>> {
     let Some(connection) = description
         .connection
         .clone()
@@ -355,7 +355,7 @@ pub(super) async fn connect_multicast(
             peer,
         },
     );
-    Ok(ClientSession::new(SessionParts {
+    Ok(PlaySession::new(SessionParts {
         description,
         capabilities,
         id,

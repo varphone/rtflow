@@ -50,19 +50,17 @@ pub use options::{
     ClientOptions, ClientOptionsBuilder, ClientReconnectPolicy, ClientReconnectPolicyBuilder,
     ServerCapabilities,
 };
-pub use publish::PublisherSession;
-pub use reconnect::ReconnectingClientSession;
+pub use publish::RecordSession;
+pub use reconnect::ReconnectingPlaySession;
 pub use rtsp_client::RtspClient;
-pub use session::{ClientQualitySnapshot, ClientSession, PlayRequest};
+pub use session::{ClientQualitySnapshot, PlayRequest, PlaySession};
 
-/// Preferred name for the PLAY-side session (`ClientSession` remains for
-/// compatibility).
-pub type PlaySession = ClientSession;
-/// Preferred name for the RECORD-side session (`PublisherSession` remains for
-/// compatibility).
-pub type RecordSession = PublisherSession;
-/// Preferred name for a reconnecting PLAY session.
-pub type ReconnectingPlaySession = ReconnectingClientSession;
+/// Backwards-compatible name for [`PlaySession`].
+pub type ClientSession = PlaySession;
+/// Backwards-compatible name for [`RecordSession`].
+pub type PublisherSession = RecordSession;
+/// Backwards-compatible name for [`ReconnectingPlaySession`].
+pub type ReconnectingClientSession = ReconnectingPlaySession;
 
 static NEXT_CLIENT_SESSION: AtomicU64 = AtomicU64::new(1);
 

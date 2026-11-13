@@ -96,6 +96,7 @@
 - VOD 自然播放结束：广播样本排空后通知连接并关闭 RTSP 会话（RTSP 无 EOS 方法）。
 - UDP 发送快路径：socket 可写时直接用 `try_send_to`，仅 WouldBlock 回退异步 send，减少每包 task 唤醒；NACK 重传同样使用。
 - MountRegistry 以 `MountId` 为键（`paths()` 返回 `Vec<MountId>`），路径字符串仅保留在 URI/展示边界。
+- 会话类型主名称改为 `PlaySession`/`RecordSession`/`ReconnectingPlaySession`，旧名保留为类型别名。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

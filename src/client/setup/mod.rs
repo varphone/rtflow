@@ -2,7 +2,7 @@ use super::{
     control::{ControlTransport, control_task, effective_keep_alive},
     emit_client_event,
     options::ClientOptions,
-    session::{ClientSession, SessionParts},
+    session::{PlaySession, SessionParts},
     wire::{
         drain_jitter, receive_rtp_packet, request, response_session_id, response_session_timeout,
     },
@@ -113,7 +113,7 @@ pub(super) async fn connect(
     capabilities: crate::client::ServerCapabilities,
     options: ClientOptions,
     id: SessionId,
-) -> std::result::Result<ClientSession, Box<SetupFailure>> {
+) -> std::result::Result<PlaySession, Box<SetupFailure>> {
     match options.transport {
         crate::transport::UpstreamTransport::Udp => {
             connect_udp(

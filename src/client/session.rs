@@ -46,7 +46,7 @@ impl PlayRequest {
     }
 }
 
-pub struct ClientSession {
+pub struct PlaySession {
     pub description: MediaDescription,
     id: SessionId,
     capabilities: ServerCapabilities,
@@ -66,7 +66,7 @@ pub struct ClientQualitySnapshot {
     pub feedback: BTreeMap<u8, crate::rtcp::FeedbackSnapshot>,
 }
 
-/// Internal construction bundle so `ClientSession::new` stays readable.
+/// Internal construction bundle so `PlaySession::new` stays readable.
 pub(super) struct SessionParts {
     pub(super) description: MediaDescription,
     pub(super) id: SessionId,
@@ -79,7 +79,7 @@ pub(super) struct SessionParts {
     pub(super) quality: Arc<std::sync::Mutex<HashMap<u8, RtcpSession>>>,
 }
 
-impl ClientSession {
+impl PlaySession {
     pub(super) fn new(parts: SessionParts) -> Self {
         Self {
             description: parts.description,
@@ -218,7 +218,7 @@ impl ClientSession {
         }
     }
 }
-impl Drop for ClientSession {
+impl Drop for PlaySession {
     fn drop(&mut self) {
         self.cancel.cancel();
         for task in self.tasks.drain(..) {
