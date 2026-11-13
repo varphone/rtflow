@@ -204,12 +204,14 @@ fn jitter_timer_releases_after_a_gap_without_a_new_packet() {
         payload: Bytes::from_static(b"x"),
     };
     let mut jitter = JitterBuffer::new(JitterBufferConfig {
-        max_delay: Duration::from_millis(1),
+        // 50ms keeps the test stable when the test binary runs many tests in
+        // parallel (a 1ms budget can expire between two pushes).
+        max_delay: Duration::from_millis(50),
         ..JitterBufferConfig::default()
     });
     assert_eq!(jitter.push(packet(10)).len(), 1);
     assert!(jitter.push(packet(12)).is_empty());
-    std::thread::sleep(Duration::from_millis(2));
+    std::thread::sleep(Duration::from_millis(60));
     assert_eq!(jitter.drain_expired()[0].header.sequence, 12);
 }
 
