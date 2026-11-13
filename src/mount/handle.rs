@@ -403,6 +403,11 @@ impl MountHandle {
     }
 
     /// Mount path, suitable as the canonical HTTP asset prefix.
+    /// Stable identity of this mount (independent of its path string).
+    pub fn mount_id(&self) -> &crate::identity::MountId {
+        &self.inner.id
+    }
+
     pub fn path(&self) -> &str {
         self.inner.id.as_str()
     }
