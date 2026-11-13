@@ -1,9 +1,13 @@
 use super::{
-    ClientOptions, ClientSession, drain_jitter, receive_rtp_packet, request, response_session_id,
+    ClientOptions, ClientSession, ControlTransport, SessionParts, control_task, drain_jitter,
+    effective_keep_alive, emit_client_event, receive_rtp_packet, request, response_session_id,
+    response_session_timeout,
 };
 use crate::{
     Error, Result,
-    media::MediaDescription,
+    identity::SessionId,
+    media::{AccessUnit, MediaDescription},
+    observe::ClientEvent,
     rtcp::{Packet as RtcpPacket, RtcpSession},
     rtp::{Depacketizer, JitterBuffer, RtpPacket},
     runtime::framing::{ConnectionFramer, InboundFrame},
@@ -17,23 +21,40 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+/// A SETUP/PLAY-phase rejection: the negotiation failed at the RTSP status
+/// level, but the control connection and the parsed SDP are still healthy,
+/// so the caller can retry with a different transport without redoing
+/// OPTIONS+DESCRIBE (audit RT-9).
+pub(super) struct SetupFailure {
+    pub(super) error: Error,
+    pub(super) stream: ControlConnection,
+    pub(super) setup_base: String,
+    pub(super) description: MediaDescription,
+}
+
 pub(super) async fn connect(
     stream: ControlConnection,
     uri: String,
     setup_base: String,
     description: MediaDescription,
     options: ClientOptions,
-) -> Result<ClientSession> {
+    id: SessionId,
+) -> std::result::Result<ClientSession, SetupFailure> {
     match options.transport {
         crate::transport::UpstreamTransport::Udp => {
-            connect_udp(stream, uri, setup_base, description, options).await
+            connect_udp(stream, uri, setup_base, description, options, id).await
         }
         crate::transport::UpstreamTransport::TcpInterleaved => {
-            connect_interleaved(stream, uri, setup_base, description, options).await
+            connect_interleaved(stream, uri, setup_base, description, options, id).await
         }
-        crate::transport::UpstreamTransport::Auto => Err(Error::Rtsp(
-            "automatic transport selection must be resolved before SETUP".into(),
-        )),
+        crate::transport::UpstreamTransport::Auto => Err(SetupFailure {
+            error: Error::Rtsp(
+                "automatic transport selection must be resolved before SETUP".into(),
+            ),
+            stream,
+            setup_base,
+            description,
+        }),
     }
 }
 
@@ -43,17 +64,39 @@ async fn connect_interleaved(
     setup_base: String,
     description: MediaDescription,
     options: ClientOptions,
-) -> Result<ClientSession> {
+    id: SessionId,
+) -> std::result::Result<ClientSession, SetupFailure> {
     let mut cseq = 3u32;
     let mut session_id = None;
+    let mut session_timeout = None;
     let mut tracks = HashMap::new();
     let mut rtcp_channels = HashMap::new();
-    for (index, track) in description.tracks.iter().cloned().enumerate() {
+    let track_list: Vec<_> = description.tracks.to_vec();
+    for (index, track) in track_list.iter().cloned().enumerate() {
         // Two interleaved channels per track; more than 127 tracks would
         // overflow the 8-bit channel space — refuse instead of wrapping.
-        let channel = u8::try_from(index * 2)
-            .map_err(|_| Error::Limit("too many tracks for interleaved transport"))?;
-        let setup_uri = crate::protocol::sdp::control_uri(&setup_base, &track.control)?;
+        let channel = match u8::try_from(index * 2) {
+            Ok(channel) => channel,
+            Err(_) => {
+                return Err(SetupFailure {
+                    error: Error::Limit("too many tracks for interleaved transport"),
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
+        };
+        let setup_uri = match crate::protocol::sdp::control_uri(&setup_base, &track.control) {
+            Ok(uri) => uri,
+            Err(error) => {
+                return Err(SetupFailure {
+                    error,
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
+        };
         let mut extra = format!(
             "Transport: RTP/AVP/TCP;unicast;interleaved={}-{}\r\n",
             channel,
@@ -62,7 +105,7 @@ async fn connect_interleaved(
         if let Some(session) = &session_id {
             extra.push_str(&format!("Session: {session}\r\n"));
         }
-        let response = request(
+        let response = match request(
             &mut stream,
             "SETUP",
             &setup_uri,
@@ -71,16 +114,53 @@ async fn connect_interleaved(
             options.request_timeout,
             options.credentials.as_ref(),
         )
-        .await?;
+        .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                return Err(SetupFailure {
+                    error,
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
+        };
         cseq = cseq.wrapping_add(1);
         if response.status != 200 {
-            return Err(Error::Rtsp(format!("SETUP returned {}", response.status)));
+            return Err(SetupFailure {
+                error: Error::RtspStatus {
+                    method: "SETUP",
+                    status: response.status,
+                },
+                stream,
+                setup_base,
+                description,
+            });
         }
-        let received = response_session_id(&response)?;
+        let received = match response_session_id(&response) {
+            Ok(value) => value,
+            Err(error) => {
+                return Err(SetupFailure {
+                    error,
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
+        };
         if session_id.as_ref().is_some_and(|value| value != &received) {
-            return Err(Error::Rtsp("server changed Session during SETUP".into()));
+            return Err(SetupFailure {
+                error: Error::Rtsp("server changed Session during SETUP".into()),
+                stream,
+                setup_base,
+                description,
+            });
         }
         session_id = Some(received);
+        if session_timeout.is_none() {
+            session_timeout = response_session_timeout(&response);
+        }
         tracks.insert(
             channel,
             (
@@ -93,12 +173,19 @@ async fn connect_interleaved(
         );
         rtcp_channels.insert(channel.saturating_add(1), channel);
     }
-    let session_id = session_id.ok_or_else(|| Error::Rtsp("SDP has no tracks".into()))?;
+    let Some(session_id) = session_id else {
+        return Err(SetupFailure {
+            error: Error::Rtsp("SDP has no tracks".into()),
+            stream,
+            setup_base,
+            description,
+        });
+    };
     let mut extra = format!("Session: {session_id}\r\n");
     if let Some(range) = options.play_range {
         extra.push_str(&format!("Range: {}\r\n", range.render()));
     }
-    let response = request(
+    let response = match request(
         &mut stream,
         "PLAY",
         &uri,
@@ -107,11 +194,31 @@ async fn connect_interleaved(
         options.request_timeout,
         options.credentials.as_ref(),
     )
-    .await?;
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            return Err(SetupFailure {
+                error,
+                stream,
+                setup_base,
+                description,
+            });
+        }
+    };
     cseq = cseq.wrapping_add(1);
     if response.status != 200 {
-        return Err(Error::Rtsp(format!("PLAY returned {}", response.status)));
+        return Err(SetupFailure {
+            error: Error::RtspStatus {
+                method: "PLAY",
+                status: response.status,
+            },
+            stream,
+            setup_base,
+            description,
+        });
     }
+    let peer = stream.peer_addr();
     let (mut reader, writer) = tokio::io::split(stream);
     let writer = Arc::new(Mutex::new(writer));
     let rtcp_writer = writer.clone();
@@ -121,23 +228,24 @@ async fn connect_interleaved(
     let reader_cancel = cancel.clone();
     let quality = Arc::new(Mutex::new(HashMap::new()));
     let reader_quality = quality.clone();
-    let jitter_poll = options
-        .jitter
-        .max_delay
-        .min(std::time::Duration::from_millis(10))
-        .max(std::time::Duration::from_millis(1));
+    let media_for_control = tx.clone();
     let reader_task = tokio::spawn(async move {
         let mut framer = ConnectionFramer::new(16 * 1024, 256 * 1024, 65_536);
         let mut scratch = [0u8; 4096];
-        let mut jitter_tick = tokio::time::interval(jitter_poll);
-        jitter_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut dropped = 0u64;
         loop {
+            // Event-driven jitter release (audit RT-17): arm a timer for the
+            // earliest buffered deadline instead of polling every 1-10ms.
+            let deadline = tracks
+                .values()
+                .filter_map(|(jitter, ..)| jitter.next_deadline())
+                .min();
             let read = tokio::select! {
                 _ = reader_cancel.cancelled() => return,
-                _ = jitter_tick.tick() => {
+                _ = wait_for_deadline(deadline) => {
                     for (jitter, depacketizer, ..) in tracks.values_mut() {
                         for result in drain_jitter(jitter, depacketizer) {
-                            if tx.send(result).await.is_err() {
+                            if !try_deliver(&tx, result, &mut dropped) {
                                 return;
                             }
                         }
@@ -164,7 +272,7 @@ async fn connect_interleaved(
                                     let packet = match RtpPacket::parse(frame.payload) {
                                         Ok(packet) => packet,
                                         Err(error) => {
-                                            if tx.send(Err(error)).await.is_err() {
+                                            if !try_deliver(&tx, Err(error), &mut dropped) {
                                                 return;
                                             }
                                             continue;
@@ -179,13 +287,13 @@ async fn connect_interleaved(
                                     )
                                     .await
                                     {
-                                        if tx.send(Err(error)).await.is_err() {
+                                        if !try_deliver(&tx, Err(error), &mut dropped) {
                                             return;
                                         }
                                         continue;
                                     }
                                     for result in receive_rtp_packet(packet, jitter, depacketizer) {
-                                        if tx.send(result).await.is_err() {
+                                        if !try_deliver(&tx, result, &mut dropped) {
                                             return;
                                         }
                                     }
@@ -237,23 +345,51 @@ async fn connect_interleaved(
                 }
             }
         }
+        // The interleaved connection carries media and control on one socket:
+        // EOF or an IO error ends the session. Cancel the shared token so the
+        // control task stops and drops its frame sender; otherwise the output
+        // channel stays open and `next()` (and the reconnect loop) would block
+        // until a keep-alive failure minutes later.
+        reader_cancel.cancel();
     });
-    Ok(ClientSession::new(
-        description,
-        rx,
-        None,
-        Some(writer),
-        Some(response_rx),
-        cseq,
-        session_id,
+    let (control_tx, control_rx) = mpsc::channel(16);
+    let control_task_handle = tokio::spawn(control_task(
+        ControlTransport::Interleaved {
+            writer,
+            responses: response_rx,
+        },
+        control_rx,
+        media_for_control,
         uri,
+        session_id,
+        cseq,
         options.credentials.clone(),
         options.request_timeout,
-        options.keep_alive_interval,
+        effective_keep_alive(options.keep_alive_interval, session_timeout),
+        id,
+        options.event_sink.clone(),
+        cancel.clone(),
+    ));
+    let event_sink = options.event_sink.clone();
+    emit_client_event(
+        &event_sink,
+        ClientEvent::Connected {
+            id,
+            transport: "tcp-interleaved",
+            peer,
+        },
+    );
+    tracing::debug!(session_id = %id, %peer, transport = "tcp-interleaved", "RTSP client session established");
+    Ok(ClientSession::new(SessionParts {
+        description,
+        id,
+        receiver: rx,
+        control_tx: Some(control_tx),
+        request_timeout: options.request_timeout,
         cancel,
-        vec![reader_task],
+        tasks: vec![reader_task, control_task_handle],
         quality,
-    ))
+    }))
 }
 
 async fn connect_udp(
@@ -262,18 +398,55 @@ async fn connect_udp(
     setup_base: String,
     description: MediaDescription,
     options: ClientOptions,
-) -> Result<ClientSession> {
+    id: SessionId,
+) -> std::result::Result<ClientSession, SetupFailure> {
     let mut cseq = 3u32;
     let mut session_id = None;
+    let mut session_timeout = None;
     let mut receivers = Vec::new();
-    for track in description.tracks.iter().cloned() {
+    let track_list: Vec<_> = description.tracks.to_vec();
+    for track in track_list {
         let bind_ip = match stream.local_addr().ip() {
             std::net::IpAddr::V4(_) => std::net::Ipv4Addr::UNSPECIFIED.into(),
             std::net::IpAddr::V6(_) => std::net::Ipv6Addr::UNSPECIFIED.into(),
         };
-        let pair = UdpPair::bind(bind_ip, None).await?;
-        let port = pair.rtp_port()?;
-        let setup_uri = crate::protocol::sdp::control_uri(&setup_base, &track.control)?;
+        let bind_result = match options.udp_recv_buffer {
+            Some(recv_buffer) => UdpPair::bind_with_recv_buffer(bind_ip, None, recv_buffer).await,
+            None => UdpPair::bind(bind_ip, None).await,
+        };
+        let pair = match bind_result {
+            Ok(pair) => pair,
+            Err(error) => {
+                return Err(SetupFailure {
+                    error,
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
+        };
+        let port = match pair.rtp_port() {
+            Ok(port) => port,
+            Err(error) => {
+                return Err(SetupFailure {
+                    error,
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
+        };
+        let setup_uri = match crate::protocol::sdp::control_uri(&setup_base, &track.control) {
+            Ok(uri) => uri,
+            Err(error) => {
+                return Err(SetupFailure {
+                    error,
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
+        };
         let mut extra = format!(
             "Transport: RTP/AVP;unicast;client_port={}-{}\r\n",
             port,
@@ -282,7 +455,7 @@ async fn connect_udp(
         if let Some(session) = &session_id {
             extra.push_str(&format!("Session: {session}\r\n"));
         }
-        let response = request(
+        let response = match request(
             &mut stream,
             "SETUP",
             &setup_uri,
@@ -291,47 +464,116 @@ async fn connect_udp(
             options.request_timeout,
             options.credentials.as_ref(),
         )
-        .await?;
+        .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                return Err(SetupFailure {
+                    error,
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
+        };
         cseq = cseq.wrapping_add(1);
         if response.status != 200 {
-            return Err(Error::Rtsp(format!("SETUP returned {}", response.status)));
+            return Err(SetupFailure {
+                error: Error::RtspStatus {
+                    method: "SETUP",
+                    status: response.status,
+                },
+                stream,
+                setup_base,
+                description,
+            });
         }
-        let received = response_session_id(&response)?;
+        let received = match response_session_id(&response) {
+            Ok(value) => value,
+            Err(error) => {
+                return Err(SetupFailure {
+                    error,
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
+        };
         if session_id.as_ref().is_some_and(|value| value != &received) {
-            return Err(Error::Rtsp("server changed Session during SETUP".into()));
+            return Err(SetupFailure {
+                error: Error::Rtsp("server changed Session during SETUP".into()),
+                stream,
+                setup_base,
+                description,
+            });
         }
         session_id = Some(received);
-        let transport_spec = response
+        if session_timeout.is_none() {
+            session_timeout = response_session_timeout(&response);
+        }
+        let transport_spec = match response
             .headers
             .get("transport")
             .map(String::as_str)
             .map(TransportSpec::parse)
-            .transpose()?;
+            .transpose()
+        {
+            Ok(spec) => spec,
+            Err(error) => {
+                return Err(SetupFailure {
+                    error,
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
+        };
         let server_rtp = match &transport_spec {
             Some(TransportSpec::Udp {
                 server_rtp: Some(port),
                 ..
             }) => *port,
-            _ => return Err(Error::Rtsp("SETUP response has no server RTP port".into())),
+            _ => {
+                return Err(SetupFailure {
+                    error: Error::Rtsp("SETUP response has no server RTP port".into()),
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
         };
         let server_rtcp = match &transport_spec {
             Some(TransportSpec::Udp {
                 server_rtcp: Some(port),
                 ..
             }) => *port,
-            _ => return Err(Error::Rtsp("SETUP response has no server RTCP port".into())),
+            _ => {
+                return Err(SetupFailure {
+                    error: Error::Rtsp("SETUP response has no server RTCP port".into()),
+                    stream,
+                    setup_base,
+                    description,
+                });
+            }
         };
         let peer_ip = stream.peer_addr().ip();
         let rtp_target = std::net::SocketAddr::new(peer_ip, server_rtp);
         let rtcp_target = std::net::SocketAddr::new(peer_ip, server_rtcp);
         receivers.push((pair, track, rtp_target, rtcp_target));
     }
-    let session_id = session_id.ok_or_else(|| Error::Rtsp("SDP has no tracks".into()))?;
+    let Some(session_id) = session_id else {
+        return Err(SetupFailure {
+            error: Error::Rtsp("SDP has no tracks".into()),
+            stream,
+            setup_base,
+            description,
+        });
+    };
     let mut extra = format!("Session: {session_id}\r\n");
     if let Some(range) = options.play_range {
         extra.push_str(&format!("Range: {}\r\n", range.render()));
     }
-    let response = request(
+    let response = match request(
         &mut stream,
         "PLAY",
         &uri,
@@ -340,10 +582,29 @@ async fn connect_udp(
         options.request_timeout,
         options.credentials.as_ref(),
     )
-    .await?;
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            return Err(SetupFailure {
+                error,
+                stream,
+                setup_base,
+                description,
+            });
+        }
+    };
     cseq = cseq.wrapping_add(1);
     if response.status != 200 {
-        return Err(Error::Rtsp(format!("PLAY returned {}", response.status)));
+        return Err(SetupFailure {
+            error: Error::RtspStatus {
+                method: "PLAY",
+                status: response.status,
+            },
+            stream,
+            setup_base,
+            description,
+        });
     }
     let (tx, rx) = mpsc::channel(options.output_queue_capacity);
     let cancel = CancellationToken::new();
@@ -352,10 +613,6 @@ async fn connect_udp(
     for (pair, track, rtp_target, rtcp_target) in receivers {
         let tx = tx.clone();
         let jitter_config = options.jitter.clone();
-        let jitter_poll = jitter_config
-            .max_delay
-            .min(std::time::Duration::from_millis(10))
-            .max(std::time::Duration::from_millis(1));
         let rtcp_pair = pair.clone();
         let rtp_cancel = cancel.clone();
         let rtp_quality = quality.clone();
@@ -369,15 +626,17 @@ async fn connect_udp(
             // handling — a restarted server reconnects instead of mixing).
             let mut expected_ssrc: Option<u32> = None;
             let mut depacketizer = Depacketizer::new(track.codec, track.id, track.clock_rate);
-            let mut buffer = vec![0u8; 65_536];
-            let mut jitter_tick = tokio::time::interval(jitter_poll);
-            jitter_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut buffer = bytes::BytesMut::zeroed(65_536);
+            let mut dropped = 0u64;
             loop {
+                // Event-driven jitter release (audit RT-17): sleep until the
+                // buffered deadline instead of polling every 1-10ms.
+                let deadline = jitter.next_deadline();
                 let received = tokio::select! {
                     _ = rtp_cancel.cancelled() => return,
-                    _ = jitter_tick.tick() => {
+                    _ = wait_for_deadline(deadline) => {
                         for result in drain_jitter(&mut jitter, &mut depacketizer) {
-                            if tx.send(result).await.is_err() {
+                            if !try_deliver(&tx, result, &mut dropped) {
                                 return;
                             }
                         }
@@ -394,12 +653,12 @@ async fn connect_udp(
                         if source != rtp_target {
                             continue;
                         }
-                        let packet = match RtpPacket::parse(bytes::Bytes::copy_from_slice(
-                            &buffer[..size],
-                        )) {
+                        let payload = buffer.split_to(size).freeze();
+                        buffer.resize(65_536, 0);
+                        let packet = match RtpPacket::parse(payload) {
                             Ok(packet) => packet,
                             Err(error) => {
-                                if tx.send(Err(error)).await.is_err() {
+                                if !try_deliver(&tx, Err(error), &mut dropped) {
                                     return;
                                 }
                                 continue;
@@ -420,13 +679,13 @@ async fn connect_udp(
                             observe_quality(&rtp_quality, track_id, clock_rate, local_ssrc, &packet)
                                 .await
                         {
-                            if tx.send(Err(error)).await.is_err() {
+                            if !try_deliver(&tx, Err(error), &mut dropped) {
                                 return;
                             }
                             continue;
                         }
                         for result in receive_rtp_packet(packet, &mut jitter, &mut depacketizer) {
-                            if tx.send(result).await.is_err() {
+                            if !try_deliver(&tx, result, &mut dropped) {
                                 return;
                             }
                         }
@@ -462,23 +721,78 @@ async fn connect_udp(
             }
         }));
     }
-    drop(tx);
-    Ok(ClientSession::new(
-        description,
-        rx,
-        Some(stream),
-        None,
-        None,
-        cseq,
-        session_id,
+    let peer = stream.peer_addr();
+    let media_for_control = tx.clone();
+    let (control_tx, control_rx) = mpsc::channel(16);
+    let control_task_handle = tokio::spawn(control_task(
+        ControlTransport::Owned(stream),
+        control_rx,
+        media_for_control,
         uri,
+        session_id,
+        cseq,
         options.credentials.clone(),
         options.request_timeout,
-        options.keep_alive_interval,
+        effective_keep_alive(options.keep_alive_interval, session_timeout),
+        id,
+        options.event_sink.clone(),
+        cancel.clone(),
+    ));
+    tasks.push(control_task_handle);
+    drop(tx);
+    let event_sink = options.event_sink.clone();
+    emit_client_event(
+        &event_sink,
+        ClientEvent::Connected {
+            id,
+            transport: "udp",
+            peer,
+        },
+    );
+    tracing::debug!(session_id = %id, %peer, transport = "udp", "RTSP client session established");
+    Ok(ClientSession::new(SessionParts {
+        description,
+        id,
+        receiver: rx,
+        control_tx: Some(control_tx),
+        request_timeout: options.request_timeout,
         cancel,
         tasks,
         quality,
-    ))
+    }))
+}
+
+/// Sleep until the jitter buffer's next release deadline. Never fires while
+/// nothing is buffered, replacing the old 1–10ms poll tick (audit RT-17).
+async fn wait_for_deadline(deadline: Option<std::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Non-blocking delivery into the frame channel: a full queue drops the
+/// frame instead of stalling the receive loop (audit RT-17). Returns false
+/// when the consumer is gone.
+fn try_deliver(
+    tx: &mpsc::Sender<Result<AccessUnit>>,
+    result: Result<AccessUnit>,
+    dropped: &mut u64,
+) -> bool {
+    match tx.try_send(result) {
+        Ok(()) => true,
+        Err(mpsc::error::TrySendError::Closed(_)) => false,
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            *dropped += 1;
+            if *dropped % 64 == 1 {
+                tracing::debug!(
+                    dropped = *dropped,
+                    "client output queue full; dropping frame"
+                );
+            }
+            true
+        }
+    }
 }
 
 fn client_ssrc(track_id: u8) -> u32 {
@@ -554,4 +868,18 @@ async fn quality_report(
         session.on_rtcp(packet, now);
     }
     session.report_now(now).map(Some)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_ssrc_is_deterministic_and_distinct_per_track() {
+        for track_id in 0..=255u8 {
+            assert_eq!(client_ssrc(track_id), client_ssrc(track_id));
+        }
+        let first = client_ssrc(0);
+        assert!((1..=255u8).all(|track_id| client_ssrc(track_id) != first));
+    }
 }

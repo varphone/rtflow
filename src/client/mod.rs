@@ -3,11 +3,15 @@ mod setup;
 
 #[cfg(feature = "tls")]
 use crate::security::TlsClientConfig;
-use crate::transport::UpstreamTransport;
+/// Transport selection for RTSP client connections (re-exported here so
+/// callers do not need to reach into `rtflow::proxy`/`rtflow::transport`).
+pub use crate::transport::UpstreamTransport;
 use crate::{
-    Error, Result,
+    Error, Result, RetryClass,
     auth::{Credentials, authorization_from_challenge, basic_authorization},
+    identity::SessionId,
     media::{AccessUnit, MediaDescription},
+    observe::{ClientEvent, EventSink, FrameworkEvent},
     protocol::range::NptRange,
     protocol::sdp,
     rtcp::{ReceptionSnapshot, RtcpSession},
@@ -19,18 +23,32 @@ use std::{
     collections::{BTreeMap, HashMap},
     str::FromStr,
     sync::Arc,
+    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
-    sync::{Mutex, mpsc},
+    sync::{Mutex, mpsc, oneshot},
     task::JoinHandle,
     time::{Instant, sleep, sleep_until, timeout},
 };
 use tokio_util::sync::CancellationToken;
 
+static NEXT_CLIENT_SESSION: AtomicU64 = AtomicU64::new(1);
+
+fn next_client_session_id() -> SessionId {
+    SessionId::new(NEXT_CLIENT_SESSION.fetch_add(1, Ordering::Relaxed))
+}
+
+fn emit_client_event(sink: &Option<Arc<dyn EventSink>>, event: ClientEvent) {
+    if let Some(sink) = sink {
+        sink.record(&FrameworkEvent::Client(event));
+    }
+}
+
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct ClientOptions {
     pub transport: UpstreamTransport,
     pub credentials: Option<Credentials>,
@@ -41,6 +59,12 @@ pub struct ClientOptions {
     #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
     pub play_range: Option<NptRange>,
+    /// Optional sink for [`ClientEvent`]s (lifecycle, fallback, backoff).
+    pub event_sink: Option<Arc<dyn EventSink>>,
+    /// UDP socket receive-buffer size per RTP/RTCP socket. Defaults to 4MiB;
+    /// memory-constrained embedded clients can lower it at the cost of burst
+    /// tolerance. Applies to UDP transport only.
+    pub udp_recv_buffer: Option<usize>,
 }
 impl Default for ClientOptions {
     fn default() -> Self {
@@ -54,11 +78,14 @@ impl Default for ClientOptions {
             #[cfg(feature = "tls")]
             tls: None,
             play_range: None,
+            event_sink: None,
+            udp_recv_buffer: None,
         }
     }
 }
 
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct ClientReconnectPolicy {
     /// Delay before the first reconnect attempt.
     pub initial_delay: Duration,
@@ -79,11 +106,43 @@ impl Default for ClientReconnectPolicy {
 }
 
 impl ClientReconnectPolicy {
+    pub fn builder() -> ClientReconnectPolicyBuilder {
+        ClientReconnectPolicyBuilder {
+            policy: Self::default(),
+        }
+    }
+
     fn validate(&self) -> Result<()> {
         if self.initial_delay == Duration::ZERO || self.max_delay < self.initial_delay {
             return Err(Error::Limit("client reconnect delay"));
         }
         Ok(())
+    }
+}
+
+pub struct ClientReconnectPolicyBuilder {
+    policy: ClientReconnectPolicy,
+}
+
+impl ClientReconnectPolicyBuilder {
+    pub fn initial_delay(mut self, value: Duration) -> Self {
+        self.policy.initial_delay = value;
+        self
+    }
+
+    pub fn max_delay(mut self, value: Duration) -> Self {
+        self.policy.max_delay = value;
+        self
+    }
+
+    pub fn max_attempts(mut self, value: u32) -> Self {
+        self.policy.max_attempts = value;
+        self
+    }
+
+    pub fn build(self) -> Result<ClientReconnectPolicy> {
+        self.policy.validate()?;
+        Ok(self.policy)
     }
 }
 
@@ -94,14 +153,61 @@ fn jittered_backoff(delay: Duration, attempt: u32) -> Duration {
     delay.mul_f32(0.75 + 0.5 * sample)
 }
 
+/// Backoff for failed keep-alive attempts (audit R23): the interval doubles
+/// per consecutive failure (capped at 16x) with the standard jitter applied.
+fn keep_alive_backoff(interval: Duration, failures: u32) -> Duration {
+    let growth = 1u32 << failures.saturating_sub(1).min(4);
+    jittered_backoff(interval.saturating_mul(growth), failures)
+}
+
+/// Effective keep-alive interval given the client configuration and the
+/// server's Session `timeout=` parameter (RFC 2326 §12.37): stay at most
+/// half the server timeout so a single dropped request cannot expire the
+/// session. When the client did not configure an interval, derive one from
+/// the server timeout instead of disabling keep-alives.
+pub(super) fn effective_keep_alive(
+    configured: Option<Duration>,
+    server_timeout: Option<Duration>,
+) -> Option<Duration> {
+    match (configured, server_timeout) {
+        (Some(configured), Some(server_timeout)) => Some(configured.min(server_timeout / 2)),
+        (None, Some(server_timeout)) => Some((server_timeout / 2).max(Duration::from_secs(1))),
+        (configured, None) => configured,
+    }
+}
+
+/// Parse the `timeout=` parameter from a SETUP response Session header.
+fn response_session_timeout(response: &Response) -> Option<Duration> {
+    response
+        .headers
+        .get("session")?
+        .split(';')
+        .find_map(|part| {
+            let (key, value) = part.trim().split_once('=')?;
+            if key.trim().eq_ignore_ascii_case("timeout") {
+                value.trim().parse::<u64>().ok()
+            } else {
+                None
+            }
+        })
+        .filter(|seconds| *seconds > 0)
+        .map(Duration::from_secs)
+}
+
 pub struct ReconnectingClientSession {
     pub description: MediaDescription,
+    id: SessionId,
     receiver: mpsc::Receiver<Result<AccessUnit>>,
     cancel: CancellationToken,
     task: JoinHandle<()>,
 }
 
 impl ReconnectingClientSession {
+    /// Stable identifier correlating this session's [`ClientEvent`]s.
+    pub fn session_id(&self) -> SessionId {
+        self.id
+    }
+
     pub async fn next(&mut self) -> Option<Result<AccessUnit>> {
         self.receiver.recv().await
     }
@@ -177,6 +283,16 @@ impl ClientOptionsBuilder {
         self
     }
 
+    pub fn event_sink(mut self, value: Arc<dyn EventSink>) -> Self {
+        self.options.event_sink = Some(value);
+        self
+    }
+
+    pub fn udp_recv_buffer(mut self, value: usize) -> Self {
+        self.options.udp_recv_buffer = Some(value);
+        self
+    }
+
     pub fn build(self) -> Result<ClientOptions> {
         self.options.validate()?;
         Ok(self.options)
@@ -185,18 +301,11 @@ impl ClientOptionsBuilder {
 
 pub struct ClientSession {
     pub description: MediaDescription,
+    id: SessionId,
     receiver: mpsc::Receiver<Result<AccessUnit>>,
-    control: Option<ControlConnection>,
-    cseq: u32,
-    session_id: String,
-    uri: String,
-    playing: bool,
-    interleaved_writer: Option<Arc<Mutex<ControlWriteHalf>>>,
-    interleaved_responses: Option<mpsc::Receiver<Response>>,
-    credentials: Option<Credentials>,
+    control_tx: Option<mpsc::Sender<ControlCommand>>,
     request_timeout: Duration,
-    keep_alive_interval: Option<Duration>,
-    last_control: Instant,
+    playing: bool,
     cancel: CancellationToken,
     tasks: Vec<JoinHandle<()>>,
     quality: Arc<Mutex<HashMap<u8, RtcpSession>>>,
@@ -206,42 +315,37 @@ pub struct ClientSession {
 pub struct ClientQualitySnapshot {
     pub tracks: BTreeMap<u8, ReceptionSnapshot>,
 }
+
+/// Internal construction bundle so `ClientSession::new` stays readable.
+pub(super) struct SessionParts {
+    pub(super) description: MediaDescription,
+    pub(super) id: SessionId,
+    pub(super) receiver: mpsc::Receiver<Result<AccessUnit>>,
+    pub(super) control_tx: Option<mpsc::Sender<ControlCommand>>,
+    pub(super) request_timeout: Duration,
+    pub(super) cancel: CancellationToken,
+    pub(super) tasks: Vec<JoinHandle<()>>,
+    pub(super) quality: Arc<Mutex<HashMap<u8, RtcpSession>>>,
+}
+
 impl ClientSession {
-    #[allow(clippy::too_many_arguments)]
-    fn new(
-        description: MediaDescription,
-        receiver: mpsc::Receiver<Result<AccessUnit>>,
-        control: Option<ControlConnection>,
-        interleaved_writer: Option<Arc<Mutex<ControlWriteHalf>>>,
-        interleaved_responses: Option<mpsc::Receiver<Response>>,
-        cseq: u32,
-        session_id: String,
-        uri: String,
-        credentials: Option<Credentials>,
-        request_timeout: Duration,
-        keep_alive_interval: Option<Duration>,
-        cancel: CancellationToken,
-        tasks: Vec<JoinHandle<()>>,
-        quality: Arc<Mutex<HashMap<u8, RtcpSession>>>,
-    ) -> Self {
+    fn new(parts: SessionParts) -> Self {
         Self {
-            description,
-            receiver,
-            control,
-            interleaved_writer,
-            interleaved_responses,
-            cseq,
-            session_id,
-            uri,
+            description: parts.description,
+            id: parts.id,
+            receiver: parts.receiver,
+            control_tx: parts.control_tx,
+            request_timeout: parts.request_timeout,
             playing: true,
-            credentials,
-            request_timeout,
-            keep_alive_interval,
-            last_control: Instant::now(),
-            cancel,
-            tasks,
-            quality,
+            cancel: parts.cancel,
+            tasks: parts.tasks,
+            quality: parts.quality,
         }
+    }
+
+    /// Stable identifier for correlating [`ClientEvent`]s and logs.
+    pub fn session_id(&self) -> SessionId {
+        self.id
     }
     pub async fn play(&mut self) -> Result<()> {
         self.send_control("PLAY").await?;
@@ -253,133 +357,33 @@ impl ClientSession {
         self.playing = false;
         Ok(())
     }
+    /// Receive the next access unit. Media consumption never blocks on the
+    /// control plane: keep-alives run in the dedicated control task
+    /// (audit RT-7/RT-8) and failures surface as error frames.
     pub async fn next(&mut self) -> Option<Result<AccessUnit>> {
-        loop {
-            let Some(interval) = self.keep_alive_interval else {
-                return self.receiver.recv().await;
-            };
-            let deadline = self.last_control + interval;
-            tokio::select! {
-                frame = self.receiver.recv() => return frame,
-                _ = sleep_until(deadline) => {
-                    // The keep-alive round-trip runs inline (this task owns
-                    // the control connection), so bound it: a slow control
-                    // plane must not stall media consumption for the full
-                    // request timeout on every interval.
-                    match tokio::time::timeout(
-                        self.request_timeout.min(std::time::Duration::from_secs(2)),
-                        self.keep_alive(),
-                    )
-                    .await
-                    {
-                        Ok(Ok(())) => {}
-                        Ok(Err(error)) => return Some(Err(error)),
-                        Err(_) => {
-                            return Some(Err(Error::Rtsp(
-                                "keep-alive timed out; control plane unreachable".into(),
-                            )));
-                        }
-                    }
-                }
-            }
-        }
+        self.receiver.recv().await
     }
 
     pub async fn keep_alive(&mut self) -> Result<()> {
         self.send_control("GET_PARAMETER").await
     }
-    async fn send_control(&mut self, method: &str) -> Result<()> {
-        let extra = format!("Session: {}\r\n", self.session_id);
-        let cseq = self.cseq;
-        self.cseq = self.cseq.wrapping_add(1);
-        if let Some(control) = self.control.as_mut() {
-            let response = request(
-                control,
+    async fn send_control(&mut self, method: &'static str) -> Result<()> {
+        let Some(commands) = self.control_tx.as_ref() else {
+            return Err(Error::Closed);
+        };
+        let (reply_tx, reply_rx) = oneshot::channel();
+        commands
+            .send(ControlCommand::Method {
                 method,
-                &self.uri,
-                cseq,
-                Some(&extra),
-                self.request_timeout,
-                self.credentials.as_ref(),
-            )
-            .await?;
-            if response.status != 200 {
-                return Err(Error::Rtsp(format!(
-                    "{method} returned {}",
-                    response.status
-                )));
-            }
-        } else if let (Some(writer), Some(responses)) = (
-            self.interleaved_writer.as_mut(),
-            self.interleaved_responses.as_mut(),
-        ) {
-            let mut authorization = self.credentials.as_ref().map(basic_authorization);
-            let wire = encode_request(
-                method,
-                &self.uri,
-                cseq,
-                Some(&extra),
-                authorization.as_deref(),
-            );
-            tokio::time::timeout(self.request_timeout, async {
-                writer.lock().await.write_all(wire.as_bytes()).await
+                reply: reply_tx,
             })
             .await
-            .map_err(|_| Error::Limit("interleaved control write timeout"))??;
-            // Pair responses by CSeq: a stale response left over from a
-            // previous exchange (e.g. a timed-out reconnect) must not be
-            // mistaken for the reply to this request.
-            let mut response = loop {
-                let candidate = timeout(self.request_timeout, responses.recv())
-                    .await
-                    .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
-                    .ok_or(Error::Closed)?;
-                if candidate_headers_cseq(&candidate) == Some(cseq) {
-                    break candidate;
-                }
-            };
-            if response.status == 401
-                && let (Some(credentials), Some(challenge)) = (
-                    self.credentials.as_ref(),
-                    response.headers.get("www-authenticate"),
-                )
-            {
-                authorization = Some(authorization_from_challenge(
-                    challenge,
-                    Method::from_str(method)?,
-                    &self.uri,
-                    credentials,
-                )?);
-                let wire = encode_request(
-                    method,
-                    &self.uri,
-                    cseq,
-                    Some(&extra),
-                    authorization.as_deref(),
-                );
-                tokio::time::timeout(self.request_timeout, async {
-                    writer.lock().await.write_all(wire.as_bytes()).await
-                })
-                .await
-                .map_err(|_| Error::Limit("interleaved control write timeout"))??;
-                response = loop {
-                    let candidate = timeout(self.request_timeout, responses.recv())
-                        .await
-                        .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
-                        .ok_or(Error::Closed)?;
-                    if candidate_headers_cseq(&candidate) == Some(cseq) {
-                        break candidate;
-                    }
-                };
-            }
-            if response.status != 200 {
-                return Err(status_error(method, response.status));
-            }
-        } else {
-            return Err(Error::Closed);
+            .map_err(|_| Error::Closed)?;
+        match timeout(self.request_timeout, reply_rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(Error::Closed),
+            Err(_) => Err(Error::Rtsp("control request timed out".into())),
         }
-        self.last_control = Instant::now();
-        Ok(())
     }
     pub async fn teardown(mut self) -> Result<()> {
         self.send_control("TEARDOWN").await
@@ -409,6 +413,280 @@ impl Drop for ClientSession {
     }
 }
 
+/// The wire the control task drives: either an owned control connection
+/// (UDP transport) or the shared interleaved writer/response stream.
+enum ControlTransport {
+    Owned(ControlConnection),
+    Interleaved {
+        writer: Arc<Mutex<ControlWriteHalf>>,
+        responses: mpsc::Receiver<Response>,
+    },
+}
+
+pub(super) enum ControlCommand {
+    Method {
+        method: &'static str,
+        reply: oneshot::Sender<Result<()>>,
+    },
+}
+
+async fn wait_for_instant(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// One RTSP control round trip on the session's transport.
+async fn perform_control(
+    transport: &mut ControlTransport,
+    method: &'static str,
+    uri: &str,
+    cseq: &mut u32,
+    session_id: &str,
+    request_timeout: Duration,
+    credentials: Option<&Credentials>,
+) -> Result<()> {
+    let extra = format!("Session: {session_id}\r\n");
+    let sequence = *cseq;
+    *cseq = cseq.wrapping_add(1);
+    match transport {
+        ControlTransport::Owned(control) => {
+            let response = request(
+                control,
+                method,
+                uri,
+                sequence,
+                Some(&extra),
+                request_timeout,
+                credentials,
+            )
+            .await?;
+            if response.status != 200 {
+                return Err(status_error(method, response.status));
+            }
+        }
+        ControlTransport::Interleaved { writer, responses } => {
+            let mut authorization = credentials.map(basic_authorization);
+            let wire = encode_request(
+                method,
+                uri,
+                sequence,
+                Some(&extra),
+                authorization.as_deref(),
+            );
+            tokio::time::timeout(request_timeout, async {
+                writer.lock().await.write_all(wire.as_bytes()).await
+            })
+            .await
+            .map_err(|_| Error::Limit("interleaved control write timeout"))??;
+            // Pair responses by CSeq: a stale response left over from a
+            // previous exchange (e.g. a timed-out reconnect) must not be
+            // mistaken for the reply to this request.
+            let mut response = loop {
+                let candidate = timeout(request_timeout, responses.recv())
+                    .await
+                    .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
+                    .ok_or(Error::Closed)?;
+                if candidate_headers_cseq(&candidate) == Some(sequence) {
+                    break candidate;
+                }
+            };
+            if response.status == 401
+                && let (Some(credentials), Some(challenge)) =
+                    (credentials, response.headers.get("www-authenticate"))
+            {
+                authorization = Some(authorization_from_challenge(
+                    challenge,
+                    Method::from_str(method)?,
+                    uri,
+                    credentials,
+                )?);
+                let wire = encode_request(
+                    method,
+                    uri,
+                    sequence,
+                    Some(&extra),
+                    authorization.as_deref(),
+                );
+                tokio::time::timeout(request_timeout, async {
+                    writer.lock().await.write_all(wire.as_bytes()).await
+                })
+                .await
+                .map_err(|_| Error::Limit("interleaved control write timeout"))??;
+                response = loop {
+                    let candidate = timeout(request_timeout, responses.recv())
+                        .await
+                        .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
+                        .ok_or(Error::Closed)?;
+                    if candidate_headers_cseq(&candidate) == Some(sequence) {
+                        break candidate;
+                    }
+                };
+            }
+            if response.status != 200 {
+                return Err(status_error(method, response.status));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Dedicated control-plane task: serializes PLAY/PAUSE/TEARDOWN commands and
+/// schedules keep-alives, keeping RTSP round trips off the media path
+/// (audits RT-7/RT-8). Keep-alive failures back off (R23) and downgrade
+/// GET_PARAMETER to OPTIONS when the server does not implement it.
+#[allow(clippy::too_many_arguments)]
+async fn control_task(
+    mut transport: ControlTransport,
+    mut commands: mpsc::Receiver<ControlCommand>,
+    media_tx: mpsc::Sender<Result<AccessUnit>>,
+    uri: String,
+    session_id: String,
+    mut cseq: u32,
+    credentials: Option<Credentials>,
+    request_timeout: Duration,
+    keep_alive_interval: Option<Duration>,
+    id: SessionId,
+    sink: Option<Arc<dyn EventSink>>,
+    cancel: CancellationToken,
+) {
+    let mut method: &'static str = "GET_PARAMETER";
+    let mut failures = 0u32;
+    let mut last_failure: Option<Instant> = None;
+    let mut last_control = Instant::now();
+    loop {
+        let due = keep_alive_interval.map(|interval| {
+            let mut due = last_control + interval;
+            if let Some(failed_at) = last_failure {
+                due = due.max(failed_at + keep_alive_backoff(interval, failures));
+            }
+            due
+        });
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            command = commands.recv() => {
+                let Some(ControlCommand::Method { method: requested, reply }) = command else {
+                    return;
+                };
+                let result = perform_control(
+                    &mut transport,
+                    requested,
+                    &uri,
+                    &mut cseq,
+                    &session_id,
+                    request_timeout,
+                    credentials.as_ref(),
+                )
+                .await;
+                let result = match result {
+                    Err(Error::RtspStatus {
+                        status: 405 | 501, ..
+                    }) if requested == "GET_PARAMETER" && method == "GET_PARAMETER" => {
+                        method = "OPTIONS";
+                        perform_control(
+                            &mut transport,
+                            method,
+                            &uri,
+                            &mut cseq,
+                            &session_id,
+                            request_timeout,
+                            credentials.as_ref(),
+                        )
+                        .await
+                    }
+                    other => other,
+                };
+                match &result {
+                    Ok(()) => {
+                        failures = 0;
+                        last_failure = None;
+                        last_control = Instant::now();
+                    }
+                    Err(error) => {
+                        failures = failures.saturating_add(1);
+                        last_failure = Some(Instant::now());
+                        tracing::warn!(
+                            session_id = %id,
+                            method = requested,
+                            consecutive = failures,
+                            error = %error,
+                            "RTSP client control request failed"
+                        );
+                        emit_client_event(
+                            &sink,
+                            ClientEvent::KeepAliveFailed {
+                                id,
+                                consecutive: failures,
+                            },
+                        );
+                    }
+                }
+                let _ = reply.send(result);
+            }
+            _ = wait_for_instant(due) => {
+                let result = perform_control(
+                    &mut transport,
+                    method,
+                    &uri,
+                    &mut cseq,
+                    &session_id,
+                    request_timeout,
+                    credentials.as_ref(),
+                )
+                .await;
+                let result = match result {
+                    Err(Error::RtspStatus {
+                        status: 405 | 501, ..
+                    }) if method == "GET_PARAMETER" => {
+                        // GET_PARAMETER is optional in RFC 2326; remember the
+                        // capability and keep the session alive via OPTIONS.
+                        method = "OPTIONS";
+                        perform_control(
+                            &mut transport,
+                            method,
+                            &uri,
+                            &mut cseq,
+                            &session_id,
+                            request_timeout,
+                            credentials.as_ref(),
+                        )
+                        .await
+                    }
+                    other => other,
+                };
+                match result {
+                    Ok(()) => {
+                        failures = 0;
+                        last_failure = None;
+                        last_control = Instant::now();
+                    }
+                    Err(error) => {
+                        failures = failures.saturating_add(1);
+                        last_failure = Some(Instant::now());
+                        tracing::warn!(
+                            session_id = %id,
+                            consecutive = failures,
+                            error = %error,
+                            "RTSP client keep-alive failed"
+                        );
+                        emit_client_event(
+                            &sink,
+                            ClientEvent::KeepAliveFailed {
+                                id,
+                                consecutive: failures,
+                            },
+                        );
+                        // Surface the failure to the consumer; drop it if the
+                        // queue is full rather than blocking the control plane.
+                        let _ = media_tx.try_send(Err(error));
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub struct RtspClient;
 impl RtspClient {
     pub async fn describe(url: url::Url, options: ClientOptions) -> Result<MediaDescription> {
@@ -417,11 +695,28 @@ impl RtspClient {
         Ok(description)
     }
 
+    /// Convenience entry accepting a URL string; see [`Self::describe`].
+    pub async fn describe_str(url: &str, options: ClientOptions) -> Result<MediaDescription> {
+        let url = url::Url::parse(url)
+            .map_err(|error| Error::Rtsp(format!("invalid RTSP URL: {error}")))?;
+        Self::describe(url, options).await
+    }
+
     pub async fn connect(url: url::Url, options: ClientOptions) -> Result<ClientSession> {
         validate_options(&options)?;
+        let sink = options.event_sink.clone();
         if options.transport != UpstreamTransport::Auto {
             let (stream, uri, setup_base, description) = open_and_describe(&url, &options).await?;
-            return setup::connect(stream, uri, setup_base, description, options).await;
+            return setup::connect(
+                stream,
+                uri,
+                setup_base,
+                description,
+                options,
+                next_client_session_id(),
+            )
+            .await
+            .map_err(|failure| failure.error);
         }
 
         let mut udp_options = options.clone();
@@ -430,27 +725,84 @@ impl RtspClient {
         let (stream, uri, setup_base, description) = match udp_open {
             Ok(value) => value,
             Err(error) if should_fallback_to_tcp(&error) => {
-                tracing::debug!(error = %error, "UDP RTSP connection failed; retrying with TCP interleaving");
+                let id = next_client_session_id();
+                tracing::debug!(session_id = %id, error = %error, "UDP RTSP connection failed; retrying with TCP interleaving");
+                emit_client_event(
+                    &sink,
+                    ClientEvent::Fallback {
+                        id,
+                        from: "udp",
+                        to: "tcp-interleaved",
+                    },
+                );
                 let mut tcp_options = options.clone();
                 tcp_options.transport = UpstreamTransport::TcpInterleaved;
                 let (stream, uri, setup_base, description) =
                     open_and_describe(&url, &tcp_options).await?;
-                return setup::connect(stream, uri, setup_base, description, tcp_options).await;
+                return setup::connect(stream, uri, setup_base, description, tcp_options, id)
+                    .await
+                    .map_err(|failure| failure.error);
             }
             Err(error) => return Err(error),
         };
-        match setup::connect(stream, uri, setup_base, description, udp_options).await {
+        let id = next_client_session_id();
+        match setup::connect(
+            stream,
+            uri.clone(),
+            setup_base,
+            description,
+            udp_options,
+            id,
+        )
+        .await
+        {
             Ok(session) => Ok(session),
-            Err(udp_error) if should_fallback_to_tcp(&udp_error) => {
-                tracing::debug!(error = %udp_error, "UDP RTSP SETUP failed; retrying with TCP interleaving");
+            Err(failure) if should_fallback_to_tcp(&failure.error) => {
+                tracing::debug!(session_id = %id, error = %failure.error, "UDP RTSP SETUP failed; retrying with TCP interleaving");
+                emit_client_event(
+                    &sink,
+                    ClientEvent::Fallback {
+                        id,
+                        from: "udp",
+                        to: "tcp-interleaved",
+                    },
+                );
                 let mut tcp_options = options;
                 tcp_options.transport = UpstreamTransport::TcpInterleaved;
-                let (stream, uri, setup_base, description) =
-                    open_and_describe(&url, &tcp_options).await?;
-                setup::connect(stream, uri, setup_base, description, tcp_options).await
+                // The SETUP rejection left the control connection and the
+                // parsed SDP intact: retry interleaved SETUP in place
+                // instead of redoing OPTIONS+DESCRIBE (audit RT-9).
+                let reused = setup::connect(
+                    failure.stream,
+                    uri.clone(),
+                    failure.setup_base,
+                    failure.description,
+                    tcp_options.clone(),
+                    id,
+                )
+                .await;
+                match reused {
+                    Ok(session) => Ok(session),
+                    Err(_) => {
+                        // The server may have closed the connection after the
+                        // rejection; recover with a fresh one.
+                        let (stream, uri, setup_base, description) =
+                            open_and_describe(&url, &tcp_options).await?;
+                        setup::connect(stream, uri, setup_base, description, tcp_options, id)
+                            .await
+                            .map_err(|failure| failure.error)
+                    }
+                }
             }
-            Err(error) => Err(error),
+            Err(failure) => Err(failure.error),
         }
+    }
+
+    /// Convenience entry accepting a URL string; see [`Self::connect`].
+    pub async fn connect_str(url: &str, options: ClientOptions) -> Result<ClientSession> {
+        let url = url::Url::parse(url)
+            .map_err(|error| Error::Rtsp(format!("invalid RTSP URL: {error}")))?;
+        Self::connect(url, options).await
     }
 
     /// Connect and keep retrying after a media-session disconnect.
@@ -467,6 +819,9 @@ impl RtspClient {
         let (tx, receiver) = mpsc::channel(options.output_queue_capacity);
         let cancel = CancellationToken::new();
         let task_cancel = cancel.clone();
+        let id = next_client_session_id();
+        let sink = options.event_sink.clone();
+        let started = Instant::now();
         let task = tokio::spawn(async move {
             let mut active = Some(initial);
             let mut failures = 0u32;
@@ -481,13 +836,50 @@ impl RtspClient {
                             session
                         }
                         Err(error) => {
-                            failures = failures.saturating_add(1);
-                            if policy.max_attempts != 0 && failures >= policy.max_attempts {
+                            // Permanent failures (bad credentials, invalid
+                            // configuration) never recover by retrying; with
+                            // max_attempts=0 they would otherwise loop forever.
+                            if matches!(error.retry_class(), RetryClass::Never) {
+                                let code = error.code();
+                                tracing::warn!(session_id = %id, error = %error, "RTSP client reconnect aborted by permanent error");
+                                emit_client_event(&sink, ClientEvent::Failed { id, code });
+                                emit_client_event(
+                                    &sink,
+                                    ClientEvent::Closed {
+                                        id,
+                                        elapsed: started.elapsed(),
+                                        error: Some(code),
+                                    },
+                                );
                                 let _ = tx.send(Err(error)).await;
                                 return;
                             }
-                            tracing::warn!(error = %error, delay_ms = delay.as_millis(), "RTSP client reconnect failed");
+                            failures = failures.saturating_add(1);
+                            if policy.max_attempts != 0 && failures >= policy.max_attempts {
+                                let code = error.code();
+                                tracing::warn!(session_id = %id, error = %error, attempts = failures, "RTSP client reconnect attempts exhausted");
+                                emit_client_event(&sink, ClientEvent::Failed { id, code });
+                                emit_client_event(
+                                    &sink,
+                                    ClientEvent::Closed {
+                                        id,
+                                        elapsed: started.elapsed(),
+                                        error: Some(code),
+                                    },
+                                );
+                                let _ = tx.send(Err(error)).await;
+                                return;
+                            }
                             let jittered = jittered_backoff(delay, failures);
+                            tracing::warn!(session_id = %id, error = %error, attempt = failures, delay_ms = jittered.as_millis(), "RTSP client reconnect failed");
+                            emit_client_event(
+                                &sink,
+                                ClientEvent::ReconnectBackoff {
+                                    id,
+                                    attempt: failures,
+                                    delay: jittered,
+                                },
+                            );
                             tokio::select! {
                                 _ = task_cancel.cancelled() => return,
                                 _ = sleep(jittered) => {}
@@ -502,17 +894,40 @@ impl RtspClient {
                     tokio::select! {
                         _ = task_cancel.cancelled() => return,
                         frame = session.next() => match frame {
-                            Some(frame) => {
-                                if tx.send(frame).await.is_err() {
+                            Some(Ok(unit)) => {
+                                if tx.send(Ok(unit)).await.is_err() {
                                     return;
                                 }
+                            }
+                            Some(Err(error)) => {
+                                // Transient errors (keep-alive failures, IO
+                                // hiccups) surface to the consumer and then
+                                // trigger a reconnect; permanent ones end the
+                                // session for good.
+                                let permanent =
+                                    matches!(error.retry_class(), RetryClass::Never);
+                                if tx.send(Err(error)).await.is_err() {
+                                    return;
+                                }
+                                if permanent {
+                                    return;
+                                }
+                                break;
                             }
                             None => break,
                         }
                     }
                 }
-                tracing::warn!("RTSP client session ended; reconnecting");
+                tracing::warn!(session_id = %id, "RTSP client session ended; reconnecting");
                 let jittered = jittered_backoff(delay, failures);
+                emit_client_event(
+                    &sink,
+                    ClientEvent::ReconnectBackoff {
+                        id,
+                        attempt: failures,
+                        delay: jittered,
+                    },
+                );
                 tokio::select! {
                     _ = task_cancel.cancelled() => return,
                     _ = sleep(jittered) => {}
@@ -522,6 +937,7 @@ impl RtspClient {
         });
         Ok(ReconnectingClientSession {
             description,
+            id,
             receiver,
             cancel,
             task,
@@ -549,6 +965,9 @@ async fn open_and_describe(
     let host = url
         .host_str()
         .ok_or_else(|| Error::Rtsp("RTSP URL has no host".into()))?;
+    // `url` reports IPv6 hosts bracketed ([::1]); the resolver wants the
+    // bare address.
+    let host = host.trim_matches(['[', ']']);
     let port = url
         .port()
         .unwrap_or_else(|| if url.scheme() == "rtsps" { 322 } else { 554 });
@@ -618,11 +1037,11 @@ async fn open_and_describe(
     Ok((stream, uri, setup_base, description))
 }
 
-fn status_error(method: &str, status: u16) -> Error {
+fn status_error(method: &'static str, status: u16) -> Error {
     if status == 401 || status == 403 {
         Error::Unauthorized
     } else {
-        Error::Rtsp(format!("{method} returned {status}"))
+        Error::RtspStatus { method, status }
     }
 }
 
@@ -672,7 +1091,10 @@ fn encode_request(
     extra: Option<&str>,
     authorization: Option<&str>,
 ) -> String {
-    let mut wire = format!("{method} {uri} RTSP/1.0\r\nCSeq: {cseq}\r\nUser-Agent: rtflow/0.1\r\n");
+    let mut wire = format!(
+        "{method} {uri} RTSP/1.0\r\nCSeq: {cseq}\r\nUser-Agent: rtflow/{}\r\n",
+        env!("CARGO_PKG_VERSION")
+    );
     if let Some(value) = authorization {
         wire.push_str("Authorization: ");
         wire.push_str(value);
@@ -738,12 +1160,9 @@ fn should_fallback_to_tcp(error: &Error) -> bool {
                 | std::io::ErrorKind::ConnectionReset
                 | std::io::ErrorKind::ConnectionAborted
         ),
-        Error::Rtsp(message) => {
-            let lower = message.to_ascii_lowercase();
-            lower.contains("461")
-                || lower.contains("unsupported transport")
-                || lower.contains("udp") && lower.contains("timeout")
-        }
+        // The server refused the negotiated transport (RFC 2326 §461);
+        // interleaved TCP is the standards-blessed fallback.
+        Error::RtspStatus { status: 461, .. } => true,
         _ => false,
     }
 }
@@ -800,5 +1219,313 @@ async fn send_request(
         stream
             .read_ahead_mut()
             .extend_from_slice(&temporary[..size]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn response_with_headers(status: u16, headers: Vec<(&str, &str)>) -> Response {
+        Response {
+            status,
+            reason: "OK".into(),
+            headers: headers
+                .into_iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .collect(),
+            body: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn jittered_backoff_stays_within_25_percent_bounds() {
+        let delay = Duration::from_secs(1);
+        for attempt in 0..256u32 {
+            let jittered = jittered_backoff(delay, attempt);
+            assert!(
+                jittered >= Duration::from_millis(750) && jittered <= Duration::from_millis(1250),
+                "attempt {attempt} produced {jittered:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn jittered_backoff_is_deterministic_per_attempt() {
+        let delay = Duration::from_millis(800);
+        for attempt in 0..32u32 {
+            assert_eq!(
+                jittered_backoff(delay, attempt),
+                jittered_backoff(delay, attempt)
+            );
+        }
+    }
+
+    #[test]
+    fn jittered_backoff_does_not_panic_on_large_attempts() {
+        let _ = jittered_backoff(Duration::from_secs(10), u32::MAX);
+    }
+
+    #[test]
+    fn fallback_classification_covers_transport_failures() {
+        assert!(should_fallback_to_tcp(&Error::Closed));
+        for kind in [
+            std::io::ErrorKind::TimedOut,
+            std::io::ErrorKind::ConnectionRefused,
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::ConnectionAborted,
+        ] {
+            assert!(
+                should_fallback_to_tcp(&Error::Io(std::io::Error::new(kind, "x"))),
+                "{kind:?} should fall back"
+            );
+        }
+        assert!(!should_fallback_to_tcp(&Error::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "x"
+        ))));
+        assert!(!should_fallback_to_tcp(&Error::Unauthorized));
+    }
+
+    // M1 switched fallback classification from error-text sniffing to the
+    // typed RtspStatus variant; free-text Rtsp errors no longer trigger it.
+    #[test]
+    fn fallback_classification_uses_typed_status() {
+        assert!(should_fallback_to_tcp(&Error::RtspStatus {
+            method: "SETUP",
+            status: 461
+        }));
+        assert!(!should_fallback_to_tcp(&Error::RtspStatus {
+            method: "PLAY",
+            status: 453
+        }));
+        assert!(!should_fallback_to_tcp(&Error::Rtsp(
+            "SETUP returned 461".into()
+        )));
+    }
+
+    #[test]
+    fn encode_request_has_expected_wire_shape() {
+        let wire = encode_request(
+            "OPTIONS",
+            "rtsp://host/stream",
+            5,
+            Some("Session: abc\r\n"),
+            Some("Basic dXNlcg=="),
+        );
+        assert_eq!(
+            wire,
+            format!(
+                concat!(
+                    "OPTIONS rtsp://host/stream RTSP/1.0\r\n",
+                    "CSeq: 5\r\n",
+                    "User-Agent: rtflow/{}\r\n",
+                    "Authorization: Basic dXNlcg==\r\n",
+                    "Session: abc\r\n",
+                    "\r\n",
+                ),
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+        let bare = encode_request("TEARDOWN", "rtsp://host/stream", 9, None, None);
+        assert_eq!(
+            bare,
+            format!(
+                concat!(
+                    "TEARDOWN rtsp://host/stream RTSP/1.0\r\n",
+                    "CSeq: 9\r\n",
+                    "User-Agent: rtflow/{}\r\n",
+                    "\r\n",
+                ),
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+    }
+
+    #[test]
+    fn session_id_is_extracted_and_timeout_suffix_stripped() {
+        let with_timeout = response_with_headers(200, vec![("session", "abc123;timeout=60")]);
+        assert_eq!(response_session_id(&with_timeout).unwrap(), "abc123");
+        let padded = response_with_headers(200, vec![("session", "  xyz  ")]);
+        assert_eq!(response_session_id(&padded).unwrap(), "xyz");
+        let empty = response_with_headers(200, vec![("session", ";timeout=60")]);
+        assert!(response_session_id(&empty).is_err());
+        let missing = response_with_headers(200, vec![]);
+        assert!(response_session_id(&missing).is_err());
+    }
+
+    #[test]
+    fn session_timeout_parameter_is_parsed() {
+        let with_timeout = response_with_headers(200, vec![("session", "abc;timeout=60")]);
+        assert_eq!(
+            response_session_timeout(&with_timeout),
+            Some(Duration::from_secs(60))
+        );
+        let spaced = response_with_headers(200, vec![("session", "abc ; Timeout = 30")]);
+        assert_eq!(
+            response_session_timeout(&spaced),
+            Some(Duration::from_secs(30))
+        );
+        let no_param = response_with_headers(200, vec![("session", "abc")]);
+        assert_eq!(response_session_timeout(&no_param), None);
+        let zero = response_with_headers(200, vec![("session", "abc;timeout=0")]);
+        assert_eq!(response_session_timeout(&zero), None);
+        let invalid = response_with_headers(200, vec![("session", "abc;timeout=lots")]);
+        assert_eq!(response_session_timeout(&invalid), None);
+        let missing = response_with_headers(200, vec![]);
+        assert_eq!(response_session_timeout(&missing), None);
+    }
+
+    #[test]
+    fn effective_keep_alive_adapts_to_server_timeout() {
+        // Configured interval wins when it is already below half the timeout.
+        assert_eq!(
+            effective_keep_alive(Some(Duration::from_secs(20)), Some(Duration::from_secs(60))),
+            Some(Duration::from_secs(20))
+        );
+        // A long configured interval is capped at half the server timeout.
+        assert_eq!(
+            effective_keep_alive(Some(Duration::from_secs(20)), Some(Duration::from_secs(10))),
+            Some(Duration::from_secs(5))
+        );
+        // Without configuration the server timeout drives the interval.
+        assert_eq!(
+            effective_keep_alive(None, Some(Duration::from_secs(10))),
+            Some(Duration::from_secs(5))
+        );
+        // Degenerate server timeouts never produce a zero interval.
+        assert_eq!(
+            effective_keep_alive(None, Some(Duration::from_secs(1))),
+            Some(Duration::from_secs(1))
+        );
+        // No server timeout: configuration passes through unchanged.
+        assert_eq!(
+            effective_keep_alive(Some(Duration::from_secs(20)), None),
+            Some(Duration::from_secs(20))
+        );
+        assert_eq!(effective_keep_alive(None, None), None);
+    }
+
+    #[test]
+    fn keep_alive_backoff_grows_and_stays_bounded() {
+        let interval = Duration::from_millis(100);
+        let first = keep_alive_backoff(interval, 1);
+        assert!(first >= Duration::from_millis(75) && first <= Duration::from_millis(125));
+        let third = keep_alive_backoff(interval, 3);
+        assert!(third >= Duration::from_millis(300) && third <= Duration::from_millis(500));
+        // Growth caps at 16x regardless of how many failures accumulate.
+        let saturated = keep_alive_backoff(interval, 5);
+        let huge = keep_alive_backoff(interval, 1_000);
+        for value in [saturated, huge] {
+            assert!(
+                value >= Duration::from_millis(1_200) && value <= Duration::from_secs(2),
+                "expected the 16x cap around 1.6s, got {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn status_error_maps_auth_statuses() {
+        assert!(matches!(status_error("OPTIONS", 401), Error::Unauthorized));
+        assert!(matches!(status_error("SETUP", 403), Error::Unauthorized));
+        let Error::RtspStatus { method, status } = status_error("PLAY", 453) else {
+            panic!("expected Error::RtspStatus");
+        };
+        assert_eq!(method, "PLAY");
+        assert_eq!(status, 453);
+    }
+
+    #[test]
+    fn candidate_cseq_is_case_insensitive_and_lenient() {
+        assert_eq!(
+            candidate_headers_cseq(&response_with_headers(200, vec![("cseq", "7")])),
+            Some(7)
+        );
+        assert_eq!(
+            candidate_headers_cseq(&response_with_headers(200, vec![("CSeq", "8")])),
+            Some(8)
+        );
+        assert_eq!(
+            candidate_headers_cseq(&response_with_headers(200, vec![("cseq", "not-a-number")])),
+            None
+        );
+        assert_eq!(
+            candidate_headers_cseq(&response_with_headers(200, vec![])),
+            None
+        );
+    }
+
+    #[test]
+    fn validate_response_cseq_enforces_exact_match() {
+        let matching = response_with_headers(200, vec![("cseq", "3")]);
+        assert!(validate_response_cseq(&matching, 3).is_ok());
+        let stale = response_with_headers(200, vec![("cseq", "4")]);
+        assert!(validate_response_cseq(&stale, 3).is_err());
+        let missing = response_with_headers(200, vec![]);
+        assert!(validate_response_cseq(&missing, 3).is_err());
+    }
+
+    #[test]
+    fn validate_options_rejects_degenerate_values() {
+        assert!(validate_options(&ClientOptions::default()).is_ok());
+        let options = ClientOptions {
+            output_queue_capacity: 0,
+            ..ClientOptions::default()
+        };
+        assert!(matches!(
+            validate_options(&options),
+            Err(Error::Limit("client output queue capacity"))
+        ));
+        let options = ClientOptions {
+            keep_alive_interval: Some(Duration::ZERO),
+            ..ClientOptions::default()
+        };
+        assert!(matches!(
+            validate_options(&options),
+            Err(Error::Limit("client keep-alive interval"))
+        ));
+        let options = ClientOptions {
+            request_timeout: Duration::ZERO,
+            ..ClientOptions::default()
+        };
+        assert!(matches!(
+            validate_options(&options),
+            Err(Error::Limit("client request timeout"))
+        ));
+    }
+
+    #[test]
+    fn builder_round_trips_and_validates() {
+        let options = ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .output_queue_capacity(8)
+            .keep_alive_interval(None)
+            .build()
+            .unwrap();
+        assert_eq!(options.transport, UpstreamTransport::TcpInterleaved);
+        assert_eq!(options.output_queue_capacity, 8);
+        assert_eq!(options.keep_alive_interval, None);
+        assert!(
+            ClientOptions::builder()
+                .output_queue_capacity(0)
+                .build()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn reconnect_policy_validate_rejects_degenerate_delays() {
+        assert!(ClientReconnectPolicy::default().validate().is_ok());
+        let zero_initial = ClientReconnectPolicy {
+            initial_delay: Duration::ZERO,
+            ..ClientReconnectPolicy::default()
+        };
+        assert!(zero_initial.validate().is_err());
+        let inverted = ClientReconnectPolicy {
+            initial_delay: Duration::from_secs(10),
+            max_delay: Duration::from_secs(1),
+            ..ClientReconnectPolicy::default()
+        };
+        assert!(inverted.validate().is_err());
     }
 }

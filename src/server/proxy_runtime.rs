@@ -99,6 +99,9 @@ async fn run_proxy(
     let selector = PolicySelector {
         strategy: upstream.failover.strategy,
     };
+    // TODO(client-roadmap M3): this hand-rolled backoff/failover duplicates
+    // `RtspClient::connect_reconnecting`; once the client emits connect/
+    // backoff events, evaluate converging on the shared reconnect API.
     let mut attempts = 0u32;
     let mut no_subscriber_since: Option<std::time::Instant> = None;
     let mut had_subscriber = false;

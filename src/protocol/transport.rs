@@ -203,7 +203,7 @@ pub struct UdpPair {
 }
 const UDP_RECEIVE_BUFFER_SIZE: usize = 4 * 1024 * 1024;
 
-fn bind_udp(addr: SocketAddr) -> Result<UdpSocket> {
+fn bind_udp(addr: SocketAddr, recv_buffer: usize) -> Result<UdpSocket> {
     let domain = match addr {
         SocketAddr::V4(_) => Domain::IPV4,
         SocketAddr::V6(_) => Domain::IPV6,
@@ -211,7 +211,7 @@ fn bind_udp(addr: SocketAddr) -> Result<UdpSocket> {
     let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP)).map_err(Error::Io)?;
     socket.set_nonblocking(true).map_err(Error::Io)?;
     socket
-        .set_recv_buffer_size(UDP_RECEIVE_BUFFER_SIZE)
+        .set_recv_buffer_size(recv_buffer)
         .map_err(Error::Io)?;
     socket.bind(&addr.into()).map_err(Error::Io)?;
     UdpSocket::from_std(socket.into()).map_err(Error::Io)
@@ -219,6 +219,17 @@ fn bind_udp(addr: SocketAddr) -> Result<UdpSocket> {
 
 impl UdpPair {
     pub async fn bind(ip: IpAddr, range: Option<RangeInclusive<u16>>) -> Result<Self> {
+        Self::bind_with_recv_buffer(ip, range, UDP_RECEIVE_BUFFER_SIZE).await
+    }
+
+    /// Like [`Self::bind`] with an explicit socket receive-buffer size.
+    /// Memory-constrained clients can trade burst tolerance for a smaller
+    /// footprint (the default is 4MiB per socket).
+    pub async fn bind_with_recv_buffer(
+        ip: IpAddr,
+        range: Option<RangeInclusive<u16>>,
+        recv_buffer: usize,
+    ) -> Result<Self> {
         if let Some(range) = range {
             for rtp_port in range.clone() {
                 let Some(rtcp_port) = rtp_port.checked_add(1) else {
@@ -227,8 +238,8 @@ impl UdpPair {
                 if !range.contains(&rtcp_port) {
                     continue;
                 }
-                if let Ok(rtp) = bind_udp(SocketAddr::new(ip, rtp_port))
-                    && let Ok(rtcp) = bind_udp(SocketAddr::new(ip, rtcp_port))
+                if let Ok(rtp) = bind_udp(SocketAddr::new(ip, rtp_port), recv_buffer)
+                    && let Ok(rtcp) = bind_udp(SocketAddr::new(ip, rtcp_port), recv_buffer)
                 {
                     return Ok(Self {
                         rtp: Arc::new(rtp),
@@ -242,12 +253,12 @@ impl UdpPair {
             )));
         }
         for _ in 0..64 {
-            let rtp = bind_udp(SocketAddr::new(ip, 0))?;
+            let rtp = bind_udp(SocketAddr::new(ip, 0), recv_buffer)?;
             let port = rtp.local_addr()?.port();
             let Some(rtcp_port) = port.checked_add(1) else {
                 continue;
             };
-            if let Ok(rtcp) = bind_udp(SocketAddr::new(ip, rtcp_port)) {
+            if let Ok(rtcp) = bind_udp(SocketAddr::new(ip, rtcp_port), recv_buffer) {
                 return Ok(Self {
                     rtp: Arc::new(rtp),
                     rtcp: Arc::new(rtcp),
