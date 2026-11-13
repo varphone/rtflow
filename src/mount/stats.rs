@@ -43,13 +43,13 @@ pub(crate) struct StreamCounters {
     /// Optional global registry to mirror frame counters into
     /// (`rtflow_frames_accepted_total` / `rtflow_frames_dropped_total`).
     #[cfg(feature = "metrics")]
-    global: Option<Arc<crate::metrics::MetricsRegistry>>,
+    global: Option<Arc<crate::core::metrics::MetricsRegistry>>,
 }
 
 impl StreamCounters {
     /// Mirror frame counters into a global metrics registry (once per mount).
     #[cfg(feature = "metrics")]
-    pub fn attach_global(&mut self, registry: Arc<crate::metrics::MetricsRegistry>) {
+    pub fn attach_global(&mut self, registry: Arc<crate::core::metrics::MetricsRegistry>) {
         self.global = Some(registry);
     }
 

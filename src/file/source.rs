@@ -3,6 +3,7 @@ use super::matroska::MatroskaDemuxer;
 #[cfg(feature = "mp4")]
 use super::mp4::Mp4Demuxer;
 use super::{mpeg_ts::MpegTsDemuxer, raw};
+pub use crate::media::demux::{DemuxedSample, Demuxer};
 #[cfg(feature = "server")]
 use crate::mount::{LocalPublisher, PushResult};
 use crate::{
@@ -82,19 +83,6 @@ impl Default for FileSourceOptions {
             audio_track: None,
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct DemuxedSample {
-    pub unit: AccessUnit,
-    pub duration: Option<Duration>,
-}
-
-pub trait Demuxer: Send {
-    fn description(&self) -> &MediaDescription;
-    fn duration(&self) -> Option<Duration>;
-    fn next_sample(&mut self) -> Result<Option<DemuxedSample>>;
-    fn seek(&mut self, position: Duration) -> Result<()>;
 }
 
 pub struct FileSource {

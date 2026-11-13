@@ -19,7 +19,7 @@ pub enum MountConfig {
     },
     #[cfg(feature = "file-storage")]
     Vod {
-        source: Arc<dyn VodSource>,
+        source: Arc<dyn crate::media::vod::VodSource>,
     },
 }
 

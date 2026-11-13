@@ -7,7 +7,19 @@
 
 pub mod bitstream;
 pub mod clock;
+#[cfg(feature = "multicast")]
+pub mod connection;
+#[cfg(feature = "srtp")]
+pub mod crypto;
+pub mod demux;
 pub mod flv;
+pub mod vod;
+
+#[cfg(feature = "multicast")]
+pub use connection::SdpConnection;
+#[cfg(feature = "srtp")]
+pub use crypto::SdpCrypto;
+pub use demux::{DemuxedSample, Demuxer};
 
 /// MPEG-TS packet size in bytes.
 pub const TS_PACKET_SIZE: usize = 188;
@@ -111,7 +123,7 @@ pub struct TrackDescription {
     pub frame_rate: Option<(u32, u32)>,
     /// SRTP crypto parameters from SDP `a=crypto:` attribute.
     #[cfg(feature = "srtp")]
-    pub crypto: Option<crate::protocol::sdp::SdpCrypto>,
+    pub crypto: Option<crate::media::crypto::SdpCrypto>,
 }
 impl TrackDescription {
     /// H.264 video track from encoder parameter sets.
@@ -269,7 +281,7 @@ pub struct MediaDescription {
     pub tracks: Vec<TrackDescription>,
     /// SDP connection information (`c=` line). None if not present.
     #[cfg(feature = "multicast")]
-    pub connection: Option<crate::protocol::sdp::SdpConnection>,
+    pub connection: Option<crate::media::connection::SdpConnection>,
 }
 impl MediaDescription {
     pub fn track(&self, id: TrackId) -> Option<&TrackDescription> {

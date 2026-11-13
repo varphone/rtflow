@@ -2,31 +2,48 @@
 
 ## 分层
 
+依赖只允许从上往下（脚本 `scripts/check-layering.py` 强制，当前依赖图
+SCC = 0、上行依赖 = 0）：
+
 ```text
 application / device integration
         │ AccessUnit / MediaDescription
         ▼
-file/storage ── pipeline ── server ── client ── proxy
-  │            │             │
-  └────── runtime/framing ───┘
-               │
-       protocol/{rtsp,sdp,range,auth,transport}
-               │
-        rtp + rtcp + media
+gateway ── protocols/{hls,dash,http_flv,rtmp,srt,webrtc,gst} ── server/client
+   │                    │                                        │
+   │                    └─────────────┬──────────────────────────┘
+   │                                  ▼
+   │            http / metrics(exporter) / mount / pipeline
+   │                                  │
+   │            segment / file / storage / runtime
+   ▼                                  │
+rtsp/{message,sdp,range,auth,token_auth,transport,multicast}
+   │                                  │
+   └──────── rtp / rtcp / srtp / security ──────────┘
+                                      │
+                        core/{error,identity,observe,metrics} + media
 ```
 
-- `file/`：统一 `Demuxer`、容器/裸流后端、时间戳节流、循环/seek、阻塞磁盘 worker 和有界预取；可直达本地 mount 或 Element DAG ingress。
-- `media/`：稳定领域类型、有界 fan-out，以及可运行的 Element DAG；每个节点和 Link 都有独立有界队列。
-- `protocol/`：RTSP、SDP、鉴权和 Transport 的纯协议解析/编码，输入全部设上限。
-- `rtp/`、`rtcp/`：载荷编解包、jitter buffer 和控制报告。
-- `runtime/`：连接 framing，把 RTSP 消息和 `$` interleaved frame 从同一字节流中分离。
+- `core/`：`error`、`identity`、`observe`（事件与 `EventSink`）、`metrics`
+  （无状态的计数器/直方图注册表与事件汇）。整个 crate 的最底层。
+- `media/`：稳定领域类型、位流/时钟/FLV 工具、容器无关的 `Demuxer`、
+  `VodSource`、SDP 值类型（`SdpCrypto`/`SdpConnection`）与 fMP4 写出。
+- `rtsp/`：RTSP 消息编解码、SDP、NPT Range、鉴权、Transport 与组播，输入
+  全部设上限；根模块继续以 `rtflow::auth`、`rtflow::transport` 等路径再导出。
+- `rtp/`、`rtcp/`、`srtp/`：载荷编解包、jitter buffer、控制报告与 SRTP。
 - `security/`：CIDR ACL、有界连接限流以及 Rustls 客户端/服务端配置。
-- `storage/`：崩溃安全分段录制、恢复扫描、保留策略和每会话 VOD source。
-- `client/`：播放会话、Content-Base/control URI 解析、每轨接收任务、jitter 定时排空与自动保活。
-- `server/`：mount registry、会话状态机及发送/接收任务。
-- `proxy/`：上游配置、状态和重连策略；Proxy mount 可自动 DESCRIBE，上游 supervisor 由 mount 生命周期托管。
-
-根模块继续导出 `rtflow::media`、`rtflow::rtp` 等稳定门面。物理目录可以继续拆分，不要求调用方同步修改 import。
+- `runtime/`：连接 framing，把 RTSP 消息和 `$` interleaved frame 从同一字节流中分离。
+- `pipeline/`：可运行的 Element DAG，每个节点和 Link 都有独立有界队列。
+- `mount/`：流注册表、发布者句柄、启动关键帧缓存，以及代理的上游配置/状态
+  （`upstream`）与时间线连续性（`continuity`）。
+- `http/`、`metrics/`：HTTP 服务与 Prometheus/`/stats` 导出（注册表在 `core`）。
+- `client/`、`server/`：RTSP 播放客户端（控制面独立任务、重连、keep-alive）
+  与服务端会话状态机、代理/VOD 运行时。
+- `file/`、`storage/`：容器解复用与文件播放；崩溃安全录制、恢复与 VOD source。
+- `protocols/`：HLS、DASH、HTTP-FLV/WS-FLV、RTMP、SRT、WebRTC、GStreamer
+  适配器；根模块以 `rtflow::hls` 等路径再导出。
+- `proxy/`：兼容门面，类型已迁入 `mount::{upstream,continuity}`（0.3 弃用）。
+- `gateway/`：多协议编排入口。
 
 ## 数据面与所有权
 

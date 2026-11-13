@@ -4,10 +4,14 @@
 //! from. All protocol servers (RTSP, RTMP, SRT, WebRTC) share the same mount
 //! registry, enabling cross-protocol interop.
 mod config;
+#[cfg(feature = "server")]
+pub mod continuity;
 mod handle;
 mod publisher;
 mod registry;
 mod stats;
+#[cfg(feature = "server")]
+pub mod upstream;
 
 pub(crate) use config::description_for;
 pub use config::{MountConfig, PushResult};
@@ -20,9 +24,10 @@ pub use stats::{MountSnapshot, StreamStats};
 pub(crate) use stats::StreamCounters;
 
 #[cfg(feature = "server")]
-use crate::proxy::{KeyframeCache, ProxyState, UpstreamConfig};
-#[cfg(feature = "file-storage")]
-use crate::storage::VodSource;
+use self::{
+    continuity::KeyframeCache,
+    upstream::{ProxyState, UpstreamConfig},
+};
 use crate::{
     Codec, Error, Result,
     identity::MountId,

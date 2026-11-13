@@ -12,7 +12,8 @@ mod mpeg_ts;
 mod raw;
 mod source;
 
+pub use crate::media::demux::{DemuxedSample, Demuxer};
 pub use source::{
-    ContainerFormat, DemuxedSample, Demuxer, FilePlayback, FileSource, FileSourceOptions, LoopMode,
-    PlaybackStats, RawFormat,
+    ContainerFormat, FilePlayback, FileSource, FileSourceOptions, LoopMode, PlaybackStats,
+    RawFormat,
 };

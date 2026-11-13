@@ -1,17 +1,17 @@
 //! Persistent media storage, recording, indexing and VOD sources.
 mod recording;
 
-use crate::{Result, file::Demuxer, media::MediaDescription};
+use crate::{
+    Result,
+    media::{MediaDescription, demux::Demuxer},
+};
+
+pub use crate::media::vod::VodSource;
 
 pub use recording::{
     RecordOutcome, RecordingCatalog, RecordingConfig, RecordingDemuxer, RecordingReport,
     RecordingSink, SegmentInfo, SegmentRecorder,
 };
-
-pub trait VodSource: Send + Sync + 'static {
-    fn description(&self) -> &MediaDescription;
-    fn open(&self) -> Result<Box<dyn Demuxer>>;
-}
 
 #[derive(Clone)]
 pub struct RecordingVodSource {

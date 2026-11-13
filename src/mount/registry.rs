@@ -13,7 +13,7 @@ pub struct MountRegistry {
     /// mounts registered via RtspServer, leaving RTMP/SRT/gateway mounts
     /// invisible in /metrics).
     #[cfg(feature = "metrics")]
-    global: Option<Arc<crate::metrics::MetricsRegistry>>,
+    global: Option<Arc<crate::core::metrics::MetricsRegistry>>,
 }
 
 /// Default per-consumer buffering limit (bytes) applied to every mount
@@ -38,7 +38,7 @@ pub struct MountOptions {
     /// Startup (keyframe) cache policy for proxy mounts; `None` → enabled
     /// with default limits.
     #[cfg(feature = "server")]
-    pub startup_cache_config: Option<crate::proxy::StartupCacheConfig>,
+    pub startup_cache_config: Option<crate::mount::continuity::StartupCacheConfig>,
 }
 
 impl MountRegistry {
@@ -54,7 +54,7 @@ impl MountRegistry {
     /// Mirror per-mount frame counters into a global metrics registry.
     /// Must be called before mounts are registered.
     #[cfg(feature = "metrics")]
-    pub fn attach_global(&mut self, registry: Arc<crate::metrics::MetricsRegistry>) {
+    pub fn attach_global(&mut self, registry: Arc<crate::core::metrics::MetricsRegistry>) {
         self.global = Some(registry);
     }
 
@@ -172,7 +172,7 @@ impl MountRegistry {
                         #[cfg(feature = "multicast")]
                         connection: None,
                     },
-                    crate::proxy::StartupCacheConfig {
+                    crate::mount::continuity::StartupCacheConfig {
                         enabled: false,
                         ..Default::default()
                     },
@@ -192,7 +192,7 @@ impl MountRegistry {
                 } else if let Some(sink) = &options.event_sink {
                     // Gateway-style registries carry metrics through the
                     // event sink instead of a registry-global handle.
-                    if let Some(registry) = crate::metrics::registry_from_sink(sink) {
+                    if let Some(registry) = crate::core::metrics::registry_from_sink(sink) {
                         counters.attach_global(registry);
                     }
                 }
