@@ -33,8 +33,8 @@
 | `RTP/AVP/TCP;interleaved=a;rtcp-mux` | 支持 | 单 channel |
 | `RTP/AVP;multicast` | 支持（IPv4） | SDP `c=` + `m=` 端口；mount 级共享 sender |
 | `RTP/SAVP;unicast` + `a=crypto` | 支持 | AES_128_CM_HMAC_SHA1_80；SRTP + SRTCP |
-| `RTP/SAVP/TCP` | 461 | TCP interleaved 上的 SRTP 未实现 |
-| 组播 + SRTP | 不支持 | — |
+| `RTP/SAVP/TCP` | 支持 | TCP interleaved 上的 SRTP/SRTCP |
+| 组播 + `RTP/SAVP` | 支持 | 组播 SRTP，客户端解密 |
 | RTSPS | 支持 | TLS（`tls` feature） |
 
 ## 3. 码流矩阵
@@ -50,8 +50,14 @@
 | Opus | RFC 7587 透传 | `opus/48000/2` | RTSP/HLS |
 | MP3 | RFC 2250/5219（MPA） | `MPA/90000`、PT 14 | RTSP |
 | G.726 16/24/32/40 | RFC 3551 | `G726-xx/8000` | RTSP |
+| AV1 | draft-ietf-payload-av1 | `AV1/90000` | RTSP |
+| JPEG | RFC 2435 | `JPEG/90000` | RTSP |
+| H.263 | RFC 4629 | `H263-1998/90000`、PT 34 | RTSP |
+| MPEG-4 Part 2 | RFC 3016 | `MP4V-ES/90000` | RTSP |
 
-明确不支持：AV1、JPEG、H.263、MPEG-4 Part 2、MPEG-2 Audio（MP3 除外）。
+明确不支持：MPEG-2 Audio（MP3 除外）、RTSP 2.0（RFC 7826）。
+AV1/JPEG/H.263/MPEG-4 Part 2 目前提供基础打包/解包与 SDP 映射，未做
+profile/level 级 fmtp 校验与浏览器/ffmpeg 互操作矩阵。
 
 ## 4. Feature 组合
 
@@ -98,13 +104,9 @@ UDP 接收缓冲 4 MiB/socket。
 
 | 项 | 现状 |
 |---|---|
-| `Transport: destination=`/`source=` | 解析后忽略，不回显；单播以 `client_port` 为准 |
-| `Transport: mode=record` 回显 | 不回显；RECORD 由方法本身驱动 |
-| SDP `a=sendonly/recvonly`、`a=ptime`、`a=rtcp:`、`b=AS` | 解析时容忍但不参与决策 |
 | RTSP 2.0（RFC 7826） | 不支持 |
-| `RTP/SAVP/TCP`、组播 SRTP | 461/不支持 |
-| 组播客户端 RTCP、SRTP 客户端 SRTCP RR | 不发送（仅接收媒体） |
-| AV1/JPEG/H.263/MPEG-4 Part 2 | 不支持 |
+| AV1/JPEG/H.263/MPEG-4 的 fmtp/profile 校验 | fmtp 透传，未做 profile/level 校验 |
+| 组播 SRTP 的 SRTCP 报告 | 客户端发送 SRTCP RR（组 RTCP 端口） |
 
 ## 8. 验证入口
 

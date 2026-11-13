@@ -6,9 +6,10 @@
 
 - RTSP 客户端：OPTIONS、DESCRIBE、多轨 SETUP、PLAY、PAUSE、TEARDOWN、GET_PARAMETER 自动保活。
 - RTSP 服务端：本地源、外部发布源、自动 SDP 探测的按需拉流代理；会话状态和超时、连接数上限、鉴权、UDP 端口范围。
-- 传输：RTP/RTCP over UDP、TCP interleaved 与 `rtcp-mux`（单端口/单 channel）；客户端默认仅在传输能力/网络失败时从 UDP 回退 TCP interleaved；服务端发布端严格校验来源地址、Payload Type 和 SSRC，并按时间调度 compound RTCP SR/SDES。
+- 传输：RTP/RTCP over UDP、TCP interleaved、`rtcp-mux`（单端口/单 channel）、
+  组播与 `RTP/SAVP`（SRTP/SRTCP）；Transport 的 destination/source/mode 会解析并回显；客户端默认仅在传输能力/网络失败时从 UDP 回退 TCP interleaved；服务端发布端严格校验来源地址、Payload Type 和 SSRC，并按时间调度 compound RTCP SR/SDES。
 - 客户端重连：`RtspClient::connect_reconnecting` 配合 `ClientReconnectPolicy` 提供显式启用的断线退避重连；普通 `connect` 保持一次性连接和直接报错语义。
-- 编码载荷：H.264 RFC 6184、H.265 RFC 7798、AAC MPEG4-GENERIC、G.711 PCMA/PCMU、Opus、VP8/VP9、MP3（MPA）与 G.726 16/24/32/40。
+- 编码载荷：H.264 RFC 6184、H.265 RFC 7798、AAC MPEG4-GENERIC、G.711 PCMA/PCMU、Opus、VP8/VP9、MP3（MPA）、G.726 16/24/32/40，以及 AV1、JPEG、H.263、MPEG-4 Part 2 的基础 RTP 支持。
 - 组播（`multicast` feature，需显式启用）：RTSP `RTP/AVP;multicast` 发布/接收；SDP `c=`/`m=` 组地址与端口。
 - 安全传输（`srtp` feature，需显式启用）：RTSP `RTP/SAVP` + SDP `a=crypto`（AES_128_CM_HMAC_SHA1_80），RTP/SRTCP 加解密；临时/测试源由 `test-source` feature 提供。
 - 文件源：MP4/MOV/M4A、Matroska/MKV、MPEG-TS/M2TS、G.711 WAV，以及裸 H.264/H.265/ADTS AAC/PCMA/PCMU；支持实时节流、起播位置、有限/无限循环、空闲暂停与有界预取。
@@ -28,10 +29,11 @@
 
 HTTP-FLV、WS-FLV 与 HLS 是当前优先维护的 RTSP 输出协议。WS-FLV 走独立 TCP 端口（RFC 6455 服务端握手，路径与 HTTP-FLV 一致：mount `/live/stream` ↔ `/live/stream.flv`），延迟最低，配合 mpegts.js/flv.js 在浏览器播放；HLS 仍是兼容性基线：实际分段长度取决于下一个视频随机访问点，因此要达到 1–3 秒端到端延迟，编码器 GOP/关键帧间隔必须不大于目标分段时长。
 
-RTSP 扩展的当前边界：`srtp` 仅支持 UDP unicast（`RTP/SAVP/TCP` 返回 461），
-客户端 SRTP 会话暂不发送 SRTCP RR，SDP `inline:` 主密钥应配合 RTSPS 使用；
+RTSP 扩展的当前边界：SRTP 支持 UDP 与 TCP interleaved（`RTP/SAVP`），
+客户端发送 SRTCP RR，组播也支持 SRTP；SDP `inline:` 主密钥应配合 RTSPS 使用。
 `multicast` 仅支持 IPv4，服务端每 mount 复用单个 RTP 端口按 PT 分流，客户端
-组播接收不发送 RTCP；RTSP 2.0、AV1/JPEG/H.263/MPEG-4 Part 2 不在支持范围。
+向组 RTCP 端口发送 compound RR。RTSP 2.0 不在支持范围；AV1/JPEG/H.263/
+MPEG-4 Part 2 提供基础 RTP/SDP 支持（fmtp profile 未校验）。
 
 `dash`、`rtmp`、`srt`、`webrtc` feature 目前仅保留模块占位，不能视为可用协议实现；它们只通过 `experimental-protocols` 聚合 feature 开启，生产部署不应启用或对外承诺这些能力。其中 `webrtc`（WHIP/WHEP）的 ICE/DTLS/SRTP 媒体管线未实现：信令握手可完成，但浏览器协商后不会有媒体流——**WHIP/WHEP 对外声明为不可用占位**，不要用 `Location` 响应头引导客户端接入。嵌入式 Linux/Yocto 网关建议使用 `embedded-gateway` profile；默认 `full` 为兼容现有 0.2 使用方式，后续主版本再迁移默认 profile。
 
