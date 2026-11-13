@@ -419,6 +419,7 @@ pub(super) async fn connect_udp(
                                     clock_rate,
                                     local_ssrc,
                                     &packets,
+                                    options.rtcp_report_interval,
                                 )
                                 && let Ok(wire) = report.try_encode()
                             {
@@ -463,9 +464,14 @@ pub(super) async fn connect_udp(
                             None => expected_ssrc = Some(packet.header.ssrc),
                             _ => {}
                         }
-                        if let Err(error) =
-                            observe_quality(&rtp_quality, track_id, clock_rate, local_ssrc, &packet)
-                        {
+                        if let Err(error) = observe_quality(
+                            &rtp_quality,
+                            track_id,
+                            clock_rate,
+                            local_ssrc,
+                            &packet,
+                            options.rtcp_report_interval,
+                        ) {
                             if !try_deliver(&tx, Err(error), &mut dropped) {
                                 return;
                             }
@@ -514,6 +520,7 @@ pub(super) async fn connect_udp(
                             clock_rate,
                             local_ssrc,
                             &packets,
+                            options.rtcp_report_interval,
                         )
                         && let Ok(report) = report.try_encode()
                     {

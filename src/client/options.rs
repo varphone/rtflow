@@ -12,6 +12,8 @@ pub struct ClientOptions {
     /// new frame is dropped (the consumer is not stalled). Defaults to 8 MiB.
     pub max_output_bytes: usize,
     pub keep_alive_interval: Option<Duration>,
+    /// Interval between client RTCP receiver reports (default 5s).
+    pub rtcp_report_interval: Duration,
     #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
     pub play_range: Option<NptRange>,
@@ -46,6 +48,7 @@ impl std::fmt::Debug for ClientOptions {
             .field("output_queue_capacity", &self.output_queue_capacity)
             .field("max_output_bytes", &self.max_output_bytes)
             .field("keep_alive_interval", &self.keep_alive_interval)
+            .field("rtcp_report_interval", &self.rtcp_report_interval)
             .field("play_range", &self.play_range)
             .field("event_sink", &self.event_sink.as_ref().map(|_| "<sink>"))
             .field("udp_recv_buffer", &self.udp_recv_buffer)
@@ -73,6 +76,7 @@ impl Default for ClientOptions {
             output_queue_capacity: 64,
             max_output_bytes: 8 * 1024 * 1024,
             keep_alive_interval: Some(Duration::from_secs(20)),
+            rtcp_report_interval: Duration::from_secs(5),
             #[cfg(feature = "tls")]
             tls: None,
             play_range: None,
@@ -156,6 +160,9 @@ pub(super) fn validate_options(options: &ClientOptions) -> Result<()> {
     if options.max_output_bytes == 0 {
         return Err(Error::Limit("client output byte budget"));
     }
+    if options.rtcp_report_interval == Duration::ZERO {
+        return Err(Error::Limit("client RTCP report interval"));
+    }
     if options.keep_alive_interval == Some(Duration::ZERO) {
         return Err(Error::Limit("client keep-alive interval"));
     }
@@ -236,6 +243,11 @@ impl ClientOptionsBuilder {
 
     pub fn keep_alive_interval(mut self, value: Option<Duration>) -> Self {
         self.options.keep_alive_interval = value;
+        self
+    }
+
+    pub fn rtcp_report_interval(mut self, value: Duration) -> Self {
+        self.options.rtcp_report_interval = value;
         self
     }
 

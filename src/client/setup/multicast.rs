@@ -239,7 +239,7 @@ pub(super) async fn connect_multicast(
     let receiver_quality = quality.clone();
     tasks.push(tokio::spawn(async move {
         let mut buffer = bytes::BytesMut::zeroed(65_536);
-        let mut rr_tick = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut rr_tick = tokio::time::interval(options.rtcp_report_interval);
         rr_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut active: HashMap<u8, (JitterBuffer, Depacketizer, u8, u32, u32)> = HashMap::new();
         for track in track_list {
@@ -273,6 +273,8 @@ pub(super) async fn connect_multicast(
                     // Multicast receivers report over the RTCP group port;
                     // there is no unicast back-channel.
                     for (track_id, ssrc) in &rr_meta {
+                        #[cfg(not(feature = "srtp"))]
+                        let _ = track_id;
                         let Ok(report) = crate::rtcp::CompoundPacket::new(vec![
                             RtcpPacket::ReceiverReport { ssrc: *ssrc },
                         ])
@@ -297,6 +299,7 @@ pub(super) async fn connect_multicast(
             let Ok((size, _source)) = received else {
                 return;
             };
+            #[allow(unused_mut)]
             let mut payload = bytes::Bytes::copy_from_slice(&buffer[..size]);
             #[cfg(feature = "srtp")]
             if let Some(payload_type) = payload.get(1).map(|byte| byte & 0x7f)
@@ -321,6 +324,7 @@ pub(super) async fn connect_multicast(
                 *clock_rate,
                 *local_ssrc,
                 &packet,
+                options.rtcp_report_interval,
             );
             let mut dropped = 0u64;
             for result in receive_rtp_packet(packet, jitter, depacketizer) {

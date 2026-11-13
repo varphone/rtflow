@@ -260,7 +260,7 @@ pub(super) async fn connect_interleaved(
         let rr_enabled = !interleaved_crypto.is_empty();
         #[cfg(not(feature = "srtp"))]
         let rr_enabled = false;
-        let mut rr_tick = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut rr_tick = tokio::time::interval(options.rtcp_report_interval);
         rr_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         rr_tick.tick().await;
         loop {
@@ -363,6 +363,7 @@ pub(super) async fn connect_interleaved(
                                             *track_id,
                                             *clock_rate,
                                             *local_ssrc,
+                                            options.rtcp_report_interval,
                                             &rtcp_writer,
                                         )
                                         .await
@@ -379,6 +380,7 @@ pub(super) async fn connect_interleaved(
                                         *track_id,
                                         *clock_rate,
                                         *local_ssrc,
+                                        options.rtcp_report_interval,
                                         &rtcp_writer,
                                     )
                                     .await;
@@ -389,6 +391,7 @@ pub(super) async fn connect_interleaved(
                                         *track_id,
                                         *clock_rate,
                                         *local_ssrc,
+                                        options.rtcp_report_interval,
                                         &rtcp_writer,
                                     )
                                     .await;
@@ -431,6 +434,7 @@ pub(super) async fn connect_interleaved(
                                         *clock_rate,
                                         *local_ssrc,
                                         &packet,
+                                        options.rtcp_report_interval,
                                     ) {
                                         if !try_deliver(&tx, Err(error), &mut dropped) {
                                             return;
@@ -453,6 +457,7 @@ pub(super) async fn connect_interleaved(
                                         *clock_rate,
                                         *local_ssrc,
                                         &packets,
+                                        options.rtcp_report_interval,
                                     )
                                     && let Ok(payload) = report.try_encode()
                                 {

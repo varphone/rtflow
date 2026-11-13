@@ -225,6 +225,7 @@ fn observe_quality(
     clock_rate: u32,
     local_ssrc: u32,
     packet: &RtpPacket,
+    report_interval: std::time::Duration,
 ) -> Result<()> {
     let now = tokio::time::Instant::now();
     let mut quality = quality
@@ -237,7 +238,7 @@ fn observe_quality(
             packet.header.ssrc,
             clock_rate,
             client_cname(local_ssrc),
-            std::time::Duration::from_secs(5),
+            report_interval,
             now,
         )?),
     };
@@ -247,7 +248,7 @@ fn observe_quality(
             packet.header.ssrc,
             clock_rate,
             client_cname(local_ssrc),
-            std::time::Duration::from_secs(5),
+            report_interval,
             now,
         )?;
         session.on_rtp(packet, now)?;
@@ -261,6 +262,7 @@ fn quality_report(
     clock_rate: u32,
     local_ssrc: u32,
     packets: &[RtcpPacket],
+    report_interval: std::time::Duration,
 ) -> Result<Option<crate::rtcp::CompoundPacket>> {
     let now = tokio::time::Instant::now();
     let mut quality = quality
@@ -280,7 +282,7 @@ fn quality_report(
                 remote_ssrc,
                 clock_rate,
                 client_cname(local_ssrc),
-                std::time::Duration::from_secs(5),
+                report_interval,
                 now,
             )?,
         );

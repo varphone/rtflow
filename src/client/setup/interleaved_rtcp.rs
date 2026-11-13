@@ -12,6 +12,7 @@ use crate::{
 /// Handle one RTCP frame (plain or SRTCP), feed quality statistics and send
 /// the receiver report back on the same channel. Returns false when the
 /// connection writer failed.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_rtcp(
     frame: &InterleavedFrame,
     #[cfg(feature = "srtp")] srtcp: Option<&mut crate::srtp::SrtcpContext>,
@@ -19,6 +20,7 @@ pub(super) async fn handle_rtcp(
     track_id: u8,
     clock_rate: u32,
     local_ssrc: u32,
+    report_interval: std::time::Duration,
     writer: &Arc<TokioMutex<ControlWriteHalf>>,
 ) -> bool {
     #[cfg(feature = "srtp")]
@@ -36,9 +38,14 @@ pub(super) async fn handle_rtcp(
     let Ok(packets) = RtcpPacket::parse(payload) else {
         return true;
     };
-    let Ok(Some(report)) =
-        super::quality_report(quality, track_id, clock_rate, local_ssrc, &packets)
-    else {
+    let Ok(Some(report)) = super::quality_report(
+        quality,
+        track_id,
+        clock_rate,
+        local_ssrc,
+        &packets,
+        report_interval,
+    ) else {
         return true;
     };
     let Ok(payload) = report.try_encode() else {
