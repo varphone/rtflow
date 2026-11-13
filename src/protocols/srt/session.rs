@@ -408,7 +408,7 @@ impl SrtServer {
 ///
 /// Common format: `#!::u=user,r=live/stream,h=host`
 /// We extract the `r=` field as the mount path.
-fn parse_stream_id(hs_data: &[u8]) -> Option<String> {
+pub(super) fn parse_stream_id(hs_data: &[u8]) -> Option<String> {
     // The handshake data has a fixed 48-byte header, then extensions follow.
     // Each extension: 2 bytes type, 2 bytes length (in 32-bit words), then data.
     if hs_data.len() < 48 {

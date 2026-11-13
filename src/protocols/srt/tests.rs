@@ -1,5 +1,4 @@
-use super::*;
-
+use super::session::parse_stream_id;
 use super::*;
 use std::time::Duration;
 
