@@ -1,3 +1,4 @@
+use super::connection::ConnState;
 use super::*;
 
 impl SrtServer {

@@ -3,7 +3,7 @@ use super::*;
 /// SRT connection state machine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
-enum ConnState {
+pub(super) enum ConnState {
     /// Handshake in progress.
     Connecting,
     /// Data transfer active.
@@ -14,7 +14,7 @@ enum ConnState {
 
 /// SRT connection state.
 #[allow(dead_code)]
-struct SrtConnection {
+pub struct SrtConnection {
     /// Peer socket ID.
     pub(super) peer_socket_id: u32,
     /// Our socket ID for this connection.

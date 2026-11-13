@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Clone, Debug)]
 pub struct SrtConfig {
     /// Bind address.
     pub bind_addr: SocketAddr,

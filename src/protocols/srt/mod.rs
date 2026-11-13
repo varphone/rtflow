@@ -55,8 +55,6 @@ use tsbpd::TsbpdBuffer;
 use crate::mount::{MountConfig, MountRegistry};
 use crate::{Error, Result};
 
-/// SRT server configuration.
-#[derive(Clone, Debug)]
 pub struct SrtServer {
     socket: Arc<UdpSocket>,
     mounts: Arc<MountRegistry>,
