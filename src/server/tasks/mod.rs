@@ -100,6 +100,64 @@ pub(super) struct SenderInput {
     pub receiver: broadcast::Receiver<crate::media::AccessUnit>,
     pub startup: Vec<crate::media::AccessUnit>,
     pub sequence: Arc<AtomicU16>,
+    pub crypto: MediaCrypto,
+}
+
+/// SRTP/SRTCP contexts for one track; empty when the `srtp` feature is off
+/// or the track has no `a=crypto` attribute.
+#[derive(Default)]
+pub(super) struct MediaCrypto {
+    #[cfg(feature = "srtp")]
+    srtp: Option<crate::srtp::SrtpContext>,
+    #[cfg(feature = "srtp")]
+    srtcp: Option<crate::srtp::SrtcpContext>,
+}
+
+impl MediaCrypto {
+    pub(super) fn from_track(track: &crate::media::TrackDescription) -> crate::Result<Self> {
+        #[cfg(feature = "srtp")]
+        if let Some(crypto) = &track.crypto {
+            let (srtp, srtcp) = crate::srtp::from_sdp_crypto(crypto)?;
+            return Ok(Self {
+                srtp: Some(srtp),
+                srtcp: Some(srtcp),
+            });
+        }
+        let _ = track;
+        Ok(Self::default())
+    }
+
+    pub(super) fn protect_rtp(&mut self, wire: Bytes) -> crate::Result<Bytes> {
+        #[cfg(feature = "srtp")]
+        if let Some(srtp) = self.srtp.as_mut() {
+            return srtp.protect_rtp(&wire);
+        }
+        Ok(wire)
+    }
+
+    pub(super) fn unprotect_rtp(&mut self, wire: Bytes) -> crate::Result<Bytes> {
+        #[cfg(feature = "srtp")]
+        if let Some(srtp) = self.srtp.as_mut() {
+            return srtp.unprotect_rtp(&wire);
+        }
+        Ok(wire)
+    }
+
+    pub(super) fn protect_rtcp(&mut self, wire: Bytes) -> crate::Result<Bytes> {
+        #[cfg(feature = "srtp")]
+        if let Some(srtcp) = self.srtcp.as_mut() {
+            return srtcp.protect(&wire);
+        }
+        Ok(wire)
+    }
+
+    pub(super) fn unprotect_rtcp(&mut self, wire: Bytes) -> crate::Result<Bytes> {
+        #[cfg(feature = "srtp")]
+        if let Some(srtcp) = self.srtcp.as_mut() {
+            return srtcp.unprotect(&wire);
+        }
+        Ok(wire)
+    }
 }
 
 fn encode_sender_report(

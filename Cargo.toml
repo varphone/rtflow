@@ -185,6 +185,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-log = "0.2"
 rcgen = "0.14"
 socket2 = "0.6"
+base64 = "0.23"
 
 # ---------------------------------------------------------------------------
 # Embedded IPC release profile (see docs/audits/embedded-resource.md §3 P0-1):

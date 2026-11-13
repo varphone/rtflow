@@ -5,7 +5,8 @@ use super::{
     ConnectionPhase, State,
     proxy_runtime::start_proxy_if_idle,
     tasks::{
-        SenderInput, spawn_interleaved_sender_from, spawn_udp_receiver, spawn_udp_sender_from,
+        MediaCrypto, SenderInput, spawn_interleaved_sender_from, spawn_udp_receiver,
+        spawn_udp_sender_from,
     },
 };
 use crate::mount::{Mount, MountConfig, description_for};

@@ -201,6 +201,7 @@ pub(super) async fn handle_play(
                         receiver: output.subscribe(),
                         startup: Vec::new(),
                         sequence,
+                        crypto: MediaCrypto::default(),
                     },
                     rtp_channel,
                     rtcp_channel,
@@ -236,6 +237,7 @@ pub(super) async fn handle_play(
                         receiver: output.subscribe(),
                         startup: Vec::new(),
                         sequence,
+                        crypto: MediaCrypto::default(),
                     },
                     socket,
                     rtp_target,
@@ -243,14 +245,9 @@ pub(super) async fn handle_play(
                     track,
                 )
             } else {
-                spawn_udp_sender_from(
-                    mount.clone(),
-                    live_udp_inputs.remove(0),
-                    socket,
-                    rtp_target,
-                    rtcp_target,
-                    track,
-                )
+                let mut input = live_udp_inputs.remove(0);
+                input.crypto = MediaCrypto::from_track(&track)?;
+                spawn_udp_sender_from(mount.clone(), input, socket, rtp_target, rtcp_target, track)
             });
             start_proxy_if_idle(
                 mount,

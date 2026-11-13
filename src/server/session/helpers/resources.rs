@@ -116,5 +116,6 @@ pub(crate) fn live_sender_input(
         receiver,
         startup,
         sequence,
+        crypto: crate::server::tasks::MediaCrypto::default(),
     }
 }

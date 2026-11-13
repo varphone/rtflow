@@ -1,5 +1,15 @@
 use super::*;
 
+struct ReceiverSpec {
+    pair: UdpPair,
+    track: crate::media::TrackDescription,
+    rtp_target: std::net::SocketAddr,
+    rtcp_target: std::net::SocketAddr,
+    rtcp_mux: bool,
+    #[cfg(feature = "srtp")]
+    srtp: Option<crate::srtp::SrtpContext>,
+}
+
 pub(super) async fn connect_udp(
     mut stream: ControlConnection,
     uri: String,
@@ -62,11 +72,16 @@ pub(super) async fn connect_udp(
             }
         };
         let request_mux = options.rtcp_mux == Some(true);
+        #[cfg(feature = "srtp")]
+        let secure = track.crypto.is_some();
+        #[cfg(not(feature = "srtp"))]
+        let secure = false;
+        let profile = if secure { "RTP/SAVP" } else { "RTP/AVP" };
         let mut extra = if request_mux {
-            format!("Transport: RTP/AVP;unicast;client_port={port};rtcp-mux\r\n")
+            format!("Transport: {profile};unicast;client_port={port};rtcp-mux\r\n")
         } else {
             format!(
-                "Transport: RTP/AVP;unicast;client_port={}-{}\r\n",
+                "Transport: {profile};unicast;client_port={}-{}\r\n",
                 port,
                 port.saturating_add(1)
             )
@@ -182,7 +197,30 @@ pub(super) async fn connect_udp(
         );
         let rtp_target = std::net::SocketAddr::new(peer_ip, server_rtp);
         let rtcp_target = std::net::SocketAddr::new(peer_ip, server_rtcp);
-        receivers.push((pair, track, rtp_target, rtcp_target, negotiated_mux));
+        #[cfg(feature = "srtp")]
+        let srtp = match &track.crypto {
+            Some(crypto) => match crate::srtp::from_sdp_crypto(crypto) {
+                Ok((srtp, _)) => Some(srtp),
+                Err(error) => {
+                    return Err(Box::new(SetupFailure {
+                        error,
+                        stream,
+                        setup_base,
+                        description,
+                    }));
+                }
+            },
+            None => None,
+        };
+        receivers.push(ReceiverSpec {
+            pair,
+            track,
+            rtp_target,
+            rtcp_target,
+            rtcp_mux: negotiated_mux,
+            #[cfg(feature = "srtp")]
+            srtp,
+        });
     }
     let Some(session_id) = session_id else {
         return Err(Box::new(SetupFailure {
@@ -233,7 +271,22 @@ pub(super) async fn connect_udp(
     let cancel = CancellationToken::new();
     let quality = Arc::new(Mutex::new(HashMap::new()));
     let mut tasks = Vec::new();
-    for (pair, track, rtp_target, rtcp_target, rtcp_mux) in receivers {
+    for spec in receivers {
+        let ReceiverSpec {
+            pair,
+            track,
+            rtp_target,
+            rtcp_target,
+            rtcp_mux,
+            #[cfg(feature = "srtp")]
+            srtp,
+        } = spec;
+        #[cfg(feature = "srtp")]
+        let mut srtp = srtp;
+        #[cfg(feature = "srtp")]
+        let secure = srtp.is_some();
+        #[cfg(not(feature = "srtp"))]
+        let secure = false;
         let tx = tx.clone();
         let jitter_config = options.jitter.clone();
         let rtcp_pair = pair.clone();
@@ -280,7 +333,7 @@ pub(super) async fn connect_udp(
                         }
                         // rtcp-mux: RTCP shares the RTP socket; classify by
                         // payload type (192..=223) before RTP parsing.
-                        if mux && size >= 2 && (192..=223).contains(&buffer[1]) {
+                        if !secure && mux && size >= 2 && (192..=223).contains(&buffer[1]) {
                             let payload = buffer.split_to(size).freeze();
                             buffer.resize(65_536, 0);
                             if let Ok(packets) = RtcpPacket::parse(payload)
@@ -300,6 +353,14 @@ pub(super) async fn connect_udp(
                         }
                         let payload = buffer.split_to(size).freeze();
                         buffer.resize(65_536, 0);
+                        #[cfg(feature = "srtp")]
+                        let payload = match srtp.as_mut() {
+                            Some(context) => match context.unprotect_rtp(&payload) {
+                                Ok(payload) => payload,
+                                Err(_) => continue,
+                            },
+                            None => payload,
+                        };
                         let packet = match RtpPacket::parse(payload) {
                             Ok(packet) => packet,
                             Err(error) => {

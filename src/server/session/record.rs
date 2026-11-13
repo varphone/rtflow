@@ -52,9 +52,13 @@ pub(super) async fn handle_record(
     }
     for (mount, socket, _rtp_target, _rtcp_target, track) in setups.iter().cloned() {
         if matches!(mount.config, MountConfig::Publisher { .. }) {
-            resources
-                .senders
-                .push(spawn_udp_receiver(mount, socket, _rtp_target, track));
+            resources.senders.push(spawn_udp_receiver(
+                mount,
+                socket,
+                _rtp_target,
+                track.clone(),
+                MediaCrypto::from_track(&track).unwrap_or_default(),
+            ));
         }
     }
     let mut has_interleaved_receiver = false;

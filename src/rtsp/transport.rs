@@ -20,12 +20,16 @@ pub enum TransportSpec {
         server_rtcp: Option<u16>,
         /// RTCP is multiplexed on the RTP port (`rtcp-mux`, RFC 7826 §4.1).
         rtcp_mux: bool,
+        /// SRTP (`RTP/SAVP`) is required for this transport.
+        secure: bool,
     },
     TcpInterleaved {
         rtp_channel: u8,
         rtcp_channel: u8,
         /// RTCP is multiplexed on the RTP interleaved channel.
         rtcp_mux: bool,
+        /// SRTP (`RTP/SAVP`) is required for this transport.
+        secure: bool,
     },
     /// Server-published multicast group (`RTP/AVP;multicast`).
     Multicast {
@@ -148,7 +152,8 @@ impl TransportSpec {
             return Err(Error::Rtsp("unsupported Transport mode".into()));
         }
 
-        if profile.eq_ignore_ascii_case("RTP/AVP/TCP") {
+        let secure = profile.eq_ignore_ascii_case("RTP/SAVP/TCP");
+        if profile.eq_ignore_ascii_case("RTP/AVP/TCP") || secure {
             let channels = parameters
                 .get("interleaved")
                 .ok_or_else(|| Error::Rtsp("TCP Transport has no interleaved channels".into()))?;
@@ -159,9 +164,14 @@ impl TransportSpec {
                 rtcp_channel: u8::try_from(rtcp)
                     .map_err(|_| Error::Rtsp("RTCP interleaved channel exceeds 255".into()))?,
                 rtcp_mux,
+                secure,
             });
         }
-        if !profile.eq_ignore_ascii_case("RTP/AVP") && !profile.eq_ignore_ascii_case("RTP/AVP/UDP")
+        let secure = profile.eq_ignore_ascii_case("RTP/SAVP")
+            || profile.eq_ignore_ascii_case("RTP/SAVP/UDP");
+        if !secure
+            && !profile.eq_ignore_ascii_case("RTP/AVP")
+            && !profile.eq_ignore_ascii_case("RTP/AVP/UDP")
         {
             return Err(Error::Rtsp("unsupported RTP transport profile".into()));
         }
@@ -183,6 +193,7 @@ impl TransportSpec {
             server_rtp,
             server_rtcp,
             rtcp_mux,
+            secure,
         })
     }
 
@@ -194,11 +205,13 @@ impl TransportSpec {
                 server_rtp,
                 server_rtcp,
                 rtcp_mux,
+                secure,
             } => {
+                let profile = if *secure { "RTP/SAVP" } else { "RTP/AVP" };
                 let mut s = if *rtcp_mux {
-                    format!("RTP/AVP;unicast;client_port={client_rtp};rtcp-mux")
+                    format!("{profile};unicast;client_port={client_rtp};rtcp-mux")
                 } else {
-                    format!("RTP/AVP;unicast;client_port={client_rtp}-{client_rtcp}")
+                    format!("{profile};unicast;client_port={client_rtp}-{client_rtcp}")
                 };
                 if let (Some(a), Some(b)) = (server_rtp, server_rtcp) {
                     if *rtcp_mux {
@@ -213,11 +226,17 @@ impl TransportSpec {
                 rtp_channel,
                 rtcp_channel,
                 rtcp_mux,
+                secure,
             } => {
-                if *rtcp_mux {
-                    format!("RTP/AVP/TCP;unicast;interleaved={rtp_channel};rtcp-mux")
+                let profile = if *secure {
+                    "RTP/SAVP/TCP"
                 } else {
-                    format!("RTP/AVP/TCP;unicast;interleaved={rtp_channel}-{rtcp_channel}")
+                    "RTP/AVP/TCP"
+                };
+                if *rtcp_mux {
+                    format!("{profile};unicast;interleaved={rtp_channel};rtcp-mux")
+                } else {
+                    format!("{profile};unicast;interleaved={rtp_channel}-{rtcp_channel}")
                 }
             }
             Self::Multicast {
@@ -462,6 +481,7 @@ mod tests {
                 rtp_channel,
                 rtcp_channel,
                 rtcp_mux,
+                ..
             } => {
                 assert_eq!((rtp_channel, rtcp_channel), (4, 4));
                 assert!(rtcp_mux);
@@ -473,6 +493,21 @@ mod tests {
             TransportSpec::parse("RTP/AVP;unicast;client_port=5000").is_err(),
             "single UDP port requires rtcp-mux"
         );
+    }
+
+    #[test]
+    fn savp_profiles_set_secure_flag() {
+        let udp = TransportSpec::parse("RTP/SAVP;unicast;client_port=5000-5001").unwrap();
+        match udp {
+            TransportSpec::Udp { secure, .. } => assert!(secure),
+            other => panic!("unexpected {other:?}"),
+        }
+        let tcp = TransportSpec::parse("RTP/SAVP/TCP;unicast;interleaved=0-1").unwrap();
+        match tcp {
+            TransportSpec::TcpInterleaved { secure, .. } => assert!(secure),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(udp.render().starts_with("RTP/SAVP;"));
     }
 
     #[test]

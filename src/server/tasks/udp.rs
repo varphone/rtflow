@@ -22,6 +22,7 @@ pub(crate) fn spawn_udp_sender_from(
             mut receiver,
             startup,
             sequence,
+            mut crypto,
         } = input;
         // Frames the startup snapshot already delivered; the broadcast ring
         // will replay the same frames, so skip them.
@@ -74,6 +75,7 @@ pub(crate) fn spawn_udp_sender_from(
                             )
                         });
                         if let Some(Ok(report)) = report
+                            && let Ok(report) = crypto.protect_rtcp(report)
                             && pair.rtcp.send_to(&report, rtcp_target).await.is_ok()
                         {
                             mount.stats.add_sender_reports(1);
@@ -87,6 +89,7 @@ pub(crate) fn spawn_udp_sender_from(
                             ssrc,
                         }])
                         .and_then(|packet| packet.try_encode())
+                        && let Ok(wire) = crypto.protect_rtcp(wire)
                         && pair.rtcp.send_to(&wire, rtcp_target).await.is_ok()
                     {
                         mount.stats.add_receiver_reports(1);
@@ -101,6 +104,10 @@ pub(crate) fn spawn_udp_sender_from(
                     }
                     let payload = rtcp_buffer.split_to(size).freeze();
                     rtcp_buffer.resize(2048, 0);
+                    let Ok(payload) = crypto.unprotect_rtcp(payload) else {
+                        mount.stats.add_dropped(1);
+                        continue;
+                    };
                     if let Ok(packets) = RtcpPacket::parse(payload) {
                         let reports = packets
                             .iter()
@@ -166,7 +173,12 @@ pub(crate) fn spawn_udp_sender_from(
                         for mut packet in packets {
                             packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
                             packet.encode_into(&mut wire);
-                            if pair.rtp.send_to(&wire, rtp_target).await.is_err() {
+                            let plain = wire.split().freeze();
+                            let protected = match crypto.protect_rtp(plain) {
+                                Ok(wire) => wire,
+                                Err(_) => continue,
+                            };
+                            if pair.rtp.send_to(&protected, rtp_target).await.is_err() {
                                 // A persistently unreachable target should not
                                 // keep the sender spinning silently.
                                 consecutive_send_failures = consecutive_send_failures.saturating_add(1);
@@ -213,6 +225,7 @@ pub(crate) fn spawn_udp_receiver(
     pair: UdpPair,
     expected_rtp_source: SocketAddr,
     track: TrackDescription,
+    mut crypto: MediaCrypto,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         if !matches!(mount.config, MountConfig::Publisher { .. }) {
@@ -232,6 +245,13 @@ pub(crate) fn spawn_udp_receiver(
             }
             let payload = buffer.split_to(size).freeze();
             buffer.resize(65_536, 0);
+            let payload = match crypto.unprotect_rtp(payload) {
+                Ok(payload) => payload,
+                Err(_) => {
+                    mount.stats.add_dropped(1);
+                    continue;
+                }
+            };
             let packet = match RtpPacket::parse(payload) {
                 Ok(packet) => packet,
                 Err(_) => {

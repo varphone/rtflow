@@ -79,6 +79,7 @@ pub(super) async fn handle_setup(
                 rtp_channel,
                 rtcp_channel,
                 rtcp_mux,
+                ..
             } => {
                 if *rtcp_mux {
                     rtp_channel == rtcp_channel
@@ -182,8 +183,21 @@ pub(super) async fn handle_setup(
         rtp_channel,
         rtcp_channel,
         rtcp_mux,
+        secure,
     } = transport
     {
+        if secure {
+            writer
+                .lock()
+                .await
+                .write_all(&rtsp::encode_response(&simple_response(
+                    461,
+                    "Unsupported Transport",
+                    cseq,
+                )))
+                .await?;
+            return Ok(());
+        }
         let Ok(track) = track_for_uri(&description_for(&mount.config)?, &req.uri) else {
             // Unknown control URI: reply 404 instead of dropping
             // the connection (strict clients treat a dropped
@@ -214,6 +228,7 @@ pub(super) async fn handle_setup(
                 rtp_channel,
                 rtcp_channel,
                 rtcp_mux,
+                secure: false,
             }
             .render(),
         );
@@ -236,6 +251,7 @@ pub(super) async fn handle_setup(
         client_rtp,
         client_rtcp,
         rtcp_mux,
+        secure,
         ..
     } = transport
     else {
@@ -290,6 +306,22 @@ pub(super) async fn handle_setup(
             .await?;
         return Ok(());
     };
+    #[cfg(feature = "srtp")]
+    let profile_mismatch = secure != track.crypto.is_some();
+    #[cfg(not(feature = "srtp"))]
+    let profile_mismatch = secure;
+    if profile_mismatch {
+        writer
+            .lock()
+            .await
+            .write_all(&rtsp::encode_response(&simple_response(
+                461,
+                "Unsupported Transport",
+                cseq,
+            )))
+            .await?;
+        return Ok(());
+    }
     let mut response = simple_response(200, "OK", cseq);
     response.headers.insert(
         "session".into(),
@@ -303,6 +335,7 @@ pub(super) async fn handle_setup(
             server_rtp: Some(server_rtp),
             server_rtcp: Some(server_rtcp),
             rtcp_mux,
+            secure,
         }
         .render(),
     );

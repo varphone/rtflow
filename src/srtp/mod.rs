@@ -52,6 +52,10 @@ pub struct SrtpContext {
     cipher_key: [u8; 16],
     auth_key: [u8; 20],
     salt: [u8; 14],
+    // RTCP session keys, for SRTCP contexts derived from the same master keys.
+    rtcp_cipher_key: [u8; 16],
+    rtcp_auth_key: [u8; 20],
+    rtcp_salt: [u8; 14],
 }
 
 /// Per-SSRC receiver state.
@@ -85,6 +89,9 @@ impl SrtpContext {
             cipher_key: keys.rtp_cipher_key,
             auth_key: keys.rtp_auth_key,
             salt: keys.rtp_salt,
+            rtcp_cipher_key: keys.rtcp_cipher_key,
+            rtcp_auth_key: keys.rtcp_auth_key,
+            rtcp_salt: keys.rtcp_salt,
         }
     }
 
@@ -262,15 +269,79 @@ impl SrtpContext {
     /// Not implemented: the RTCP session keys are not stored on this
     /// context. Use [`SrtcpContext::new`] directly with the derived keys.
     pub fn srtcp_context(&self) -> crate::Result<SrtcpContext> {
-        Err(crate::Error::Media(
-            "SRTCP context creation requires RTCP session keys; use SrtcpContext::new".into(),
+        Ok(SrtcpContext::new(
+            &self.rtcp_cipher_key,
+            &self.rtcp_auth_key,
+            &self.rtcp_salt,
         ))
     }
+}
+
+/// Build SRTP and SRTCP contexts from an SDP `a=crypto:` attribute.
+///
+/// Supports the RFC 3711 default suite `AES_128_CM_HMAC_SHA1_80` with an
+/// `inline:` master key (16-byte key + 14-byte salt, base64).
+#[cfg(feature = "srtp")]
+pub fn from_sdp_crypto(
+    crypto: &crate::media::crypto::SdpCrypto,
+) -> crate::Result<(SrtpContext, SrtcpContext)> {
+    use base64::Engine as _;
+    if !crypto
+        .crypto_suite
+        .eq_ignore_ascii_case("AES_128_CM_HMAC_SHA1_80")
+    {
+        return Err(crate::Error::Unsupported(format!(
+            "unsupported SRTP suite {}",
+            crypto.crypto_suite
+        )));
+    }
+    let encoded = crypto
+        .key_params
+        .strip_prefix("inline:")
+        .ok_or_else(|| crate::Error::Unsupported("SRTP key is not inline".into()))?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|_| crate::Error::Media("invalid SRTP inline key".into()))?;
+    if decoded.len() < 30 {
+        return Err(crate::Error::Media("SRTP master key is too short".into()));
+    }
+    let mut master_key = [0u8; 16];
+    master_key.copy_from_slice(&decoded[..16]);
+    let mut master_salt = [0u8; 14];
+    master_salt.copy_from_slice(&decoded[16..30]);
+    let keys = key_derive::derive_session_keys(&master_key, &master_salt);
+    Ok((
+        SrtpContext::from_session_keys(&keys),
+        SrtcpContext::new(&keys.rtcp_cipher_key, &keys.rtcp_auth_key, &keys.rtcp_salt),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sdp_crypto_builds_contexts() {
+        use crate::media::crypto::SdpCrypto;
+        use base64::Engine as _;
+        let crypto = SdpCrypto {
+            tag: 1,
+            crypto_suite: "AES_128_CM_HMAC_SHA1_80".into(),
+            key_params: format!(
+                "inline:{}",
+                base64::engine::general_purpose::STANDARD.encode([3u8; 30])
+            ),
+            session_params: None,
+        };
+        let (mut srtp, _srtcp) = from_sdp_crypto(&crypto).unwrap();
+        let raw = Bytes::from_static(&[
+            0x80, 0x60, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x11, 0x22, 0x33, 0x44, 0xaa, 0xbb,
+        ]);
+        let protected = srtp.protect_rtp(&raw).unwrap();
+        assert!(protected.len() > raw.len());
+        let plain = srtp.unprotect_rtp(&protected).unwrap();
+        assert_eq!(plain, raw);
+    }
 
     #[test]
     fn protect_unprotect_roundtrip() {

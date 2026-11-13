@@ -13,6 +13,7 @@ pub(crate) fn spawn_interleaved_sender_from(
             mut receiver,
             startup,
             sequence,
+            crypto: _,
         } = input;
         // Frames the startup snapshot already delivered; the broadcast ring
         // will replay the same frames, so skip them.

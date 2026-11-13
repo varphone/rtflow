@@ -4,7 +4,7 @@ mod tasks;
 #[cfg(feature = "file-storage")]
 mod vod_runtime;
 use session::serve_connection;
-use tasks::{SenderInput, spawn_udp_sender_from};
+use tasks::{MediaCrypto, SenderInput, spawn_udp_sender_from};
 
 // Re-export mount types for backward compatibility (deprecated in 0.3).
 #[deprecated(
@@ -507,6 +507,7 @@ async fn spawn_multicast_senders(
                 receiver,
                 startup,
                 sequence: Arc::new(AtomicU16::new(0)),
+                crypto: MediaCrypto::default(),
             },
             pair,
             SocketAddr::new(group, port),
