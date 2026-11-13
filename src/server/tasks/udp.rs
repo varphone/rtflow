@@ -16,6 +16,7 @@ pub(crate) fn spawn_udp_sender_from(
     rtp_target: SocketAddr,
     rtcp_target: SocketAddr,
     track: TrackDescription,
+    anchor_ntp: Option<u64>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let SenderInput {
@@ -217,7 +218,11 @@ pub(crate) fn spawn_udp_sender_from(
                             sent_octets = sent_octets.wrapping_add(packet.payload.len() as u32);
                             last_rtp_timestamp = packet.header.timestamp;
                             if ntp_clock.is_none() {
-                                ntp_clock = RtpNtpClock::new(last_rtp_timestamp, track.clock_rate);
+                                ntp_clock = RtpNtpClock::new_with_anchor(
+                                    last_rtp_timestamp,
+                                    track.clock_rate,
+                                    anchor_ntp,
+                                );
                             }
                             mount.stats.add_rtp(1, packet.payload.len() as u64);
                             if sent_packets == 1

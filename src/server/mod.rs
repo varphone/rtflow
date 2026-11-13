@@ -51,7 +51,7 @@ use tokio_util::sync::CancellationToken;
 
 mod config;
 
-pub use config::{ConfigError, ResourceLimits, ServerConfig, ServerConfigBuilder};
+pub use config::{ConfigError, ResourceLimits, ServerConfig, ServerConfigBuilder, TimelineMode};
 
 struct State {
     mounts: Arc<MountRegistry>,
@@ -62,6 +62,7 @@ struct State {
     supervisor: TaskSupervisor,
     peer_sessions: Mutex<HashMap<IpAddr, usize>>,
     connection_rate_limiter: ConnectionRateLimiter,
+    timeline_epoch: std::time::Instant,
 }
 
 struct PeerSessionLease {
@@ -88,6 +89,20 @@ impl Drop for PeerSessionLease {
 }
 
 impl State {
+    /// NTP anchor matching the configured live timeline, if it differs from
+    /// the wall clock (uptime/absolute modes).
+    fn timeline_ntp_anchor(&self) -> Option<u64> {
+        let seconds = match self.config.timeline {
+            TimelineMode::Relative | TimelineMode::Unix => return None,
+            TimelineMode::ServerUptime => self.timeline_epoch.elapsed(),
+            TimelineMode::Absolute { offset } => offset + self.timeline_epoch.elapsed(),
+        };
+        const NTP_UNIX_OFFSET: u64 = 2_208_988_800;
+        let secs = seconds.as_secs().saturating_add(NTP_UNIX_OFFSET);
+        let frac = (u64::from(seconds.subsec_nanos()) << 32) / 1_000_000_000;
+        Some((secs << 32) | frac)
+    }
+
     fn try_acquire_peer(self: &Arc<Self>, peer: IpAddr) -> Option<PeerSessionLease> {
         let mut sessions = self
             .peer_sessions
@@ -145,6 +160,7 @@ impl RtspServer {
             supervisor,
             peer_sessions: Mutex::new(HashMap::new()),
             connection_rate_limiter,
+            timeline_epoch: std::time::Instant::now(),
             config,
         });
         emit(
@@ -518,6 +534,7 @@ async fn spawn_multicast_senders(
             SocketAddr::new(group, port),
             SocketAddr::new(group, port.saturating_add(1)),
             track.clone(),
+            None,
         );
     }
 }

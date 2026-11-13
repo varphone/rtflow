@@ -116,7 +116,9 @@ pub use security::{IpAcl, IpCidr, RateLimitConfig, SecurityConfig};
 #[cfg(feature = "tls")]
 pub use security::{TlsClientConfig, TlsServerConfig};
 #[cfg(feature = "server")]
-pub use server::{ConfigError, ResourceLimits, RtspServer, ServerConfig, ServerConfigBuilder};
+pub use server::{
+    ConfigError, ResourceLimits, RtspServer, ServerConfig, ServerConfigBuilder, TimelineMode,
+};
 #[cfg(feature = "srtp")]
 pub use srtp::{SessionKeys, SrtcpContext, SrtpContext, SrtpProfile};
 #[cfg(feature = "file-storage")]

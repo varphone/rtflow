@@ -1,5 +1,24 @@
 use super::*;
 
+/// How live PLAY maps media time to Normal Play Time (the value a client
+/// shows as the playback position).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum TimelineMode {
+    /// Per-session live range (`npt=now-`/`npt=0-`); VLC starts at zero.
+    #[default]
+    Relative,
+    /// NPT starts at seconds since this server process started. Every new
+    /// connection observes a larger start and the clock never resets while
+    /// the process runs (camera-uptime style).
+    ServerUptime,
+    /// NPT starts at Unix epoch seconds (a large wall-clock value).
+    Unix,
+    /// NPT starts at `offset + seconds since server start`; use a fixed
+    /// large offset to emulate a device with an existing uptime.
+    Absolute { offset: Duration },
+}
+
 #[derive(Clone)]
 pub struct ServerConfig {
     pub listen: SocketAddr,
@@ -13,6 +32,8 @@ pub struct ServerConfig {
     pub udp_recv_buffer: usize,
     /// Startup keyframe cache policy applied to non-proxy mounts.
     pub startup_cache: StartupCacheConfig,
+    /// NPT origin for live PLAY responses.
+    pub timeline: TimelineMode,
     pub consumer_queue_capacity: usize,
     pub no_subscriber_grace: Duration,
     pub shutdown_grace: Duration,
@@ -34,6 +55,7 @@ impl ServerConfig {
             udp_port_range: None,
             udp_recv_buffer: 4 * 1024 * 1024,
             startup_cache: StartupCacheConfig::default(),
+            timeline: TimelineMode::Relative,
             consumer_queue_capacity: 256,
             no_subscriber_grace: Duration::from_secs(5),
             shutdown_grace: Duration::from_secs(5),
@@ -200,6 +222,12 @@ impl ServerConfigBuilder {
     /// Set the per-socket UDP receive buffer (bytes).
     pub fn udp_recv_buffer(mut self, value: usize) -> Self {
         self.config.udp_recv_buffer = value;
+        self
+    }
+
+    /// Set how live PLAY reports Normal Play Time.
+    pub fn timeline(mut self, value: TimelineMode) -> Self {
+        self.config.timeline = value;
         self
     }
 

@@ -7,6 +7,7 @@ pub(crate) fn spawn_interleaved_sender_from(
     rtcp_channel: u8,
     track: TrackDescription,
     writer: Arc<Mutex<ControlWriteHalf>>,
+    anchor_ntp: Option<u64>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let SenderInput {
@@ -143,7 +144,11 @@ pub(crate) fn spawn_interleaved_sender_from(
                     sent_octets = sent_octets.wrapping_add(payload_len);
                     last_rtp_timestamp = packet.header.timestamp;
                     if ntp_clock.is_none() {
-                        ntp_clock = RtpNtpClock::new(last_rtp_timestamp, track.clock_rate);
+                        ntp_clock = RtpNtpClock::new_with_anchor(
+                            last_rtp_timestamp,
+                            track.clock_rate,
+                            anchor_ntp,
+                        );
                     }
                     mount.stats.add_rtp(1, u64::from(payload_len));
                     if sent_packets == 1

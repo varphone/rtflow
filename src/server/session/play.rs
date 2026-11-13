@@ -1,5 +1,6 @@
 use super::*;
 use crate::media::TrackDescription;
+use crate::server::TimelineMode;
 
 /// PLAY: start senders for the negotiated tracks (live or VOD).
 #[allow(clippy::too_many_arguments)]
@@ -94,6 +95,19 @@ pub(super) async fn handle_play(
     if let Some(position) = resources.stop_vod() {
         *vod_cursor = position;
     }
+    let timeline_ntp_anchor = state.timeline_ntp_anchor();
+    let timeline_position = match state.config.timeline {
+        TimelineMode::Relative => None,
+        TimelineMode::ServerUptime => Some(NptPosition::Time(state.timeline_epoch.elapsed())),
+        TimelineMode::Unix => Some(NptPosition::Time(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default(),
+        )),
+        TimelineMode::Absolute { offset } => {
+            Some(NptPosition::Time(offset + state.timeline_epoch.elapsed()))
+        }
+    };
     let start = requested_range
         .map(|range| match range.start {
             NptPosition::Time(position) => position,
@@ -171,7 +185,9 @@ pub(super) async fn handle_play(
             // that omitted range semantics altogether.
             response.headers.insert(
                 "range".into(),
-                requested_range
+                timeline_position
+                    .map(|start| NptRange { start, end: None })
+                    .or(requested_range)
                     .unwrap_or(NptRange {
                         start: NptPosition::Now,
                         end: None,
@@ -207,6 +223,7 @@ pub(super) async fn handle_play(
                     rtcp_channel,
                     track,
                     writer.clone(),
+                    timeline_ntp_anchor,
                 )
             } else {
                 let mut input = live_interleaved_inputs.remove(0);
@@ -218,6 +235,7 @@ pub(super) async fn handle_play(
                     rtcp_channel,
                     track,
                     writer.clone(),
+                    timeline_ntp_anchor,
                 )
             });
             start_proxy_if_idle(
@@ -245,11 +263,20 @@ pub(super) async fn handle_play(
                     rtp_target,
                     rtcp_target,
                     track,
+                    None,
                 )
             } else {
                 let mut input = live_udp_inputs.remove(0);
                 input.crypto = MediaCrypto::from_track(&track)?;
-                spawn_udp_sender_from(mount.clone(), input, socket, rtp_target, rtcp_target, track)
+                spawn_udp_sender_from(
+                    mount.clone(),
+                    input,
+                    socket,
+                    rtp_target,
+                    rtcp_target,
+                    track,
+                    timeline_ntp_anchor,
+                )
             });
             start_proxy_if_idle(
                 mount,

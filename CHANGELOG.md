@@ -77,6 +77,8 @@
 - RTCP 完整包型：APP、RTPFB/PSFB（NACK/PLI/FIR/REMB）、XR；新增反馈计数 `FeedbackSnapshot`。
 - RTCP `RtcpInterval`（带宽/成员数/随机化）与 `RtcpSession::bye` compound 构造。
 - RTCP 反馈动作：PLI/FIR/NACK 触发本地源关键帧请求；SSRC collision 检测、reduced-size compound、XR RRTR/DLRR。
+- RTSP 服务端新增 `TimelineMode`（Relative/ServerUptime/Unix/Absolute），可选择摄像机风格的绝对 NPT 进度。
+- 绝对 NPT 模式的发送端 RTCP SR NTP 与 Range/RTP-Info 使用同一时间轴。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

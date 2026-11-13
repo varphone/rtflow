@@ -162,3 +162,67 @@ async fn reports_protocol_errors_without_closing_the_session() {
 
     server.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn absolute_timeline_mode_reports_uptime_range() {
+    use rtflow::{
+        TimelineMode,
+        rtsp::range::{NptPosition, NptRange},
+    };
+    let server = RtspServer::bind(
+        ServerConfig::builder("127.0.0.1:0".parse().unwrap())
+            .timeline(TimelineMode::Absolute {
+                offset: Duration::from_secs(1_000_000),
+            })
+            .build()
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    let description = rtflow_testkit::description("absolute", &[Codec::H264]);
+    let mount = server
+        .register_mount(Arc::from("/absolute"), MountConfig::Local { description })
+        .await
+        .unwrap();
+    let _warm = mount.subscribe();
+    mount
+        .publisher()
+        .unwrap()
+        .try_push(rtflow_testkit::unit(0, Codec::H264, 0))
+        .unwrap();
+    let base = format!("rtsp://{}/absolute", server.local_addr());
+
+    let mut first = None;
+    for _sequence in 0..2 {
+        let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+        let setup = request(
+            &mut stream,
+            &format!(
+                "SETUP {base}/trackID=0 RTSP/1.0\r\nCSeq: 1\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n"
+            ),
+        )
+        .await;
+        assert_eq!(setup.status, 200);
+        let session = setup.headers.get("session").unwrap().clone();
+        let response = request(
+            &mut stream,
+            &format!(
+                "PLAY {base} RTSP/1.0\r\nCSeq: 2\r\nSession: {session}\r\nRange: npt=0-\r\n\r\n"
+            ),
+        )
+        .await;
+        assert_eq!(response.status, 200);
+        let range = NptRange::parse(response.headers.get("range").unwrap()).unwrap();
+        let NptPosition::Time(start) = range.start else {
+            panic!("absolute mode returned {range:?}");
+        };
+        assert!(start >= Duration::from_secs(1_000_000));
+        if let Some(previous) = first {
+            assert!(start >= previous, "timeline reset across connections");
+        }
+        first = Some(start);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(stream);
+    }
+    server.shutdown().await.unwrap();
+}

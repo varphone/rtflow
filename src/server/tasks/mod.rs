@@ -52,9 +52,13 @@ pub(super) struct RtpNtpClock {
 }
 
 impl RtpNtpClock {
-    fn new(anchor_rtp_timestamp: u32, clock_rate: u32) -> Option<Self> {
+    fn new_with_anchor(
+        anchor_rtp_timestamp: u32,
+        clock_rate: u32,
+        anchor_ntp: Option<u64>,
+    ) -> Option<Self> {
         (clock_rate != 0).then(|| Self {
-            anchor_ntp: ntp_now(),
+            anchor_ntp: anchor_ntp.unwrap_or_else(ntp_now),
             clock_rate,
             last_rtp: anchor_rtp_timestamp,
             extended_delta: 0,
