@@ -7,7 +7,7 @@ pub struct RtspClient;
 impl RtspClient {
     pub async fn describe(url: url::Url, options: ClientOptions) -> Result<MediaDescription> {
         validate_options(&options)?;
-        let (_, _, _, description) = open_and_describe(&url, &options).await?;
+        let (_, _, _, description, _) = open_and_describe(&url, &options).await?;
         Ok(description)
     }
 
@@ -22,7 +22,12 @@ impl RtspClient {
         validate_options(&options)?;
         let sink = options.event_sink.clone();
         if options.transport != UpstreamTransport::Auto {
-            let (stream, uri, setup_base, description) = open_and_describe(&url, &options).await?;
+            let (stream, uri, setup_base, description, sdp_mux) =
+                open_and_describe(&url, &options).await?;
+            let mut options = options;
+            if options.rtcp_mux.is_none() {
+                options.rtcp_mux = Some(sdp_mux);
+            }
             return setup::connect(
                 stream,
                 uri,
@@ -38,7 +43,7 @@ impl RtspClient {
         let mut udp_options = options.clone();
         udp_options.transport = UpstreamTransport::Udp;
         let udp_open = open_and_describe(&url, &udp_options).await;
-        let (stream, uri, setup_base, description) = match udp_open {
+        let (stream, uri, setup_base, description, sdp_mux) = match udp_open {
             Ok(value) => value,
             Err(error) if should_fallback_to_tcp(&error) => {
                 let id = next_client_session_id();
@@ -53,8 +58,12 @@ impl RtspClient {
                 );
                 let mut tcp_options = options.clone();
                 tcp_options.transport = UpstreamTransport::TcpInterleaved;
-                let (stream, uri, setup_base, description) =
+                let (stream, uri, setup_base, description, fallback_mux) =
                     open_and_describe(&url, &tcp_options).await?;
+                let mut tcp_options = tcp_options;
+                if tcp_options.rtcp_mux.is_none() {
+                    tcp_options.rtcp_mux = Some(fallback_mux);
+                }
                 return setup::connect(stream, uri, setup_base, description, tcp_options, id)
                     .await
                     .map_err(|failure| failure.error);
@@ -62,6 +71,10 @@ impl RtspClient {
             Err(error) => return Err(error),
         };
         let id = next_client_session_id();
+        let mut udp_options = udp_options;
+        if udp_options.rtcp_mux.is_none() {
+            udp_options.rtcp_mux = Some(sdp_mux);
+        }
         match setup::connect(
             stream,
             uri.clone(),
@@ -102,8 +115,12 @@ impl RtspClient {
                     Err(_) => {
                         // The server may have closed the connection after the
                         // rejection; recover with a fresh one.
-                        let (stream, uri, setup_base, description) =
+                        let (stream, uri, setup_base, description, fallback_mux) =
                             open_and_describe(&url, &tcp_options).await?;
+                        let mut tcp_options = tcp_options;
+                        if tcp_options.rtcp_mux.is_none() {
+                            tcp_options.rtcp_mux = Some(fallback_mux);
+                        }
                         setup::connect(stream, uri, setup_base, description, tcp_options, id)
                             .await
                             .map_err(|failure| failure.error)
@@ -264,7 +281,7 @@ impl RtspClient {
 async fn open_and_describe(
     url: &url::Url,
     options: &ClientOptions,
-) -> Result<(ControlConnection, String, String, MediaDescription)> {
+) -> Result<(ControlConnection, String, String, MediaDescription, bool)> {
     let host = url
         .host_str()
         .ok_or_else(|| Error::Rtsp("RTSP URL has no host".into()))?;
@@ -336,6 +353,12 @@ async fn open_and_describe(
         .map(|value| sdp::control_uri(&uri, value))
         .transpose()?
         .unwrap_or_else(|| uri.clone());
+    let rtcp_mux = std::str::from_utf8(&response.body)
+        .map(|sdp| {
+            sdp.lines()
+                .any(|line| line.trim().eq_ignore_ascii_case("a=rtcp-mux"))
+        })
+        .unwrap_or(false);
     let description = sdp::parse(&response.body)?;
-    Ok((stream, uri, setup_base, description))
+    Ok((stream, uri, setup_base, description, rtcp_mux))
 }

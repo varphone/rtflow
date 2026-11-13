@@ -18,6 +18,10 @@ pub struct ClientOptions {
     /// memory-constrained embedded clients can lower it at the cost of burst
     /// tolerance. Applies to UDP transport only.
     pub udp_recv_buffer: Option<usize>,
+    /// Request RTCP multiplexing (`rtcp-mux`). `None` (default) follows the
+    /// server's SDP advertisement, `Some(true)` requests it unconditionally
+    /// and `Some(false)` disables it.
+    pub rtcp_mux: Option<bool>,
 }
 impl Default for ClientOptions {
     fn default() -> Self {
@@ -33,6 +37,7 @@ impl Default for ClientOptions {
             play_range: None,
             event_sink: None,
             udp_recv_buffer: None,
+            rtcp_mux: None,
         }
     }
 }
@@ -177,6 +182,12 @@ impl ClientOptionsBuilder {
 
     pub fn udp_recv_buffer(mut self, value: usize) -> Self {
         self.options.udp_recv_buffer = Some(value);
+        self
+    }
+
+    /// Force RTCP multiplexing on (`true`) or off (`false`); omit for auto.
+    pub fn rtcp_mux(mut self, value: bool) -> Self {
+        self.options.rtcp_mux = Some(value);
         self
     }
 

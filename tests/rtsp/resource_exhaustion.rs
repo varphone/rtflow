@@ -76,6 +76,7 @@ async fn udp_port_range_exhaustion_fails_the_second_setup() {
         url.clone(),
         ClientOptions::builder()
             .transport(UpstreamTransport::Udp)
+            .rtcp_mux(false)
             .build()
             .unwrap(),
     )
@@ -86,6 +87,7 @@ async fn udp_port_range_exhaustion_fails_the_second_setup() {
             url,
             ClientOptions::builder()
                 .transport(UpstreamTransport::Udp)
+                .rtcp_mux(false)
                 .build()
                 .unwrap()
         )

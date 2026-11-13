@@ -77,13 +77,21 @@ pub(super) async fn handle_setup(
             TransportSpec::TcpInterleaved {
                 rtp_channel,
                 rtcp_channel,
+                rtcp_mux,
             } => {
-                rtp_channel != rtcp_channel
-                    && !interleaved.iter().any(|(_, current_rtp, current_rtcp, _)| {
-                        [*current_rtp, *current_rtcp]
-                            .into_iter()
-                            .any(|current| current == *rtp_channel || current == *rtcp_channel)
-                    })
+                if *rtcp_mux {
+                    rtp_channel == rtcp_channel
+                        && !interleaved.iter().any(|(_, current_rtp, current_rtcp, _)| {
+                            current_rtp == rtp_channel || current_rtcp == rtp_channel
+                        })
+                } else {
+                    rtp_channel != rtcp_channel
+                        && !interleaved.iter().any(|(_, current_rtp, current_rtcp, _)| {
+                            [*current_rtp, *current_rtcp]
+                                .into_iter()
+                                .any(|current| current == *rtp_channel || current == *rtcp_channel)
+                        })
+                }
             }
             TransportSpec::Udp { .. } => true,
         })
@@ -103,6 +111,7 @@ pub(super) async fn handle_setup(
     if let TransportSpec::TcpInterleaved {
         rtp_channel,
         rtcp_channel,
+        rtcp_mux,
     } = transport
     {
         let Ok(track) = track_for_uri(&description_for(&mount.config)?, &req.uri) else {
@@ -134,6 +143,7 @@ pub(super) async fn handle_setup(
             TransportSpec::TcpInterleaved {
                 rtp_channel,
                 rtcp_channel,
+                rtcp_mux,
             }
             .render(),
         );
@@ -155,6 +165,7 @@ pub(super) async fn handle_setup(
     let TransportSpec::Udp {
         client_rtp,
         client_rtcp,
+        rtcp_mux,
         ..
     } = transport
     else {
@@ -173,9 +184,23 @@ pub(super) async fn handle_setup(
         std::net::IpAddr::V4(_) => std::net::Ipv4Addr::UNSPECIFIED.into(),
         std::net::IpAddr::V6(_) => std::net::Ipv6Addr::UNSPECIFIED.into(),
     };
-    let pair = UdpPair::bind(bind_ip, state.config.udp_port_range.clone()).await?;
+    let pair = if rtcp_mux {
+        UdpPair::bind_mux(
+            bind_ip,
+            state.config.udp_port_range.clone(),
+            4 * 1024 * 1024,
+        )
+        .await?
+    } else {
+        UdpPair::bind(bind_ip, state.config.udp_port_range.clone()).await?
+    };
     let server_rtp = pair.rtp_port()?;
-    let server_rtcp = pair.rtcp_port()?;
+    let server_rtcp = if rtcp_mux {
+        server_rtp
+    } else {
+        pair.rtcp_port()?
+    };
+    let client_rtcp = if rtcp_mux { client_rtp } else { client_rtcp };
     let rtp_target = SocketAddr::new(peer.ip(), client_rtp);
     let rtcp_target = SocketAddr::new(peer.ip(), client_rtcp);
     let Ok(track) = track_for_uri(&description_for(&mount.config)?, &req.uri) else {
@@ -202,6 +227,7 @@ pub(super) async fn handle_setup(
             client_rtcp,
             server_rtp: Some(server_rtp),
             server_rtcp: Some(server_rtcp),
+            rtcp_mux,
         }
         .render(),
     );

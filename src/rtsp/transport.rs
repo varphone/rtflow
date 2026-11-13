@@ -11,16 +11,21 @@ use std::{
 use tokio::net::UdpSocket;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum TransportSpec {
     Udp {
         client_rtp: u16,
         client_rtcp: u16,
         server_rtp: Option<u16>,
         server_rtcp: Option<u16>,
+        /// RTCP is multiplexed on the RTP port (`rtcp-mux`, RFC 7826 §4.1).
+        rtcp_mux: bool,
     },
     TcpInterleaved {
         rtp_channel: u8,
         rtcp_channel: u8,
+        /// RTCP is multiplexed on the RTP interleaved channel.
+        rtcp_mux: bool,
     },
 }
 impl TransportSpec {
@@ -54,7 +59,15 @@ impl TransportSpec {
             .ok_or_else(|| Error::Rtsp("empty Transport".into()))?;
         let mut parameters = std::collections::BTreeMap::new();
         let mut unicast = false;
+        let mut rtcp_mux = false;
         for part in parts {
+            if part.eq_ignore_ascii_case("rtcp-mux") {
+                if rtcp_mux {
+                    return Err(Error::Rtsp("duplicate rtcp-mux Transport parameter".into()));
+                }
+                rtcp_mux = true;
+                continue;
+            }
             if part.eq_ignore_ascii_case("unicast") {
                 if unicast {
                     return Err(Error::Rtsp("duplicate unicast Transport parameter".into()));
@@ -90,12 +103,13 @@ impl TransportSpec {
             let channels = parameters
                 .get("interleaved")
                 .ok_or_else(|| Error::Rtsp("TCP Transport has no interleaved channels".into()))?;
-            let (rtp, rtcp) = port_pair(channels)?;
+            let (rtp, rtcp) = port_or_pair(channels, rtcp_mux)?;
             return Ok(Self::TcpInterleaved {
                 rtp_channel: u8::try_from(rtp)
                     .map_err(|_| Error::Rtsp("RTP interleaved channel exceeds 255".into()))?,
                 rtcp_channel: u8::try_from(rtcp)
                     .map_err(|_| Error::Rtsp("RTCP interleaved channel exceeds 255".into()))?,
+                rtcp_mux,
             });
         }
         if !profile.eq_ignore_ascii_case("RTP/AVP") && !profile.eq_ignore_ascii_case("RTP/AVP/UDP")
@@ -105,13 +119,13 @@ impl TransportSpec {
         let client = parameters
             .get("client_port")
             .ok_or_else(|| Error::Rtsp("UDP Transport has no client_port".into()))?;
-        let (client_rtp, client_rtcp) = port_pair(client)?;
+        let (client_rtp, client_rtcp) = port_or_pair(client, rtcp_mux)?;
         if client_rtp == 0 {
             return Err(Error::Rtsp("UDP client_port must be non-zero".into()));
         }
         let (server_rtp, server_rtcp) = parameters
             .get("server_port")
-            .map(|value| port_pair(value))
+            .map(|value| port_or_pair(value, rtcp_mux))
             .transpose()?
             .map_or((None, None), |(a, b)| (Some(a), Some(b)));
         Ok(Self::Udp {
@@ -119,6 +133,7 @@ impl TransportSpec {
             client_rtcp,
             server_rtp,
             server_rtcp,
+            rtcp_mux,
         })
     }
 
@@ -129,32 +144,52 @@ impl TransportSpec {
                 client_rtcp,
                 server_rtp,
                 server_rtcp,
+                rtcp_mux,
             } => {
-                let mut s = format!("RTP/AVP;unicast;client_port={client_rtp}-{client_rtcp}");
-                if let (Some(a), Some(b)) = (server_rtp, server_rtcp) {
-                    s.push_str(&format!(";server_port={a}-{b}"))
+                let mut s = if *rtcp_mux {
+                    format!("RTP/AVP;unicast;client_port={client_rtp};rtcp-mux")
+                } else {
+                    format!("RTP/AVP;unicast;client_port={client_rtp}-{client_rtcp}")
                 };
+                if let (Some(a), Some(b)) = (server_rtp, server_rtcp) {
+                    if *rtcp_mux {
+                        s.push_str(&format!(";server_port={a}"))
+                    } else {
+                        s.push_str(&format!(";server_port={a}-{b}"))
+                    }
+                }
                 s
             }
             Self::TcpInterleaved {
                 rtp_channel,
                 rtcp_channel,
-            } => format!("RTP/AVP/TCP;unicast;interleaved={rtp_channel}-{rtcp_channel}"),
+                rtcp_mux,
+            } => {
+                if *rtcp_mux {
+                    format!("RTP/AVP/TCP;unicast;interleaved={rtp_channel};rtcp-mux")
+                } else {
+                    format!("RTP/AVP/TCP;unicast;interleaved={rtp_channel}-{rtcp_channel}")
+                }
+            }
         }
     }
 }
-fn port_pair(s: &str) -> Result<(u16, u16)> {
-    let (a, b) = s
-        .split_once('-')
-        .ok_or_else(|| Error::Rtsp("port pair must use '-'".into()))?;
-    let a = u16::from_str(a.trim()).map_err(|_| Error::Rtsp("invalid RTP port".into()))?;
-    let b = u16::from_str(b.trim()).map_err(|_| Error::Rtsp("invalid RTCP port".into()))?;
-    if b != a.checked_add(1).unwrap_or_default() {
-        return Err(Error::Rtsp(
-            "RTP/RTCP values must be an adjacent pair".into(),
-        ));
+fn port_or_pair(s: &str, allow_single: bool) -> Result<(u16, u16)> {
+    if let Some((a, b)) = s.split_once('-') {
+        let a = u16::from_str(a.trim()).map_err(|_| Error::Rtsp("invalid RTP port".into()))?;
+        let b = u16::from_str(b.trim()).map_err(|_| Error::Rtsp("invalid RTCP port".into()))?;
+        if b != a.checked_add(1).unwrap_or_default() {
+            return Err(Error::Rtsp(
+                "RTP/RTCP values must be an adjacent pair".into(),
+            ));
+        }
+        return Ok((a, b));
     }
-    Ok((a, b))
+    if allow_single {
+        let value = u16::from_str(s.trim()).map_err(|_| Error::Rtsp("invalid RTP port".into()))?;
+        return Ok((value, value));
+    }
+    Err(Error::Rtsp("port pair must use '-'".into()))
 }
 #[derive(Clone, Debug)]
 pub struct InterleavedFrame {
@@ -269,6 +304,31 @@ impl UdpPair {
             std::io::ErrorKind::AddrNotAvailable,
             "unable to allocate adjacent RTP/RTCP ports",
         )))
+    }
+    /// Bind a single UDP socket shared by RTP and RTCP (`rtcp-mux`).
+    pub async fn bind_mux(
+        ip: IpAddr,
+        range: Option<RangeInclusive<u16>>,
+        recv_buffer: usize,
+    ) -> Result<Self> {
+        let socket = if let Some(range) = range {
+            range
+                .into_iter()
+                .find_map(|port| bind_udp(SocketAddr::new(ip, port), recv_buffer).ok())
+                .ok_or_else(|| {
+                    Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::AddrNotAvailable,
+                        "no free RTP port",
+                    ))
+                })?
+        } else {
+            bind_udp(SocketAddr::new(ip, 0), recv_buffer)?
+        };
+        let socket = Arc::new(socket);
+        Ok(Self {
+            rtp: socket.clone(),
+            rtcp: socket,
+        })
     }
     pub fn rtp_port(&self) -> Result<u16> {
         Ok(self.rtp.local_addr()?.port())

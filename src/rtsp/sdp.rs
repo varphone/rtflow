@@ -315,6 +315,15 @@ pub fn encode(description: &MediaDescription) -> String {
 /// `None` keeps the historical `c=IN IP4 0.0.0.0` (valid for IPv4 and
 /// accepted by most clients); an IPv6 local address emits `c=IN IP6 ::`.
 pub fn encode_to(description: &MediaDescription, local_ip: Option<std::net::IpAddr>) -> String {
+    encode_with(description, local_ip, false)
+}
+
+/// Encode SDP with optional `a=rtcp-mux` advertisement.
+pub fn encode_with(
+    description: &MediaDescription,
+    local_ip: Option<std::net::IpAddr>,
+    rtcp_mux: bool,
+) -> String {
     let mut output = format!(
         "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns={}\r\nt=0 0\r\n",
         description.session_name
@@ -362,6 +371,9 @@ pub fn encode_to(description: &MediaDescription, local_ip: Option<std::net::IpAd
         ));
         if let Some(fmtp) = &track.fmtp {
             output.push_str(&format!("a=fmtp:{} {}\r\n", track.payload_type, fmtp))
+        }
+        if rtcp_mux {
+            output.push_str("a=rtcp-mux\r\n");
         }
         if let Some((numerator, denominator)) = track.frame_rate
             && numerator > 0

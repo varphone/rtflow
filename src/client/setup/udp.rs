@@ -55,11 +55,16 @@ pub(super) async fn connect_udp(
                 }));
             }
         };
-        let mut extra = format!(
-            "Transport: RTP/AVP;unicast;client_port={}-{}\r\n",
-            port,
-            port.saturating_add(1)
-        );
+        let request_mux = options.rtcp_mux == Some(true);
+        let mut extra = if request_mux {
+            format!("Transport: RTP/AVP;unicast;client_port={port};rtcp-mux\r\n")
+        } else {
+            format!(
+                "Transport: RTP/AVP;unicast;client_port={}-{}\r\n",
+                port,
+                port.saturating_add(1)
+            )
+        };
         if let Some(session) = &session_id {
             extra.push_str(&format!("Session: {session}\r\n"));
         }
@@ -165,9 +170,13 @@ pub(super) async fn connect_udp(
             }
         };
         let peer_ip = stream.peer_addr().ip();
+        let negotiated_mux = matches!(
+            &transport_spec,
+            Some(TransportSpec::Udp { rtcp_mux: true, .. })
+        );
         let rtp_target = std::net::SocketAddr::new(peer_ip, server_rtp);
         let rtcp_target = std::net::SocketAddr::new(peer_ip, server_rtcp);
-        receivers.push((pair, track, rtp_target, rtcp_target));
+        receivers.push((pair, track, rtp_target, rtcp_target, negotiated_mux));
     }
     let Some(session_id) = session_id else {
         return Err(Box::new(SetupFailure {
@@ -218,13 +227,15 @@ pub(super) async fn connect_udp(
     let cancel = CancellationToken::new();
     let quality = Arc::new(Mutex::new(HashMap::new()));
     let mut tasks = Vec::new();
-    for (pair, track, rtp_target, rtcp_target) in receivers {
+    for (pair, track, rtp_target, rtcp_target, rtcp_mux) in receivers {
         let tx = tx.clone();
         let jitter_config = options.jitter.clone();
         let rtcp_pair = pair.clone();
         let rtp_cancel = cancel.clone();
         let rtp_quality = quality.clone();
         let track_id = track.id;
+        let mux_rtcp_target = rtcp_target;
+        let mux = rtcp_mux;
         let clock_rate = track.clock_rate;
         let local_ssrc = client_ssrc(track_id);
         tasks.push(tokio::spawn(async move {
@@ -259,6 +270,26 @@ pub(super) async fn connect_udp(
                         // built-in authenticity, so an on-path attacker
                         // must not be able to inject media.
                         if source != rtp_target {
+                            continue;
+                        }
+                        // rtcp-mux: RTCP shares the RTP socket; classify by
+                        // payload type (192..=223) before RTP parsing.
+                        if mux && size >= 2 && (192..=223).contains(&buffer[1]) {
+                            let payload = buffer.split_to(size).freeze();
+                            buffer.resize(65_536, 0);
+                            if let Ok(packets) = RtcpPacket::parse(payload)
+                                && let Ok(Some(report)) = quality_report(
+                                    &rtp_quality,
+                                    track_id,
+                                    clock_rate,
+                                    local_ssrc,
+                                    &packets,
+                                )
+                                .await
+                                && let Ok(wire) = report.try_encode()
+                            {
+                                let _ = pair.rtp.send_to(&wire, mux_rtcp_target).await;
+                            }
                             continue;
                         }
                         let payload = buffer.split_to(size).freeze();
@@ -305,29 +336,36 @@ pub(super) async fn connect_udp(
                 }
             }
         }));
-        let rtcp_cancel = cancel.clone();
-        let rtcp_quality = quality.clone();
-        tasks.push(tokio::spawn(async move {
-            let mut buffer = vec![0u8; 2048];
-            loop {
-                let received = tokio::select! {
-                    _ = rtcp_cancel.cancelled() => return,
-                    result = rtcp_pair.rtcp.recv_from(&mut buffer) => result,
-                };
-                let Ok((size, _)) = received else {
-                    return;
-                };
-                if let Ok(packets) =
-                    RtcpPacket::parse(bytes::Bytes::copy_from_slice(&buffer[..size]))
-                    && let Ok(Some(report)) =
-                        quality_report(&rtcp_quality, track_id, clock_rate, local_ssrc, &packets)
-                            .await
-                    && let Ok(report) = report.try_encode()
-                {
-                    let _ = rtcp_pair.rtcp.send_to(&report, rtcp_target).await;
+        if !rtcp_mux {
+            let rtcp_cancel = cancel.clone();
+            let rtcp_quality = quality.clone();
+            tasks.push(tokio::spawn(async move {
+                let mut buffer = vec![0u8; 2048];
+                loop {
+                    let received = tokio::select! {
+                        _ = rtcp_cancel.cancelled() => return,
+                        result = rtcp_pair.rtcp.recv_from(&mut buffer) => result,
+                    };
+                    let Ok((size, _)) = received else {
+                        return;
+                    };
+                    if let Ok(packets) =
+                        RtcpPacket::parse(bytes::Bytes::copy_from_slice(&buffer[..size]))
+                        && let Ok(Some(report)) = quality_report(
+                            &rtcp_quality,
+                            track_id,
+                            clock_rate,
+                            local_ssrc,
+                            &packets,
+                        )
+                        .await
+                        && let Ok(report) = report.try_encode()
+                    {
+                        let _ = rtcp_pair.rtcp.send_to(&report, rtcp_target).await;
+                    }
                 }
-            }
-        }));
+            }));
+        }
     }
     let peer = stream.peer_addr();
     let media_for_control = tx.clone();

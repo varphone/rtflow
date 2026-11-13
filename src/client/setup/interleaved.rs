@@ -39,11 +39,16 @@ pub(super) async fn connect_interleaved(
                 }));
             }
         };
-        let mut extra = format!(
-            "Transport: RTP/AVP/TCP;unicast;interleaved={}-{}\r\n",
-            channel,
-            channel.saturating_add(1)
-        );
+        let request_mux = options.rtcp_mux == Some(true);
+        let mut extra = if request_mux {
+            format!("Transport: RTP/AVP/TCP;unicast;interleaved={channel};rtcp-mux\r\n")
+        } else {
+            format!(
+                "Transport: RTP/AVP/TCP;unicast;interleaved={}-{}\r\n",
+                channel,
+                channel.saturating_add(1)
+            )
+        };
         if let Some(session) = &session_id {
             extra.push_str(&format!("Session: {session}\r\n"));
         }
@@ -113,7 +118,19 @@ pub(super) async fn connect_interleaved(
                 client_ssrc(track.id),
             ),
         );
-        rtcp_channels.insert(channel.saturating_add(1), channel);
+        let negotiated_mux = request_mux
+            && response
+                .headers
+                .get("transport")
+                .is_some_and(|value| value.to_ascii_lowercase().contains("rtcp-mux"));
+        rtcp_channels.insert(
+            if negotiated_mux {
+                channel
+            } else {
+                channel.saturating_add(1)
+            },
+            channel,
+        );
     }
     let Some(session_id) = session_id else {
         return Err(Box::new(SetupFailure {
@@ -203,6 +220,45 @@ pub(super) async fn connect_interleaved(
                     loop {
                         match framer.next_frame() {
                             Ok(Some(InboundFrame::Interleaved(frame))) => {
+                                // rtcp-mux: RTCP and RTP share a channel;
+                                // classify by payload type before RTP parsing.
+                                if frame.payload.len() >= 2
+                                    && (192..=223).contains(&frame.payload[1])
+                                    && let Some(rtp_channel) = rtcp_channels.get(&frame.channel)
+                                    && let Some((_, _, track_id, clock_rate, local_ssrc)) =
+                                        tracks.get(rtp_channel)
+                                    && let Ok(packets) = RtcpPacket::parse(frame.payload.clone())
+                                    && let Ok(Some(report)) = quality_report(
+                                        &reader_quality,
+                                        *track_id,
+                                        *clock_rate,
+                                        *local_ssrc,
+                                        &packets,
+                                    )
+                                    .await
+                                    && let Ok(payload) = report.try_encode()
+                                {
+                                    let Ok(wire) = (InterleavedFrame {
+                                        channel: frame.channel,
+                                        payload,
+                                    })
+                                    .try_encode() else {
+                                        return;
+                                    };
+                                    let write =
+                                        async { rtcp_writer.lock().await.write_all(&wire).await };
+                                    if !matches!(
+                                        tokio::time::timeout(
+                                            std::time::Duration::from_secs(10),
+                                            write,
+                                        )
+                                        .await,
+                                        Ok(Ok(()))
+                                    ) {
+                                        return;
+                                    }
+                                    continue;
+                                }
                                 if let Some((
                                     jitter,
                                     depacketizer,

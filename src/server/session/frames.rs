@@ -10,10 +10,19 @@ pub(super) async fn handle_incoming_interleaved(
     depacketizers: &mut HashMap<u8, Depacketizer>,
     ssrcs: &mut HashMap<u8, u32>,
 ) -> Result<()> {
-    if frame.channel % 2 == 1 {
-        if let Some((mount, _, _, _)) = interleaved
-            .iter()
-            .find(|(_, _, rtcp_channel, _)| *rtcp_channel == frame.channel)
+    // `rtcp-mux` puts RTCP on the RTP channel: classify by payload type
+    // (RTCP PT 192..=223) before treating the frame as RTP.
+    let is_rtcp = frame
+        .payload
+        .get(1)
+        .is_some_and(|byte| (192..=223).contains(byte));
+    if is_rtcp || frame.channel % 2 == 1 {
+        if let Some((mount, _, _, _)) =
+            interleaved
+                .iter()
+                .find(|(_, rtp_channel, rtcp_channel, _)| {
+                    *rtcp_channel == frame.channel || (is_rtcp && *rtp_channel == frame.channel)
+                })
             && let Ok(packets) = RtcpPacket::parse(frame.payload)
         {
             let reports = packets
