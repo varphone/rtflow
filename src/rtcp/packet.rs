@@ -337,7 +337,9 @@ fn parse_reports(data: &[u8], count: u8) -> Result<Vec<ReportBlock>> {
         return Err(Error::Media("invalid RTCP report blocks".into()));
     }
     let mut reports = Vec::with_capacity(usize::from(count));
-    for block in data.chunks_exact(24) {
+    // The length is validated above, so every block is exactly 24 bytes.
+    let (blocks, _) = data.as_chunks::<24>();
+    for block in blocks {
         let raw_lost =
             (u32::from(block[5]) << 16) | (u32::from(block[6]) << 8) | u32::from(block[7]);
         let cumulative_lost = if raw_lost & 0x80_0000 != 0 {

@@ -98,7 +98,8 @@ impl MediaFixture {
         let ts = fs::read(fixture.path("sample.ts")).unwrap();
         assert_eq!(ts.len() % 188, 0);
         let mut m2ts = Vec::with_capacity(ts.len() / 188 * 192);
-        for packet in ts.chunks_exact(188) {
+        let (packets, _) = ts.as_chunks::<188>();
+        for packet in packets {
             m2ts.extend_from_slice(&[0, 0, 0, 0]);
             m2ts.extend_from_slice(packet);
         }

@@ -39,7 +39,7 @@ pub(super) async fn connect(
     description: MediaDescription,
     options: ClientOptions,
     id: SessionId,
-) -> std::result::Result<ClientSession, SetupFailure> {
+) -> std::result::Result<ClientSession, Box<SetupFailure>> {
     match options.transport {
         crate::transport::UpstreamTransport::Udp => {
             connect_udp(stream, uri, setup_base, description, options, id).await
@@ -47,14 +47,14 @@ pub(super) async fn connect(
         crate::transport::UpstreamTransport::TcpInterleaved => {
             connect_interleaved(stream, uri, setup_base, description, options, id).await
         }
-        crate::transport::UpstreamTransport::Auto => Err(SetupFailure {
+        crate::transport::UpstreamTransport::Auto => Err(Box::new(SetupFailure {
             error: Error::Rtsp(
                 "automatic transport selection must be resolved before SETUP".into(),
             ),
             stream,
             setup_base,
             description,
-        }),
+        })),
     }
 }
 
@@ -65,7 +65,7 @@ async fn connect_interleaved(
     description: MediaDescription,
     options: ClientOptions,
     id: SessionId,
-) -> std::result::Result<ClientSession, SetupFailure> {
+) -> std::result::Result<ClientSession, Box<SetupFailure>> {
     let mut cseq = 3u32;
     let mut session_id = None;
     let mut session_timeout = None;
@@ -78,23 +78,23 @@ async fn connect_interleaved(
         let channel = match u8::try_from(index * 2) {
             Ok(channel) => channel,
             Err(_) => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error: Error::Limit("too many tracks for interleaved transport"),
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         let setup_uri = match crate::protocol::sdp::control_uri(&setup_base, &track.control) {
             Ok(uri) => uri,
             Err(error) => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error,
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         let mut extra = format!(
@@ -118,17 +118,17 @@ async fn connect_interleaved(
         {
             Ok(response) => response,
             Err(error) => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error,
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         cseq = cseq.wrapping_add(1);
         if response.status != 200 {
-            return Err(SetupFailure {
+            return Err(Box::new(SetupFailure {
                 error: Error::RtspStatus {
                     method: "SETUP",
                     status: response.status,
@@ -136,26 +136,26 @@ async fn connect_interleaved(
                 stream,
                 setup_base,
                 description,
-            });
+            }));
         }
         let received = match response_session_id(&response) {
             Ok(value) => value,
             Err(error) => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error,
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         if session_id.as_ref().is_some_and(|value| value != &received) {
-            return Err(SetupFailure {
+            return Err(Box::new(SetupFailure {
                 error: Error::Rtsp("server changed Session during SETUP".into()),
                 stream,
                 setup_base,
                 description,
-            });
+            }));
         }
         session_id = Some(received);
         if session_timeout.is_none() {
@@ -174,12 +174,12 @@ async fn connect_interleaved(
         rtcp_channels.insert(channel.saturating_add(1), channel);
     }
     let Some(session_id) = session_id else {
-        return Err(SetupFailure {
+        return Err(Box::new(SetupFailure {
             error: Error::Rtsp("SDP has no tracks".into()),
             stream,
             setup_base,
             description,
-        });
+        }));
     };
     let mut extra = format!("Session: {session_id}\r\n");
     if let Some(range) = options.play_range {
@@ -198,17 +198,17 @@ async fn connect_interleaved(
     {
         Ok(response) => response,
         Err(error) => {
-            return Err(SetupFailure {
+            return Err(Box::new(SetupFailure {
                 error,
                 stream,
                 setup_base,
                 description,
-            });
+            }));
         }
     };
     cseq = cseq.wrapping_add(1);
     if response.status != 200 {
-        return Err(SetupFailure {
+        return Err(Box::new(SetupFailure {
             error: Error::RtspStatus {
                 method: "PLAY",
                 status: response.status,
@@ -216,7 +216,7 @@ async fn connect_interleaved(
             stream,
             setup_base,
             description,
-        });
+        }));
     }
     let peer = stream.peer_addr();
     let (mut reader, writer) = tokio::io::split(stream);
@@ -399,7 +399,7 @@ async fn connect_udp(
     description: MediaDescription,
     options: ClientOptions,
     id: SessionId,
-) -> std::result::Result<ClientSession, SetupFailure> {
+) -> std::result::Result<ClientSession, Box<SetupFailure>> {
     let mut cseq = 3u32;
     let mut session_id = None;
     let mut session_timeout = None;
@@ -417,34 +417,34 @@ async fn connect_udp(
         let pair = match bind_result {
             Ok(pair) => pair,
             Err(error) => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error,
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         let port = match pair.rtp_port() {
             Ok(port) => port,
             Err(error) => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error,
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         let setup_uri = match crate::protocol::sdp::control_uri(&setup_base, &track.control) {
             Ok(uri) => uri,
             Err(error) => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error,
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         let mut extra = format!(
@@ -468,17 +468,17 @@ async fn connect_udp(
         {
             Ok(response) => response,
             Err(error) => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error,
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         cseq = cseq.wrapping_add(1);
         if response.status != 200 {
-            return Err(SetupFailure {
+            return Err(Box::new(SetupFailure {
                 error: Error::RtspStatus {
                     method: "SETUP",
                     status: response.status,
@@ -486,26 +486,26 @@ async fn connect_udp(
                 stream,
                 setup_base,
                 description,
-            });
+            }));
         }
         let received = match response_session_id(&response) {
             Ok(value) => value,
             Err(error) => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error,
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         if session_id.as_ref().is_some_and(|value| value != &received) {
-            return Err(SetupFailure {
+            return Err(Box::new(SetupFailure {
                 error: Error::Rtsp("server changed Session during SETUP".into()),
                 stream,
                 setup_base,
                 description,
-            });
+            }));
         }
         session_id = Some(received);
         if session_timeout.is_none() {
@@ -520,12 +520,12 @@ async fn connect_udp(
         {
             Ok(spec) => spec,
             Err(error) => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error,
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         let server_rtp = match &transport_spec {
@@ -534,12 +534,12 @@ async fn connect_udp(
                 ..
             }) => *port,
             _ => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error: Error::Rtsp("SETUP response has no server RTP port".into()),
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         let server_rtcp = match &transport_spec {
@@ -548,12 +548,12 @@ async fn connect_udp(
                 ..
             }) => *port,
             _ => {
-                return Err(SetupFailure {
+                return Err(Box::new(SetupFailure {
                     error: Error::Rtsp("SETUP response has no server RTCP port".into()),
                     stream,
                     setup_base,
                     description,
-                });
+                }));
             }
         };
         let peer_ip = stream.peer_addr().ip();
@@ -562,12 +562,12 @@ async fn connect_udp(
         receivers.push((pair, track, rtp_target, rtcp_target));
     }
     let Some(session_id) = session_id else {
-        return Err(SetupFailure {
+        return Err(Box::new(SetupFailure {
             error: Error::Rtsp("SDP has no tracks".into()),
             stream,
             setup_base,
             description,
-        });
+        }));
     };
     let mut extra = format!("Session: {session_id}\r\n");
     if let Some(range) = options.play_range {
@@ -586,17 +586,17 @@ async fn connect_udp(
     {
         Ok(response) => response,
         Err(error) => {
-            return Err(SetupFailure {
+            return Err(Box::new(SetupFailure {
                 error,
                 stream,
                 setup_base,
                 description,
-            });
+            }));
         }
     };
     cseq = cseq.wrapping_add(1);
     if response.status != 200 {
-        return Err(SetupFailure {
+        return Err(Box::new(SetupFailure {
             error: Error::RtspStatus {
                 method: "PLAY",
                 status: response.status,
@@ -604,7 +604,7 @@ async fn connect_udp(
             stream,
             setup_base,
             description,
-        });
+        }));
     }
     let (tx, rx) = mpsc::channel(options.output_queue_capacity);
     let cancel = CancellationToken::new();
