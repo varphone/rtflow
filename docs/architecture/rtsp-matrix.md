@@ -103,8 +103,8 @@ VLC 3.0（snap）可以连接并订阅 rtflow 的 RTSP mount，但在 `-I dummy`
 + 无显示环境下 H.264 解码出现 `buffer deadlock prevented`，未作为自动化断言。
 
 AV1 真实互操作使用用户目录的 FFmpeg master（2026-11）验证：
-`FFMPEG=~/.local/opt/ffmpeg/ffmpeg cargo test --test interop ffmpeg_round_trips_av1 -- --ignored`。
-系统 FFmpeg 6.1 没有 AV1 RTP，默认测试中该用例保持 ignore。
+`FFMPEG=~/.local/opt/ffmpeg/ffmpeg cargo test --test interop ffmpeg_round_trips_av1`。
+测试会检测 FFmpeg 是否支持 AV1 RTP；系统 FFmpeg 6.1 无该能力时自动跳过。
 
 ## 7. 已确认的验证结果（2026-11）
 

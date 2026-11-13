@@ -5,6 +5,39 @@ use rtflow_testkit::{description, wait_until};
 use std::{path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 use tokio::process::Command;
 
+fn ffmpeg_supports_av1_rtp() -> bool {
+    let sdp = std::env::temp_dir().join("rtflow-av1-support.sdp");
+    let _ = std::fs::remove_file(&sdp);
+    let Ok(status) = std::process::Command::new(ffmpeg_bin())
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=16x16:d=0.2",
+            "-frames:v",
+            "1",
+            "-c:v",
+            "libaom-av1",
+            "-strict",
+            "-2",
+            "-f",
+            "rtp",
+            "-sdp_file",
+            sdp.to_str().unwrap(),
+            "rtp://127.0.0.1:9",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+    else {
+        return false;
+    };
+    status.success() && std::fs::read_to_string(&sdp).is_ok_and(|text| text.contains("AV1/90000"))
+}
+
 fn ffmpeg_bin() -> PathBuf {
     std::env::var_os("FFMPEG")
         .map(PathBuf::from)
@@ -185,7 +218,10 @@ async fn ffmpeg_round_trips_legacy_codecs() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires FFmpeg master/8.x with AV1 RTP support (see FFMPEG env var)"]
 async fn ffmpeg_round_trips_av1() {
+    if !ffmpeg_supports_av1_rtp() {
+        eprintln!("skipping AV1: FFmpeg has no AV1 RTP support (use a master/8.x build)");
+        return;
+    }
     run_codec(Codec::Av1).await;
 }
