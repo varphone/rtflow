@@ -1,0 +1,37 @@
+{
+  "path_attributes": [
+    "src/lib.rs",
+    "src/media/pipeline.rs"
+  ],
+  "oversized_files": [
+    "src/client/mod.rs (1531 lines)",
+    "src/client/setup.rs (885 lines)",
+    "src/file/mpeg_ts.rs (857 lines)",
+    "src/hls/segmenter.rs (1424 lines)",
+    "src/http_flv/mux.rs (1035 lines)",
+    "src/metrics/mod.rs (952 lines)",
+    "src/mount.rs (994 lines)",
+    "src/rtmp/session.rs (1057 lines)",
+    "src/rtp/payload.rs (1432 lines)",
+    "src/server/session.rs (1362 lines)",
+    "src/storage/recording.rs (811 lines)"
+  ],
+  "root_entries": [
+    ".cargo",
+    ".github",
+    ".gitignore",
+    "Cargo.toml",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+    "README.md",
+    "benches",
+    "docs",
+    "examples",
+    "fuzz",
+    "scripts",
+    "src",
+    "test_decode.sh",
+    "tests",
+    "tools"
+  ]
+}

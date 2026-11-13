@@ -9,3 +9,9 @@ Cargo.lock
 
 # Reasonix configuration
 reasonix.toml
+
+# Qoder assistant workspace settings
+/.qoder
+
+# Python bytecode from layout scripts
+__pycache__/

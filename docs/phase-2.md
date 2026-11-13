@@ -31,7 +31,7 @@ proxy/      上游策略、连续性、启动缓存、故障转移
 rtp/rtcp/   数据面与控制面包处理
 ```
 
-`rtsp::recording`、`rtsp::tls` 等兼容门面继续保留，新的实现分别归入 `storage` 和 `security`，便于后续拆分 crate 而不迫使调用方同步迁移。
+`rtflow::recording`、`rtflow::tls` 等兼容门面继续保留，新的实现分别归入 `storage` 和 `security`，便于后续拆分 crate 而不迫使调用方同步迁移。
 
 ## 运行发布门禁
 

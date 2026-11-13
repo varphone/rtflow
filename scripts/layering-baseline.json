@@ -1,0 +1,13 @@
+{
+  "cycles": [
+    "file <-> http <-> metrics <-> mount <-> proxy <-> storage",
+    "media <-> rtsp"
+  ],
+  "upward_edges": [
+    "http -> metrics",
+    "media -> rtsp",
+    "mount -> metrics",
+    "mount -> proxy",
+    "mount -> storage"
+  ]
+}

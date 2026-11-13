@@ -1,4 +1,4 @@
-# rtspflow
+# rtflow
 
 面向嵌入式实时音视频网关的异步 RTSP/RTP 框架。核心数据面只传递编码后的 `bytes::Bytes`，不做解码或转码，便于直接连接硬件编码器、DMA 输出缓冲区和自定义媒体管线。
 
@@ -40,7 +40,7 @@ use rtflow::{
 use std::{sync::Arc, time::Duration};
 
 #[tokio::main]
-async fn main() -> rtsp::Result<()> {
+async fn main() -> rtflow::Result<()> {
     let server = RtspServer::bind(ServerConfig::new("0.0.0.0:8554".parse().unwrap())).await?;
     let mount = server.register_mount(
         Arc::from("/camera"),
@@ -93,7 +93,7 @@ cargo run --example live_stream_demo -- --headless --duration 10
 use rtflow::{FileSource, FileSourceOptions, LoopMode, MountConfig, RtspServer, ServerConfig};
 use std::sync::Arc;
 
-# async fn serve() -> rtsp::Result<()> {
+# async fn serve() -> rtflow::Result<()> {
 let server = RtspServer::bind(ServerConfig::new("0.0.0.0:8554".parse().unwrap())).await?;
 let source = FileSource::open_async("movie.mp4", FileSourceOptions {
     loop_mode: LoopMode::Forever,

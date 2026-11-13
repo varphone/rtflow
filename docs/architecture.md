@@ -26,7 +26,7 @@ file/storage ── pipeline ── server ── client ── proxy
 - `server/`：mount registry、会话状态机及发送/接收任务。
 - `proxy/`：上游配置、状态和重连策略；Proxy mount 可自动 DESCRIBE，上游 supervisor 由 mount 生命周期托管。
 
-根模块继续导出 `rtsp::media`、`rtsp::rtp` 等稳定门面。物理目录可以继续拆分，不要求调用方同步修改 import。
+根模块继续导出 `rtflow::media`、`rtflow::rtp` 等稳定门面。物理目录可以继续拆分，不要求调用方同步修改 import。
 
 ## 数据面与所有权
 
