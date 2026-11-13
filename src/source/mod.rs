@@ -49,6 +49,7 @@ struct Emitter {
     samples_per_packet: u64,
     sample_rate: u64,
     fps: u64,
+    force_keyframe: bool,
 }
 
 impl Emitter {
@@ -82,12 +83,16 @@ impl Emitter {
             samples_per_packet,
             sample_rate,
             fps: u64::from(config.fps),
+            force_keyframe: false,
         })
     }
 
     fn unit(&mut self, keyframe_interval: u32) -> AccessUnit {
+        let forced = std::mem::take(&mut self.force_keyframe);
         let (data, keyframe) = if let Some(samples) = &self.samples {
-            let index = if self.track.kind == MediaKind::Video {
+            let index = if forced && self.track.kind == MediaKind::Video {
+                0
+            } else if self.track.kind == MediaKind::Video {
                 let gop = (self.units % u64::from(keyframe_interval)) as usize;
                 gop.min(samples.len() - 1)
             } else {
@@ -95,7 +100,7 @@ impl Emitter {
             };
             self.index = self.index.wrapping_add(1);
             let sample = &samples[index];
-            (sample.data.clone(), sample.keyframe)
+            (sample.data.clone(), sample.keyframe || forced)
         } else {
             (assets::g711_tone(self.track.codec, self.units), true)
         };
@@ -173,6 +178,7 @@ impl SyntheticSource {
             return Err(Error::Media("synthetic source has no tracks".into()));
         }
 
+        let mut keyframe_requests = publisher.keyframe_requests();
         let mut emitters = Vec::with_capacity(tracks.len());
         for track in tracks {
             emitters.push(Emitter::new(track, config)?);
@@ -194,6 +200,15 @@ impl SyntheticSource {
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => return Ok(()),
+                    request = keyframe_requests.recv() => {
+                        if let Ok(track_id) = request {
+                            for emitter in &mut emitters {
+                                if emitter.track.id == track_id {
+                                    emitter.force_keyframe = true;
+                                }
+                            }
+                        }
+                    }
                     _ = ticker.tick() => {}
                 }
                 clock = clock.saturating_add(tick);

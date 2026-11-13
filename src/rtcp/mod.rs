@@ -311,4 +311,42 @@ mod tests {
         assert!(matches!(bye.packets[1], Packet::ByeSources { .. }));
         assert!(bye.try_encode().is_ok());
     }
+    #[test]
+    fn reduced_size_feedback_and_typed_xr() {
+        let nack = Packet::nack(
+            1,
+            2,
+            &[NackEntry {
+                packet_id: 5,
+                lost: 0,
+            }],
+        )
+        .unwrap();
+        let compound = CompoundPacket::new_reduced(vec![nack]).unwrap();
+        let encoded = compound.try_encode().unwrap();
+        assert_eq!(Packet::parse(encoded).unwrap().len(), 1);
+
+        let rttr = XrBlock::rttr(0x0102_0304_0506_0708);
+        assert_eq!(rttr.rttr_timestamp(), Some(0x0102_0304_0506_0708));
+        let dlrr = XrBlock::dlrr(&[(10, 20)]);
+        assert_eq!((dlrr.block_type, dlrr.data.len()), (5, 12));
+        assert!(CompoundPacket::new_reduced(Vec::new()).is_err());
+    }
+
+    #[test]
+    fn ssrc_collision_is_detected() {
+        let now = Instant::now();
+        let mut session = RtcpSession::new(
+            7,
+            9,
+            90_000,
+            Bytes::from_static(b"client"),
+            Duration::from_secs(5),
+            now,
+        )
+        .unwrap();
+        assert!(!session.collision_detected());
+        session.on_rtcp(&Packet::ReceiverReport { ssrc: 7 }, now);
+        assert!(session.collision_detected());
+    }
 }

@@ -21,6 +21,16 @@ impl LocalPublisher {
         self.inner.cancel.is_cancelled()
     }
 
+    /// Subscribe to local-source keyframe requests (track id).
+    pub fn keyframe_requests(&self) -> tokio::sync::broadcast::Receiver<u8> {
+        self.inner.keyframe_requests.subscribe()
+    }
+
+    /// Request a keyframe on a track (used by RTCP feedback actions).
+    pub fn request_keyframe(&self, track_id: u8) {
+        self.inner.request_keyframe(track_id);
+    }
+
     /// Push a frame without track validation (for protocol ingest like RTMP
     /// where the description may not yet be populated).
     pub fn push(&self, frame: AccessUnit) -> Result<PushResult> {

@@ -4,6 +4,8 @@ pub(crate) struct Mount {
     pub id: MountId,
     pub config: MountConfig,
     pub frames: broadcast::Sender<AccessUnit>,
+    /// PLI/FIR/NACK feedback forwarded to local sources (track id).
+    pub keyframe_requests: broadcast::Sender<u8>,
     pub stats: StreamCounters,
     #[cfg(feature = "server")]
     pub startup_cache: Mutex<KeyframeCache>,
@@ -76,6 +78,11 @@ impl Mount {
     /// Cancellation token for this mount's data plane (cancelled on
     /// unregister or server shutdown).
     #[allow(dead_code)] // used by the RTSP server session layer
+    /// Ask a local source to emit a keyframe on `track_id`.
+    pub(crate) fn request_keyframe(&self, track_id: u8) {
+        let _ = self.keyframe_requests.send(track_id);
+    }
+
     pub(crate) fn cancel_token(&self) -> CancellationToken {
         self.cancel.clone()
     }
@@ -344,6 +351,11 @@ impl MountHandle {
             #[allow(unreachable_patterns)] // only reachable with proxy/VOD mounts
             _ => Err(Error::Conflict("mount does not accept publishers".into())),
         }
+    }
+
+    /// Request a keyframe from a local source (RTCP PLI/FIR/NACK action).
+    pub fn request_keyframe(&self, track_id: u8) {
+        self.inner.request_keyframe(track_id);
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<AccessUnit> {

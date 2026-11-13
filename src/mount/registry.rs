@@ -157,6 +157,7 @@ impl MountRegistry {
         let description = description_for(&config)?;
         let queue_capacity = options.consumer_queue_capacity.unwrap_or(256);
         let (tx, _) = broadcast::channel(queue_capacity);
+        let (keyframe_requests, _) = broadcast::channel(16);
         #[cfg(feature = "server")]
         let startup_cache = match KeyframeCache::new(
             &description,
@@ -185,6 +186,7 @@ impl MountRegistry {
             id: MountId::from(path.clone()),
             config,
             frames: tx,
+            keyframe_requests,
             stats: {
                 #[cfg_attr(not(feature = "metrics"), allow(unused_mut))]
                 let mut counters = StreamCounters::default();

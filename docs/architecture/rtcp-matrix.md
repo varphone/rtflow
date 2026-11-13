@@ -36,9 +36,11 @@ Scope: RFC 3550 RTCP plus RFC 4585/5104/5506 feedback in `src/rtcp/`.
 1. `RtcpInterval` implements a bandwidth/membership estimate with randomized
    intervals and BYE construction; it is opt-in (the session default remains a
    fixed interval).
-2. RTCP SSRC collision handling is not implemented; BYE must be sent by the
-   owner when closing.
-3. Feedback actions: PLI/FIR/NACK are counted but a sender does not
-   automatically request an IDR/retransmit.
-4. RTCP XR block bodies are opaque (no typed VoIP/RRTR/DLRR accessors).
-5. Reduced-size RTCP (RFC 5506) / early feedback profile is not enforced.
+2. RTCP SSRC collision is detected (`RtcpSession::collision_detected`), but no
+   automatic SSRC switch/restart is performed.
+3. PLI/FIR/NACK are forwarded to local sources (`MountHandle::
+   request_keyframe`); an external publisher or retransmission cache cannot
+   currently act on NACK.
+4. RTCP XR has typed RRTR/DLRR helpers; VoIP metrics blocks remain opaque.
+5. Reduced-size RTCP is available via `CompoundPacket::new_reduced`; profile
+   interoperability is not enforced.

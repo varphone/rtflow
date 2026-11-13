@@ -102,3 +102,53 @@ async fn synthetic_source_feeds_every_codec_over_rtsp() {
         server.shutdown().await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn keyframe_request_forces_a_local_source_idr() {
+    let media = description("source-keyframe", &[Codec::H264]);
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let mount = server
+        .register_mount(
+            Arc::from("/source-keyframe"),
+            MountConfig::Local {
+                description: media.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let mut subscriber = mount.subscribe();
+    let source = SyntheticSource::spawn(
+        mount.publisher().unwrap(),
+        media,
+        SyntheticSourceConfig {
+            fps: 50,
+            keyframe_interval: 50,
+        },
+    )
+    .unwrap();
+    let _first = tokio::time::timeout(Duration::from_secs(2), subscriber.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    mount.request_keyframe(0);
+    let mut forced = None;
+    for _ in 0..10 {
+        let unit = tokio::time::timeout(Duration::from_secs(2), subscriber.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        if unit.is_keyframe {
+            forced = Some(unit);
+            break;
+        }
+    }
+    assert!(
+        forced.is_some(),
+        "keyframe request did not reach the source"
+    );
+    source.abort();
+    let _ = source.await;
+    server.shutdown().await.unwrap();
+}

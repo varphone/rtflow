@@ -132,6 +132,15 @@ pub(crate) fn spawn_udp_sender_from(
                             })
                             .count() as u64;
                         mount.stats.add_receiver_reports(reports);
+                        if packets.iter().any(|packet| {
+                            matches!(
+                                packet,
+                                RtcpPacket::RtpFeedback { fmt: 1, .. }
+                                    | RtcpPacket::PayloadFeedback { fmt: 1 | 4, .. }
+                            )
+                        }) {
+                            mount.request_keyframe(track.id);
+                        }
                     }
                 }
                 received = async {

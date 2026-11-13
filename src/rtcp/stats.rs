@@ -311,6 +311,7 @@ pub struct RtcpSession {
     reception: ReceptionStats,
     rtt: RttEstimator,
     feedback: FeedbackSnapshot,
+    collision: bool,
 }
 
 impl RtcpSession {
@@ -337,6 +338,7 @@ impl RtcpSession {
             reception: ReceptionStats::new(remote_ssrc, clock_rate, now)?,
             rtt: RttEstimator::new(32)?,
             feedback: FeedbackSnapshot::default(),
+            collision: false,
         })
     }
 
@@ -345,6 +347,17 @@ impl RtcpSession {
     }
 
     pub fn on_rtcp(&mut self, packet: &Packet, received_at: Instant) {
+        let remote_ssrc = match packet {
+            Packet::SenderReport { ssrc, .. }
+            | Packet::SenderReportWithReports { ssrc, .. }
+            | Packet::ReceiverReport { ssrc }
+            | Packet::ReceiverReportWithReports { ssrc, .. } => Some(*ssrc),
+            Packet::SourceDescription { chunks } => chunks.first().map(|chunk| chunk.ssrc),
+            _ => None,
+        };
+        if remote_ssrc == Some(self.local_ssrc) {
+            self.collision = true;
+        }
         match packet {
             Packet::SenderReport { ntp, .. } => {
                 self.reception.observe_sender_report(*ntp, received_at);
@@ -447,6 +460,11 @@ impl RtcpSession {
 
     pub fn feedback(&self) -> FeedbackSnapshot {
         self.feedback
+    }
+
+    /// An RTCP packet used our local SSRC (RFC 3550 §8.2 collision).
+    pub fn collision_detected(&self) -> bool {
+        self.collision
     }
 }
 

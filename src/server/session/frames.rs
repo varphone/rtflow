@@ -18,7 +18,7 @@ pub(super) async fn handle_incoming_interleaved(
         .get(1)
         .is_some_and(|byte| (192..=223).contains(byte));
     if is_rtcp || frame.channel % 2 == 1 {
-        if let Some((mount, _, _, _)) =
+        if let Some((mount, _, _, track)) =
             interleaved
                 .iter()
                 .find(|(_, rtp_channel, rtcp_channel, _)| {
@@ -41,6 +41,15 @@ pub(super) async fn handle_incoming_interleaved(
                 })
                 .count() as u64;
             mount.stats.add_receiver_reports(reports);
+            if packets.iter().any(|packet| {
+                matches!(
+                    packet,
+                    RtcpPacket::RtpFeedback { fmt: 1, .. }
+                        | RtcpPacket::PayloadFeedback { fmt: 1 | 4, .. }
+                )
+            }) {
+                mount.request_keyframe(track.id);
+            }
         }
         return Ok(());
     }

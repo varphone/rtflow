@@ -359,6 +359,7 @@ impl RtspServer {
         };
         let startup_cache = KeyframeCache::new(&description, startup_cache_config)?;
         let (tx, _) = tokio::sync::broadcast::channel(self.state.config.consumer_queue_capacity);
+        let (keyframe_requests, _) = tokio::sync::broadcast::channel(16);
         let mut counters = crate::mount::StreamCounters::default();
         #[cfg(feature = "metrics")]
         if let Some(registry) = crate::metrics::registry_from_sink(&self.state.config.event_sink) {
@@ -368,6 +369,7 @@ impl RtspServer {
             id: MountId::from(path.clone()),
             config,
             frames: tx,
+            keyframe_requests,
             stats: counters,
             startup_cache: Mutex::new(startup_cache),
             bootstrap: Mutex::new(std::array::from_fn(|_| None)),

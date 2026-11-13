@@ -278,6 +278,16 @@ impl CompoundPacket {
         Ok(Self { packets })
     }
 
+    /// RFC 5506 reduced-size RTCP: feedback/XR may be sent without an
+    /// leading SR/RR. The packet list must still be non-empty and encode to
+    /// 32-bit aligned packets.
+    pub fn new_reduced(packets: Vec<Packet>) -> Result<Self> {
+        if packets.is_empty() {
+            return Err(Error::Media("empty reduced-size RTCP packet".into()));
+        }
+        Ok(Self { packets })
+    }
+
     pub fn try_encode(&self) -> Result<Bytes> {
         if self.packets.is_empty() {
             return Err(Error::Media("empty RTCP compound packet".into()));

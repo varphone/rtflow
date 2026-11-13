@@ -18,6 +18,45 @@ pub struct NackEntry {
     pub lost: u16,
 }
 
+impl XrBlock {
+    /// RFC 3611 Receiver Reference Time (block type 4).
+    pub fn rttr(ntp: u64) -> Self {
+        Self {
+            block_type: 4,
+            data: Bytes::copy_from_slice(&ntp.to_be_bytes()),
+        }
+    }
+
+    /// RFC 3611 DLRR (block type 5): (last RR, delay since last RR) pairs.
+    pub fn dlrr(entries: &[(u32, u32)]) -> Self {
+        let mut data = BytesMut::with_capacity(entries.len() * 12);
+        for (last_rr, delay) in entries {
+            data.extend_from_slice(&last_rr.to_be_bytes());
+            data.extend_from_slice(&delay.to_be_bytes());
+            data.extend_from_slice(&[0, 0, 0, 0]);
+        }
+        Self {
+            block_type: 5,
+            data: data.freeze(),
+        }
+    }
+
+    pub fn rttr_timestamp(&self) -> Option<u64> {
+        (self.block_type == 4 && self.data.len() == 8).then(|| {
+            u64::from_be_bytes([
+                self.data[0],
+                self.data[1],
+                self.data[2],
+                self.data[3],
+                self.data[4],
+                self.data[5],
+                self.data[6],
+                self.data[7],
+            ])
+        })
+    }
+}
+
 impl Packet {
     /// Build an RFC 4585 NACK (RTPFB FMT 1).
     pub fn nack(sender_ssrc: u32, media_ssrc: u32, entries: &[NackEntry]) -> Result<Self> {
