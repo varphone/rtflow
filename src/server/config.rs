@@ -265,6 +265,11 @@ impl ServerConfigBuilder {
         self
     }
 
+    pub fn rtcp_report_interval(mut self, value: Duration) -> Self {
+        self.config.rtcp_report_interval = value;
+        self
+    }
+
     pub fn no_subscriber_grace(mut self, value: Duration) -> Self {
         self.config.no_subscriber_grace = value;
         self
