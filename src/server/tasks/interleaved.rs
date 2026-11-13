@@ -1,34 +1,6 @@
 use super::*;
 use crate::server::timed_writer::TimedWriter;
 
-struct NackCache {
-    max: usize,
-    entries: std::collections::VecDeque<(u16, Bytes)>,
-}
-
-impl NackCache {
-    fn new(max: usize) -> Self {
-        Self {
-            max: max.max(1),
-            entries: std::collections::VecDeque::new(),
-        }
-    }
-
-    fn insert(&mut self, sequence: u16, payload: Bytes) {
-        if self.entries.len() >= self.max {
-            self.entries.pop_front();
-        }
-        self.entries.push_back((sequence, payload));
-    }
-
-    fn get(&self, sequence: u16) -> Option<Bytes> {
-        self.entries
-            .iter()
-            .find(|(current, _)| *current == sequence)
-            .map(|(_, payload)| payload.clone())
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_interleaved_sender_from(
     mount: Arc<Mount>,
@@ -83,7 +55,7 @@ pub(crate) fn spawn_interleaved_sender_from(
         let mut sent_octets = 0u32;
         let mut last_rtp_timestamp = 0u32;
         let mut ntp_clock: Option<RtpNtpClock> = None;
-        let mut nack_cache = NackCache::new(512);
+        let mut nack_cache = RetransmitCache::new(512);
         let mut nack_rx = mount.nack_requests.subscribe();
         let mut report_tick = tokio::time::interval(report_interval);
         report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

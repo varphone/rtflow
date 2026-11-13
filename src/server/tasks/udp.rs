@@ -1,34 +1,5 @@
 use super::*;
 
-/// Small RTP retransmission cache for RFC 4585 NACK feedback (UDP/plain RTP).
-struct RtpCache {
-    max: usize,
-    entries: VecDeque<(u16, Bytes)>,
-}
-
-impl RtpCache {
-    fn new(max: usize) -> Self {
-        Self {
-            max: max.max(1),
-            entries: VecDeque::new(),
-        }
-    }
-
-    fn insert(&mut self, sequence: u16, packet: Bytes) {
-        if self.entries.len() >= self.max {
-            self.entries.pop_front();
-        }
-        self.entries.push_back((sequence, packet));
-    }
-
-    fn get(&self, sequence: u16) -> Option<&Bytes> {
-        self.entries
-            .iter()
-            .find(|(current, _)| *current == sequence)
-            .map(|(_, packet)| packet)
-    }
-}
-
 struct PublisherLease(Arc<Mount>);
 impl Drop for PublisherLease {
     fn drop(&mut self) {
@@ -92,7 +63,7 @@ pub(crate) fn spawn_udp_sender_from(
         let mut sent_octets = 0u32;
         let mut last_rtp_timestamp = 0u32;
         let mut ntp_clock: Option<RtpNtpClock> = None;
-        let mut nack_cache = RtpCache::new(512);
+        let mut nack_cache = RetransmitCache::new(512);
         // Cache the protected bytes too: retransmitting an SRTP packet with
         // its original index is safe (the original was lost) and avoids
         // reusing the sender's keystream state.
@@ -180,7 +151,7 @@ pub(crate) fn spawn_udp_sender_from(
                                             .map(|bit| entry.packet_id.wrapping_add(1 + bit as u16)),
                                     );
                                     for sequence in requested {
-                                        if let Some(cached) = nack_cache.get(sequence).cloned()
+                                        if let Some(cached) = nack_cache.get(sequence)
                                             && pair.rtp.send_to(&cached, rtp_target).await.is_ok()
                                         {
                                             sent_packets = sent_packets.wrapping_add(1);
@@ -397,24 +368,24 @@ pub(crate) fn spawn_udp_receiver(
 
 #[cfg(test)]
 mod tests {
-    use super::RtpCache;
+    use super::RetransmitCache;
     use bytes::Bytes;
 
     #[test]
     fn rtp_cache_retains_recent_packets_and_evicts_oldest() {
-        let mut cache = RtpCache::new(2);
+        let mut cache = RetransmitCache::new(2);
         cache.insert(1, Bytes::from_static(b"one"));
         cache.insert(2, Bytes::from_static(b"two"));
-        assert_eq!(cache.get(1).map(Bytes::as_ref), Some(&b"one"[..]));
+        assert_eq!(cache.get(1).as_deref(), Some(&b"one"[..]));
         cache.insert(3, Bytes::from_static(b"three"));
         assert!(cache.get(1).is_none());
-        assert_eq!(cache.get(2).map(Bytes::as_ref), Some(&b"two"[..]));
-        assert_eq!(cache.get(3).map(Bytes::as_ref), Some(&b"three"[..]));
+        assert_eq!(cache.get(2).as_deref(), Some(&b"two"[..]));
+        assert_eq!(cache.get(3).as_deref(), Some(&b"three"[..]));
     }
 
     #[test]
     fn rtp_cache_normalizes_zero_capacity_without_panicking() {
-        let mut cache = RtpCache::new(0);
+        let mut cache = RetransmitCache::new(0);
         cache.insert(7, Bytes::from_static(b"packet"));
         assert!(cache.get(7).is_some());
     }

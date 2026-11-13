@@ -26,6 +26,35 @@ use tokio::{
 /// freeze every track's sender and the RTCP path.
 const INTERLEAVED_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Bounded RTP retransmission cache shared by UDP and interleaved senders.
+pub(super) struct RetransmitCache {
+    max: usize,
+    entries: VecDeque<(u16, Bytes)>,
+}
+
+impl RetransmitCache {
+    pub(super) fn new(max: usize) -> Self {
+        Self {
+            max: max.max(1),
+            entries: VecDeque::new(),
+        }
+    }
+
+    pub(super) fn insert(&mut self, sequence: u16, packet: Bytes) {
+        if self.entries.len() >= self.max {
+            self.entries.pop_front();
+        }
+        self.entries.push_back((sequence, packet));
+    }
+
+    pub(super) fn get(&self, sequence: u16) -> Option<Bytes> {
+        self.entries
+            .iter()
+            .find(|(current, _)| *current == sequence)
+            .map(|(_, packet)| packet.clone())
+    }
+}
+
 /// Send one UDP datagram, falling back to the async path only when the
 /// socket is not immediately writable. Avoids a task wake-up per RTP packet.
 async fn send_udp(
