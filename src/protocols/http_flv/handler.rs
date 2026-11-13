@@ -16,7 +16,7 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
     description: MediaDescription,
     mut receiver: broadcast::Receiver<AccessUnit>,
     startup: Vec<AccessUnit>,
-    fmtp_source: crate::server::MountHandle,
+    fmtp_source: crate::mount::MountHandle,
 ) -> Result<ResponseWriter<W>> {
     let mut muxer = FlvMuxer::new(&description);
 

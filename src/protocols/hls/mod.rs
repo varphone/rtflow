@@ -41,7 +41,7 @@ impl Default for HlsConfig {
 /// Create HLS HTTP handlers backed by a mount startup snapshot and tied to its lifetime.
 pub fn create_hls_handlers(
     config: HlsConfig,
-    mount: &crate::server::MountHandle,
+    mount: &crate::mount::MountHandle,
 ) -> (Handler, Handler, Handler) {
     let ring = Arc::new(SegmentRing::new(config.segment_count));
     let target_duration = config.segment_duration;

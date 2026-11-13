@@ -6,7 +6,8 @@ pub mod buffer;
 pub mod pipeline;
 
 use crate::media::{Codec, MediaDescription, MediaKind, TrackDescription};
-use crate::mount::{LocalPublisher, MountConfig};
+use crate::mount::{LocalPublisher, MountConfig, MountRegistry};
+#[cfg(feature = "server")]
 use crate::server::RtspServer;
 use crate::{Error, Result};
 use gstreamer as gst;
@@ -181,6 +182,7 @@ impl GStreamerSource {
     }
 
     /// Register with an RTSP server and start push-mode playback.
+    #[cfg(feature = "server")]
     pub async fn register_and_play(
         self,
         server: &RtspServer,
@@ -190,6 +192,22 @@ impl GStreamerSource {
         let handle = server
             .register_mount(path, MountConfig::Local { description })
             .await?;
+        let publisher = handle.publisher()?;
+        self.play(publisher)
+    }
+
+    /// Register with a mount registry and start push-mode playback.
+    ///
+    /// Protocol-agnostic variant of [`Self::register_and_play`]: it only needs
+    /// the shared [`MountRegistry`], so it is available without the `server`
+    /// feature (the mount can then be served by RTMP, SRT, HTTP or WebRTC).
+    pub fn register_and_play_with(
+        self,
+        mounts: &MountRegistry,
+        path: impl Into<Arc<str>>,
+    ) -> Result<GstPlayback> {
+        let description = self.build_media_description();
+        let handle = mounts.register(path.into(), MountConfig::Local { description })?;
         let publisher = handle.publisher()?;
         self.play(publisher)
     }

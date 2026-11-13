@@ -184,7 +184,7 @@ pub fn create_web_player_handler(registry: Arc<MountRegistry>, config: WebPlayer
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod tests {
     use super::*;
     use crate::media::{MediaDescription, TrackDescription};

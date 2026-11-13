@@ -168,10 +168,17 @@ impl RtmpServer {
                             m.rtmp_connections_total.fetch_add(1, Ordering::Relaxed);
                         }
                         #[cfg(feature = "metrics")]
-                        let metrics_opt = metrics.clone();
+                        let result = serve_rtmp_session(
+                            stream,
+                            mounts,
+                            config,
+                            cancel,
+                            metrics.clone(),
+                        )
+                        .await;
                         #[cfg(not(feature = "metrics"))]
-                        let metrics_opt = ();
-                        if let Err(e) = serve_rtmp_session(stream, mounts, config, cancel, metrics_opt).await {
+                        let result = serve_rtmp_session(stream, mounts, config, cancel).await;
+                        if let Err(e) = result {
                             debug!("RTMP session error from {peer}: {e}");
                         }
                     });

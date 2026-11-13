@@ -276,7 +276,6 @@ impl Mount {
     /// description has no explicit fmtp. Cheap: runs on keyframes only,
     /// once per track, and also while no subscriber is attached (the
     /// very first keyframe typically arrives before the first PLAY).
-    #[cfg(feature = "server")]
     pub fn auto_inject_fmtp(&self, frame: &AccessUnit) {
         if !frame.is_keyframe {
             return;

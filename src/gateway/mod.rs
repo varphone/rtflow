@@ -167,6 +167,7 @@ impl Gateway {
                 event_sink: Some(event_sink),
                 // Gateway local streams serve from the bootstrap keyframe
                 // snapshot; the RTSP-proxy startup cache is not used.
+                #[cfg(feature = "server")]
                 startup_cache_config: Some(crate::proxy::StartupCacheConfig {
                     enabled: false,
                     ..Default::default()
