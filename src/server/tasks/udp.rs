@@ -40,7 +40,10 @@ pub(crate) fn spawn_udp_sender_from(
             ssrc,
         };
         let mut packetizer = match Packetizer::new(track.codec, track.payload_type, ssrc, 1200) {
-            Ok(value) => value,
+            Ok(value) => value.with_dimensions(
+                u16::try_from(track.width.unwrap_or(0)).unwrap_or(0),
+                u16::try_from(track.height.unwrap_or(0)).unwrap_or(0),
+            ),
             Err(_) => return,
         };
         let mut awaiting_key = track.kind == MediaKind::Video;

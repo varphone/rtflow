@@ -1,0 +1,146 @@
+//! Real ffmpeg publish→playback round trips for AV1/JPEG/H.263/MPEG-4.
+
+use rtflow::{Codec, MountConfig, RtspServer, ServerConfig};
+use rtflow_testkit::{description, wait_until};
+use std::{process::Stdio, sync::Arc, time::Duration};
+use tokio::process::Command;
+
+fn encoder_args(codec: Codec) -> Vec<&'static str> {
+    match codec {
+        Codec::Av1 => vec![
+            "-c:v",
+            "libsvtav1",
+            "-preset",
+            "12",
+            "-crf",
+            "50",
+            "-g",
+            "10",
+            "-pix_fmt",
+            "yuv420p",
+        ],
+        Codec::Jpeg => vec![
+            "-c:v",
+            "mjpeg",
+            "-huffman",
+            "default",
+            "-q:v",
+            "8",
+            "-pix_fmt",
+            "yuvj420p",
+            "-g",
+            "10",
+            "-payload_type",
+            "96",
+        ],
+        Codec::H263 => vec![
+            "-c:v", "h263", "-s", "176x144", "-r", "10", "-g", "10", "-pix_fmt", "yuv420p",
+        ],
+        Codec::Mpeg4 => vec![
+            "-c:v", "mpeg4", "-q:v", "5", "-g", "10", "-pix_fmt", "yuv420p",
+        ],
+        _ => unreachable!(),
+    }
+}
+
+async fn run_codec(codec: Codec) {
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let mut media = description("ffmpeg-new-codec", &[codec]);
+    for track in &mut media.tracks {
+        track.control = Arc::from(format!("streamid={}", track.id));
+    }
+    let mount = server
+        .register_mount(
+            Arc::from("/ingest"),
+            MountConfig::Publisher {
+                description: media,
+                allow_replace_after_disconnect: true,
+            },
+        )
+        .await
+        .unwrap();
+    let location = format!("rtsp://{}/ingest", server.local_addr());
+    let mut publish = Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-re",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=176x144:rate=10",
+            "-t",
+            "12",
+        ])
+        .args(encoder_args(codec))
+        .args([
+            "-rtsp_transport",
+            "tcp",
+            "-muxdelay",
+            "0",
+            "-f",
+            "rtsp",
+            &location,
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn ffmpeg publisher");
+    wait_until(Duration::from_secs(20), || {
+        mount.snapshot().publisher_connected
+    })
+    .await;
+
+    if let Ok(d) = rtflow::client::RtspClient::describe_str(
+        &location,
+        rtflow::client::ClientOptions::default(),
+    )
+    .await
+    {
+        eprintln!("SDP:\n{}", rtflow::rtsp::sdp::encode(&d));
+    }
+    let play = Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            "-nostdin",
+            "-rtsp_transport",
+            "tcp",
+            "-i",
+            &location,
+            "-t",
+            "3",
+            "-f",
+            "null",
+            "-",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .expect("run ffmpeg player");
+    let stderr = String::from_utf8_lossy(&play.stderr);
+    let accepted = mount.snapshot().stats.accepted_frames;
+    publish.kill().await.ok();
+    server.shutdown().await.unwrap();
+    assert!(
+        play.status.success(),
+        "{codec:?} ffmpeg playback failed (accepted={accepted}):\n{stderr}"
+    );
+    assert!(accepted > 0, "{codec:?}: no frames accepted from ffmpeg");
+    assert!(
+        !stderr.to_ascii_lowercase().contains("decode"),
+        "{codec:?} ffmpeg reported decode errors:\n{stderr}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ffmpeg_round_trips_mpeg4() {
+    run_codec(Codec::Mpeg4).await;
+}

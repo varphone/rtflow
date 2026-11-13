@@ -264,7 +264,11 @@ impl Depacketizer {
         for chunk in self.access_unit.drain(..) {
             output.extend_from_slice(&chunk);
         }
-        let is_keyframe = self.assembled_is_keyframe;
+        let is_keyframe = if self.codec == Codec::Mpeg4 {
+            mpeg4_is_keyframe(&output)
+        } else {
+            self.assembled_is_keyframe
+        };
         self.access_unit_bytes = 0;
         self.assembled_is_keyframe = false;
         self.current_timestamp = None;
@@ -278,4 +282,16 @@ impl Depacketizer {
             data: output.freeze(),
         }])
     }
+}
+
+/// True when the MPEG-4 Visual access unit contains an I-VOP start code.
+fn mpeg4_is_keyframe(data: &[u8]) -> bool {
+    let mut index = 0;
+    while index + 5 <= data.len() {
+        if data[index..].starts_with(&[0, 0, 1, 0xb6]) {
+            return data[index + 4] >> 6 == 0;
+        }
+        index += 1;
+    }
+    false
 }

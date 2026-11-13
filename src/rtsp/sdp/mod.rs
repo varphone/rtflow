@@ -122,6 +122,7 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                 (MediaKind::Audio, 8) => (Codec::Pcma, 8_000, Some(1)),
                 (MediaKind::Audio, 14) => (Codec::Mp3, 90_000, None),
                 (MediaKind::Video, 34) => (Codec::H263, 90_000, None),
+                (MediaKind::Video, 26) => (Codec::Jpeg, 90_000, None),
                 (MediaKind::Video, value) if value >= 96 => (Codec::H264, 90_000, None),
                 (MediaKind::Audio, value) if value >= 96 => (Codec::Aac, 48_000, Some(2)),
                 _ => {
@@ -177,7 +178,7 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                     "G726-40" => Codec::G726_40,
                     "AV1" => Codec::Av1,
                     "JPEG" => Codec::Jpeg,
-                    "H263-1998" | "H263" => Codec::H263,
+                    "H263-1998" | "H263" | "H263-2000" => Codec::H263,
                     "MP4V-ES" => Codec::Mpeg4,
                     _ => return Err(Error::Rtsp("unsupported SDP codec".into())),
                 };
@@ -212,6 +213,14 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                         let numerator = (fps * 1_000.0).round() as u32;
                         let divisor = gcd(numerator, 1_000);
                         track.frame_rate = Some((numerator / divisor, 1_000 / divisor));
+                    }
+                } else if let Some(framesize) = value.strip_prefix("framesize:") {
+                    let mut fields = framesize.split_whitespace();
+                    if let (Some(_pt), Some(size)) = (fields.next(), fields.next())
+                        && let Some((width, height)) = size.split_once('-')
+                    {
+                        track.width = width.parse().ok();
+                        track.height = height.parse().ok();
                     }
                 } else if let Some(fmtp) = value.strip_prefix("fmtp:") {
                     let (payload_type, fmtp) = fmtp
@@ -435,6 +444,14 @@ pub fn encode_with(
         ));
         if let Some(bandwidth) = track.bandwidth_as {
             output.push_str(&format!("b=AS:{bandwidth}\r\n"));
+        }
+        if let (Some(width), Some(height)) = (track.width, track.height)
+            && matches!(track.codec, Codec::Jpeg | Codec::H263)
+        {
+            output.push_str(&format!(
+                "a=framesize:{} {width}-{height}\r\n",
+                track.payload_type
+            ));
         }
         if let Some(direction) = track.direction {
             output.push_str(&format!("a={}\r\n", direction.as_str()));

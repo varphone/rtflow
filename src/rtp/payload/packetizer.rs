@@ -15,6 +15,8 @@ pub struct Packetizer {
     /// Per-frame picture ID for the VP9 payload descriptor
     /// (draft-ietf-payload-vp9), incremented and wrapped per frame.
     vp9_picture_id: u16,
+    width: u16,
+    height: u16,
 }
 impl Packetizer {
     pub fn new(codec: Codec, payload_type: u8, ssrc: u32, mtu: usize) -> Result<Self> {
@@ -33,8 +35,17 @@ impl Packetizer {
             next_sequence: 0,
             mtu,
             vp9_picture_id: 0,
+            width: 0,
+            height: 0,
         })
     }
+    /// Set the picture dimensions used by RFC 2435 JPEG headers.
+    pub fn with_dimensions(mut self, width: u16, height: u16) -> Self {
+        self.width = width;
+        self.height = height;
+        self
+    }
+
     fn packet(&mut self, payload: Bytes, timestamp: u32, marker: bool) -> RtpPacket {
         let p = RtpPacket {
             header: RtpHeader {
@@ -319,8 +330,8 @@ impl Packetizer {
                 (offset & 0xff) as u8,
                 1,
                 128,
-                0,
-                0,
+                self.width.min(255) as u8,
+                self.height.min(255) as u8,
             ]);
             buffer.extend_from_slice(data);
             let length = buffer.len();

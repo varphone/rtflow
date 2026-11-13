@@ -89,7 +89,20 @@ UDP 接收缓冲 4 MiB/socket。
 均低于 24 MiB 目标（不含内核 socket 缓冲）。包化路径实测 **0.29 次分配/RTP 包**
 （20 KB H.264 分片：整帧单缓冲切片 + 复用 `encode_into` 缓冲），预算 ≤1。
 
-## 6. 已确认的验证结果（2026-11）
+## 6. 真实工具互操作（2026-11 实测）
+
+| codec | ffmpeg 推流 → rtflow → ffmpeg 拉流 | GStreamer 拉流 | 备注 |
+|---|---|---|---|
+| MPEG-4 Part 2 | 通过 | 通过（rtpmp4vdepay/avdec_mpeg4） | 首帧关键帧识别已修正 |
+| JPEG | 服务端接收通过；ffmpeg 拉流端在 SDP 阶段报 unspecified size | 通过（rtpjpegdepay/jpegdec） | 依赖 RTP JPEG 头尺寸；GStreamer 正常 |
+| H.263 | 待修：ffmpeg H263-2000 RTP 头（RFC 4629）与当前 2 字节头不匹配 | 未通过（not-linked） | 内部 17-codec 回环通过，真实互操作待实现 |
+| AV1 | 不可测：ffmpeg 6.1 RTSP muxer 不写 AV1 rtpmap | 不可测：缺少 rtpav1pay/depay | 内部回环通过 |
+| H.264/AAC | 既有测试通过 | 既有测试通过 | — |
+
+VLC 3.0（snap）可以连接并订阅 rtflow 的 RTSP mount，但在 `-I dummy`
++ 无显示环境下 H.264 解码出现 `buffer deadlock prevented`，未作为自动化断言。
+
+## 7. 已确认的验证结果（2026-11）
 
 - `cargo test --no-fail-fast`：293 passed / 0 failed。
 - `cargo test --features experimental-protocols`：358 passed / 0 failed。
@@ -100,7 +113,7 @@ UDP 接收缓冲 4 MiB/socket。
 - 30 分钟会话翻腾浸泡（8 客户端/轮，UDP+TCP 交替）：通过，无 panic/forced task。
 - 包化分配：0.29 次/RTP 包；嵌入式内存：4 会话 × 2 track 稳态 ≈8 MiB。
 
-## 7. 已知未实现（明确边界）
+## 8. 已知未实现（明确边界）
 
 | 项 | 现状 |
 |---|---|
@@ -108,7 +121,7 @@ UDP 接收缓冲 4 MiB/socket。
 | AV1/JPEG/H.263/MPEG-4 的 fmtp/profile 校验 | fmtp 透传，未做 profile/level 校验 |
 | 组播 SRTP 的 SRTCP 报告 | 客户端发送 SRTCP RR（组 RTCP 端口） |
 
-## 8. 验证入口
+## 9. 验证入口
 
 ```bash
 cargo test --no-fail-fast
