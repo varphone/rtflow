@@ -45,6 +45,21 @@ rtsp/{message,sdp,range,auth,token_auth,transport,multicast}
 - `proxy/`：兼容门面，类型已迁入 `mount::{upstream,continuity}`（0.3 弃用）。
 - `gateway/`：多协议编排入口。
 
+## 仓库结构
+
+| 目录 | 内容 |
+|---|---|
+| `src/` | 按上文分层组织的 crate 源码；目录结构即模块结构（无 `#[path]`） |
+| `tests/<area>/` | 集成测试：`rtsp`/`client`/`proxy`/`protocols`/`security`/`storage`/`interop`/`system`，每个域一个测试二进制 |
+| `examples/<area>/` | 示例：`server`/`client`/`protocols`/`gateway`/`embedded`，资源在 `examples/assets/` |
+| `support/` | 不发布的 dev 线束 `rtflow-testkit`（测试与示例共用） |
+| `scripts/` | 布局校验、示例冒烟、fixture 生成与发布检查 |
+| `docs/` | `architecture`（含 ADR）、`guides`、`audits`、`roadmap`、`archive` |
+| `benches/`、`fuzz/` | 性能基线与模糊测试（fuzz 为独立 workspace） |
+
+布局规则由 `scripts/check-layering.py`、`check-tree.py`、`check-docs-paths.sh`
+在 CI 中强制；单文件硬上限 800 行，软目标 600 行（当前最大 587 行）。
+
 ## 数据面与所有权
 
 `AccessUnit.data`、`RtpPacket.payload` 和 `InterleavedFrame.payload` 使用 `Bytes`。RTP 解析和 interleaved 解帧通过 slice/split 转移所有权，不复制 payload；分片重组、RTP 头拼接和 socket syscall 边界仍会分配。所有队列都有显式容量，慢消费者通过 broadcast lag 隔离，不反压实时采集线程。
@@ -66,7 +81,7 @@ rtsp/{message,sdp,range,auth,token_auth,transport,multicast}
 
 ## 当前边界
 
-共享文件 mount 仍适合循环宣传片；`MountConfig::Vod` 则为每个 RTSP session 创建独立 demux、NPT Range 和 PAUSE 游标。RTSPS 保护 RTSP 控制连接及 TCP interleaved 媒体；UDP RTP 若需加密应使用后续 SRTP transport。组播、SRTP、ONVIF、转码和集群状态复制仍是独立扩展。
+共享文件 mount 仍适合循环宣传片；`MountConfig::Vod` 则为每个 RTSP session 创建独立 demux、NPT Range 和 PAUSE 游标。RTSPS 保护 RTSP 控制连接及 TCP interleaved 媒体；UDP RTP 若需加密应使用后续 SRTP transport。组播与 SRTP 已作为可选 feature（`multicast`、`srtp`）实现；ONVIF、转码和集群状态复制仍是独立扩展。
 
 ## 决策记录与兼容门面
 
