@@ -208,6 +208,7 @@ pub(crate) fn spawn_udp_sender_from(
                                     sent_packets,
                                     sent_octets,
                                 )
+                                && let Ok(report) = crypto.protect_rtcp(report)
                                 && pair.rtcp.send_to(&report, rtcp_target).await.is_ok()
                             {
                                 mount.stats.add_sender_reports(1);

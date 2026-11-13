@@ -335,6 +335,10 @@ async fn srtp_playback_decrypts_media() {
         .expect("srtp stream ended")
         .expect("srtp media error");
     assert_eq!(received.data, expected.data);
+    rtflow_testkit::wait_until(Duration::from_secs(2), || {
+        mount.snapshot().stats.rtcp_receiver_reports > 0
+    })
+    .await;
     client.teardown().await.unwrap();
     server.shutdown().await.unwrap();
 }
@@ -503,5 +507,32 @@ async fn multicast_client_sends_rtcp_reports() {
         RtcpPacket::ReceiverReport { .. } | RtcpPacket::ReceiverReportWithReports { .. }
     )));
     client.teardown().await.unwrap();
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn setup_echoes_destination_source_and_mode() {
+    let server = server_with(Codec::H264).await;
+    let base = format!("rtsp://{}/edge", server.local_addr());
+    let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+    let describe = request(
+        &mut stream,
+        &format!("DESCRIBE {base} RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\n\r\n"),
+    )
+    .await;
+    let description = sdp::parse(&describe.body).unwrap();
+    let control = sdp::control_uri(&base, &description.tracks[0].control).unwrap();
+    let setup = request(
+        &mut stream,
+        &format!(
+            "SETUP {control} RTSP/1.0\r\nCSeq: 2\r\nTransport: RTP/AVP;unicast;client_port=33000-33001;destination=203.0.113.5;source=192.0.2.10;mode=record\r\n\r\n"
+        ),
+    )
+    .await;
+    assert_eq!(setup.status, 200, "{:?}", setup.headers);
+    let transport = setup.headers.get("transport").unwrap();
+    assert!(transport.contains("destination=203.0.113.5"), "{transport}");
+    assert!(transport.contains("source=192.0.2.10"), "{transport}");
+    assert!(transport.contains("mode=record"), "{transport}");
     server.shutdown().await.unwrap();
 }
