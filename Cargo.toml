@@ -11,6 +11,13 @@ license = "MIT OR Apache-2.0"
 categories = ["network-programming", "asynchronous", "multimedia"]
 keywords = ["rtsp", "rtp", "streaming", "media", "embedded"]
 publish = ["crates-io"]
+# dev-only tooling stays out of the published tarball.
+exclude = ["support", "fuzz", "scripts", "tools", ".github", "docs/archive"]
+
+[package.metadata.docs.rs]
+# docs.rs 默认只开 default features；这里叠加实验协议，但排除 gstreamer
+# （需要系统 GStreamer 开发库，docs.rs 构建机不提供）。
+features = ["rtmp", "srt", "dash", "webrtc"]
 
 [features]
 default = ["full"]
