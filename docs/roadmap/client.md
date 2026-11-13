@@ -2,7 +2,7 @@
 
 本文件是 `src/client/` 持续迭代的落库看板：每个阶段是一个可独立 review 的批次，完成后勾选并记录偏差。破坏性变更集中在 M3 一次性完成。
 
-当前短板依据：`docs/audit-report.md` R23、`docs/realtime-compat-audit.md` RT-7/RT-8/RT-9/RT-17、以及 M0 前的测试缺口（模块 0 单测、`connect_reconnecting` 零覆盖）。
+当前短板依据：`docs/audits/code.md` R23、`docs/audits/realtime-compat.md` RT-7/RT-8/RT-9/RT-17、以及 M0 前的测试缺口（模块 0 单测、`connect_reconnecting` 零覆盖）。
 
 ## M0 — 测试地基
 
@@ -32,10 +32,10 @@
 ## M3 — 可观测性 + 易用性【含破坏性变更】
 
 - [x] `src/observe.rs` 新增 `FrameworkEvent::Client(ClientEvent)`：Connected/Fallback/ReconnectBackoff/KeepAliveFailed/Failed/Closed（形状照 `ProxyEvent`，接入 `identity::SessionId`，静态原子计数分配）
-- [x] **破坏**：`ClientOptions` 加 `event_sink: Option<Arc<dyn EventSink>>`，`ClientOptions`/`ClientReconnectPolicy` 加 `#[non_exhaustive]`。实施中发现 E0639：crate 外**任何**结构体字面量（含 `..Default::default()`）都被禁止，因此仓库内 ~21 处 tests/examples 构造点全部迁移为 builder；`ClientReconnectPolicy` 同步新增 builder。迁移注记已入 `docs/migration-0.1-to-0.2.md`（0.3 预告节）
+- [x] **破坏**：`ClientOptions` 加 `event_sink: Option<Arc<dyn EventSink>>`，`ClientOptions`/`ClientReconnectPolicy` 加 `#[non_exhaustive]`。实施中发现 E0639：crate 外**任何**结构体字面量（含 `..Default::default()`）都被禁止，因此仓库内 ~21 处 tests/examples 构造点全部迁移为 builder；`ClientReconnectPolicy` 同步新增 builder。迁移注记已入 `docs/guides/migration/0.1-to-0.2.md`（0.3 预告节）
 - [x] connect/fallback/backoff/keep-alive 失败/终止点 `observe::emit`（含结构化 tracing 字段 session_id/attempt/status）
 - [x] `src/metrics/mod.rs`：client_sessions_total/active、client_reconnect_attempts、client_keep_alive_failures、client_fallbacks + Prometheus 导出（测试 `client_events.rs::reconnect_lifecycle_emits_backoff_failed_closed_and_feeds_metrics`）
-- [x] 易用性：`rtflow::client::UpstreamTransport` re-export；`RtspClient::connect_str/describe_str`；`ClientSession::new` 收敛为 `SessionParts`（删除两处 `too_many_arguments` allow）；`examples/play_client.rs` 加 `--reconnect` 与 5s 质量快照；`docs/examples.md` 增"播放客户端"章节
+- [x] 易用性：`rtflow::client::UpstreamTransport` re-export；`RtspClient::connect_str/describe_str`；`ClientSession::new` 收敛为 `SessionParts`（删除两处 `too_many_arguments` allow）；`examples/play_client.rs` 加 `--reconnect` 与 5s 质量快照；`docs/guides/examples.md` 增"播放客户端"章节
 - [x] 事件序列测试：`tests/client_events.rs`（Collector sink 断言 Connected/Fallback 顺序、KeepAliveFailed、重连终止事件 + metrics 计数）
 
 ## M4 — 性能

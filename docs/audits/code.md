@@ -182,7 +182,7 @@
 - **R20. `aac_config_from_fmtp` 字节级 str 切片 panic**：`src/hls/segmenter.rs:1205-1222`（`&value[index..index+2]`），fmtp 来自 ANNOUNCE SDP 无字符校验，含多字节 UTF-8 且长度恰为偶数的 `config=` 值直接 panic；segmenter 运行在 `tokio::spawn` 任务（`hls/mod.rs:59`），该流 HLS/DASH 输出整体中断。
 - **R21. RTMP 写路径无超时**：`src/rtmp/session.rs:156`（`write_all` 在客户端停止读取时无限阻塞；30s idle 超时只覆盖读侧），writer_task 与整个连接永久挂起。
 - **R22. HTTP 请求读超时为滑动窗口、响应写无超时**：`src/http/mod.rs:159-165`（每 29s 发 1 字节可无限占用 1024 连接槽）；`ResponseWriter` 写路径无 `write_timeout`，慢读客户端可耗尽连接。
-- **R23. RTSP keep-alive 失败无退避**：`src/client/mod.rs:254-262`（`last_control` 不更新，`next()` 每次调用立即重试 GET_PARAMETER，错误帧无限重复）。**已修复**（`docs/client-roadmap.md` M2：失败按指数退避推迟 + GET_PARAMETER→OPTIONS 降级 + Session `timeout=` 自适应）；回归测试：`tests/client_edge.rs::keep_alive_failures_back_off`。
+- **R23. RTSP keep-alive 失败无退避**：`src/client/mod.rs:254-262`（`last_control` 不更新，`next()` 每次调用立即重试 GET_PARAMETER，错误帧无限重复）。**已修复**（`docs/roadmap/client.md` M2：失败按指数退避推迟 + GET_PARAMETER→OPTIONS 降级 + Session `timeout=` 自适应）；回归测试：`tests/client_edge.rs::keep_alive_failures_back_off`。
 - **R24. 同一"注册 mount"三套实现语义不一致**：`src/mount.rs:510-555`（`MountRegistry::register`：容量硬编码 1024、独立 token、4MB 字节上限、不发射事件）vs `src/server/mod.rs:496-575`（容量配置化、server child token、发射事件）vs `src/gateway.rs:134-179`。同一 mount 不同路径注册后满队列丢弃行为不同，`mounts_active` 系统性低估。
 - **R25. 视频无 IDR/IDR 极稀疏时 `samples` 无界增长**：`src/hls/segmenter.rs:162-183`（与 R10 同根源的独立触发路径，见 P4）。
 

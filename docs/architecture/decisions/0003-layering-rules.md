@@ -23,7 +23,7 @@
 2. 同层跨组依赖允许但会被脚本提示，通常意味着应拆出共享模块（如
    `media::fmp4`、`media::demux`）。
 3. `scripts/check-layering.py` 从非测试代码提取 `crate::` 依赖并强制以上规则；
-   `docs/architecture.md` 的图必须与脚本结果一致。
+   `docs/architecture/overview.md` 的图必须与脚本结果一致。
 
 ## 后果
 

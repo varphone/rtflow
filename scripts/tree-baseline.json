@@ -7,20 +7,23 @@
   ],
   "root_entries": [
     ".cargo",
+    ".editorconfig",
     ".github",
     ".gitignore",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
     "Cargo.toml",
     "LICENSE-APACHE",
     "LICENSE-MIT",
     "README.md",
+    "SECURITY.md",
     "benches",
+    "deny.toml",
     "docs",
     "examples",
     "fuzz",
     "scripts",
     "src",
-    "test_decode.sh",
-    "tests",
-    "tools"
+    "tests"
   ]
 }

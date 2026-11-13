@@ -1,5 +1,9 @@
-#!/bin/bash
-cd /home/devel/workspace/varphone/rtflow
+#!/usr/bin/env bash
+# DASH smoke test: start dash_server, push via FFmpeg, fetch init/segments.
+set -euo pipefail
+
+repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$repo_dir"
 
 pkill -f dash_server 2>/dev/null
 pkill -f "ffmpeg.*8554" 2>/dev/null

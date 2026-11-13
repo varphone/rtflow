@@ -166,7 +166,7 @@ cargo build --examples
 提交的 `tests/fixtures` 覆盖 MP4/MOV/fMP4、MKV、TS/M2TS、WAV 和裸流。需要重新生成时运行：
 
 ```bash
-./tools/regenerate-fixtures.sh
+./scripts/regenerate-fixtures.sh
 (cd tests/fixtures && sha256sum -c SHA256SUMS)
 ```
 

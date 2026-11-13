@@ -128,7 +128,7 @@ cargo build --release --target aarch64-unknown-linux-gnu \
   `http`、`http-flv`、`hls`。IPC 只需 RTSP 时可再裁剪（如
   `--no-default-features --features client,server`）。
 - 二进制 footprint 实测（本仓库 HEAD，release + strip，见
-  `docs/embedded-resource-audit.md`）：
+  `docs/audits/embedded-resource.md`）：
 
   | 特性组合 | ROM |
   |---|---|

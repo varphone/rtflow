@@ -20,7 +20,7 @@
 | 代理传输矩阵 | 上游 UDP/TCP 与下游 UDP/TCP 四种组合、双轨转发 | `proxy_transport_matrix` |
 | 确定性文件夹具 | 提交小型 MP4/MOV/fMP4/MKV/TS/M2TS/WAV/裸流及哈希清单 | `fixture_files` 默认必跑；再生成脚本可复现 |
 | 外部发布互操作 | FFmpeg ANNOUNCE/SETUP/RECORD TCP/UDP 发布，GStreamer 五编码 TCP/UDP 拉流 | ignored 外部测试由 `media-interop` CI 强制执行 |
-| 可运行示例 | 本地源、文件源、客户端、代理、发布、鉴权、Pipeline 七类 CLI | `cargo build --examples` 与 `docs/examples.md` |
+| 可运行示例 | 本地源、文件源、客户端、代理、发布、鉴权、Pipeline 七类 CLI | `cargo build --examples` 与 `docs/guides/examples.md` |
 
 
 当前文件 mount 为多客户端共享时间线，不包含 RTSP Range/per-session 独立 seek。第一期明确不包含 TLS、SRTP、组播、转码、ONVIF、录像索引和完整 RTCP 拥塞控制；这些是独立后续功能。

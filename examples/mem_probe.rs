@@ -1,4 +1,4 @@
-//! Memory baseline probe for embedded IPC sizing (docs/embedded-resource-audit.md §3 P0-4).
+//! Memory baseline probe for embedded IPC sizing (docs/audits/embedded-resource.md §3 P0-4).
 //!
 //! Runs a real RTSP server publishing synthetic H.264, attaches `--clients`
 //! consumer sessions (TCP interleaved), and prints VmRSS / VmHWM every

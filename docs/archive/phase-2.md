@@ -36,7 +36,7 @@ rtp/rtcp/   数据面与控制面包处理
 ## 运行发布门禁
 
 ```text
-./tools/release-check.sh
+./scripts/release-check.sh
 cargo bench --bench hot_path
 cargo test --test soak -- --ignored --nocapture
 cargo fuzz run control_framing

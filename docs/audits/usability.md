@@ -4,7 +4,7 @@
 - 目标场景：**海思（HiSilicon）平台 IPC**——HiMPP 的 VENC 输出 H.264/H.265 编码帧，通过 rtflow 以 RTSP 发布，实现主/子多码流网络摄像机
 - 方法：以"嵌入式客户从零接入"的最小路径逐环节走查（README 最小示例 → API 形状 → 帧格式契约 → 平台构建），对照现有 examples/docs 能力
 - 口径：易用性 = 从拿到 SDK 到出流所需的代码量、需要理解的协议概念、需要自行实现的胶水、以及文档/示例覆盖
-- **实施状态（2026-08）：H1-H4 全部落地**——`media::bitstream`/`media::clock` 公开工具、`AccessUnit::video/audio`、`TrackDescription::h264_video/h265_video/aac_audio/pcma_audio/pcmu_audio`、mount 首关键帧自动提取 `sprop-parameter-sets` 并合并进 DESCRIBE、`examples/ipc_camera.rs` 双码流参考、`docs/embedded.md` 交叉编译/调参指南
+- **实施状态（2026-08）：H1-H4 全部落地**——`media::bitstream`/`media::clock` 公开工具、`AccessUnit::video/audio`、`TrackDescription::h264_video/h265_video/aac_audio/pcma_audio/pcmu_audio`、mount 首关键帧自动提取 `sprop-parameter-sets` 并合并进 DESCRIBE、`examples/ipc_camera.rs` 双码流参考、`docs/guides/embedded.md` 交叉编译/调参指南
 
 ## 结论摘要
 
@@ -67,7 +67,7 @@ HiMPP VENC 回调
 
 - **现状**：README 有 `embedded-gateway` feature profile 一行，但**没有任何交叉编译指南**：目标三元组（`aarch64-unknown-linux-gnu` / `-musl`）、`~/.cargo/config.toml` 的 linker 配置、静态链接与 musl 的取舍、`tokio` 的 io-uring/线程模型在嵌入式上的 footprint、`bytes`/`Arc` 共享避免拷贝的说明。
 - **影响**：嵌入式客户第一关就是"编不出来"——即使代码写对了也跑不起来；没有 `cargo build --target aarch64-unknown-linux-gnu --no-default-features --features embedded-gateway` 的一键验证。
-- **建议**：新增 `docs/embedded.md`：目标三元组、交叉工具链示例（海思 SDK 的 aarch64-linux-gnu-gcc）、Cargo 配置片段、musl vs glibc 建议、二进制 footprint 数据（`cargo bloat`/`size` 实测表）、以及在目标板上运行的最小部署包。
+- **建议**：新增 `docs/guides/embedded.md`：目标三元组、交叉工具链示例（海思 SDK 的 aarch64-linux-gnu-gcc）、Cargo 配置片段、musl vs glibc 建议、二进制 footprint 数据（`cargo bloat`/`size` 实测表）、以及在目标板上运行的最小部署包。
 
 ## 三、中优先级
 
@@ -85,7 +85,7 @@ HiMPP VENC 回调
 
 ### M4. 性能/内存调参无指南
 - `consumer_queue_capacity`（广播队列）、`max_queued_bytes_per_session`、`STARTUP_WINDOW` 等参数对延迟/内存的影响无文档；嵌入式内存紧张，需要"256MB 内存能开几路"这类参考。
-- 建议：`docs/embedded.md` 或 README 增加调参表（参数 → 作用 → 建议值 → 对延迟/内存的影响）。
+- 建议：`docs/guides/embedded.md` 或 README 增加调参表（参数 → 作用 → 建议值 → 对延迟/内存的影响）。
 
 ### M5. 多码流（主/子码流）无示例与约定
 - 框架支持多 mount（每码流一个 URL：`/cam/main`、`/cam/sub`）或单 mount 多轨（一个 URL 两轨，需客户端同时 SETUP）。IPC 业界惯例是**独立 URL**（客户端按需拉主/子码流）。
@@ -96,7 +96,7 @@ HiMPP VENC 回调
 - L1. `AccessUnit`/`TrackDescription` 缺 `Debug` 友好打印（大 Bytes 截断）——排查现场问题时的日志噪音。
 - L2. 无 `RUST_LOG` 快速上手说明（`RUST_LOG=rtflow=debug` 的模块层级）——联调第一件事。
 - L3. `publisher()` 返回 `Result`，何时 `Err`（挂载已失效/类型不匹配）文档缺失。
-- L4. examples 统一入口：现有 17 个示例各自 `--help` 风格略有差异；`docs/examples.md` 已列，但缺"IPC 场景该看哪几个"的导航。
+- L4. examples 统一入口：现有 17 个示例各自 `--help` 风格略有差异；`docs/guides/examples.md` 已列，但缺"IPC 场景该看哪几个"的导航。
 - L5. `TrackId`/`payload_type`/`clock_rate` 的默认约定（视频 90000、96）无显式文档——建议 helper 内聚（见 H2）。
 
 ## 五、建议的"IPC 快速接入包"（改进蓝图）
@@ -107,7 +107,7 @@ HiMPP VENC 回调
 2. **描述自动生成**（H1.3）：`TrackDescription::h264_video(sps, pps, w, h, fps)`（自动 fmtp）与 `MediaDescription::camera(...)`（主码流/子码流两个 mount 的完整描述）。
 3. **运行时注入**（H1.2）：首关键帧到达时若 fmtp 为空且帧含 SPS/PPS，自动提取并延迟生成 SDP fmtp（复用 `announce_fmtp` 槽位）。
 4. **示例**（H3）：`examples/ipc_camera.rs`——双码流、SPS/PPS 分离注入、订阅感知省电、优雅退出。
-5. **文档**（H4 + M4 + M2/M3/L2）：`docs/embedded.md`（交叉编译 + 调参 + 部署）+ README 导航。
+5. **文档**（H4 + M4 + M2/M3/L2）：`docs/guides/embedded.md`（交叉编译 + 调参 + 部署）+ README 导航。
 
 其中 1-4 的代码量估算：约 300-400 行 + 1 个示例 + 2-4 个测试；5 约 200 行文档。1 和 2 是纯增量 API（不破坏现有用法）；3 需要小心 DESCRIBE 时机的改动（fmtp 从"注册时固定"变为"可延迟确定"）。
 

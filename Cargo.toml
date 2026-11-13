@@ -12,7 +12,7 @@ categories = ["network-programming", "asynchronous", "multimedia"]
 keywords = ["rtsp", "rtp", "streaming", "media", "embedded"]
 publish = ["crates-io"]
 # dev-only tooling stays out of the published tarball.
-exclude = ["support", "fuzz", "scripts", "tools", ".github", "docs/archive"]
+exclude = ["support", "fuzz", "scripts", ".github", "docs/archive"]
 
 [package.metadata.docs.rs]
 # docs.rs 默认只开 default features；这里叠加实验协议，但排除 gstreamer
@@ -112,7 +112,7 @@ tracing-log = "0.2"
 rcgen = "0.14"
 
 # ---------------------------------------------------------------------------
-# Embedded IPC release profile (see docs/embedded-resource-audit.md §3 P0-1):
+# Embedded IPC release profile (see docs/audits/embedded-resource.md §3 P0-1):
 # - fat LTO + codegen-units=1: smaller & slightly faster binary
 # - panic=abort: no unwinding tables (saves ROM/RAM)
 # - strip=symbols: drop symbol table from the shipped artifact

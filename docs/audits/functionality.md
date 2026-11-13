@@ -112,7 +112,7 @@
 - **L1** `examples/webrtc_server.rs` 用独立 MountRegistry（见 F9 佐证）。
 - **L2** `examples/authenticated_server.rs:47` Digest nonce 硬编码 `"example-static-nonce"`（用 `verify_digest` 而非 `ManagedDigestAuthenticator`），README 声称的签名 nonce/防重放未在示例演示。
 - **L3** `ServerConfigBuilder` 缺 `max_rtsp_header_bytes`/`max_rtsp_body_bytes` setter（字段公开可直赋，便利性缺口）。
-- **L4** multicast feature 在默认 `full` 中启用且实现真实（src/multicast/mod.rs:54-70），但 docs/architecture.md:51 称组播"仍是独立扩展"，README 未提及——文档口径偏差。
+- **L4** multicast feature 在默认 `full` 中启用且实现真实（src/multicast/mod.rs:54-70），但 docs/architecture/overview.md:51 称组播"仍是独立扩展"，README 未提及——文档口径偏差。
 - **L5** 实验协议 CLI 未暴露配置：`examples/hls_server.rs:78` 硬编码 `HlsConfig.live=true`；rtmp_server 无 `RtmpSessionConfig` CLI 开关。
 - **L6** `Gateway::register_local_mount`（src/gateway.rs:148-195）手工构造 Mount 内部字段，与 `RtspServer::register_mount` 两套实现，字段演进存在漂移风险（audit-report.md R24 跳过项）。
 - **L7** HTTP 请求行/头非法时直接断连无 400（src/http/mod.rs:184-190）。

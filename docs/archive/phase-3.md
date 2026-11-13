@@ -39,7 +39,7 @@
 
 - 版本升级至 0.2.0
 - crates.io 元数据（license、categories、keywords）
-- 迁移指南（`docs/migration-0.1-to-0.2.md`）
+- 迁移指南（`docs/guides/migration/0.1-to-0.2.md`）
 - 弃用注解（`recording`、`tls`、`media_pipeline` 门面）
 
 ## Feature Flags

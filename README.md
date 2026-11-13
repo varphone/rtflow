@@ -74,7 +74,7 @@ async fn main() -> rtflow::Result<()> {
 }
 ```
 
-完整 CLI 覆盖本地源、文件源、播放客户端、按需代理、外部发布、鉴权和 Element Pipeline。命令与联调组合见 `docs/examples.md`；文件格式矩阵和 VOD 边界见 `docs/file-streaming.md`，模块扩展约定见 `docs/architecture.md`。
+完整 CLI 覆盖本地源、文件源、播放客户端、按需代理、外部发布、鉴权和 Element Pipeline。命令与联调组合见 `docs/guides/examples.md`；文件格式矩阵和 VOD 边界见 `docs/guides/file-streaming.md`，模块扩展约定见 `docs/architecture/overview.md`。
 
 ## 动态实时串流
 
@@ -85,7 +85,7 @@ cargo run --example live_stream_demo
 cargo run --example live_stream_demo -- --headless --duration 10
 ```
 
-也可以用 `ffmpeg_live_publish` 和 `gstreamer_live_play` 分别连接已有 RTSP 服务。详细参数、依赖和嵌入式 headless 用法见 `docs/examples.md`。
+也可以用 `ffmpeg_live_publish` 和 `gstreamer_live_play` 分别连接已有 RTSP 服务。详细参数、依赖和嵌入式 headless 用法见 `docs/guides/examples.md`。
 
 ## 文件服务器
 
@@ -114,7 +114,7 @@ server.shutdown().await
 
 把硬件编码器（HiMPP VENC / V4L2）输出的 H.264/H.265/AAC/G.711 帧直接
 推入 RTSP 的最小路径见 `examples/ipc_camera.rs`；帧构造/时间戳/SPS/PPS
-自动注入等细节见 `docs/embedded.md`。浏览器实时预览（网页版 IPC
+自动注入等细节见 `docs/guides/embedded.md`。浏览器实时预览（网页版 IPC
 观看）无需额外代码：`cargo run --example ipc_camera -- --web` 后打开
 `http://<ip>:8080/`，页面自动列出全部通道并以 WS-FLV / HTTP-FLV /
 HLS 三种模式播放（`--no-web` 可只留 RTSP）。
@@ -150,7 +150,7 @@ HLS 三种模式播放（`--no-web` 可只留 RTSP）。
 cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo build --examples
-./tools/release-check.sh
+./scripts/release-check.sh
 ```
 
 默认测试使用仓库内的确定性媒体夹具，不依赖 FFmpeg/GStreamer。真实互操作测试显式标记为 ignored，由 CI 的媒体任务强制运行：

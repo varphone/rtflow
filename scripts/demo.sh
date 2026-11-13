@@ -9,7 +9,7 @@
 # 4. Prints playback commands for all protocols
 #
 # Usage:
-#   ./tools/demo.sh [--duration SECONDS]
+#   ./scripts/demo.sh [--duration SECONDS]
 #
 # Requirements:
 #   - cargo (Rust toolchain)

@@ -16,7 +16,7 @@
 //! | Composition | [`gateway`] |
 //!
 //! Dependencies only point downwards; `scripts/check-layering.py` enforces it and
-//! `docs/architecture.md` documents the layer diagram.
+//! `docs/architecture/overview.md` documents the layer diagram.
 //!
 //! # Feature profiles
 //!

@@ -2,7 +2,7 @@
 
 - 日期：2026-07（基于当前工作区，含已提交的 15 个性能/可靠性修复 commit）
 - 范围：`src/` 全部模块、`tests/`、`examples/`、`docs/`
-- 方法：多路只读子代理分组审查 + 关键发现人工抽查复核 `file:line`；与《docs/audit-report.md》修复状态交叉，已修复问题（如 segmenter 时间回绕强制切段、纯音频切段）视为基线并评估其新副作用
+- 方法：多路只读子代理分组审查 + 关键发现人工抽查复核 `file:line`；与《docs/audits/code.md》修复状态交叉，已修复问题（如 segmenter 时间回绕强制切段、纯音频切段）视为基线并评估其新副作用
 - 参考基线：README 声明端到端延迟目标 1-3 秒（GOP ≤ 分段时长）；`dash/rtmp/srt/webrtc` 为实验性占位协议（README:23），本报告对它们的问题按"实验功能"标注但仍列出
 
 ## 严重性统计（去重后）
@@ -62,9 +62,9 @@ WebRTC 系列（CP-3/CP-28/CP-29 等 7 条）：按用户决策降级处理—�
 
 ## 中
 
-- **RT-7. proxy keepalive 与帧消费共路串行**：`src/client/mod.rs:249-264`——20s 到期后 `keep_alive().await` 串行执行完整 RTSP 往返（最坏 `request_timeout` 5s），期间媒体帧停止消费、mpsc(64) 填满、上游积压；慢响应上游使订阅端周期性停顿。修复：keepalive 独立 task。（已列入 `docs/client-roadmap.md` M4）
-- **RT-8. RTSP UDP 模式 keepalive 被媒体流抢占**：`src/client/mod.rs:252-258`——`sleep_until` 到期后与 33ms 一帧的媒体分支竞争（tokio 公平 select 下最多延迟数个帧周期），配合服务端 60s session 超时，半开控制连接可能到期才被发现。修复：控制面独立 task 或 `select!` 中 `biased` 媒体优先 + keepalive 专用间隔。（已列入 `docs/client-roadmap.md` M4）
-- **RT-9. proxy 冷启动首帧 = 4+N 个 RTT + GOP 剩余**：`src/server/session.rs:656-694`（PLAY 先响应后连上游）、`src/server/proxy_runtime.rs:121-183`、`src/client/mod.rs:502-576`（无条件 OPTIONS+DESCRIBE，SDP 已缓存仍重取）——公网首帧延迟 2-4s。修复：SETUP 阶段预热、跳过冗余 DESCRIBE。（客户端侧回退复用连接已列入 `docs/client-roadmap.md` M2）
+- **RT-7. proxy keepalive 与帧消费共路串行**：`src/client/mod.rs:249-264`——20s 到期后 `keep_alive().await` 串行执行完整 RTSP 往返（最坏 `request_timeout` 5s），期间媒体帧停止消费、mpsc(64) 填满、上游积压；慢响应上游使订阅端周期性停顿。修复：keepalive 独立 task。（已列入 `docs/roadmap/client.md` M4）
+- **RT-8. RTSP UDP 模式 keepalive 被媒体流抢占**：`src/client/mod.rs:252-258`——`sleep_until` 到期后与 33ms 一帧的媒体分支竞争（tokio 公平 select 下最多延迟数个帧周期），配合服务端 60s session 超时，半开控制连接可能到期才被发现。修复：控制面独立 task 或 `select!` 中 `biased` 媒体优先 + keepalive 专用间隔。（已列入 `docs/roadmap/client.md` M4）
+- **RT-9. proxy 冷启动首帧 = 4+N 个 RTT + GOP 剩余**：`src/server/session.rs:656-694`（PLAY 先响应后连上游）、`src/server/proxy_runtime.rs:121-183`、`src/client/mod.rs:502-576`（无条件 OPTIONS+DESCRIBE，SDP 已缓存仍重取）——公网首帧延迟 2-4s。修复：SETUP 阶段预热、跳过冗余 DESCRIBE。（客户端侧回退复用连接已列入 `docs/roadmap/client.md` M2）
 - **RT-10. 上游 jitter buffer 固定 max_delay=100ms**：`src/rtp/jitter.rs:19`、`src/client/setup.rs:58-66`——公网乱序/丢包时稳态增加 100ms 且突发。修复：直播场景 20-40ms 或事件驱动释放。
 - **RT-11. 无订阅者 5s 后 proxy 停止，间歇观众每次冷启动**：`src/server/proxy_runtime.rs:100-119,209-234`、`src/server/mod.rs:72`。修复：常连配置或保留关键帧快速恢复。
 - **RT-12. HLS/DASH Lagged 后丢弃全部帧等 GOP**：`src/hls/mod.rs:91-95`、`src/dash/mod.rs:138-145`——一次 lag 导致最长一个 GOP 的输出中断。修复：等待关键帧前先回放缓存关键帧。
@@ -75,7 +75,7 @@ WebRTC 系列（CP-3/CP-28/CP-29 等 7 条）：按用户决策降级处理—�
 
 ## 低
 
-- **RT-17. jitter drain 用 1-10ms 轮询 tick 且与收包同 task**：`src/client/setup.rs:121-145,343-405`——乱序恢复帧平均多等 5ms；`tx.send().await` 满时阻塞收包。修复：`next_deadline()` 事件驱动 + 满时丢弃。（已列入 `docs/client-roadmap.md` M4）
+- **RT-17. jitter drain 用 1-10ms 轮询 tick 且与收包同 task**：`src/client/setup.rs:121-145,343-405`——乱序恢复帧平均多等 5ms；`tx.send().await` 满时阻塞收包。修复：`next_deadline()` 事件驱动 + 满时丢弃。（已列入 `docs/roadmap/client.md` M4）
 - **RT-18. bootstrap 单帧启动黑屏**：`src/mount.rs:255-265`——startup 缓存空时新订阅者仅得 1 个孤立关键帧，之后 `awaiting_key` 丢 P 帧等下一 GOP。修复：缓存完整 GOP。
 - **RT-19. TSBPD 10ms tick 量化**：`src/srt/mod.rs:197`——投递时刻被量化到 10ms 网格。
 - **RT-20. HTTP-FLV 每帧 flush**：`src/http_flv/handler.rs`（`write_all` + 每帧 flush）——小包 syscall 放大。修复：按 16-32KB 或 50ms 聚合。
@@ -210,6 +210,6 @@ WebRTC 系列（CP-3/CP-28/CP-29 等 7 条）：按用户决策降级处理—�
 
 # 六、与既有修复的关联
 
-- 上一轮《docs/audit-report.md》修复的 segmenter 时间回绕强制切段（R10）在本轮被评估为 TB-2/TB-6 的"兜底但有害"方案：它把 13.1h 回绕变成每周期一次断流，且跨轨基准差会误触发——建议按 TB-2/TB-6 的根因方案替换。
+- 上一轮《docs/audits/code.md》修复的 segmenter 时间回绕强制切段（R10）在本轮被评估为 TB-2/TB-6 的"兜底但有害"方案：它把 13.1h 回绕变成每周期一次断流，且跨轨基准差会误触发——建议按 TB-2/TB-6 的根因方案替换。
 - 上一轮新增的 proxy 媒体空闲超时（10s）与 RT-8 的 keepalive 抢占叠加时，可能把慢控制面误判为流失败——建议先修 RT-7/RT-8 再评估超时阈值。
 - RTMP/SRT/WebRTC 的问题绝大多数位于上一轮已提交的"feat" commit 中，属实验功能开发质量，与本轮修复建议独立。

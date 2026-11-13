@@ -48,7 +48,7 @@
 
 ### P0 — IPC 落地必需
 
-1. **发布构建配置**（`.cargo/config.toml` + `docs/embedded.md` 补全）
+1. **发布构建配置**（`.cargo/config.toml` + `docs/guides/embedded.md` 补全）
    - `profile.release`：`lto = true`、`panic = "abort"`、`codegen-units = 1`、`strip = "symbols"`、`opt-level = "z"`（实测 4.8MB → 预计 3.5MB 级）
    - 交叉编译 target 配置（aarch64-linux-gnu / armv7）与 strip 命令文档化
    - 特性矩阵固化：IPC 预览 = `embedded-gateway`；加 HLS = `+hls`；不要 `webrtc/srt/dash/rtmp/mkv`
@@ -58,7 +58,7 @@
    - `ipc_camera` 示例给出"主码流 128 / 子码流 64"的推荐配置注释
 
 3. **弱核 runtime 指引**
-   - 框架不建 runtime（用户 main 决定）✓；`docs/embedded.md` 补 `#[tokio::main(flavor = "current_thread")]` 的适用条件（纯 RTSP 预览 ≤ 4 客户端）
+   - 框架不建 runtime（用户 main 决定）✓；`docs/guides/embedded.md` 补 `#[tokio::main(flavor = "current_thread")]` 的适用条件（纯 RTSP 预览 ≤ 4 客户端）
    - 多核平台：每核一个 `current_thread` runtime 各管一路码流（避免多线程锁竞争）——文档级方案
 
 4. **内存基线测试方法**（文档 + 可选示例）

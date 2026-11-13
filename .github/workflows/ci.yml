@@ -58,7 +58,7 @@ jobs:
       - name: Examples
         run: |
           cargo build --examples
-          ./tools/check-examples.sh
+          ./scripts/check-examples.sh
 
   feature-matrix:
     runs-on: ubuntu-latest
