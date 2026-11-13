@@ -1,9 +1,6 @@
 {
   "path_attributes": [],
-  "oversized_files": [
-    "src/file/mpeg_ts.rs (857 lines)",
-    "src/storage/recording.rs (811 lines)"
-  ],
+  "oversized_files": [],
   "root_entries": [
     ".cargo",
     ".editorconfig",
