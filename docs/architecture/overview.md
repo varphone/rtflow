@@ -28,8 +28,9 @@ rtsp/{message,sdp,range,auth,token_auth,transport,multicast}
   （无状态的计数器/直方图注册表与事件汇）。整个 crate 的最底层。
 - `media/`：稳定领域类型、位流/时钟/FLV 工具、容器无关的 `Demuxer`、
   `VodSource`、SDP 值类型（`SdpCrypto`/`SdpConnection`）与 fMP4 写出。
-- `rtsp/`：RTSP 消息编解码、SDP、NPT Range、鉴权、Transport 与组播，输入
-  全部设上限；根模块继续以 `rtflow::auth`、`rtflow::transport` 等路径再导出。
+- `rtsp/`：RTSP 消息编解码、SDP、NPT Range、鉴权、Transport（UDP/TCP
+  interleaved/`rtcp-mux`/multicast/SRTP profile）与组播，输入全部设上限；
+  根模块继续以 `rtflow::auth`、`rtflow::transport` 等路径再导出。
 - `rtp/`、`rtcp/`、`srtp/`：载荷编解包、jitter buffer、控制报告与 SRTP。
 - `security/`：CIDR ACL、有界连接限流以及 Rustls 客户端/服务端配置。
 - `runtime/`：连接 framing，把 RTSP 消息和 `$` interleaved frame 从同一字节流中分离。

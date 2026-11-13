@@ -18,9 +18,14 @@ SPS/PPS（分离输出）           →  首个关键帧自动提取 → SDP fmt
                           RTSP 信令 / RTP / 多客户端 / HLS / HTTP-FLV
 ```
 
-支持的编码：**H.264 / H.265（视频）、AAC（MPEG4-GENERIC）、G.711
-A-law / μ-law（PCMA / PCMU）**。RTP 打包、SDP（含 `sprop-parameter-sets`
+支持的编码：**H.264 / H.265 / VP8 / VP9（视频）、AAC（MPEG4-GENERIC）、
+G.711 A-law / μ-law（PCMA / PCMU）、Opus、MP3（MPA）、G.726 16/24/32/40**。RTP 打包、SDP（含 `sprop-parameter-sets`
 等 fmtp）、RTCP、多客户端分发全部由框架完成，接入代码只做"帧搬运"。
+
+低内存部署使用 `ServerConfig::embedded(listen)`：UDP 接收缓冲 256 KiB、
+最多 32 会话/8 track、64 帧消费者队列、每 mount 512 KiB 启动缓存；4 会话 ×
+2 track 的稳态目标 RSS ≤ 24 MiB（不含内核 socket 缓冲）。也可以只覆盖单项：
+`ServerConfig::builder(addr).udp_recv_buffer(256 * 1024).build()?`。
 
 ## 2. 最小接入代码
 

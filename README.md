@@ -6,10 +6,11 @@
 
 - RTSP 客户端：OPTIONS、DESCRIBE、多轨 SETUP、PLAY、PAUSE、TEARDOWN、GET_PARAMETER 自动保活。
 - RTSP 服务端：本地源、外部发布源、自动 SDP 探测的按需拉流代理；会话状态和超时、连接数上限、鉴权、UDP 端口范围。
-- 传输：RTP/RTCP over UDP，以及 RTSP TCP interleaved；客户端默认仅在传输能力/网络失败时从 UDP 回退 TCP interleaved；服务端发布端严格校验来源地址、Payload Type 和 SSRC，并按时间调度 compound RTCP SR/SDES。
+- 传输：RTP/RTCP over UDP、TCP interleaved 与 `rtcp-mux`（单端口/单 channel）；客户端默认仅在传输能力/网络失败时从 UDP 回退 TCP interleaved；服务端发布端严格校验来源地址、Payload Type 和 SSRC，并按时间调度 compound RTCP SR/SDES。
 - 客户端重连：`RtspClient::connect_reconnecting` 配合 `ClientReconnectPolicy` 提供显式启用的断线退避重连；普通 `connect` 保持一次性连接和直接报错语义。
-- 编码载荷：H.264 RFC 6184、H.265 RFC 7798、AAC MPEG4-GENERIC、G.711 PCMA/PCMU。
-- 组播（`multicast` feature，默认启用）：向 `udp://` 地址发布 SRT/UDP 组播流。
+- 编码载荷：H.264 RFC 6184、H.265 RFC 7798、AAC MPEG4-GENERIC、G.711 PCMA/PCMU、Opus、VP8/VP9、MP3（MPA）与 G.726 16/24/32/40。
+- 组播（`multicast` feature，需显式启用）：RTSP `RTP/AVP;multicast` 发布/接收；SDP `c=`/`m=` 组地址与端口。
+- 安全传输（`srtp` feature，需显式启用）：RTSP `RTP/SAVP` + SDP `a=crypto`（AES_128_CM_HMAC_SHA1_80），RTP/SRTCP 加解密；临时/测试源由 `test-source` feature 提供。
 - 文件源：MP4/MOV/M4A、Matroska/MKV、MPEG-TS/M2TS、G.711 WAV，以及裸 H.264/H.265/ADTS AAC/PCMA/PCMU；支持实时节流、起播位置、有限/无限循环、空闲暂停与有界预取。
 - 实时性：有界广播队列和 Element DAG 管线、逐 Link 溢出策略、慢消费者隔离、视频丢包后等待关键帧、乱序/重复/序号回绕处理。
 - 可靠性：完整 RTCP 质量统计、多上游故障转移与时间线连续、关键帧启动缓存、统一任务监督和有期限 shutdown。
