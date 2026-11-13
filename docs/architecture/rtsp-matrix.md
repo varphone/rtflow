@@ -108,8 +108,8 @@ AV1 真实互操作使用用户目录的 FFmpeg master（2026-11）验证：
 
 ## 7. 已确认的验证结果（2026-11）
 
-- `cargo test --no-fail-fast`：348 passed / 0 failed。
-- `cargo test --features experimental-protocols`：414 passed / 0 failed。
+- `cargo test --no-fail-fast`：349 passed / 0 failed。
+- `cargo test --features experimental-protocols`：415 passed / 0 failed。
 - fuzz（libFuzzer，600 s/目标，无崩溃）：
   - `sdp`：13,931,778 次执行
   - `transport`：53,815,772 次执行

@@ -106,6 +106,7 @@
 - interleaved 发送端加入 512 包 NACK 缓存；RTCP NACK 经 mount 反馈通道重传（含 SRTP），不再只请求关键帧。
 - UDP/interleaved 共用 `RetransmitCache`，消除两份 512 包缓存实现；测试同步。
 - `MountRegistry::paths()`/`snapshots()` 按路径稳定排序，metrics/挂载列表输出可复现。
+- 新增 interleaved NACK 转发单测（PID+BLP 展开）。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

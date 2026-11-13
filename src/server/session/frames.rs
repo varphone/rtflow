@@ -151,3 +151,70 @@ pub(super) async fn handle_incoming_interleaved(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        media::{MediaDescription, TrackDescription},
+        mount::{MountConfig, MountRegistry},
+        rtcp::{CompoundPacket, NackEntry, Packet as RtcpPacket},
+    };
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn nack_is_forwarded_to_interleaved_sender_with_expanded_bitmap() {
+        let description = MediaDescription::new(
+            "nack",
+            vec![TrackDescription::h264_video(0, &[], &[], 640, 360, 30)],
+        );
+        let registry = MountRegistry::new(1);
+        let handle = registry
+            .register(
+                Arc::from("/nack"),
+                MountConfig::Local {
+                    description: description.clone(),
+                },
+            )
+            .unwrap();
+        let mount = handle.inner.clone();
+        let track = description.tracks[0].clone();
+        let mut requests = mount.nack_requests.subscribe();
+
+        let nack = RtcpPacket::nack(
+            1,
+            2,
+            &[NackEntry {
+                packet_id: 100,
+                lost: 0b101,
+            }],
+        )
+        .unwrap();
+        let payload = CompoundPacket::new(vec![RtcpPacket::ReceiverReport { ssrc: 1 }, nack])
+            .unwrap()
+            .try_encode()
+            .unwrap();
+        let frame = InterleavedFrame {
+            channel: 1,
+            payload,
+        };
+        let interleaved = vec![(mount.clone(), 0u8, 1u8, track)];
+        let mut depacketizers = HashMap::new();
+        let mut ssrcs = HashMap::new();
+        let mut crypto = HashMap::new();
+        handle_incoming_interleaved(
+            frame,
+            ConnectionPhase::Playing,
+            &interleaved,
+            &mut depacketizers,
+            &mut ssrcs,
+            &mut crypto,
+        )
+        .await
+        .unwrap();
+
+        let request = requests.try_recv().expect("NACK request forwarded");
+        assert_eq!(request.track_id, 0);
+        assert_eq!(request.sequences, vec![100, 101, 103]);
+    }
+}
