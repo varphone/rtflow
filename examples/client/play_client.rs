@@ -157,7 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         consumer.finish();
-        session.teardown().await;
+        let _ = session.teardown().await;
         return Ok(());
     }
 

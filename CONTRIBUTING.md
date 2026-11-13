@@ -23,8 +23,8 @@ python3 scripts/check-tree.py
 快速一键：`./scripts/release-check.sh`。
 
 > 说明：`rtflow-testkit` 是 dev-dependency，且 `MediaDescription` 等类型含
-> feature 门控字段，因此它的 `rtflow` 依赖固定启用 `srtp`/`multicast`（两者已在
-> 默认 `full` 中）。真正的 no-default 验证用 `cargo check --no-default-features --lib`
+> feature 门控字段，因此它的 `rtflow` 依赖固定启用 `srtp`/`multicast`（两者是
+> 显式 opt-in，不在默认 `full` 中）。真正的 no-default 验证用 `cargo check --no-default-features --lib`
 > （该目标不构建 dev-dependencies）。
 
 ## 模块布局规则

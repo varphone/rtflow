@@ -68,6 +68,26 @@ pub struct Response {
     pub headers: BTreeMap<String, String>,
     pub body: Vec<u8>,
 }
+
+impl Request {
+    /// Case-insensitive header lookup (parsed keys are lower-case).
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+impl Response {
+    /// Case-insensitive header lookup (parsed keys are lower-case).
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+}
 #[derive(Clone, Debug)]
 pub enum Message {
     Request(Request),

@@ -403,8 +403,7 @@ pub(super) async fn connect_udp(
                         // rtcp-mux: RTCP shares the RTP socket; classify by
                         // payload type (192..=223) before RTP parsing.
                         if mux && size >= 2 && (192..=223).contains(&buffer[1]) {
-                            let payload = buffer.split_to(size).freeze();
-                            buffer.resize(65_536, 0);
+                            let payload = bytes::Bytes::copy_from_slice(&buffer[..size]);
                             #[cfg(feature = "srtp")]
                             let payload = match srtcp.as_mut() {
                                 Some(context) => match context.unprotect(&payload) {
@@ -436,8 +435,7 @@ pub(super) async fn connect_udp(
                             }
                             continue;
                         }
-                        let payload = buffer.split_to(size).freeze();
-                        buffer.resize(65_536, 0);
+                        let payload = bytes::Bytes::copy_from_slice(&buffer[..size]);
                         #[cfg(feature = "srtp")]
                         let payload = match srtp.as_mut() {
                             Some(context) => match context.unprotect_rtp(&payload) {

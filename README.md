@@ -36,15 +36,15 @@ RTSP 扩展的当前边界：SRTP 支持 UDP 与 TCP interleaved（`RTP/SAVP`）
 向组 RTCP 端口发送 compound RR。RTSP 2.0 不在支持范围；AV1/JPEG/H.263/
 MPEG-4 Part 2 提供基础 RTP/SDP 支持（fmtp profile 未校验）。
 
-`dash`、`rtmp`、`srt`、`webrtc` feature 目前仅保留模块占位，不能视为可用协议实现；它们只通过 `experimental-protocols` 聚合 feature 开启，生产部署不应启用或对外承诺这些能力。其中 `webrtc`（WHIP/WHEP）的 ICE/DTLS/SRTP 媒体管线未实现：信令握手可完成，但浏览器协商后不会有媒体流——**WHIP/WHEP 对外声明为不可用占位**，不要用 `Location` 响应头引导客户端接入。嵌入式 Linux/Yocto 网关建议使用 `embedded-gateway` profile；默认 `full` 为兼容现有 0.2 使用方式，后续主版本再迁移默认 profile。
+`dash`、`rtmp`、`srt`、`webrtc` 通过 `experimental-protocols` 聚合 feature 开启，已有实现和集成测试，但生产成熟度与互操作覆盖仍低于 RTSP/HLS；上线前应按功能做独立评审。`webrtc` 的 WHIP/WHEP 使用 `webrtc` crate 的 ICE/DTLS/SRTP 管线（见 `tests/protocols/webrtc_e2e.rs`），跨 NAT 需配置 STUN/TURN。嵌入式 Linux/Yocto 网关建议使用 `embedded-gateway` profile；默认 `full` 为兼容现有 0.2 使用方式，后续主版本再迁移默认 profile。
 
 ## 最小服务端示例
 
 ```rust,no_run
 use bytes::Bytes;
 use rtflow::{
-    AccessUnit, Codec, MediaDescription, MediaKind, MountConfig, RtspServer,
-    ServerConfig, TrackDescription,
+    AccessUnit, Codec, MediaDescription, MountConfig, RtspServer, ServerConfig,
+    TrackDescription,
 };
 use std::{sync::Arc, time::Duration};
 
@@ -54,19 +54,10 @@ async fn main() -> rtflow::Result<()> {
     let mount = server.register_mount(
         Arc::from("/camera"),
         MountConfig::Local {
-            description: MediaDescription {
-                session_name: Arc::from("camera"),
-                tracks: vec![TrackDescription {
-                    id: 0,
-                    kind: MediaKind::Video,
-                    codec: Codec::H264,
-                    clock_rate: 90_000,
-                    channels: None,
-                    payload_type: 96,
-                    fmtp: None,
-                    control: Arc::from("trackID=0"),
-                }],
-            },
+            description: MediaDescription::new(
+                "camera",
+                vec![TrackDescription::h264_video(0, &[], &[], 1920, 1080, 30)],
+            ),
         },
     ).await?;
     let publisher = mount.publisher()?;

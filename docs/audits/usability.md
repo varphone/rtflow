@@ -80,7 +80,7 @@ HiMPP VENC 回调
 - 建议：文档明确：IPC 固定推流用 `Publisher + allow_replace_after_disconnect=true`（断线重推无需重建 mount）；纯本地注入用 `Local`。
 
 ### M3. `PushResult` 与订阅状态需要文档化
-- `try_push` 返回 `DroppedNoSubscribers`/`DroppedQueueFull`（`src/mount.rs:55`）——首次联调的嵌入式用户会困惑"我推了怎么没有流"。且没有"无订阅者时自动停推"的推荐模式（IPC 场景通常希望有订阅者才编码，省 CPU）。
+- `try_push` 返回 `DroppedNoSubscribers`/`Dropped`（`src/mount.rs:55`）——首次联调的嵌入式用户会困惑"我推了怎么没有流"。且没有"无订阅者时自动停推"的推荐模式（IPC 场景通常希望有订阅者才编码，省 CPU）。
 - 建议：文档化三个返回值语义 + 推荐模式：`snapshot().subscriber_count == 0` 时可停 VENC 或降帧率（省功耗），有订阅者再恢复。
 
 ### M4. 性能/内存调参无指南

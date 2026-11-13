@@ -100,29 +100,55 @@ pub(super) async fn handle_setup(
             .await?;
         return Ok(());
     };
+    #[cfg(any(feature = "srtp", feature = "multicast"))]
+    let mount_description = description_for(&mount.config)?;
+    #[cfg(feature = "srtp")]
+    let requested_track = track_for_uri(&mount_description, &req.uri).ok();
+    let secure_matches = |secure: bool| {
+        #[cfg(feature = "srtp")]
+        {
+            requested_track
+                .as_ref()
+                .is_none_or(|track| secure == track.crypto.is_some())
+        }
+        #[cfg(not(feature = "srtp"))]
+        {
+            !secure
+        }
+    };
+    #[cfg(feature = "multicast")]
+    let multicast_mount = mount_description
+        .connection
+        .as_ref()
+        .is_some_and(|connection| connection.address.is_multicast());
+    #[cfg(not(feature = "multicast"))]
+    let multicast_mount = false;
     let transport = TransportSpec::parse_all(raw).ok().and_then(|alternatives| {
         alternatives.into_iter().find(|candidate| match candidate {
             TransportSpec::TcpInterleaved {
                 rtp_channel,
                 rtcp_channel,
                 rtcp_mux,
+                secure,
                 ..
             } => {
-                if *rtcp_mux {
-                    rtp_channel == rtcp_channel
-                        && !interleaved.iter().any(|(_, current_rtp, current_rtcp, _)| {
-                            current_rtp == rtp_channel || current_rtcp == rtp_channel
-                        })
-                } else {
-                    rtp_channel != rtcp_channel
-                        && !interleaved.iter().any(|(_, current_rtp, current_rtcp, _)| {
-                            [*current_rtp, *current_rtcp]
-                                .into_iter()
-                                .any(|current| current == *rtp_channel || current == *rtcp_channel)
-                        })
-                }
+                secure_matches(*secure)
+                    && if *rtcp_mux {
+                        rtp_channel == rtcp_channel
+                            && !interleaved.iter().any(|(_, current_rtp, current_rtcp, _)| {
+                                current_rtp == rtp_channel || current_rtcp == rtp_channel
+                            })
+                    } else {
+                        rtp_channel != rtcp_channel
+                            && !interleaved.iter().any(|(_, current_rtp, current_rtcp, _)| {
+                                [*current_rtp, *current_rtcp].into_iter().any(|current| {
+                                    current == *rtp_channel || current == *rtcp_channel
+                                })
+                            })
+                    }
             }
-            TransportSpec::Udp { .. } | TransportSpec::Multicast { .. } => true,
+            TransportSpec::Udp { secure, .. } => secure_matches(*secure),
+            TransportSpec::Multicast { secure, .. } => multicast_mount && secure_matches(*secure),
         })
     });
     let Some(transport) = transport else {

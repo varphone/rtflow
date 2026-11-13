@@ -297,8 +297,7 @@ pub(super) async fn connect_multicast(
             let Ok((size, _source)) = received else {
                 return;
             };
-            let mut payload = buffer.split_to(size).freeze();
-            buffer.resize(65_536, 0);
+            let mut payload = bytes::Bytes::copy_from_slice(&buffer[..size]);
             #[cfg(feature = "srtp")]
             if let Some(payload_type) = payload.get(1).map(|byte| byte & 0x7f)
                 && let Some(context) = srtp_contexts.get_mut(&payload_type)

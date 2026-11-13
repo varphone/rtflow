@@ -30,8 +30,11 @@ pub enum MountConfig {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PushResult {
     Accepted,
+    /// No active subscriber/broadcast receiver; the frame was cached only.
     DroppedNoSubscribers,
-    DroppedQueueFull,
+    /// The mount rejected the frame (unregistered/session closed) or a
+    /// consumer could not keep up.
+    Dropped,
 }
 
 // ---------------------------------------------------------------------------

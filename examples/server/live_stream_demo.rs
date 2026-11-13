@@ -139,9 +139,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 description: publisher_description("live-tool-demo", &codecs),
                 allow_replace_after_disconnect: true,
             },
-            MountOptions {
-                timeline: Some(timeline),
-                ..Default::default()
+            {
+                let mut options = MountOptions::default();
+                options.timeline = Some(timeline);
+                options
             },
         )
         .await?;

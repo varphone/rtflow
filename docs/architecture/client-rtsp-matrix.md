@@ -17,7 +17,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 | SET_PARAMETER | ✅ | `ClientSession::set_parameter` (text/parameters body) |
 | ANNOUNCE / RECORD | ✅ | `RtspClient::publish` + `PublisherSession::push`; UDP/TCP interleaved, multi-track, SRTP, periodic RTCP SR |
 | REDIRECT | ✅ | 3xx `Location` on OPTIONS/DESCRIBE is followed; server-initiated `REDIRECT` during connect and inside `connect_reconnecting` is followed automatically (same origin by default; cross-origin opt-in) |
-| UNSUPPORTED | ⚠️ | parsed as a method but no client-side `Require` negotiation |
+| UNSUPPORTED | ⚠️ | parsed as a method; the server answers 501. `Require`/`Proxy-Require` negotiation is handled separately |
 
 ## Headers and behaviour
 

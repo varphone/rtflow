@@ -429,6 +429,9 @@ pub struct UdpPair {
     pub rtcp: Arc<UdpSocket>,
 }
 const UDP_RECEIVE_BUFFER_SIZE: usize = 4 * 1024 * 1024;
+/// Send-side buffer for RTP packets. IDR bursts otherwise overflow the
+/// kernel default (usually ~200 KiB) and show up as receiver loss.
+const UDP_SEND_BUFFER_SIZE: usize = 1024 * 1024;
 
 fn bind_udp(addr: SocketAddr, recv_buffer: usize) -> Result<UdpSocket> {
     let domain = match addr {
@@ -439,6 +442,9 @@ fn bind_udp(addr: SocketAddr, recv_buffer: usize) -> Result<UdpSocket> {
     socket.set_nonblocking(true).map_err(Error::Io)?;
     socket
         .set_recv_buffer_size(recv_buffer)
+        .map_err(Error::Io)?;
+    socket
+        .set_send_buffer_size(UDP_SEND_BUFFER_SIZE)
         .map_err(Error::Io)?;
     socket.bind(&addr.into()).map_err(Error::Io)?;
     UdpSocket::from_std(socket.into()).map_err(Error::Io)

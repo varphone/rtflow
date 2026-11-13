@@ -16,6 +16,8 @@ pub const MAX_CHUNK_SIZE: u32 = 16 * 1024 * 1024;
 /// repeatedly declares a large message but never completes it must not
 /// be able to grow `pending` without bound.
 pub const MAX_PENDING_BYTES: usize = MAX_CHUNK_SIZE as usize + 4096;
+/// Total reassembly budget across all chunk streams on one connection.
+pub const MAX_REASSEMBLY_BYTES: usize = 32 * 1024 * 1024;
 
 /// RTMP message type IDs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -84,8 +86,9 @@ pub struct Dechunker {
     chunk_size: u32,
     streams: HashMap<u32, ChunkStreamState>,
     pending: BytesMut,
-    /// Set when buffered input exceeded [`MAX_PENDING_BYTES`]; the
-    /// connection should be dropped.
+    /// Bytes retained in per-stream message buffers.
+    buffered: usize,
+    /// Set when input/reassembly exceeded its budget.
     overflowed: bool,
 }
 
@@ -101,6 +104,7 @@ impl Dechunker {
             chunk_size: DEFAULT_CHUNK_SIZE,
             streams: HashMap::new(),
             pending: BytesMut::new(),
+            buffered: 0,
             overflowed: false,
         }
     }
@@ -132,6 +136,7 @@ impl Dechunker {
             );
             self.pending.clear();
             self.streams.clear();
+            self.buffered = 0;
             self.overflowed = true;
             return;
         }
@@ -266,6 +271,7 @@ impl Dechunker {
                     state.timestamp_delta = 0;
                     state.extended_timestamp = false;
                 }
+                self.buffered = self.buffered.saturating_sub(state.buffer.len());
                 state.buffer.clear();
             }
             1 => {
@@ -282,6 +288,7 @@ impl Dechunker {
                     state.extended_timestamp = false;
                 }
                 state.timestamp = state.timestamp.wrapping_add(state.timestamp_delta);
+                self.buffered = self.buffered.saturating_sub(state.buffer.len());
                 state.buffer.clear();
             }
             2 => {
@@ -296,6 +303,8 @@ impl Dechunker {
                     state.extended_timestamp = false;
                 }
                 state.timestamp = state.timestamp.wrapping_add(state.timestamp_delta);
+                self.buffered = self.buffered.saturating_sub(state.buffer.len());
+                state.buffer.clear();
             }
             _ => {
                 // fmt 3: continuation
@@ -314,9 +323,14 @@ impl Dechunker {
             return Err(ChunkError::NeedMoreData);
         }
 
+        if self.buffered.saturating_add(chunk_payload_len as usize) > MAX_REASSEMBLY_BYTES {
+            self.overflowed = true;
+            return Err(ChunkError::Protocol);
+        }
         state
             .buffer
             .extend_from_slice(&data[pos..pos + chunk_payload_len as usize]);
+        self.buffered = self.buffered.saturating_add(chunk_payload_len as usize);
         pos += chunk_payload_len as usize;
 
         // Consume processed bytes
@@ -324,6 +338,7 @@ impl Dechunker {
 
         // Check if message is complete
         if state.buffer.len() as u32 >= state.msg_length {
+            self.buffered = self.buffered.saturating_sub(state.buffer.len());
             let payload = state.buffer.split().freeze();
             let msg = RtmpMessage {
                 chunk_stream_id: csid,

@@ -2,6 +2,7 @@ use super::*;
 use crate::rtsp::range::TimelineMode;
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct ServerConfig {
     pub listen: SocketAddr,
     pub session_timeout: Duration,

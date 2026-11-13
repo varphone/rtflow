@@ -177,11 +177,12 @@ async fn absolute_timeline_mode_reports_uptime_range() {
         .register_mount_with(
             Arc::from("/absolute"),
             MountConfig::Local { description },
-            MountOptions {
-                timeline: Some(TimelineMode::Absolute {
+            {
+                let mut options = MountOptions::default();
+                options.timeline = Some(TimelineMode::Absolute {
                     offset: Duration::from_secs(1_000_000),
-                }),
-                ..Default::default()
+                });
+                options
             },
         )
         .await

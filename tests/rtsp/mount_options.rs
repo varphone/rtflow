@@ -19,14 +19,15 @@ async fn register_mount_with_honors_startup_cache_policy() {
             MountConfig::Local {
                 description: description("mount-options", &[Codec::H264]),
             },
-            MountOptions {
-                startup_cache_config: Some(StartupCacheConfig {
+            {
+                let mut options = MountOptions::default();
+                options.startup_cache_config = Some(StartupCacheConfig {
                     enabled: true,
                     max_bytes: 1024 * 1024,
                     max_bytes_total: 1024 * 1024,
                     max_frames_per_track: 1,
-                }),
-                ..Default::default()
+                });
+                options
             },
         )
         .await

@@ -61,7 +61,7 @@ RTSP 方法/传输/码流/feature 的完整矩阵见 [rtsp-matrix.md](rtsp-matri
 | `benches/`、`fuzz/` | 性能基线与模糊测试（fuzz 为独立 workspace） |
 
 布局规则由 `scripts/check-layering.py`、`check-tree.py`、`check-docs-paths.sh`
-在 CI 中强制；单文件硬上限 800 行，软目标 600 行（当前最大 587 行）。
+在 CI 中强制；单文件硬上限 800 行，软目标 600 行（当前最大 600 行）。
 
 ## 数据面与所有权
 

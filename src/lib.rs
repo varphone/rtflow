@@ -134,12 +134,14 @@ pub use storage::{
 /// use rtflow::prelude::*;
 /// ```
 pub mod prelude {
-    pub use crate::mount::{LocalPublisher, MountHandle, MountRegistry};
+    pub use crate::mount::{LocalPublisher, MountConfig, MountHandle, MountOptions, MountRegistry};
     pub use crate::observe::{EventSink, FrameworkEvent};
-    pub use crate::{AccessUnit, Codec, Error, MediaDescription, Result, TrackDescription};
+    pub use crate::{
+        AccessUnit, Codec, Error, MediaDescription, MediaKind, Result, TrackDescription,
+    };
 
     #[cfg(feature = "client")]
     pub use crate::client::{ClientOptions, RtspClient};
     #[cfg(feature = "server")]
-    pub use crate::server::{RtspServer, ServerConfig};
+    pub use crate::server::{RtspServer, ServerConfig, TimelineMode};
 }

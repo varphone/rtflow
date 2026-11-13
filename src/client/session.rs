@@ -60,6 +60,7 @@ pub struct ClientSession {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct ClientQualitySnapshot {
     pub tracks: BTreeMap<u8, ReceptionSnapshot>,
     pub feedback: BTreeMap<u8, crate::rtcp::FeedbackSnapshot>,

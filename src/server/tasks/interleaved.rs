@@ -131,62 +131,69 @@ pub(crate) fn spawn_interleaved_sender_from(
                     continue;
                 }
             };
-            {
-                for mut packet in packets {
-                    packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
-                    let payload_len = packet.payload.len() as u32;
-                    let payload = match crypto.protect_rtp(packet.encode()) {
-                        Ok(payload) => payload,
-                        Err(error) => {
-                            mount.stats.add_dropped(1);
-                            tracing::warn!(track = track.id, %error, "SRTP protect failed");
-                            continue;
-                        }
-                    };
-                    let wire = InterleavedFrame {
-                        channel: rtp_channel,
-                        payload,
+            let first_batch = sent_packets == 0;
+            let mut batch = BytesMut::with_capacity(1500 * packets.len().max(1));
+            let mut batch_packets = 0u64;
+            let mut batch_octets = 0u64;
+            for mut packet in packets {
+                packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
+                let payload_len = packet.payload.len() as u32;
+                let payload = match crypto.protect_rtp(packet.encode()) {
+                    Ok(payload) => payload,
+                    Err(error) => {
+                        mount.stats.add_dropped(1);
+                        tracing::warn!(track = track.id, %error, "SRTP protect failed");
+                        continue;
                     }
-                    .try_encode();
-                    let Ok(wire) = wire else {
-                        return;
-                    };
-                    if !write_interleaved(&writer, &wire).await {
-                        return;
-                    }
-                    sent_packets = sent_packets.wrapping_add(1);
-                    sent_octets = sent_octets.wrapping_add(payload_len);
-                    last_rtp_timestamp = packet.header.timestamp;
-                    if ntp_clock.is_none() {
-                        ntp_clock = RtpNtpClock::new_with_anchor(
-                            last_rtp_timestamp,
-                            track.clock_rate,
-                            anchor_ntp,
-                        );
-                    }
-                    mount.stats.add_rtp(1, u64::from(payload_len));
-                    if sent_packets == 1
-                        && let Some(clock) = ntp_clock.as_mut()
-                        && let Ok(report) = encode_sender_report(
-                            ssrc,
-                            clock.ntp_for(last_rtp_timestamp),
-                            last_rtp_timestamp,
-                            sent_packets,
-                            sent_octets,
-                        )
-                        && let Ok(payload) = crypto.protect_rtcp(report)
-                        && let Ok(wire) = (InterleavedFrame {
-                            channel: rtcp_channel,
-                            payload,
-                        })
-                        .try_encode()
-                    {
-                        if writer.lock().await.write_all(&wire).await.is_err() {
-                            return;
-                        }
-                        mount.stats.add_sender_reports(1);
-                    }
+                };
+                let Ok(length) = u16::try_from(payload.len()) else {
+                    mount.stats.add_dropped(1);
+                    tracing::warn!(track = track.id, "interleaved frame too large");
+                    continue;
+                };
+                // Batch every RTP packet of this access unit into one
+                // write: one lock + one syscall instead of one per packet.
+                batch.extend_from_slice(&[b'$', rtp_channel]);
+                batch.extend_from_slice(&length.to_be_bytes());
+                batch.extend_from_slice(&payload);
+                sent_packets = sent_packets.wrapping_add(1);
+                sent_octets = sent_octets.wrapping_add(payload_len);
+                last_rtp_timestamp = packet.header.timestamp;
+                if ntp_clock.is_none() {
+                    ntp_clock = RtpNtpClock::new_with_anchor(
+                        last_rtp_timestamp,
+                        track.clock_rate,
+                        anchor_ntp,
+                    );
                 }
+                batch_packets = batch_packets.saturating_add(1);
+                batch_octets = batch_octets.saturating_add(u64::from(payload_len));
+            }
+            if !batch.is_empty() && !write_interleaved(&writer, &batch).await {
+                return;
+            }
+            mount.stats.add_rtp(batch_packets, batch_octets);
+            if first_batch
+                && sent_packets > 0
+                && let Some(clock) = ntp_clock.as_mut()
+                && let Ok(report) = encode_sender_report(
+                    ssrc,
+                    clock.ntp_for(last_rtp_timestamp),
+                    last_rtp_timestamp,
+                    sent_packets,
+                    sent_octets,
+                )
+                && let Ok(report) = crypto.protect_rtcp(report)
+                && let Ok(wire) = (InterleavedFrame {
+                    channel: rtcp_channel,
+                    payload: report,
+                })
+                .try_encode()
+            {
+                if !write_interleaved(&writer, &wire).await {
+                    return;
+                }
+                mount.stats.add_sender_reports(1);
             }
         }
     })

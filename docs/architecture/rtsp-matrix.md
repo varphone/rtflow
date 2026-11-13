@@ -74,7 +74,7 @@ profile/level 级 fmtp 校验与浏览器/ffmpeg 互操作矩阵。
 
 默认 `ServerConfig`：header 16 KiB、body 256 KiB、256 会话、16 track/会话、
 interleaved 64 KiB、消费者队列 256 帧、启动缓存 4 MiB/track（mount 总计 16 MiB）、
-UDP 接收缓冲 4 MiB/socket。
+UDP 接收缓冲 4 MiB/socket（rtcp-mux 与普通路径一致）。
 
 `ServerConfig::embedded`：UDP 256 KiB、32 会话、8 track/会话、64 帧队列、
 启动缓存 512 KiB/mount。
@@ -108,8 +108,8 @@ AV1 真实互操作使用用户目录的 FFmpeg master（2026-11）验证：
 
 ## 7. 已确认的验证结果（2026-11）
 
-- `cargo test --no-fail-fast`：293 passed / 0 failed。
-- `cargo test --features experimental-protocols`：358 passed / 0 failed。
+- `cargo test --no-fail-fast`：346 passed / 0 failed。
+- `cargo test --features experimental-protocols`：411 passed / 0 failed。
 - fuzz（libFuzzer，600 s/目标，无崩溃）：
   - `sdp`：13,931,778 次执行
   - `transport`：53,815,772 次执行

@@ -7,6 +7,7 @@ pub(crate) struct Mount {
     /// PLI/FIR/NACK feedback forwarded to local sources (track id).
     pub keyframe_requests: broadcast::Sender<u8>,
     /// Optional per-mount live NPT timeline override.
+    #[cfg_attr(not(feature = "server"), allow(dead_code))]
     pub timeline: Option<crate::rtsp::range::TimelineMode>,
     pub stats: StreamCounters,
     #[cfg(feature = "server")]
@@ -77,14 +78,14 @@ pub fn startup_dedup_keys(startup: &[AccessUnit]) -> std::collections::HashSet<(
 pub const STARTUP_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
 
 impl Mount {
-    /// Cancellation token for this mount's data plane (cancelled on
-    /// unregister or server shutdown).
-    #[allow(dead_code)] // used by the RTSP server session layer
     /// Ask a local source to emit a keyframe on `track_id`.
     pub(crate) fn request_keyframe(&self, track_id: u8) {
         let _ = self.keyframe_requests.send(track_id);
     }
 
+    /// Cancellation token for this mount's data plane (cancelled on
+    /// unregister or server shutdown).
+    #[allow(dead_code)] // used by the RTSP server session layer
     pub(crate) fn cancel_token(&self) -> CancellationToken {
         self.cancel.clone()
     }

@@ -115,8 +115,7 @@ pub(crate) fn spawn_udp_sender_from(
                         mount.stats.add_dropped(1);
                         continue;
                     }
-                    let payload = rtcp_buffer.split_to(size).freeze();
-                    rtcp_buffer.resize(2048, 0);
+                    let payload = bytes::Bytes::copy_from_slice(&rtcp_buffer[..size]);
                     let Ok(payload) = crypto.unprotect_rtcp(payload) else {
                         mount.stats.add_dropped(1);
                         continue;
@@ -200,6 +199,8 @@ pub(crate) fn spawn_udp_sender_from(
                     };
                     {
                         let mut wire = BytesMut::with_capacity(1500);
+                        let mut frame_packets = 0u64;
+                        let mut frame_octets = 0u64;
                         for mut packet in packets {
                             packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
                             packet.encode_into(&mut wire);
@@ -236,7 +237,8 @@ pub(crate) fn spawn_udp_sender_from(
                                     anchor_ntp,
                                 );
                             }
-                            mount.stats.add_rtp(1, packet.payload.len() as u64);
+                            frame_packets = frame_packets.saturating_add(1);
+                            frame_octets = frame_octets.saturating_add(packet.payload.len() as u64);
                             if sent_packets == 1
                                 && let Some(clock) = ntp_clock.as_mut()
                                 && let Ok(report) = encode_sender_report(
@@ -252,6 +254,7 @@ pub(crate) fn spawn_udp_sender_from(
                                 mount.stats.add_sender_reports(1);
                             }
                         }
+                        mount.stats.add_rtp(frame_packets, frame_octets);
                     }
                 }
             }
@@ -282,8 +285,7 @@ pub(crate) fn spawn_udp_receiver(
                 mount.stats.add_dropped(1);
                 continue;
             }
-            let payload = buffer.split_to(size).freeze();
-            buffer.resize(65_536, 0);
+            let payload = bytes::Bytes::copy_from_slice(&buffer[..size]);
             let payload = match crypto.unprotect_rtp(payload) {
                 Ok(payload) => payload,
                 Err(_) => {

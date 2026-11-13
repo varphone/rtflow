@@ -103,8 +103,6 @@ fn sdes_cname(ssrc: u32) -> Bytes {
     Bytes::from(format!("rtflow@{host}-{ssrc:08x}"))
 }
 
-/// Sends an RTCP BYE when the sender task ends (RAII; Drop runs on the
-/// tokio runtime the task lives in).
 pub(super) struct SenderInput {
     pub receiver: broadcast::Receiver<crate::media::AccessUnit>,
     pub startup: Vec<crate::media::AccessUnit>,
@@ -210,6 +208,7 @@ fn system_time_to_ntp(time: std::time::SystemTime) -> Option<u64> {
     Some((seconds << 32) | fraction)
 }
 
+/// Sends an RTCP BYE when the sender task ends.
 struct ByeGuard {
     pair: UdpPair,
     target: SocketAddr,

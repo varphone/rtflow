@@ -487,6 +487,17 @@ pub struct MediaDescription {
     pub connection: Option<crate::media::connection::SdpConnection>,
 }
 impl MediaDescription {
+    /// Build a description with no SDP session connection. Protocol servers
+    /// add the negotiated `c=` information when encoding.
+    pub fn new(session_name: impl Into<Arc<str>>, tracks: Vec<TrackDescription>) -> Self {
+        Self {
+            session_name: session_name.into(),
+            tracks,
+            #[cfg(feature = "multicast")]
+            connection: None,
+        }
+    }
+
     pub fn track(&self, id: TrackId) -> Option<&TrackDescription> {
         self.tracks.iter().find(|t| t.id == id)
     }

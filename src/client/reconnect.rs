@@ -25,9 +25,10 @@ impl ReconnectingClientSession {
         self.receiver.recv().await
     }
 
-    pub async fn teardown(self) {
+    pub async fn teardown(self) -> crate::Result<()> {
         self.cancel.cancel();
         self.task.abort();
+        Ok(())
     }
 }
 

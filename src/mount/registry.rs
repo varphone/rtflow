@@ -26,17 +26,19 @@ pub const DEFAULT_MAX_QUEUED_BYTES_PER_SESSION: usize = 4 * 1024 * 1024;
 /// [`MountRegistry::register`] historically used, so existing callers keep
 /// identical behavior.
 #[derive(Default, Clone)]
+#[non_exhaustive]
 pub struct MountOptions {
-    /// Capacity of the per-mount frame broadcast channel. Applies backpressure
-    /// to publishers when every consumer is slower than the encoder.
+    /// Capacity (frames) of the per-mount broadcast ring. Slow consumers
+    /// lag and recover; the broadcaster never blocks the encoder.
     pub consumer_queue_capacity: Option<usize>,
-    /// Per-consumer buffering limit in bytes; excess frames are dropped
-    /// (with Lagged recovery) instead of growing memory without bound.
+    /// Frame-size budget used by senders and startup snapshots. This is not
+    /// a full broadcast-ring byte budget yet; size the ring together with
+    /// the expected frame size.
     pub max_queued_bytes_per_session: Option<usize>,
     /// Sink for mount lifecycle/stream events; `None` → no-op sink.
     pub event_sink: Option<Arc<dyn EventSink>>,
-    /// Startup (keyframe) cache policy for proxy mounts; `None` → enabled
-    /// with default limits.
+    /// Startup (keyframe) cache policy for every mount type; `None` uses
+    /// the server default.
     #[cfg(feature = "server")]
     pub startup_cache_config: Option<crate::mount::continuity::StartupCacheConfig>,
     /// Per-mount override of the server's live NPT timeline mode.

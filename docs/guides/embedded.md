@@ -169,7 +169,7 @@ cargo build --release --target aarch64-unknown-linux-gnu \
   段缓冲（若开：2s 段 × 码率 × lookback）。
 - `examples/ipc_camera --queue 128`（默认）即按此预算；主/子码流若需
   不同容量，可起两个 `RtspServer`（不同端口）分别配置。
-- 队列满时丢最旧帧（`PushResult::DroppedQueueFull` / 客户端 lagged），
+- 队列满时丢最旧帧（`PushResult::Dropped` / 客户端 lagged），
   不会无限增长——网络抖动与内存预算之间按产品取舍。
 
 ## 7. 部署检查清单

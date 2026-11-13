@@ -10,7 +10,6 @@ pub struct LocalPublisher {
 }
 
 impl LocalPublisher {
-    /// Number of subscribers currently attached to this local source.
     /// Number of unique client sessions currently playing this mount.
     pub fn subscriber_count(&self) -> usize {
         self.inner.active_sessions.load(Ordering::Relaxed)
@@ -56,7 +55,7 @@ impl LocalPublisher {
             }
             Err(_) => {
                 self.inner.stats.add_dropped(1);
-                Ok(PushResult::DroppedQueueFull)
+                Ok(PushResult::Dropped)
             }
         }
     }
@@ -98,7 +97,7 @@ impl LocalPublisher {
             }
             Err(_) => {
                 self.inner.stats.add_dropped(1);
-                Ok(PushResult::DroppedQueueFull)
+                Ok(PushResult::Dropped)
             }
         }
     }
