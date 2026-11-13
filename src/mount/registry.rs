@@ -295,8 +295,8 @@ impl MountRegistry {
         })
     }
 
-    /// Snapshot all registered mounts (path + stats).
-    pub fn snapshots(&self) -> Vec<(Arc<str>, MountSnapshot)> {
+    /// Snapshot all registered mounts (identity + stats).
+    pub fn snapshots(&self) -> Vec<(MountId, MountSnapshot)> {
         self.mounts
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -312,7 +312,7 @@ impl MountRegistry {
                     },
                     inner: mount.clone(),
                 };
-                (path.as_str().into(), handle.snapshot())
+                (path.clone(), handle.snapshot())
             })
             .collect()
     }
