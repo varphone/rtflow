@@ -42,8 +42,8 @@ than missing packet types:
    the application.
 3. PLI/FIR/NACK request a keyframe from a local source; UDP senders keep a
    512-packet protected RTP cache and retransmit NACK-requested packets
-   (including SRTP, reusing the original index). Interleaved senders currently
-   request a keyframe instead of retransmitting.
+   (including SRTP, reusing the original index). Interleaved senders use a
+   mount-level NACK feedback channel and the same cache/retransmission policy.
 4. XR RRTR/DLRR have typed helpers; VoIP metrics blocks are exposed as opaque
    XR payloads.
 5. Reduced-size RTCP is available via `CompoundPacket::new_reduced`; profile
