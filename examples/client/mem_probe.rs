@@ -35,6 +35,15 @@ struct Args {
     /// Total run duration in seconds (0 = until Ctrl-C).
     #[arg(long, default_value_t = 0)]
     duration: u64,
+    /// Use ServerConfig::embedded (256 KiB UDP buffers, small queues).
+    #[arg(long)]
+    embedded: bool,
+    /// Number of tracks per mount (1 = video, 2 = video + PCMA).
+    #[arg(long, default_value_t = 1)]
+    tracks: usize,
+    /// Use UDP clients instead of TCP interleaved.
+    #[arg(long)]
+    udp: bool,
 }
 
 fn vm_stat() -> (u64, u64) {
@@ -83,13 +92,17 @@ fn frame(seq: u64) -> AccessUnit {
     }
 }
 
-async fn attach_clients(count: usize, url: &str) -> Vec<rtflow::client::ClientSession> {
+async fn attach_clients(count: usize, url: &str, udp: bool) -> Vec<rtflow::client::ClientSession> {
     let mut clients = Vec::new();
     for _ in 0..count {
         let client = RtspClient::connect(
             Url::parse(url).unwrap(),
             ClientOptions::builder()
-                .transport(UpstreamTransport::TcpInterleaved)
+                .transport(if udp {
+                    UpstreamTransport::Udp
+                } else {
+                    UpstreamTransport::TcpInterleaved
+                })
                 .keep_alive_interval(None)
                 .build()
                 .unwrap(),
@@ -105,19 +118,30 @@ async fn attach_clients(count: usize, url: &str) -> Vec<rtflow::client::ClientSe
 async fn main() -> rtflow::Result<()> {
     let args = <Args as clap::Parser>::parse();
     let (base_rss, _) = vm_stat();
-    let server = RtspServer::bind(
+    let config = if args.embedded {
+        let mut config = ServerConfig::embedded(args.listen.parse().unwrap());
+        config.consumer_queue_capacity = args.queue;
+        config
+    } else {
         ServerConfig::builder(args.listen.parse().unwrap())
             .consumer_queue_capacity(args.queue)
-            .build()?,
-    )
-    .await?;
+            .build()?
+    };
+    let server = RtspServer::bind(config).await?;
     let mount = server
         .register_mount(
             "/probe",
             MountConfig::Publisher {
                 description: MediaDescription::from_tracks(
                     "probe",
-                    vec![TrackDescription::h264_video(0, &[], &[], 1920, 1080, 30)],
+                    if args.tracks >= 2 {
+                        vec![
+                            TrackDescription::h264_video(0, &[], &[], 1920, 1080, 30),
+                            TrackDescription::pcma_audio(1, 8_000, 1),
+                        ]
+                    } else {
+                        vec![TrackDescription::h264_video(0, &[], &[], 1920, 1080, 30)]
+                    },
                 ),
                 allow_replace_after_disconnect: true,
             },
@@ -129,6 +153,7 @@ async fn main() -> rtflow::Result<()> {
     let clients = attach_clients(
         args.clients,
         &format!("rtsp://{}/probe", server.local_addr()),
+        args.udp,
     )
     .await;
 
@@ -137,6 +162,19 @@ async fn main() -> rtflow::Result<()> {
         let mut seq = 0u64;
         loop {
             let _ = publisher.try_push(frame(seq));
+            if args.tracks >= 2 {
+                let mut audio = vec![0xd5u8; 160];
+                audio[0] = (seq % 251) as u8;
+                let _ = publisher.try_push(AccessUnit {
+                    track_id: 1,
+                    codec: Codec::Pcma,
+                    pts: Duration::from_micros(seq * 33_333),
+                    dts: None,
+                    rtp_timestamp: (seq * 160) as u32,
+                    is_keyframe: true,
+                    data: audio.into(),
+                });
+            }
             seq += 1;
             tokio::time::sleep(Duration::from_millis(33)).await;
         }
@@ -154,8 +192,8 @@ async fn main() -> rtflow::Result<()> {
     }
 
     println!(
-        "baseline VmRSS={}KiB; clients={} queue={}; interval={}s",
-        base_rss, args.clients, args.queue, args.interval
+        "baseline VmRSS={}KiB; clients={} queue={}; interval={}s embedded={} tracks={} udp={}",
+        base_rss, args.clients, args.queue, args.interval, args.embedded, args.tracks, args.udp
     );
     let started = std::time::Instant::now();
     loop {

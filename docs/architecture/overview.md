@@ -46,6 +46,8 @@ rtsp/{message,sdp,range,auth,token_auth,transport,multicast}
 - `proxy/`：兼容门面，类型已迁入 `mount::{upstream,continuity}`（0.3 弃用）。
 - `gateway/`：多协议编排入口。
 
+RTSP 方法/传输/码流/feature 的完整矩阵见 [rtsp-matrix.md](rtsp-matrix.md)。
+
 ## 仓库结构
 
 | 目录 | 内容 |

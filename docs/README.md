@@ -3,6 +3,7 @@
 | 目录 | 内容 |
 |---|---|
 | [architecture/](architecture/overview.md) | 分层图、模块职责、数据面与所有权约定 |
+| [architecture/rtsp-matrix.md](architecture/rtsp-matrix.md) | RTSP 方法/传输/码流/feature/内存矩阵 |
 | [architecture/decisions/](architecture/decisions/README.md) | ADR：单 crate、文件=模块、分层规则、兼容策略 |
 | [guides/embedded.md](guides/embedded.md) | 嵌入式交叉编译、调参与部署 |
 | [guides/examples.md](guides/examples.md) | 示例导航（本地源、文件、客户端、代理、发布、鉴权、Pipeline） |
