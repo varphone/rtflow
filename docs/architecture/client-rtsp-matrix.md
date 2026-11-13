@@ -15,7 +15,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 | TEARDOWN | ✅ | waits for the response; Drop aborts tasks |
 | GET_PARAMETER | ✅ | `ClientSession::get_parameter`, keep-alive |
 | SET_PARAMETER | ✅ | `ClientSession::set_parameter` (text/parameters body) |
-| ANNOUNCE / RECORD | ❌ | publishing client not implemented (roadmap M5.1) |
+| ANNOUNCE / RECORD | ✅ | `RtspClient::publish` + `PublisherSession::push`; UDP transport (multi-track); interleaved publishing pending |
 | REDIRECT | ⚠️ | 3xx `Location` on OPTIONS/DESCRIBE is followed; server-initiated `REDIRECT` requests are not handled |
 | UNSUPPORTED | ⚠️ | parsed as a method but no client-side `Require` negotiation |
 
@@ -26,7 +26,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 | CSeq / response pairing | ✅ exact match; stale interleaved responses skipped |
 | Session / timeout | ✅ `Session`, `timeout=`, keep-alive capped at half timeout |
 | Authentication | ✅ Basic/Digest for OPTIONS/DESCRIBE/SETUP and control; interleaved control retries Digest |
-| Transport | ✅ UDP, TCP interleaved, multicast, SRTP/RTSPS; fallback on 461/IO |
+| Transport | ✅ UDP, TCP interleaved, multicast, SRTP/RTSPS; fallback on 461/IO; publishing UDP now, interleaved pending |
 | Range/RTP-Info | Range sent; `RTP-Info` response not consumed (server keyframe cache supplies startup) |
 | Scale/Speed | ✅ sent on PLAY (`PlayRequest`) |
 | `Require`/`Proxy-Require` | ❌ not emitted; 551 `Unsupported` surfaces as `RtspStatus` |
@@ -50,7 +50,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 
 ## Known gaps / next increments
 
-1. Publishing client (`ANNOUNCE` + `RECORD` + `PublisherSession::push`).
+1. Interleaved publishing (TCP publish transport) and publisher RTCP.`
 2. Server-initiated `REDIRECT` request and `RTP-Info`/`Range` response handling.
 3. `Require`/`Proxy-Require` negotiation and `551 Unsupported` details.
 4. Byte-bounded output queue (currently frame-count bounded; a small number of

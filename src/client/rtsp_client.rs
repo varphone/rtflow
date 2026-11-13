@@ -185,6 +185,30 @@ impl RtspClient {
         Self::connect(url, options).await
     }
 
+    /// Publish a stream: OPTIONS + ANNOUNCE + SETUP + RECORD.
+    ///
+    /// The returned [`PublisherSession`] owns the UDP RTP sockets and a
+    /// keep-alive task; call [`PublisherSession::push`] for every access unit.
+    pub async fn publish(
+        url: url::Url,
+        description: MediaDescription,
+        options: ClientOptions,
+    ) -> Result<PublisherSession> {
+        validate_options(&options)?;
+        super::publish::connect(&url, description, &options).await
+    }
+
+    /// Convenience entry accepting a URL string; see [`Self::publish`].
+    pub async fn publish_str(
+        url: &str,
+        description: MediaDescription,
+        options: ClientOptions,
+    ) -> Result<PublisherSession> {
+        let url = url::Url::parse(url)
+            .map_err(|error| Error::Rtsp(format!("invalid RTSP URL: {error}")))?;
+        Self::publish(url, description, options).await
+    }
+
     /// Connect and keep retrying after a media-session disconnect.
     ///
     /// Initial connection failures are still returned to the caller.
@@ -378,7 +402,7 @@ async fn open_and_describe(
     Err(Error::Rtsp("too many RTSP redirects".into()))
 }
 
-async fn open_control(
+pub(super) async fn open_control(
     url: &url::Url,
     options: &ClientOptions,
 ) -> Result<(ControlConnection, String)> {

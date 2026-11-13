@@ -48,7 +48,7 @@
 
 ## M5 — 功能扩展（各子阶段独立立项）
 
-- [ ] M5.1 发布客户端（ANNOUNCE/RECORD）：`src/client/publish.rs`，`PublisherSession::push(AccessUnit)`；`tests/client_publish.rs` + ffmpeg 互通
+- [x] M5.1 发布客户端（ANNOUNCE/RECORD，UDP）：`src/client/publish.rs`，`PublisherSession::push(AccessUnit)`，多轨与并发测试；interleaved 发布待补
 - [ ] M5.2 SRTP 接收：`RTP/SAVP` + SDP `a=crypto`，`src/client/srtp_rx.rs`，复用 `src/srtp`
 - [ ] M5.3 WHEP 客户端：`src/client/whep.rs`（feature `webrtc`），与 `ClientSession::next()` 同形态出帧；扩展 `tests/webrtc_e2e.rs`
 

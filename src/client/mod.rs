@@ -36,6 +36,7 @@ use tokio_util::sync::CancellationToken;
 
 mod control;
 mod options;
+mod publish;
 mod reconnect;
 mod rtsp_client;
 mod session;
@@ -48,6 +49,7 @@ pub use options::{
     ClientOptions, ClientOptionsBuilder, ClientReconnectPolicy, ClientReconnectPolicyBuilder,
     ServerCapabilities,
 };
+pub use publish::PublisherSession;
 pub use reconnect::ReconnectingClientSession;
 pub use rtsp_client::RtspClient;
 pub use session::{ClientQualitySnapshot, ClientSession, PlayRequest};
