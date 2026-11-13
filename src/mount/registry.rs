@@ -143,14 +143,17 @@ impl MountRegistry {
         mounts.clear();
     }
 
-    /// List all registered mounts.
+    /// List all registered mounts in stable path order.
     pub fn paths(&self) -> Vec<MountId> {
-        self.mounts
+        let mut paths = self
+            .mounts
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .keys()
             .cloned()
-            .collect()
+            .collect::<Vec<_>>();
+        paths.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+        paths
     }
 
     /// Find the mount whose path is the longest prefix of `requested`.
@@ -299,7 +302,8 @@ impl MountRegistry {
 
     /// Snapshot all registered mounts (identity + stats).
     pub fn snapshots(&self) -> Vec<(MountId, MountSnapshot)> {
-        self.mounts
+        let mut snapshots = self
+            .mounts
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
@@ -316,6 +320,8 @@ impl MountRegistry {
                 };
                 (path.clone(), handle.snapshot())
             })
-            .collect()
+            .collect::<Vec<_>>();
+        snapshots.sort_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()));
+        snapshots
     }
 }
