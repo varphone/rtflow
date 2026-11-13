@@ -81,12 +81,24 @@ mod tests {
 
     #[test]
     fn composition_time_clamps_to_signed_24bit() {
-        assert_eq!(composition_time_ms(Duration::from_millis(40), Some(Duration::from_millis(0))), 40);
-        assert_eq!(composition_time_ms(Duration::ZERO, Some(Duration::from_millis(40))), -40);
+        assert_eq!(
+            composition_time_ms(Duration::from_millis(40), Some(Duration::from_millis(0))),
+            40
+        );
+        assert_eq!(
+            composition_time_ms(Duration::ZERO, Some(Duration::from_millis(40))),
+            -40
+        );
         assert_eq!(composition_time_ms(Duration::ZERO, None), 0);
         // > 24.8 days of B-frame offset clamps (FLV signed 24-bit limit).
-        assert_eq!(composition_time_ms(Duration::from_secs(100 * 24 * 3600), Some(Duration::ZERO)), 0x7f_ffff);
-        assert_eq!(composition_time_ms(Duration::ZERO, Some(Duration::from_secs(100 * 24 * 3600))), -0x80_0000);
+        assert_eq!(
+            composition_time_ms(Duration::from_secs(100 * 24 * 3600), Some(Duration::ZERO)),
+            0x7f_ffff
+        );
+        assert_eq!(
+            composition_time_ms(Duration::ZERO, Some(Duration::from_secs(100 * 24 * 3600))),
+            -0x80_0000
+        );
     }
 
     #[test]

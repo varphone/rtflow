@@ -9,12 +9,12 @@ use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::time::Duration;
 
+use rtc::rtp_transceiver::rtp_sender::RTCRtpSendParameters;
 use tokio::sync::{Notify, RwLock};
 use webrtc::peer_connection::{
-    PeerConnection, PeerConnectionEventHandler, RTCPeerConnectionIceEvent,
-    RTCIceConnectionState, RTCIceGatheringState, RTCPeerConnectionState,
+    PeerConnection, PeerConnectionEventHandler, RTCIceConnectionState, RTCIceGatheringState,
+    RTCPeerConnectionIceEvent, RTCPeerConnectionState,
 };
-use rtc::rtp_transceiver::rtp_sender::RTCRtpSendParameters;
 
 use crate::Result;
 
@@ -92,7 +92,8 @@ impl PeerConnectionEventHandler for PcHandler {
             RTCIceConnectionState::Connected | RTCIceConnectionState::Completed => {
                 self.state.connected.notify_waiters();
             }
-            RTCIceConnectionState::Failed | RTCIceConnectionState::Disconnected
+            RTCIceConnectionState::Failed
+            | RTCIceConnectionState::Disconnected
             | RTCIceConnectionState::Closed => {
                 self.state.closed.notify_waiters();
             }
@@ -159,12 +160,10 @@ where
         .with_handler(handler)
         .with_udp_addrs(udp_addrs);
 
-    let pc: Arc<dyn PeerConnection> = Arc::new(
-        builder
-            .build()
-            .await
-            .map_err(|e| crate::Error::Media(format!("WebRTC peer connection build failed: {e}")))?,
-    );
+    let pc: Arc<dyn PeerConnection> =
+        Arc::new(builder.build().await.map_err(|e| {
+            crate::Error::Media(format!("WebRTC peer connection build failed: {e}"))
+        })?);
     Ok(pc)
 }
 
@@ -191,7 +190,6 @@ pub(crate) async fn sender_payload_type(
         })
         .map(|c| c.payload_type)
 }
-
 
 /// Extract ICE candidates from an SDP document, associating each with its
 /// media section (`a=mid`) and section index.

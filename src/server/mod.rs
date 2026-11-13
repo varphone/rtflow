@@ -158,8 +158,7 @@ impl Default for ResourceLimits {
             max_mounts: 1_024,
             max_tracks_per_session: 16,
             max_interleaved_frame_bytes: 65_536,
-            max_queued_bytes_per_session:
-                crate::mount::DEFAULT_MAX_QUEUED_BYTES_PER_SESSION,
+            max_queued_bytes_per_session: crate::mount::DEFAULT_MAX_QUEUED_BYTES_PER_SESSION,
         }
     }
 }

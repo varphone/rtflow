@@ -322,8 +322,8 @@ fn pop_front(track: &mut TrackCache) {
 }
 
 fn duration_to_ticks(duration: Duration, clock_rate: u32) -> u32 {
-    crate::media::clock::duration_to_ticks(duration, clock_rate)
-        .clamp(1, u64::from(u32::MAX)) as u32
+    crate::media::clock::duration_to_ticks(duration, clock_rate).clamp(1, u64::from(u32::MAX))
+        as u32
 }
 
 fn ticks_to_duration(ticks: u32, clock_rate: u32) -> Duration {

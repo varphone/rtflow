@@ -8,16 +8,16 @@
 
 use std::sync::Arc;
 
-use tokio::sync::RwLock;
-use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
-use webrtc::media_stream::track_local::TrackLocal;
-use webrtc::media_stream::{MediaStreamId, MediaStreamTrack, MediaStreamTrackId};
-use webrtc::peer_connection::{PeerConnection, RTCSessionDescription};
-use rtc::rtp::packet::Packet as RtpPacket;
 use rtc::rtp::header::Header as RtpHeader;
+use rtc::rtp::packet::Packet as RtpPacket;
 use rtc::rtp_transceiver::rtp_sender::{
     RTCRtpCodec, RTCRtpCodingParameters, RTCRtpEncodingParameters, RtpCodecKind,
 };
+use tokio::sync::RwLock;
+use webrtc::media_stream::track_local::TrackLocal;
+use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
+use webrtc::media_stream::{MediaStreamId, MediaStreamTrack, MediaStreamTrackId};
+use webrtc::peer_connection::{PeerConnection, RTCSessionDescription};
 
 use super::session::{SessionRegistry, SessionState, SessionType, WebrtcSession};
 use super::transport::{
@@ -84,7 +84,10 @@ pub async fn handle_whep_post(
     let playable = mount.description.tracks.iter().any(|t| match t.kind {
         crate::media::MediaKind::Video => true,
         crate::media::MediaKind::Audio => {
-            matches!(t.codec, Codec::Opus | Codec::Pcma | Codec::Pcmu | Codec::Aac)
+            matches!(
+                t.codec,
+                Codec::Opus | Codec::Pcma | Codec::Pcmu | Codec::Aac
+            )
         }
     });
     if !playable {
@@ -149,7 +152,10 @@ pub async fn handle_whep_post(
                 | Codec::Pcmu
                 | Codec::Aac
         ) {
-            tracing::warn!(?codec, "WHEP: codec not supported by WebRTC, skipping track");
+            tracing::warn!(
+                ?codec,
+                "WHEP: codec not supported by WebRTC, skipping track"
+            );
             continue;
         }
         let track_id = format!("rtflow-{}-{}", kind_str(kind), track.id);
@@ -424,7 +430,10 @@ pub async fn handle_whep_options(
 }
 
 fn session_id_from_path(path: &str) -> Option<String> {
-    path.rsplit('/').next().map(|s| s.to_string()).filter(|s| !s.is_empty())
+    path.rsplit('/')
+        .next()
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
 }
 
 async fn respond_plain(
@@ -432,6 +441,8 @@ async fn respond_plain(
     status: u16,
     msg: &str,
 ) -> Result<ResponseWriter<crate::http::ConnWriter>> {
-    writer.write_body(status, "text/plain", msg.as_bytes()).await?;
+    writer
+        .write_body(status, "text/plain", msg.as_bytes())
+        .await?;
     Ok(writer)
 }

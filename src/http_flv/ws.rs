@@ -398,7 +398,11 @@ async fn handshake(mut stream: TcpStream, timeout: Duration) -> Result<(String, 
     stream.flush().await?;
 
     // Path convention: /live/stream.flv -> mount /live/stream.
-    let mount_path = request.path.strip_suffix(".flv").unwrap_or(&request.path).to_string();
+    let mount_path = request
+        .path
+        .strip_suffix(".flv")
+        .unwrap_or(&request.path)
+        .to_string();
     Ok((mount_path, stream))
 }
 

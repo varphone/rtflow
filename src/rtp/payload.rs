@@ -337,7 +337,10 @@ impl Depacketizer {
         if self
             .expected_sequence
             .is_some_and(|e| e != p.header.sequence)
-            && matches!(self.codec, Codec::H264 | Codec::H265 | Codec::Vp8 | Codec::Vp9)
+            && matches!(
+                self.codec,
+                Codec::H264 | Codec::H265 | Codec::Vp8 | Codec::Vp9
+            )
         {
             let d = self.current_timestamp == Some(timestamp);
             self.assembling = None;
@@ -576,7 +579,8 @@ impl Depacketizer {
                 if size < 2 || offset + size > p.len() {
                     return Err(Error::Media("invalid H265 AP".into()));
                 }
-                keyframe |= size >= 2 && crate::media::bitstream::is_h265_random_access(&p[offset..offset + size]);
+                keyframe |= size >= 2
+                    && crate::media::bitstream::is_h265_random_access(&p[offset..offset + size]);
                 output.extend_from_slice(&[0, 0, 0, 1]);
                 output.extend_from_slice(&p[offset..offset + size]);
                 offset += size;
@@ -655,40 +659,38 @@ impl Depacketizer {
             data,
             keyframe: keyframe_fn,
         } = if self.codec == Codec::Vp8 {
-                let first = payload[0];
-                VpFragment {
-                    start_bit: first & 0x10 != 0,
-                    end_bit: false,
-                    data: &payload[1..],
-                    keyframe: |data| {
-                        data.first().is_some_and(|byte| byte & 0x01 == 0)
-                    },
-                }
-            } else {
-                let first = payload[0];
-                // I=1: picture ID follows. The M bit (octet 1, bit 7)
-                // selects a 7-bit (2-byte descriptor, ffmpeg style) or
-                // 15-bit (3-byte) picture ID.
-                let offset = if first & 0x80 != 0 {
-                    if payload.len() < 2 {
-                        return Err(Error::Media("short VP9 payload descriptor".into()));
-                    }
-                    if payload[1] & 0x80 != 0 { 3 } else { 2 }
-                } else {
-                    1
-                };
-                if payload.len() < offset {
+            let first = payload[0];
+            VpFragment {
+                start_bit: first & 0x10 != 0,
+                end_bit: false,
+                data: &payload[1..],
+                keyframe: |data| data.first().is_some_and(|byte| byte & 0x01 == 0),
+            }
+        } else {
+            let first = payload[0];
+            // I=1: picture ID follows. The M bit (octet 1, bit 7)
+            // selects a 7-bit (2-byte descriptor, ffmpeg style) or
+            // 15-bit (3-byte) picture ID.
+            let offset = if first & 0x80 != 0 {
+                if payload.len() < 2 {
                     return Err(Error::Media("short VP9 payload descriptor".into()));
                 }
-                VpFragment {
-                    start_bit: first & 0x04 != 0,
-                    end_bit: first & 0x02 != 0,
-                    data: &payload[offset..],
-                    // frame_type bit of the VP9 uncompressed header:
-                    // bit 4 of the first byte, 0 = keyframe.
-                    keyframe: |data| data.first().is_some_and(|byte| byte & 0x10 == 0),
-                }
+                if payload[1] & 0x80 != 0 { 3 } else { 2 }
+            } else {
+                1
             };
+            if payload.len() < offset {
+                return Err(Error::Media("short VP9 payload descriptor".into()));
+            }
+            VpFragment {
+                start_bit: first & 0x04 != 0,
+                end_bit: first & 0x02 != 0,
+                data: &payload[offset..],
+                // frame_type bit of the VP9 uncompressed header:
+                // bit 4 of the first byte, 0 = keyframe.
+                keyframe: |data| data.first().is_some_and(|byte| byte & 0x10 == 0),
+            }
+        };
         if start_bit {
             // A new frame begins: drop any truncated previous frame.
             if let Some(prev) = self.vp_assembling.take() {
@@ -721,9 +723,7 @@ impl Depacketizer {
             // VP9: E bit or RTP marker ends the frame.
             p.header.marker || end_bit
         };
-        if frame_complete
-            && let Some(frame) = self.vp_assembling.take()
-        {
+        if frame_complete && let Some(frame) = self.vp_assembling.take() {
             let is_keyframe = std::mem::take(&mut self.vp_is_keyframe);
             return Ok(vec![AccessUnit {
                 track_id: self.track_id,
@@ -1251,7 +1251,9 @@ mod vp8_gap_tests {
     fn vp8_sequence_gap_discards_inflight_frame() {
         let mut dep = Depacketizer::new(Codec::Vp8, 0, 90_000);
         // Frame 1: fragments seq 1 (S) ... seq 2.
-        let _ = dep.push(packet(1, 100, false, &[0x10, 0x00, 0x01])).unwrap();
+        let _ = dep
+            .push(packet(1, 100, false, &[0x10, 0x00, 0x01]))
+            .unwrap();
         // Gap: seq 4 (not 3) — starts a new frame with S=1.
         let units = dep.push(packet(4, 200, true, &[0x10, 0x00, 0x02])).unwrap();
         assert_eq!(units.len(), 1, "new frame still delivered");
@@ -1303,7 +1305,11 @@ mod vp9_tests {
         assert_eq!(packets.len(), 1);
         // Descriptor: I=1, B=1, E=1.
         assert_eq!(packets[0].payload[0], 0x80 | 0x04 | 0x02);
-        assert_eq!(packets[0].payload[1] & 0x80, 0x80, "M=1 (15-bit picture ID)");
+        assert_eq!(
+            packets[0].payload[1] & 0x80,
+            0x80,
+            "M=1 (15-bit picture ID)"
+        );
         assert_eq!(
             u16::from_be_bytes([packets[0].payload[1] & 0x7f, packets[0].payload[2]]),
             0
@@ -1370,7 +1376,10 @@ mod vp9_tests {
         let mut seq = 0u16;
         for p in f1.iter().chain(f2.iter()) {
             seq = seq.wrapping_add(1);
-            out.extend(dep.push(packet(seq, p.header.timestamp, p.header.marker, &p.payload)).unwrap());
+            out.extend(
+                dep.push(packet(seq, p.header.timestamp, p.header.marker, &p.payload))
+                    .unwrap(),
+            );
         }
         assert_eq!(out.len(), 2, "both frames reassembled");
         assert!(out[0].is_keyframe);
@@ -1404,7 +1413,11 @@ mod vp9_tests {
             .push(packet(3, 200, true, &[0x86, 0x80, 0x02, 0xcc]))
             .unwrap();
         assert_eq!(units.len(), 1);
-        assert_eq!(units[0].data.as_ref(), &[0xcc], "abandoned fragments dropped");
+        assert_eq!(
+            units[0].data.as_ref(),
+            &[0xcc],
+            "abandoned fragments dropped"
+        );
     }
 
     #[test]

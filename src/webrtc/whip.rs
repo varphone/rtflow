@@ -8,14 +8,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::RwLock;
 use rtc::rtp::packet::Packet as RtpPacket;
+use tokio::sync::RwLock;
 use webrtc::media_stream::track_remote::{TrackRemote, TrackRemoteEvent};
 use webrtc::peer_connection::{PeerConnection, RTCSessionDescription};
 
 use super::session::{SessionRegistry, SessionState, SessionType};
 use super::transport::{GATHER_TIMEOUT, PcHandler, PcState, build_peer_connection};
-use crate::http::{ResponseWriter};
+use crate::http::ResponseWriter;
 use crate::media::Codec;
 use crate::mount::MountRegistry;
 use crate::rtp::Depacketizer;
@@ -73,9 +73,9 @@ pub async fn handle_whip_post(
     let mount = mounts
         .get_handle(&path)
         .ok_or_else(|| Error::Http("WHIP: mount not found".into()))?;
-    let _publisher = mount.publisher().map_err(|_| {
-        Error::Http("WHIP: mount is not a publisher mount".into())
-    })?;
+    let _publisher = mount
+        .publisher()
+        .map_err(|_| Error::Http("WHIP: mount is not a publisher mount".into()))?;
 
     let session = sessions
         .create_session(SessionType::Publish, path.clone())
@@ -134,7 +134,14 @@ pub async fn handle_whip_post(
     }
 
     // Start the ingest loop: remote track RTP → depacketizer → mount.
-    spawn_ingest_task(&session, pc.clone(), mounts.clone(), path.clone(), config.max_frame_bytes).await;
+    spawn_ingest_task(
+        &session,
+        pc.clone(),
+        mounts.clone(),
+        path.clone(),
+        config.max_frame_bytes,
+    )
+    .await;
 
     {
         let mut s = session.write().await;
@@ -260,10 +267,15 @@ fn ingest_rtp(
         *depacketizer = Some(Depacketizer::new(*codec, *track_id as u8, *clock_rate));
     }
 
-    let Some(dep) = depacketizer.as_mut() else { return };
+    let Some(dep) = depacketizer.as_mut() else {
+        return;
+    };
     // Guard against a malicious publisher growing buffers without bound.
     if packet.payload.len() > max_frame_bytes {
-        tracing::warn!("WHIP: oversized RTP packet dropped ({} bytes)", packet.payload.len());
+        tracing::warn!(
+            "WHIP: oversized RTP packet dropped ({} bytes)",
+            packet.payload.len()
+        );
         return;
     }
     let rtp_packet = crate::rtp::RtpPacket {
@@ -345,7 +357,10 @@ pub async fn handle_whip_options(
 }
 
 fn session_id_from_path(path: &str) -> Option<String> {
-    path.rsplit('/').next().map(|s| s.to_string()).filter(|s| !s.is_empty())
+    path.rsplit('/')
+        .next()
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
 }
 
 async fn respond_plain(
@@ -353,6 +368,8 @@ async fn respond_plain(
     status: u16,
     msg: &str,
 ) -> Result<ResponseWriter<crate::http::ConnWriter>> {
-    writer.write_body(status, "text/plain", msg.as_bytes()).await?;
+    writer
+        .write_body(status, "text/plain", msg.as_bytes())
+        .await?;
     Ok(writer)
 }

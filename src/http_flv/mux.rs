@@ -229,10 +229,7 @@ impl FlvMuxer {
     /// (SPS + PPS extracted via [`crate::media::bitstream::h264_parameter_sets`]).
     pub fn build_avc_sequence_header(annex_b_data: &Bytes) -> Option<Bytes> {
         let sets = crate::media::bitstream::h264_parameter_sets(annex_b_data);
-        crate::media::bitstream::build_avc_config_record(
-            sets.sps.as_deref()?,
-            sets.pps.as_deref()?,
-        )
+        crate::media::bitstream::build_avc_config_record(sets.sps.as_deref()?, sets.pps.as_deref()?)
     }
 
     /// Build a HEVCDecoderConfigurationRecord from Annex-B H.265 data
@@ -529,14 +526,24 @@ fn write_composition_time(buf: &mut BytesMut, unit: &AccessUnit) {
 /// Write the FLV video tag header.
 fn write_flv_tag_header(buf: &mut BytesMut, unit: &AccessUnit, body_size: usize) {
     let timestamp = unit.dts.unwrap_or(unit.pts).as_millis() as u32;
-    crate::media::flv::write_tag_header(buf, crate::media::flv::TAG_TYPE_VIDEO, body_size, timestamp);
+    crate::media::flv::write_tag_header(
+        buf,
+        crate::media::flv::TAG_TYPE_VIDEO,
+        body_size,
+        timestamp,
+    );
 }
 
 /// Write an audio FLV tag (AAC).
 fn write_audio_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_sequence_header: bool) {
     let timestamp = unit.pts.as_millis() as u32;
     let data_size = data.len() + 2; // +2 for audio tag header bytes
-    crate::media::flv::write_tag_header(buf, crate::media::flv::TAG_TYPE_AUDIO, data_size, timestamp);
+    crate::media::flv::write_tag_header(
+        buf,
+        crate::media::flv::TAG_TYPE_AUDIO,
+        data_size,
+        timestamp,
+    );
 
     // AAC: sound_format=10, rate=3 (44 kHz), size=1 (16-bit), type=1 (stereo).
     buf.put_u8(crate::media::flv::AAC_SOUND_HEADER);
@@ -551,7 +558,12 @@ fn write_audio_tag(buf: &mut BytesMut, unit: &AccessUnit, data: &Bytes, is_seque
 fn write_g711_audio_tag(buf: &mut BytesMut, unit: &AccessUnit) {
     let timestamp = unit.pts.as_millis() as u32;
     let data_size = unit.data.len() + 1; // +1 for audio tag header byte
-    crate::media::flv::write_tag_header(buf, crate::media::flv::TAG_TYPE_AUDIO, data_size, timestamp);
+    crate::media::flv::write_tag_header(
+        buf,
+        crate::media::flv::TAG_TYPE_AUDIO,
+        data_size,
+        timestamp,
+    );
 
     let sound_format = match unit.codec {
         Codec::Pcma => crate::media::flv::SOUND_FORMAT_ALAW,

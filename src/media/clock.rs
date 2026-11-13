@@ -163,8 +163,14 @@ mod conversion_tests {
     #[test]
     fn duration_to_ticks_truncates_int_exactly() {
         // 33.333ms at 90 kHz = 2999.97 ticks → floor 2999 (no float drift).
-        assert_eq!(duration_to_ticks(Duration::from_micros(33_333), 90_000), 2999);
-        assert_eq!(duration_to_ticks(Duration::from_micros(66_666), 90_000), 5999);
+        assert_eq!(
+            duration_to_ticks(Duration::from_micros(33_333), 90_000),
+            2999
+        );
+        assert_eq!(
+            duration_to_ticks(Duration::from_micros(66_666), 90_000),
+            5999
+        );
         // Whole seconds are exact.
         assert_eq!(duration_to_ticks(Duration::from_secs(2), 90_000), 180_000);
         // Sub-nanosecond remainder truncates to zero.
@@ -174,16 +180,31 @@ mod conversion_tests {
     #[test]
     fn duration_to_ticks_rounded_half_tick_up() {
         // 33.333ms at 90 kHz: 2999.97 → round 3000.
-        assert_eq!(duration_to_ticks_rounded(Duration::from_micros(33_333), 90_000), 3000);
+        assert_eq!(
+            duration_to_ticks_rounded(Duration::from_micros(33_333), 90_000),
+            3000
+        );
         // Exactly on a tick boundary is unchanged.
-        assert_eq!(duration_to_ticks_rounded(Duration::from_millis(40), 90_000), 3600);
+        assert_eq!(
+            duration_to_ticks_rounded(Duration::from_millis(40), 90_000),
+            3600
+        );
         // Half a tick rounds up.
-        assert_eq!(duration_to_ticks_rounded(Duration::from_nanos(5_555_555), 90_000), 500);
+        assert_eq!(
+            duration_to_ticks_rounded(Duration::from_nanos(5_555_555), 90_000),
+            500
+        );
     }
 
     #[test]
     fn ticks_to_duration_round_trips() {
-        let cases = [(0u64, 90_000u32), (1, 90_000), (2999, 90_000), (1024, 44_100), (u32::MAX as u64, 8_000)];
+        let cases = [
+            (0u64, 90_000u32),
+            (1, 90_000),
+            (2999, 90_000),
+            (1024, 44_100),
+            (u32::MAX as u64, 8_000),
+        ];
         for (ticks, rate) in cases {
             let d = ticks_to_duration(ticks, rate);
             // Truncation loses at most one tick on the way back (the
@@ -203,7 +224,10 @@ mod conversion_tests {
         // Float math can under-count by one on exact boundaries
         // (703ms * 90000 = 63270 exactly, but f64 gives 63269.9999…).
         // The integer implementation must hit the exact value.
-        assert_eq!(duration_to_ticks(Duration::from_millis(703), 90_000), 63_270);
+        assert_eq!(
+            duration_to_ticks(Duration::from_millis(703), 90_000),
+            63_270
+        );
         // And stay exact across a long run: every integer millisecond.
         for ms in 0..10_000u32 {
             let d = Duration::from_millis(u64::from(ms));

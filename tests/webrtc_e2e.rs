@@ -7,21 +7,20 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use rtc::rtp_transceiver::rtp_sender::RtpCodecKind;
+use rtc::rtp_transceiver::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
 use rtflow::http::{HttpConfig, HttpServer, Method};
-use rtflow::media::{AccessUnit, Codec, MediaKind, MediaDescription, TrackDescription};
+use rtflow::media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription};
 use rtflow::mount::{MountConfig, MountRegistry};
 use rtflow::webrtc::{WebRtcConfig, create_webrtc_handlers};
-use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
 use webrtc::media_stream::track_local::TrackLocal;
+use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
 use webrtc::media_stream::track_remote::{TrackRemote, TrackRemoteEvent};
 use webrtc::media_stream::{MediaStreamId, MediaStreamTrack, MediaStreamTrackId};
 use webrtc::peer_connection::{
-    PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler,
-    RTCConfigurationBuilder, RTCIceGatheringState, RTCPeerConnectionIceEvent,
-    RTCSessionDescription,
+    PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
+    RTCIceGatheringState, RTCPeerConnectionIceEvent, RTCSessionDescription,
 };
-use rtc::rtp_transceiver::rtp_sender::RtpCodecKind;
-use rtc::rtp_transceiver::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
 
 /// Browser-side handler: collects local candidates, records the incoming
 /// track, and signals ICE connection state.
@@ -35,7 +34,6 @@ struct BrowserHandler {
 #[async_trait::async_trait]
 impl PeerConnectionEventHandler for BrowserHandler {
     async fn on_ice_candidate(&self, event: RTCPeerConnectionIceEvent) {
-
         if let Ok(init) = event.candidate.to_json() {
             let mut line = format!("a={}", init.candidate);
             if let Some(mid) = init.sdp_mid {
@@ -55,14 +53,19 @@ impl PeerConnectionEventHandler for BrowserHandler {
     }
 
     async fn on_track(&self, track: Arc<dyn TrackRemote>) {
-
         *self.track.lock().await = Some(track);
     }
 
-    async fn on_ice_connection_state_change(&self, _state: webrtc::peer_connection::RTCIceConnectionState) {
-        }
+    async fn on_ice_connection_state_change(
+        &self,
+        _state: webrtc::peer_connection::RTCIceConnectionState,
+    ) {
+    }
 
-    async fn on_connection_state_change(&self, state: webrtc::peer_connection::RTCPeerConnectionState) {
+    async fn on_connection_state_change(
+        &self,
+        state: webrtc::peer_connection::RTCPeerConnectionState,
+    ) {
         // RTCPeerConnectionState::Connected means ICE *and* DTLS are done
         // and SRTP contexts are installed — only then is it safe to push
         // media packets.
@@ -73,11 +76,7 @@ impl PeerConnectionEventHandler for BrowserHandler {
 }
 
 /// Simple HTTP POST helper returning (status, headers, body).
-async fn http_post(
-    addr: std::net::SocketAddr,
-    path: &str,
-    body: &str,
-) -> (u16, String, String) {
+async fn http_post(addr: std::net::SocketAddr, path: &str, body: &str) -> (u16, String, String) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
     let request = format!(
@@ -135,14 +134,20 @@ async fn whep_streams_h264_rtp_over_real_ice_dtls_srtp() {
             },
         )
         .unwrap();
-    let publisher = mounts.get_handle("/live/stream").unwrap().publisher().unwrap();
+    let publisher = mounts
+        .get_handle("/live/stream")
+        .unwrap()
+        .publisher()
+        .unwrap();
 
-    let (_whip_handler, whep_handler) = create_webrtc_handlers(WebRtcConfig::default(), mounts.clone());
+    let (_whip_handler, whep_handler) =
+        create_webrtc_handlers(WebRtcConfig::default(), mounts.clone());
     let mut http = HttpServer::bind(HttpConfig::new("127.0.0.1:0".parse().unwrap()))
         .await
         .unwrap();
     let addr = http.local_addr();
-    http.add_route(Method::Post, "/whep/live/stream", whep_handler).await;
+    http.add_route(Method::Post, "/whep/live/stream", whep_handler)
+        .await;
     http.run().await.unwrap();
 
     // Browser: recvonly H.264 peer connection.
@@ -195,7 +200,10 @@ async fn whep_streams_h264_rtp_over_real_ice_dtls_srtp() {
 
     let (status, _headers, answer) = http_post(addr, "/whep/live/stream", &offer_sdp).await;
     assert_eq!(status, 201, "WHEP POST failed: {answer}");
-    assert!(answer.contains("a=mid"), "answer should carry media sections");
+    assert!(
+        answer.contains("a=mid"),
+        "answer should carry media sections"
+    );
 
     // Feed the answer's ICE candidates into the browser agent (the
     // server's handler does the same for offer candidates).
@@ -266,7 +274,7 @@ async fn whep_streams_h264_rtp_over_real_ice_dtls_srtp() {
     // at least three packets.
     let track = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-                    if let Some(track) = handler.track.lock().await.clone() {
+            if let Some(track) = handler.track.lock().await.clone() {
                 return track;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -338,12 +346,14 @@ async fn whip_receives_h264_rtp_over_real_ice_dtls_srtp() {
     let mount = mounts.get_handle("/live/cam").unwrap();
     let mut frames_rx = mount.subscribe();
 
-    let (whip_handler, _whep_handler) = create_webrtc_handlers(WebRtcConfig::default(), mounts.clone());
+    let (whip_handler, _whep_handler) =
+        create_webrtc_handlers(WebRtcConfig::default(), mounts.clone());
     let mut http = HttpServer::bind(HttpConfig::new("127.0.0.1:0".parse().unwrap()))
         .await
         .unwrap();
     let addr = http.local_addr();
-    http.add_route(Method::Post, "/whip/live/cam", whip_handler).await;
+    http.add_route(Method::Post, "/whip/live/cam", whip_handler)
+        .await;
     http.run().await.unwrap();
 
     // Browser: sendonly H.264 peer connection.
@@ -454,7 +464,8 @@ async fn whip_receives_h264_rtp_over_real_ice_dtls_srtp() {
         .find(|c| c.rtp_codec.mime_type.to_ascii_uppercase().contains("H264"))
         .map(|c| c.payload_type)
         .unwrap_or(96);
-    let mut packetizer = rtflow::rtp::Packetizer::new(Codec::H264, send_pt, send_ssrc, 1200).unwrap();
+    let mut packetizer =
+        rtflow::rtp::Packetizer::new(Codec::H264, send_pt, send_ssrc, 1200).unwrap();
     for i in 0..20u32 {
         let units = packetizer
             .packetize(&AccessUnit {
@@ -549,7 +560,11 @@ async fn whep_streams_pcma_audio_over_real_ice_dtls_srtp() {
             },
         )
         .unwrap();
-    let publisher = mounts.get_handle("/live/audio").unwrap().publisher().unwrap();
+    let publisher = mounts
+        .get_handle("/live/audio")
+        .unwrap()
+        .publisher()
+        .unwrap();
 
     let (_whip_handler, whep_handler) =
         create_webrtc_handlers(WebRtcConfig::default(), mounts.clone());
@@ -557,7 +572,8 @@ async fn whep_streams_pcma_audio_over_real_ice_dtls_srtp() {
         .await
         .unwrap();
     let addr = http.local_addr();
-    http.add_route(Method::Post, "/whep/live/audio", whep_handler).await;
+    http.add_route(Method::Post, "/whep/live/audio", whep_handler)
+        .await;
     http.run().await.unwrap();
 
     // Browser: audio-only recvonly PC (PCMA is registered by the default

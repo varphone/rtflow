@@ -114,7 +114,9 @@ pub fn is_h265_random_access(nal: &[u8]) -> bool {
 pub fn is_random_access_point(codec: super::Codec, data: &[u8]) -> bool {
     match codec {
         super::Codec::H264 => annex_b_nals(data).iter().any(|nal| is_h264_idr(nal)),
-        super::Codec::H265 => annex_b_nals(data).iter().any(|nal| is_h265_random_access(nal)),
+        super::Codec::H265 => annex_b_nals(data)
+            .iter()
+            .any(|nal| is_h265_random_access(nal)),
         _ => true,
     }
 }
