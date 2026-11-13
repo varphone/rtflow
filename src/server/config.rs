@@ -27,6 +27,32 @@ pub struct ServerConfig {
     #[cfg(feature = "tls")]
     pub tls: Option<TlsServerConfig>,
 }
+impl std::fmt::Debug for ServerConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("ServerConfig");
+        debug
+            .field("listen", &self.listen)
+            .field("session_timeout", &self.session_timeout)
+            .field("max_rtsp_header_bytes", &self.max_rtsp_header_bytes)
+            .field("max_rtsp_body_bytes", &self.max_rtsp_body_bytes)
+            .field("max_sessions", &self.max_sessions)
+            .field("udp_port_range", &self.udp_port_range)
+            .field("udp_recv_buffer", &self.udp_recv_buffer)
+            .field("startup_cache", &self.startup_cache)
+            .field("timeline", &self.timeline)
+            .field("consumer_queue_capacity", &self.consumer_queue_capacity)
+            .field("no_subscriber_grace", &self.no_subscriber_grace)
+            .field("shutdown_grace", &self.shutdown_grace)
+            .field("authenticator", &"<authenticator>")
+            .field("resource_limits", &self.resource_limits)
+            .field("event_sink", &"<sink>")
+            .field("security", &self.security);
+        #[cfg(feature = "tls")]
+        debug.field("tls", &self.tls.is_some());
+        debug.finish()
+    }
+}
+
 impl ServerConfig {
     pub fn new(listen: SocketAddr) -> Self {
         Self {

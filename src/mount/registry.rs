@@ -49,6 +49,24 @@ pub struct MountOptions {
     pub cancel: Option<CancellationToken>,
 }
 
+impl std::fmt::Debug for MountOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("MountOptions");
+        debug
+            .field("consumer_queue_capacity", &self.consumer_queue_capacity)
+            .field(
+                "max_queued_bytes_per_session",
+                &self.max_queued_bytes_per_session,
+            )
+            .field("event_sink", &self.event_sink.as_ref().map(|_| "<sink>"))
+            .field("timeline", &self.timeline)
+            .field("cancel", &self.cancel.is_some());
+        #[cfg(feature = "server")]
+        debug.field("startup_cache_config", &self.startup_cache_config);
+        debug.finish()
+    }
+}
+
 impl MountRegistry {
     pub fn new(max_mounts: usize) -> Self {
         Self {

@@ -35,6 +35,34 @@ pub struct ClientOptions {
     /// avoid leaking credentials to another origin).
     pub allow_cross_origin_redirect: bool,
 }
+impl std::fmt::Debug for ClientOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = formatter.debug_struct("ClientOptions");
+        debug
+            .field("transport", &self.transport)
+            .field("credentials", &self.credentials)
+            .field("request_timeout", &self.request_timeout)
+            .field("jitter", &self.jitter)
+            .field("output_queue_capacity", &self.output_queue_capacity)
+            .field("max_output_bytes", &self.max_output_bytes)
+            .field("keep_alive_interval", &self.keep_alive_interval)
+            .field("play_range", &self.play_range)
+            .field("event_sink", &self.event_sink.as_ref().map(|_| "<sink>"))
+            .field("udp_recv_buffer", &self.udp_recv_buffer)
+            .field("rtcp_mux", &self.rtcp_mux)
+            .field("require", &self.require)
+            .field("proxy_require", &self.proxy_require)
+            .field("follow_redirects", &self.follow_redirects)
+            .field(
+                "allow_cross_origin_redirect",
+                &self.allow_cross_origin_redirect,
+            );
+        #[cfg(feature = "tls")]
+        debug.field("tls", &self.tls.is_some());
+        debug.finish()
+    }
+}
+
 impl Default for ClientOptions {
     fn default() -> Self {
         Self {
