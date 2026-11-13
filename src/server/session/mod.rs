@@ -37,7 +37,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    sync::Mutex,
+    sync::{Mutex, Notify},
 };
 
 mod announce;
@@ -127,6 +127,7 @@ pub(super) async fn serve_connection(
     let mut interleaved_depacketizers: HashMap<u8, Depacketizer> = HashMap::new();
     let mut interleaved_ssrcs: HashMap<u8, u32> = HashMap::new();
     let mut vod_cursor = std::time::Duration::ZERO;
+    let vod_end = Arc::new(Notify::new());
     let mut rtp_sequences: HashMap<u8, Arc<AtomicU16>> = HashMap::new();
     loop {
         let n = tokio::select! { _ = state.cancel.cancelled() => break, result = tokio::time::timeout(state.config.session_timeout, reader.read(&mut scratch)) => result.map_err(|_| Error::Closed)?? };
@@ -218,6 +219,7 @@ pub(super) async fn serve_connection(
                     &mut rtp_sequences,
                     &mut vod_cursor,
                     &mut phase,
+                    &vod_end,
                 )
                 .await?;
             } else if req.method == Method::Record {

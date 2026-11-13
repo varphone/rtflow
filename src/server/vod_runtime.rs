@@ -12,7 +12,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{Notify, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct VodPlayback {
@@ -41,6 +41,7 @@ pub(super) fn spawn_vod_playback(
     start: Duration,
     end: Option<Duration>,
     prefetch: usize,
+    done: Arc<Notify>,
 ) -> Result<VodPlayback> {
     if prefetch == 0 {
         return Err(Error::Limit("VOD prefetch"));
@@ -86,6 +87,10 @@ pub(super) fn spawn_vod_playback(
                 Ok(result) => result?,
                 Err(error) => return Err(Error::Media(format!("VOD worker failed: {error}"))),
             }
+            // Let the per-track senders drain the last broadcast samples
+            // before the session closes; RTSP has no EOS method.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            done.notify_waiters();
             Ok(())
         },
     );

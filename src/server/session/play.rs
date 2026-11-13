@@ -35,6 +35,7 @@ pub(super) async fn handle_play(
     rtp_sequences: &mut HashMap<u8, Arc<AtomicU16>>,
     vod_cursor: &mut std::time::Duration,
     phase: &mut ConnectionPhase,
+    vod_end: &Arc<tokio::sync::Notify>,
 ) -> Result<()> {
     // Scale/Speed are optional RTSP 1.0 extensions. Only normal speed is
     // supported; answer 551 instead of silently ignoring a request the
@@ -313,6 +314,7 @@ pub(super) async fn handle_play(
                 start,
                 end,
                 state.config.consumer_queue_capacity,
+                vod_end.clone(),
             )?);
         }
     }

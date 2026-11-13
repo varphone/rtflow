@@ -93,6 +93,7 @@
 - RTCP `RtcpSession::with_interval` 接入动态 bandwidth interval；mount 单帧字节上限生效（超限计 dropped，不进入缓存/广播）；新增 PlaySession/RecordSession 别名。
 - 路线图/发布：SRTP 接收/发布与精确收包状态更新；crate 包排除依赖未发布 testkit 的 examples；CI semver 说明。
 - NACK 缓存在 SRTP 会话同样启用：重传原始受保护字节/索引，不再限制为明文 RTP。
+- VOD 自然播放结束：广播样本排空后通知连接并关闭 RTSP 会话（RTSP 无 EOS 方法）。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、
