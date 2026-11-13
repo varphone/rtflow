@@ -16,7 +16,7 @@ categories = ["network-programming", "asynchronous", "multimedia"]
 keywords = ["rtsp", "rtp", "streaming", "media", "embedded"]
 publish = ["crates-io"]
 # dev-only tooling stays out of the published tarball.
-exclude = ["support", "fuzz", "scripts", ".github", "docs/archive"]
+exclude = ["support", "fuzz", "scripts", ".github", "docs/archive", "examples"]
 
 [package.metadata.docs.rs]
 # docs.rs 默认只开 default features；这里叠加实验协议，但排除 gstreamer

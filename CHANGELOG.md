@@ -91,6 +91,7 @@
 - 生命周期：`MountRegistry::cancel_all` 在 server/gateway 关闭时取消并清空 mount；Gateway 实现 Drop 取消协议任务；mount 路径统一由 registry 校验并返回 `InvalidConfig`。
 - UDP 发送端支持 RFC 4585 NACK 重传缓存（512 包，仅明文 RTP；SRTP 仍走关键帧请求），PLI/FIR/NACK 触发本地源关键帧。
 - RTCP `RtcpSession::with_interval` 接入动态 bandwidth interval；mount 单帧字节上限生效（超限计 dropped，不进入缓存/广播）；新增 PlaySession/RecordSession 别名。
+- 路线图/发布：SRTP 接收/发布与精确收包状态更新；crate 包排除依赖未发布 testkit 的 examples；CI semver 说明。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

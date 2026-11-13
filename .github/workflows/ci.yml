@@ -132,8 +132,7 @@ jobs:
 
   semver:
     runs-on: ubuntu-latest
-    # The 0.2.0 baseline is only meaningful once published; keep this advisory
-    # until then so it never blocks unrelated PRs.
+    # Advisory until a 0.3.0 baseline is published; then make it blocking.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
