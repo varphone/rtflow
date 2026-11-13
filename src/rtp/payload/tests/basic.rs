@@ -249,3 +249,26 @@ fn jitter_reorders_deduplicates_and_wraps() {
     assert_eq!(jitter.push(packet(u16::MAX))[0].header.sequence, u16::MAX);
     assert_eq!(jitter.push(packet(0))[0].header.sequence, 0);
 }
+
+#[test]
+fn h263_rfc2190_round_trip_keeps_start_code() {
+    let data = Bytes::from_static(&[0, 0, 0x80, 0x02, 0x08, 0x04, 0x11, 0x22]);
+    let unit = AccessUnit {
+        track_id: 0,
+        codec: Codec::H263,
+        pts: std::time::Duration::ZERO,
+        dts: None,
+        rtp_timestamp: 90_000,
+        is_keyframe: true,
+        data: data.clone(),
+    };
+    let mut packetizer = Packetizer::new(Codec::H263, 34, 1, 1200).unwrap();
+    let packets = packetizer.packetize(&unit).unwrap();
+    let mut depacketizer = Depacketizer::new(Codec::H263, 0, 90_000);
+    let mut output = Vec::new();
+    for packet in packets {
+        output.extend(depacketizer.push(packet).unwrap());
+    }
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0].data, data);
+}
