@@ -32,7 +32,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 | `Require`/`Proxy-Require` | ✅ `ClientOptions::require`/`proxy_require`; 551 surfaces as `Error::RtspUnsupported` with tokens |
 | Content-* | ✅ request/response lengths; `Content-Base` |
 | 1xx/3xx/4xx/5xx | 3xx redirect (limited origin), 4xx/5xx typed `RtspStatus`, 401 retry |
-| Pipelining | ❌ one outstanding control request per session |
+| Pipelining | Optional optimization, not used: one outstanding control request per session |
 
 ## Concurrency, latency, memory
 
@@ -51,12 +51,10 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
   p50 ≈ 0.14 ms / p99 ≈ 1.1 ms; TCP interleaved p50 ≈ 0.16 ms /
   p99 ≈ 0.74 ms; both ≈ 310–320 frames/s with a 2 ms publisher cadence.
 
-## Known gaps / next increments
+## Known gaps / out of scope
 
-1. Publisher RTCP RR reception (SR is sent and covered by a wire-level
-   test; server RR/feedback is not consumed).
-2. REDIRECT during an active session reconnects only through the caller.
-3. `551 Unsupported` is typed with tokens; no automatic fallback/downgrade is attempted.
-4. Byte-bounded output queue (currently frame-count bounded; a small number of
-   very large frames can still consume significant memory).
-5. RTSP-over-HTTP tunnelling and RTSP 2.0 are explicitly out of scope.
+1. Publisher RTCP **RR/feedback reception** is not consumed (SR is sent;
+   RTCP feedback is an optional enhancement beyond the RTSP method set).
+2. RTSP-over-HTTP tunnelling and RTSP 2.0 are explicitly out of scope.
+3. Automatic downgrade after a `551 Unsupported` response is a policy choice;
+   the typed error carries the server's tokens.

@@ -73,6 +73,17 @@
 
 multicast 接收、RTSP-over-HTTP tunneling、RTSP 2.0/pipelining、interleaved >127 track 通道分配、proxy_runtime 与 client 重连去重。
 
+## M7 — RTSP 1.0 完整方法面（收尾审计）
+
+- [x] OPTIONS/DESCRIBE/ANNOUNCE/SETUP/PLAY/PAUSE/RECORD/TEARDOWN/GET_PARAMETER/SET_PARAMETER
+- [x] REDIRECT（3xx 与 server-initiated；连接与重连自动跟随，同源默认）
+- [x] Require/Proxy-Require + 551 类型化 token
+- [x] RTP-Info（seq/rtptime）、Range/Scale/Speed、Session timeout
+- [x] Basic/Digest、TLS、SRTP（接收与发布）、multicast、UDP/TCP interleaved
+- [x] 并发（32 路）、字节/帧双限流、低内存预设、loopback 延迟基线
+- [ ] RTCP 发布端 RR/反馈消费（非 RTSP 方法，列为后续增强）
+- [ ] RTSP-over-HTTP/RTSP 2.0（明确范围外）
+
 ## 每阶段收尾
 
 1. 勾选本文件对应项并记录偏差；
