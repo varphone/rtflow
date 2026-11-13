@@ -11,6 +11,7 @@
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --no-fail-fast
+cargo test --features experimental-protocols   # RTMP/SRT/WebRTC/DASH 集成测试
 cargo check --no-default-features --lib   # dev harness enables srtp/multicast (see below)
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 python3 scripts/check-layering.py --baseline scripts/layering-baseline.json
