@@ -8,6 +8,10 @@ struct ReceiverSpec {
     rtcp_mux: bool,
     #[cfg(feature = "srtp")]
     srtp: Option<crate::srtp::SrtpContext>,
+    #[cfg(feature = "srtp")]
+    srtcp: Option<crate::srtp::SrtcpContext>,
+    #[cfg(feature = "srtp")]
+    srtcp_rr: Option<crate::srtp::SrtcpContext>,
 }
 
 pub(super) async fn connect_udp(
@@ -215,19 +219,25 @@ pub(super) async fn connect_udp(
             |rtcp| std::net::SocketAddr::new(rtcp.address.unwrap_or(peer_ip), rtcp.port),
         );
         #[cfg(feature = "srtp")]
-        let srtp = match &track.crypto {
-            Some(crypto) => match crate::srtp::from_sdp_crypto(crypto) {
-                Ok((srtp, _)) => Some(srtp),
-                Err(error) => {
-                    return Err(Box::new(SetupFailure {
-                        error,
-                        stream,
-                        setup_base,
-                        description,
-                    }));
+        let (srtp, srtcp, srtcp_rr) = match &track.crypto {
+            Some(crypto) => {
+                let first = crate::srtp::from_sdp_crypto(crypto);
+                let second = crate::srtp::from_sdp_crypto(crypto);
+                match (first, second) {
+                    (Ok((srtp, srtcp)), Ok((_, srtcp_rr))) => {
+                        (Some(srtp), Some(srtcp), Some(srtcp_rr))
+                    }
+                    (Err(error), _) | (_, Err(error)) => {
+                        return Err(Box::new(SetupFailure {
+                            error,
+                            stream,
+                            setup_base,
+                            description,
+                        }));
+                    }
                 }
-            },
-            None => None,
+            }
+            None => (None, None, None),
         };
         receivers.push(ReceiverSpec {
             pair,
@@ -237,6 +247,10 @@ pub(super) async fn connect_udp(
             rtcp_mux: negotiated_mux,
             #[cfg(feature = "srtp")]
             srtp,
+            #[cfg(feature = "srtp")]
+            srtcp,
+            #[cfg(feature = "srtp")]
+            srtcp_rr,
         });
     }
     let Some(session_id) = session_id else {
@@ -297,13 +311,17 @@ pub(super) async fn connect_udp(
             rtcp_mux,
             #[cfg(feature = "srtp")]
             srtp,
+            #[cfg(feature = "srtp")]
+            srtcp,
+            #[cfg(feature = "srtp")]
+            srtcp_rr,
         } = spec;
         #[cfg(feature = "srtp")]
         let mut srtp = srtp;
         #[cfg(feature = "srtp")]
-        let secure = srtp.is_some();
-        #[cfg(not(feature = "srtp"))]
-        let secure = false;
+        let mut srtcp = srtcp;
+        #[cfg(feature = "srtp")]
+        let mut srtcp_rr = srtcp_rr;
         let tx = tx.clone();
         let jitter_config = options.jitter.clone();
         let rtcp_pair = pair.clone();
@@ -350,9 +368,17 @@ pub(super) async fn connect_udp(
                         }
                         // rtcp-mux: RTCP shares the RTP socket; classify by
                         // payload type (192..=223) before RTP parsing.
-                        if !secure && mux && size >= 2 && (192..=223).contains(&buffer[1]) {
+                        if mux && size >= 2 && (192..=223).contains(&buffer[1]) {
                             let payload = buffer.split_to(size).freeze();
                             buffer.resize(65_536, 0);
+                            #[cfg(feature = "srtp")]
+                            let payload = match srtcp.as_mut() {
+                                Some(context) => match context.unprotect(&payload) {
+                                    Ok(payload) => payload,
+                                    Err(_) => continue,
+                                },
+                                None => payload,
+                            };
                             if let Ok(packets) = RtcpPacket::parse(payload)
                                 && let Ok(Some(report)) = quality_report(
                                     &rtp_quality,
@@ -364,6 +390,14 @@ pub(super) async fn connect_udp(
                                 .await
                                 && let Ok(wire) = report.try_encode()
                             {
+                                #[cfg(feature = "srtp")]
+                                let wire = match srtcp.as_mut() {
+                                    Some(context) => match context.protect(&wire) {
+                                        Ok(wire) => wire,
+                                        Err(_) => continue,
+                                    },
+                                    None => wire,
+                                };
                                 let _ = pair.rtp.send_to(&wire, mux_rtcp_target).await;
                             }
                             continue;
@@ -445,6 +479,14 @@ pub(super) async fn connect_udp(
                         .await
                         && let Ok(report) = report.try_encode()
                     {
+                        #[cfg(feature = "srtp")]
+                        let report = match srtcp_rr.as_mut() {
+                            Some(context) => match context.protect(&report) {
+                                Ok(report) => report,
+                                Err(_) => continue,
+                            },
+                            None => report,
+                        };
                         let _ = rtcp_pair.rtcp.send_to(&report, rtcp_target).await;
                     }
                 }

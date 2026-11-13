@@ -228,6 +228,13 @@ pub(super) async fn connect_interleaved(
         let mut framer = ConnectionFramer::new(16 * 1024, 256 * 1024, 65_536);
         let mut scratch = [0u8; 4096];
         let mut dropped = 0u64;
+        #[cfg(feature = "srtp")]
+        let rr_enabled = !interleaved_crypto.is_empty();
+        #[cfg(not(feature = "srtp"))]
+        let rr_enabled = false;
+        let mut rr_tick = tokio::time::interval(std::time::Duration::from_secs(5));
+        rr_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        rr_tick.tick().await;
         loop {
             // Event-driven jitter release (audit RT-17): arm a timer for the
             // earliest buffered deadline instead of polling every 1-10ms.
@@ -237,6 +244,42 @@ pub(super) async fn connect_interleaved(
                 .min();
             let read = tokio::select! {
                 _ = reader_cancel.cancelled() => return,
+                _ = rr_tick.tick(), if rr_enabled => {
+                    // SRTCP receiver reports: no SR-driven report blocks yet,
+                    // but keep the peer's RTCP state alive (and prove the
+                    // SRTCP path) while media is flowing.
+                    #[cfg(feature = "srtp")]
+                    {
+                        for (rtcp_channel, rtp_channel) in &rtcp_channels {
+                            let Some((_, _, _, _, ssrc)) = tracks.get(rtp_channel) else {
+                                continue;
+                            };
+                            let Some((_, srtcp)) = interleaved_crypto.get_mut(rtp_channel) else {
+                                continue;
+                            };
+                            let Ok(report) = crate::rtcp::CompoundPacket::new(vec![
+                                RtcpPacket::ReceiverReport { ssrc: *ssrc },
+                            ])
+                            .and_then(|compound| compound.try_encode()) else {
+                                continue;
+                            };
+                            let Ok(payload) = srtcp.protect(&report) else {
+                                continue;
+                            };
+                            let Ok(wire) = (InterleavedFrame {
+                                channel: *rtcp_channel,
+                                payload,
+                            })
+                            .try_encode() else {
+                                continue;
+                            };
+                            if rtcp_writer.lock().await.write_all(&wire).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    continue;
+                }
                 _ = wait_for_deadline(deadline) => {
                     for (jitter, depacketizer, ..) in tracks.values_mut() {
                         for result in drain_jitter(jitter, depacketizer) {

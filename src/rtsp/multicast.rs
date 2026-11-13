@@ -53,7 +53,15 @@ impl MulticastConfig {
     /// and joined to the multicast group on the specified or default interface.
     pub async fn bind(&self) -> Result<UdpSocket> {
         let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.port);
-        let socket = UdpSocket::bind(bind_addr).await?;
+        let domain = socket2::Domain::IPV4;
+        let raw = socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))
+            .map_err(Error::Io)?;
+        // Multiple receivers on one host must be able to join the same
+        // group/port (standard multicast deployment).
+        raw.set_reuse_address(true).map_err(Error::Io)?;
+        raw.set_nonblocking(true).map_err(Error::Io)?;
+        raw.bind(&bind_addr.into()).map_err(Error::Io)?;
+        let socket = UdpSocket::from_std(raw.into()).map_err(Error::Io)?;
 
         if let IpAddr::V4(group_v4) = self.group {
             let interface_v4 = match self.interface {

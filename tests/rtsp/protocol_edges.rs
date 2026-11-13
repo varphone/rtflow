@@ -271,9 +271,15 @@ async fn multicast_client_receives_group_media() {
         .unwrap();
     let publisher = mount.publisher().unwrap();
     let url = format!("rtsp://{}/mc", server.local_addr());
-    let mut client = RtspClient::connect_str(&url, ClientOptions::default())
-        .await
-        .expect("multicast connect");
+    let mut client = RtspClient::connect_str(
+        &url,
+        ClientOptions::builder()
+            .transport(rtflow::transport::UpstreamTransport::Udp)
+            .build()
+            .unwrap(),
+    )
+    .await
+    .expect("multicast connect");
     publisher
         .try_push(rtflow_testkit::unit(0, Codec::H264, 1))
         .unwrap();
@@ -424,9 +430,15 @@ async fn srtp_multicast_client_decrypts_group_media() {
         .unwrap();
     let publisher = mount.publisher().unwrap();
     let url = format!("rtsp://{}/secure-mc", server.local_addr());
-    let mut client = RtspClient::connect_str(&url, ClientOptions::default())
-        .await
-        .expect("srtp multicast connect");
+    let mut client = RtspClient::connect_str(
+        &url,
+        ClientOptions::builder()
+            .transport(rtflow::transport::UpstreamTransport::Udp)
+            .build()
+            .unwrap(),
+    )
+    .await
+    .expect("srtp multicast connect");
     let expected = rtflow_testkit::unit(0, Codec::H264, 1);
     publisher.try_push(expected.clone()).unwrap();
     let received = tokio::time::timeout(Duration::from_secs(2), client.next())
@@ -435,6 +447,61 @@ async fn srtp_multicast_client_decrypts_group_media() {
         .expect("srtp multicast ended")
         .expect("srtp multicast media error");
     assert_eq!(received.data, expected.data);
+    client.teardown().await.unwrap();
+    server.shutdown().await.unwrap();
+}
+
+#[cfg(feature = "multicast")]
+#[tokio::test]
+async fn multicast_client_sends_rtcp_reports() {
+    use rtflow::{
+        client::{ClientOptions, RtspClient},
+        rtcp::Packet as RtcpPacket,
+        rtsp::{multicast::MulticastConfig, sdp::SdpConnection},
+    };
+
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let mut media = description("multicast-rtcp", &[Codec::H264]);
+    media.connection = Some(SdpConnection {
+        addr_type: "IP4".into(),
+        address: "239.255.0.11".parse().unwrap(),
+        ttl: Some(1),
+        port: Some(15024),
+    });
+    server
+        .register_mount(
+            Arc::from("/mc-rtcp"),
+            MountConfig::Local { description: media },
+        )
+        .await
+        .unwrap();
+    let monitor = MulticastConfig::new("239.255.0.11".parse().unwrap(), 15025)
+        .bind()
+        .await
+        .expect("join RTCP group");
+    let url = format!("rtsp://{}/mc-rtcp", server.local_addr());
+    let client = RtspClient::connect_str(
+        &url,
+        ClientOptions::builder()
+            .transport(rtflow::transport::UpstreamTransport::Udp)
+            .build()
+            .unwrap(),
+    )
+    .await
+    .expect("multicast connect");
+    let mut buffer = [0u8; 2048];
+    let (size, _) = tokio::time::timeout(Duration::from_secs(2), monitor.recv_from(&mut buffer))
+        .await
+        .expect("multicast RTCP timeout")
+        .expect("multicast RTCP recv");
+    let packets = RtcpPacket::parse(bytes::Bytes::copy_from_slice(&buffer[..size]))
+        .expect("multicast RR parse");
+    assert!(packets.iter().any(|packet| matches!(
+        packet,
+        RtcpPacket::ReceiverReport { .. } | RtcpPacket::ReceiverReportWithReports { .. }
+    )));
     client.teardown().await.unwrap();
     server.shutdown().await.unwrap();
 }

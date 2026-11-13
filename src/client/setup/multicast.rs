@@ -50,7 +50,7 @@ pub(super) async fn connect_multicast(
         } else {
             "RTP/AVP"
         };
-        let mut extra = format!("Transport: {profile};multicast;\r\n");
+        let mut extra = format!("Transport: {profile};multicast\r\n");
         if let Some(session) = &session_id {
             extra.push_str(&format!("Session: {session}\r\n"));
         }
@@ -191,11 +191,15 @@ pub(super) async fn connect_multicast(
     let mut srtp_contexts: std::collections::HashMap<u8, crate::srtp::SrtpContext> =
         std::collections::HashMap::new();
     #[cfg(feature = "srtp")]
+    let mut srtcp_contexts: std::collections::HashMap<u8, crate::srtp::SrtcpContext> =
+        std::collections::HashMap::new();
+    #[cfg(feature = "srtp")]
     for track in &description.tracks {
         if let Some(attribute) = &track.crypto {
             match crate::srtp::from_sdp_crypto(attribute) {
-                Ok((srtp, _)) => {
+                Ok((srtp, srtcp)) => {
                     srtp_contexts.insert(track.payload_type, srtp);
+                    srtcp_contexts.insert(track.payload_type, srtcp);
                 }
                 Err(error) => {
                     return Err(Box::new(SetupFailure {
@@ -213,11 +217,17 @@ pub(super) async fn connect_multicast(
     let quality = Arc::new(Mutex::new(HashMap::new()));
     let mut tasks = Vec::new();
     let track_list: Vec<_> = description.tracks.to_vec();
+    let rr_meta: Vec<(u8, u32)> = track_list
+        .iter()
+        .map(|track| (track.id, client_ssrc(track.id)))
+        .collect();
     let media_for_control = tx.clone();
     let receiver_cancel = cancel.clone();
     let receiver_quality = quality.clone();
     tasks.push(tokio::spawn(async move {
         let mut buffer = bytes::BytesMut::zeroed(65_536);
+        let mut rr_tick = tokio::time::interval(std::time::Duration::from_secs(5));
+        rr_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut active: HashMap<u8, (JitterBuffer, Depacketizer, u8, u32, u32)> = HashMap::new();
         for track in track_list {
             active.insert(
@@ -234,6 +244,29 @@ pub(super) async fn connect_multicast(
         loop {
             let received = tokio::select! {
                 _ = receiver_cancel.cancelled() => return,
+                _ = rr_tick.tick() => {
+                    // Multicast receivers report over the RTCP group port;
+                    // there is no unicast back-channel.
+                    for (track_id, ssrc) in &rr_meta {
+                        let Ok(report) = crate::rtcp::CompoundPacket::new(vec![
+                            RtcpPacket::ReceiverReport { ssrc: *ssrc },
+                        ])
+                        .and_then(|compound| compound.try_encode()) else {
+                            continue;
+                        };
+                        #[cfg(feature = "srtp")]
+                        let report = match srtcp_contexts.get_mut(track_id) {
+                            Some(context) => match context.protect(&report) {
+                                Ok(report) => report,
+                                Err(_) => continue,
+                            },
+                            None => report,
+                        };
+                        let target = std::net::SocketAddr::new(group, port.saturating_add(1));
+                        let _ = pair.rtcp.send_to(&report, target).await;
+                    }
+                    continue;
+                }
                 result = pair.rtp.recv_from(&mut buffer) => result,
             };
             let Ok((size, _source)) = received else {
