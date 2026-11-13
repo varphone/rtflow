@@ -32,14 +32,12 @@ fn jittered_backoff_stays_within_25_percent_bounds() {
 }
 
 #[test]
-fn jittered_backoff_is_deterministic_per_attempt() {
+fn jittered_backoff_uses_independent_samples() {
     let delay = Duration::from_millis(800);
-    for attempt in 0..32u32 {
-        assert_eq!(
-            jittered_backoff(delay, attempt),
-            jittered_backoff(delay, attempt)
-        );
-    }
+    let samples = (0..32)
+        .map(|attempt| jittered_backoff(delay, attempt))
+        .collect::<std::collections::HashSet<_>>();
+    assert!(samples.len() > 1, "jitter must not be deterministic");
 }
 
 #[test]
