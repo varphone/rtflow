@@ -80,6 +80,10 @@ pub(super) async fn handle_incoming_interleaved(
         }
         if packet.header.payload_type != track.payload_type
             && !(packet.header.payload_type >= 96 && track.payload_type >= 96)
+            && !matches!(
+                track.codec,
+                crate::media::Codec::H263 | crate::media::Codec::Jpeg
+            )
         {
             tracing::debug!(
                 channel = frame.channel,

@@ -1,4 +1,4 @@
-//! GStreamer playback of AV1-era/legacy RTSP codecs from an rtflow server.
+//! GStreamer playback of legacy RTSP codecs from an rtflow server.
 
 use rtflow::{Codec, MountConfig, RtspServer, ServerConfig};
 use rtflow_testkit::{description, wait_until};
@@ -43,6 +43,7 @@ async fn run(codec: Codec) {
                 track.height = Some(144);
             }
             Codec::H263 => {
+                track.payload_type = 34;
                 track.width = Some(176);
                 track.height = Some(144);
             }
@@ -77,7 +78,7 @@ async fn run(codec: Codec) {
         .args(ffmpeg_encoder(codec))
         .args(["-rtsp_transport", "tcp", "-f", "rtsp", &location])
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
         .expect("spawn ffmpeg publisher");
@@ -114,15 +115,9 @@ async fn run(codec: Codec) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn gstreamer_plays_mpeg4_and_jpeg() {
-    for codec in [Codec::Mpeg4, Codec::Jpeg] {
+async fn gstreamer_plays_legacy_codecs() {
+    for codec in [Codec::Mpeg4, Codec::Jpeg, Codec::H263] {
         eprintln!("=== {codec:?} ===");
         run(codec).await;
     }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "H.263 RTP header layout (RFC 4629) is not yet interoperable with GStreamer rtph263depay"]
-async fn gstreamer_plays_h263() {
-    run(Codec::H263).await;
 }

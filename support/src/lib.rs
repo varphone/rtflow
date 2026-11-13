@@ -63,7 +63,7 @@ pub fn track(id: u8, codec: Codec) -> TrackDescription {
         Codec::G726_40 => (MediaKind::Audio, 8_000, Some(1), 104, None),
         Codec::Av1 => (MediaKind::Video, 90_000, None, 105, None),
         Codec::Jpeg => (MediaKind::Video, 90_000, None, 106, None),
-        Codec::H263 => (MediaKind::Video, 90_000, None, 107, None),
+        Codec::H263 => (MediaKind::Video, 90_000, None, 34, None),
         Codec::Mpeg4 => (MediaKind::Video, 90_000, None, 108, None),
         _ => (MediaKind::Audio, 8_000, Some(1), 120, None),
     };

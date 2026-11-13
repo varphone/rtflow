@@ -237,7 +237,25 @@ impl Depacketizer {
                 if payload.len() < 2 {
                     return Err(Error::Media("short H263 payload header".into()));
                 }
-                (payload.slice(2..), true)
+                let header = u16::from_be_bytes([payload[0], payload[1]]);
+                let startcode = header & 0x0400 != 0;
+                let mut offset = 2usize;
+                if header & 0x0200 != 0 {
+                    offset += 1; // VRC byte
+                }
+                offset += ((header & 0x01f8) >> 3) as usize;
+                if offset > payload.len() {
+                    return Err(Error::Media("short H263 payload header".into()));
+                }
+                let data = payload.slice(offset..);
+                if startcode {
+                    let mut value = bytes::BytesMut::with_capacity(data.len() + 2);
+                    value.extend_from_slice(&[0, 0]);
+                    value.extend_from_slice(&data);
+                    (value.freeze(), true)
+                } else {
+                    (data, true)
+                }
             }
             Codec::Mpeg4 => {
                 let keyframe =

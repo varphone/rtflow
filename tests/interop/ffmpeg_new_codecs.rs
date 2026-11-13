@@ -50,6 +50,15 @@ async fn run_codec(codec: Codec) {
     let mut media = description("ffmpeg-new-codec", &[codec]);
     for track in &mut media.tracks {
         track.control = Arc::from(format!("streamid={}", track.id));
+        if codec == Codec::Jpeg {
+            track.payload_type = 96;
+            track.width = Some(176);
+            track.height = Some(144);
+        }
+        if codec == Codec::H263 {
+            track.width = Some(176);
+            track.height = Some(144);
+        }
     }
     let mount = server
         .register_mount(
@@ -141,6 +150,8 @@ async fn run_codec(codec: Codec) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn ffmpeg_round_trips_mpeg4() {
-    run_codec(Codec::Mpeg4).await;
+async fn ffmpeg_round_trips_legacy_codecs() {
+    for codec in [Codec::Mpeg4, Codec::H263, Codec::Jpeg] {
+        run_codec(codec).await;
+    }
 }

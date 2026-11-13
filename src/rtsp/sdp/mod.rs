@@ -420,7 +420,7 @@ pub fn encode_with(
             Codec::G726_40 => "G726-40",
             Codec::Av1 => "AV1",
             Codec::Jpeg => "JPEG",
-            Codec::H263 => "H263-1998",
+            Codec::H263 => "H263",
             Codec::Mpeg4 => "MP4V-ES",
         };
         #[cfg(feature = "multicast")]

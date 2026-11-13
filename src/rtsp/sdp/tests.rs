@@ -137,7 +137,7 @@ fn legacy_and_av1_video_names_round_trip() {
     for (codec, name) in [
         (Codec::Av1, "AV1"),
         (Codec::Jpeg, "JPEG"),
-        (Codec::H263, "H263-1998"),
+        (Codec::H263, "H263"),
         (Codec::Mpeg4, "MP4V-ES"),
     ] {
         let track = TrackDescription {

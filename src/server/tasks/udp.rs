@@ -39,7 +39,16 @@ pub(crate) fn spawn_udp_sender_from(
             target: rtcp_target,
             ssrc,
         };
-        let mut packetizer = match Packetizer::new(track.codec, track.payload_type, ssrc, 1200) {
+        let mut packetizer = match Packetizer::new(
+            track.codec,
+            track.payload_type,
+            ssrc,
+            if track.codec == crate::media::Codec::Jpeg {
+                60_000
+            } else {
+                1200
+            },
+        ) {
             Ok(value) => value.with_dimensions(
                 u16::try_from(track.width.unwrap_or(0)).unwrap_or(0),
                 u16::try_from(track.height.unwrap_or(0)).unwrap_or(0),
@@ -265,6 +274,10 @@ pub(crate) fn spawn_udp_receiver(
             };
             if packet.header.payload_type != track.payload_type
                 && !(packet.header.payload_type >= 96 && track.payload_type >= 96)
+                && !matches!(
+                    track.codec,
+                    crate::media::Codec::H263 | crate::media::Codec::Jpeg
+                )
             {
                 mount.stats.add_dropped(1);
                 continue;

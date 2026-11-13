@@ -329,9 +329,9 @@ impl Packetizer {
                 ((offset >> 8) & 0xff) as u8,
                 (offset & 0xff) as u8,
                 1,
-                128,
-                self.width.min(255) as u8,
-                self.height.min(255) as u8,
+                80,
+                self.width.div_ceil(8).min(255) as u8,
+                self.height.div_ceil(8).min(255) as u8,
             ]);
             buffer.extend_from_slice(data);
             let length = buffer.len();
@@ -346,20 +346,27 @@ impl Packetizer {
             return Err(Error::Media("empty H263 access unit".into()));
         }
         let max = self.mtu.saturating_sub(12);
-        if max <= 2 {
+        if max <= 4 {
             return Err(Error::Media("MTU too small for H263".into()));
         }
-        let chunk = max - 2;
+        // RFC 2190 mode A: 4-byte header, picture start code kept in-band.
+        // Both FFmpeg (H263/PT34) and GStreamer rtph263depay implement this
+        // format; H263-1998 (RFC 4629) is only used on the input side.
+        let chunk = max - 4;
         let total = f.data.len().div_ceil(chunk);
-        let mut buffer = BytesMut::with_capacity(f.data.len() + 2 * total);
         let mut out = Vec::with_capacity(total);
         for (index, data) in f.data.chunks(chunk).enumerate() {
-            // P=1 on the first packet of the picture, V=0, PLEN=0.
-            buffer.extend_from_slice(&[if index == 0 { 0x80 } else { 0x00 }, 0x00]);
-            buffer.extend_from_slice(data);
-            let length = buffer.len();
-            let payload = buffer.split_to(length).freeze();
-            out.push(self.packet(payload, f.rtp_timestamp, index + 1 == total));
+            let start = index == 0;
+            let header = [
+                if start { 0x40 } else { 0x00 },
+                if start { 0x10 } else { 0x00 },
+                0,
+                0,
+            ];
+            let mut payload = BytesMut::with_capacity(4 + data.len());
+            payload.extend_from_slice(&header);
+            payload.extend_from_slice(data);
+            out.push(self.packet(payload.freeze(), f.rtp_timestamp, index + 1 == total));
         }
         Ok(out)
     }

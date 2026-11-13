@@ -30,7 +30,16 @@ pub(crate) fn spawn_interleaved_sender_from(
             channel: rtcp_channel,
             ssrc,
         };
-        let mut packetizer = match Packetizer::new(track.codec, track.payload_type, ssrc, 1200) {
+        let mut packetizer = match Packetizer::new(
+            track.codec,
+            track.payload_type,
+            ssrc,
+            if track.codec == crate::media::Codec::Jpeg {
+                60_000
+            } else {
+                1200
+            },
+        ) {
             Ok(value) => value.with_dimensions(
                 u16::try_from(track.width.unwrap_or(0)).unwrap_or(0),
                 u16::try_from(track.height.unwrap_or(0)).unwrap_or(0),
