@@ -207,6 +207,29 @@ impl Gateway {
         if let Some(http) = self.http.take() {
             http.shutdown();
         }
+        self.mounts.cancel_all();
         Ok(())
+    }
+}
+
+impl Drop for Gateway {
+    fn drop(&mut self) {
+        #[cfg(feature = "rtmp")]
+        if let Some(cancel) = self.rtmp_cancel.take() {
+            cancel.cancel();
+        }
+        #[cfg(feature = "srt")]
+        if let Some(cancel) = self.srt_cancel.take() {
+            cancel.cancel();
+        }
+        #[cfg(feature = "rtmp")]
+        if let Some(task) = self.rtmp_task.take() {
+            task.abort();
+        }
+        #[cfg(feature = "srt")]
+        if let Some(task) = self.srt_task.take() {
+            task.abort();
+        }
+        self.mounts.cancel_all();
     }
 }

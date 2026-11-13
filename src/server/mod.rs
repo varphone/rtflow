@@ -339,7 +339,9 @@ impl RtspServer {
     ) -> Result<MountHandle> {
         let path = path.into();
         if !path.starts_with('/') {
-            return Err(Error::Rtsp("mount path must start with '/'".into()));
+            return Err(Error::InvalidConfig(
+                "mount path must start with '/'".into(),
+            ));
         }
         if self.state.mounts.len() >= self.state.config.resource_limits.max_mounts {
             return Err(Error::Limit("mounts"));
@@ -462,6 +464,7 @@ impl RtspServer {
             let report = task
                 .await
                 .map_err(|error| Error::Rtsp(format!("server supervisor failed: {error}")))?;
+            self.state.mounts.cancel_all();
             emit(
                 &self.state.config.event_sink,
                 FrameworkEvent::Server(ServerEvent::Stopped),

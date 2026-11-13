@@ -127,6 +127,21 @@ impl MountRegistry {
         self.len() == 0
     }
 
+    /// Cancel every mount's data plane and drop the registry entries.
+    /// Protocol servers call this on shutdown; the mount handles held by
+    /// callers become detached but their broadcast receivers close when
+    /// those handles are dropped.
+    pub fn cancel_all(&self) {
+        let mut mounts = self
+            .mounts
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for mount in mounts.values() {
+            mount.cancel.cancel();
+        }
+        mounts.clear();
+    }
+
     /// List all registered mount paths.
     pub fn paths(&self) -> Vec<Arc<str>> {
         self.mounts
@@ -180,6 +195,11 @@ impl MountRegistry {
         config: MountConfig,
         options: MountOptions,
     ) -> Result<MountHandle> {
+        if !path.starts_with('/') {
+            return Err(Error::InvalidConfig(
+                "mount path must start with '/'".into(),
+            ));
+        }
         let description = description_for(&config)?;
         let queue_capacity = options.consumer_queue_capacity.unwrap_or(256);
         let (tx, _) = broadcast::channel(queue_capacity);

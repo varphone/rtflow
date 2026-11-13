@@ -36,7 +36,7 @@ async fn invalid_capacities_and_mount_operations_fail_explicitly() {
                     },
                 )
                 .await,
-            Err(Error::Rtsp(_))
+            Err(Error::InvalidConfig(_))
         ),
         "invalid mount paths must be rejected"
     );

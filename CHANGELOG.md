@@ -88,6 +88,7 @@
 - API 可诊断性：`ClientOptions`/`ServerConfig`/`MountOptions` 增加脱敏 Debug；`MediaDescription::new`；header 大小写不敏感访问。
 - Proxy 订阅者 watcher：HLS/HTTP-FLV 等非 RTSP 订阅也能触发按需上游；删除未使用的 `TrackKey`；新增 SRTP fuzz target 与 CI protocol clippy。
 - 性能：客户端 RTCP 质量统计改用 std Mutex（移除每包 await），jitter earliest deadline 缓存避免每包/每定时 O(n) 扫描。
+- 生命周期：`MountRegistry::cancel_all` 在 server/gateway 关闭时取消并清空 mount；Gateway 实现 Drop 取消协议任务；mount 路径统一由 registry 校验并返回 `InvalidConfig`。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、
