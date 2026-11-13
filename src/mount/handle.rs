@@ -13,6 +13,8 @@ pub(crate) struct Mount {
     /// Expected codec per track id, for O(1) push validation without
     /// cloning the whole MediaDescription on every frame.
     pub codec_by_track: [Option<Codec>; 256],
+    /// Read by feature-gated adapters (metrics exporter, RTMP/WebRTC).
+    #[allow(dead_code)]
     pub event_sink: Arc<dyn EventSink>,
     pub cancel: CancellationToken,
     #[cfg(feature = "server")]
@@ -31,6 +33,8 @@ pub(crate) struct Mount {
     /// Latest RTMP AVC/HEVC/AAC sequence headers published to this mount,
     /// keyed by track_id — so RTMP play sessions can initialize decoders
     /// before the first GOP arrives.
+    /// Read by the RTMP play path (feature-gated).
+    #[allow(dead_code)]
     pub rtmp_seq_headers: Mutex<HashMap<u8, Bytes>>,
 }
 
@@ -71,6 +75,7 @@ pub const STARTUP_WINDOW: std::time::Duration = std::time::Duration::from_millis
 impl Mount {
     /// Cancellation token for this mount's data plane (cancelled on
     /// unregister or server shutdown).
+    #[allow(dead_code)] // used by the RTSP server session layer
     pub(crate) fn cancel_token(&self) -> CancellationToken {
         self.cancel.clone()
     }
@@ -190,6 +195,7 @@ impl Mount {
         }
     }
 
+    #[allow(dead_code)] // used by RTSP sessions when the server feature is on
     pub fn subscribe_with_startup(
         &self,
         track_id: u8,
@@ -335,6 +341,7 @@ impl MountHandle {
                     active: true,
                 })
             }
+            #[allow(unreachable_patterns)] // only reachable with proxy/VOD mounts
             _ => Err(Error::Conflict("mount does not accept publishers".into())),
         }
     }
@@ -344,6 +351,7 @@ impl MountHandle {
     }
 
     /// Subscribe to live frames together with a cached decodable stream start.
+    #[allow(dead_code)] // used by RTSP sessions and HLS/HTTP-FLV adapters
     pub fn subscribe_with_startup(&self) -> (broadcast::Receiver<AccessUnit>, Vec<AccessUnit>) {
         self.inner.subscribe_with_all_startup()
     }

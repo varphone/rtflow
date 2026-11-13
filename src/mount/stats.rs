@@ -67,6 +67,7 @@ impl StreamCounters {
             global.frames_dropped.fetch_add(value, Ordering::Relaxed);
         }
     }
+    #[allow(dead_code)] // called by feature-gated server/protocol code
     pub fn add_rtp(&self, packets: u64, octets: u64) {
         self.rtp_packets.fetch_add(packets, Ordering::Relaxed);
         self.rtp_octets.fetch_add(octets, Ordering::Relaxed);
@@ -78,9 +79,11 @@ impl StreamCounters {
             global.rtp_octets_sent.fetch_add(octets, Ordering::Relaxed);
         }
     }
+    #[allow(dead_code)] // called by feature-gated server/protocol code
     pub fn add_sender_reports(&self, value: u64) {
         self.rtcp_sender_reports.fetch_add(value, Ordering::Relaxed);
     }
+    #[allow(dead_code)] // called by feature-gated server/protocol code
     pub fn add_receiver_reports(&self, value: u64) {
         self.rtcp_receiver_reports
             .fetch_add(value, Ordering::Relaxed);

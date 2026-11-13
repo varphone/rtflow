@@ -112,6 +112,7 @@ impl MountRegistry {
     }
 
     /// Find the mount whose path is the longest prefix of `requested`.
+    #[allow(dead_code)] // used by the RTSP server
     pub(crate) fn find_longest_prefix(&self, requested: &str) -> Option<(Arc<str>, Arc<Mount>)> {
         let mounts = self
             .mounts
@@ -185,6 +186,7 @@ impl MountRegistry {
             config,
             frames: tx,
             stats: {
+                #[cfg_attr(not(feature = "metrics"), allow(unused_mut))]
                 let mut counters = StreamCounters::default();
                 #[cfg(feature = "metrics")]
                 if let Some(global) = &self.global {

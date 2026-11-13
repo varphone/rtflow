@@ -179,6 +179,7 @@ impl Gateway {
     }
 
     /// Shutdown all running protocol servers.
+    #[cfg_attr(not(any(feature = "rtmp", feature = "srt")), allow(unused_mut))]
     pub async fn shutdown(mut self) -> Result<()> {
         #[cfg(feature = "rtmp")]
         if let Some(cancel) = self.rtmp_cancel.take() {
