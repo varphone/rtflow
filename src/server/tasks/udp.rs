@@ -91,7 +91,10 @@ pub(crate) fn spawn_udp_sender_from(
         let mut last_rtp_timestamp = 0u32;
         let mut ntp_clock: Option<RtpNtpClock> = None;
         let mut nack_cache = RtpCache::new(512);
-        let retransmit = !crypto.is_secure();
+        // Cache the protected bytes too: retransmitting an SRTP packet with
+        // its original index is safe (the original was lost) and avoids
+        // reusing the sender's keystream state.
+        let retransmit = true;
         let mut rtcp_buffer = BytesMut::zeroed(2048);
         // Last sender report's NTP timestamp, for periodic receiver reports
         // (LSR reference).

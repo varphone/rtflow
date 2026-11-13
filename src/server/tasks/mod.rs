@@ -158,17 +158,6 @@ impl MediaCrypto {
         Ok(wire)
     }
 
-    pub(super) fn is_secure(&self) -> bool {
-        #[cfg(feature = "srtp")]
-        {
-            self.srtp.is_some()
-        }
-        #[cfg(not(feature = "srtp"))]
-        {
-            false
-        }
-    }
-
     pub(super) fn unprotect_rtcp(&mut self, wire: Bytes) -> crate::Result<Bytes> {
         #[cfg(feature = "srtp")]
         if let Some(srtcp) = self.srtcp.as_mut() {
