@@ -60,21 +60,50 @@ async fn publishes_h264_into_publisher_mount() {
 }
 
 #[tokio::test]
-async fn publish_rejects_interleaved_transport_for_now() {
-    let media = description("publish", &[Codec::H264]);
-    let result = {
-        // No server is needed: validation happens before dialing.
-        RtspClient::publish_str(
-            "rtsp://127.0.0.1:1/ingest",
-            media,
-            ClientOptions::builder()
-                .transport(UpstreamTransport::TcpInterleaved)
-                .build()
-                .unwrap(),
+async fn publishes_h264_over_interleaved_transport() {
+    let media = description("publish-tcp", &[Codec::H264]);
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let mount = server
+        .register_mount(
+            Arc::from("/ingest-tcp"),
+            MountConfig::Publisher {
+                description: media.clone(),
+                allow_replace_after_disconnect: true,
+            },
         )
         .await
-    };
-    assert!(result.is_err(), "interleaved publishing must be rejected");
+        .unwrap();
+    let mut subscriber = mount.subscribe();
+    let url = format!("rtsp://{}/ingest-tcp", server.local_addr());
+    let mut publisher = RtspClient::publish_str(
+        &url,
+        media,
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .build()
+            .unwrap(),
+    )
+    .await
+    .expect("interleaved publish connect");
+    for sequence in 0..5u32 {
+        publisher
+            .push(rtflow_testkit::unit(0, Codec::H264, sequence))
+            .await
+            .unwrap();
+    }
+    wait_until(Duration::from_secs(3), || {
+        mount.snapshot().stats.accepted_frames > 0
+    })
+    .await;
+    let frame = tokio::time::timeout(Duration::from_secs(3), subscriber.recv())
+        .await
+        .expect("subscriber timeout")
+        .expect("subscriber closed");
+    assert_eq!(frame.codec, Codec::H264);
+    publisher.teardown().await.unwrap();
+    server.shutdown().await.unwrap();
 }
 
 #[tokio::test]

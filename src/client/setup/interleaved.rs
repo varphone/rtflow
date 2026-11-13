@@ -223,7 +223,10 @@ pub(super) async fn connect_interleaved(
     let cancel = CancellationToken::new();
     let reader_cancel = cancel.clone();
     let quality = Arc::new(Mutex::new(HashMap::new()));
+    let queued_bytes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let reader_quality = quality.clone();
+    let reader_queued = queued_bytes.clone();
+    let byte_limit = options.max_output_bytes;
     let media_for_control = tx.clone();
     let reader_task = tokio::spawn(async move {
         let mut framer = ConnectionFramer::new(16 * 1024, 256 * 1024, 65_536);
@@ -284,7 +287,7 @@ pub(super) async fn connect_interleaved(
                 _ = wait_for_deadline(deadline) => {
                     for (jitter, depacketizer, ..) in tracks.values_mut() {
                         for result in drain_jitter(jitter, depacketizer) {
-                            if !try_deliver(&tx, result, &mut dropped) {
+                            if !try_deliver(&tx, result, &mut dropped, &reader_queued, byte_limit) {
                                 return;
                             }
                         }
@@ -370,7 +373,13 @@ pub(super) async fn connect_interleaved(
                                     let packet = match RtpPacket::parse(payload) {
                                         Ok(packet) => packet,
                                         Err(error) => {
-                                            if !try_deliver(&tx, Err(error), &mut dropped) {
+                                            if !try_deliver(
+                                                &tx,
+                                                Err(error),
+                                                &mut dropped,
+                                                &reader_queued,
+                                                byte_limit,
+                                            ) {
                                                 return;
                                             }
                                             continue;
@@ -385,13 +394,25 @@ pub(super) async fn connect_interleaved(
                                     )
                                     .await
                                     {
-                                        if !try_deliver(&tx, Err(error), &mut dropped) {
+                                        if !try_deliver(
+                                            &tx,
+                                            Err(error),
+                                            &mut dropped,
+                                            &reader_queued,
+                                            byte_limit,
+                                        ) {
                                             return;
                                         }
                                         continue;
                                     }
                                     for result in receive_rtp_packet(packet, jitter, depacketizer) {
-                                        if !try_deliver(&tx, result, &mut dropped) {
+                                        if !try_deliver(
+                                            &tx,
+                                            result,
+                                            &mut dropped,
+                                            &reader_queued,
+                                            byte_limit,
+                                        ) {
                                             return;
                                         }
                                     }
@@ -498,5 +519,7 @@ pub(super) async fn connect_interleaved(
         cancel,
         tasks: vec![reader_task, control_task_handle],
         quality,
+        queued_bytes,
+        max_output_bytes: options.max_output_bytes,
     }))
 }

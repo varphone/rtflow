@@ -317,5 +317,9 @@ fn low_memory_preset_is_bounded() {
     assert!(options.jitter.max_packets <= 32);
     assert!(options.jitter.max_delay <= Duration::from_millis(30));
     assert_eq!(options.udp_recv_buffer, Some(256 * 1024));
+    assert_eq!(options.max_output_bytes, 2 * 1024 * 1024);
     options.validate().unwrap();
+    let mut invalid = options.clone();
+    invalid.max_output_bytes = 0;
+    assert!(invalid.validate().is_err());
 }

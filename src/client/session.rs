@@ -56,6 +56,8 @@ pub struct ClientSession {
     cancel: CancellationToken,
     tasks: Vec<JoinHandle<()>>,
     quality: Arc<Mutex<HashMap<u8, RtcpSession>>>,
+    queued_bytes: Arc<std::sync::atomic::AtomicUsize>,
+    max_output_bytes: usize,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -74,6 +76,8 @@ pub(super) struct SessionParts {
     pub(super) cancel: CancellationToken,
     pub(super) tasks: Vec<JoinHandle<()>>,
     pub(super) quality: Arc<Mutex<HashMap<u8, RtcpSession>>>,
+    pub(super) queued_bytes: Arc<std::sync::atomic::AtomicUsize>,
+    pub(super) max_output_bytes: usize,
 }
 
 impl ClientSession {
@@ -89,6 +93,8 @@ impl ClientSession {
             cancel: parts.cancel,
             tasks: parts.tasks,
             quality: parts.quality,
+            queued_bytes: parts.queued_bytes,
+            max_output_bytes: parts.max_output_bytes,
         }
     }
 
@@ -129,7 +135,14 @@ impl ClientSession {
     /// control plane: keep-alives run in the dedicated control task
     /// (audit RT-7/RT-8) and failures surface as error frames.
     pub async fn next(&mut self) -> Option<Result<AccessUnit>> {
-        self.receiver.recv().await
+        let item = self.receiver.recv().await;
+        if let Some(Ok(unit)) = &item {
+            self.queued_bytes.fetch_sub(
+                unit.data.len().min(self.max_output_bytes),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+        item
     }
 
     pub async fn keep_alive(&mut self) -> Result<()> {

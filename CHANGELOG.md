@@ -64,6 +64,8 @@
   `SET_PARAMETER`/`GET_PARAMETER`、interleaved 控制面 Digest 重试与
   `ClientOptions::low_memory()` 预设；新增 32 路并发客户端测试。
 - RTSP 客户端发布：`RtspClient::publish` / `PublisherSession::push`（ANNOUNCE/SETUP/RECORD、UDP、多轨、保活、TEARDOWN）。
+- RTSP 客户端发布支持 TCP interleaved；输出队列增加字节上限
+  (`ClientOptions::max_output_bytes`，低内存预设 2 MiB)。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

@@ -105,11 +105,34 @@ fn try_deliver(
     tx: &mpsc::Sender<Result<AccessUnit>>,
     result: Result<AccessUnit>,
     dropped: &mut u64,
+    queued_bytes: &Arc<std::sync::atomic::AtomicUsize>,
+    max_output_bytes: usize,
 ) -> bool {
+    use std::sync::atomic::Ordering;
+    let size = result.as_ref().map_or(0, |unit| unit.data.len());
+    if size > 0 {
+        let previous = queued_bytes.fetch_add(size, Ordering::Relaxed);
+        if previous.saturating_add(size) > max_output_bytes {
+            queued_bytes.fetch_sub(size, Ordering::Relaxed);
+            *dropped += 1;
+            if *dropped % 64 == 1 {
+                tracing::debug!(dropped = *dropped, "client output byte budget exceeded");
+            }
+            return true;
+        }
+    }
     match tx.try_send(result) {
         Ok(()) => true,
-        Err(mpsc::error::TrySendError::Closed(_)) => false,
+        Err(mpsc::error::TrySendError::Closed(_)) => {
+            if size > 0 {
+                queued_bytes.fetch_sub(size, Ordering::Relaxed);
+            }
+            false
+        }
         Err(mpsc::error::TrySendError::Full(_)) => {
+            if size > 0 {
+                queued_bytes.fetch_sub(size, Ordering::Relaxed);
+            }
             *dropped += 1;
             if *dropped % 64 == 1 {
                 tracing::debug!(

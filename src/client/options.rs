@@ -8,6 +8,9 @@ pub struct ClientOptions {
     pub request_timeout: Duration,
     pub jitter: JitterBufferConfig,
     pub output_queue_capacity: usize,
+    /// Byte cap for frames buffered in the output queue. When exceeded the
+    /// new frame is dropped (the consumer is not stalled). Defaults to 8 MiB.
+    pub max_output_bytes: usize,
     pub keep_alive_interval: Option<Duration>,
     #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
@@ -31,6 +34,7 @@ impl Default for ClientOptions {
             request_timeout: Duration::from_secs(5),
             jitter: JitterBufferConfig::default(),
             output_queue_capacity: 64,
+            max_output_bytes: 8 * 1024 * 1024,
             keep_alive_interval: Some(Duration::from_secs(20)),
             #[cfg(feature = "tls")]
             tls: None,
@@ -108,6 +112,9 @@ pub(super) fn validate_options(options: &ClientOptions) -> Result<()> {
     if options.output_queue_capacity == 0 {
         return Err(Error::Limit("client output queue capacity"));
     }
+    if options.max_output_bytes == 0 {
+        return Err(Error::Limit("client output byte budget"));
+    }
     if options.keep_alive_interval == Some(Duration::ZERO) {
         return Err(Error::Limit("client keep-alive interval"));
     }
@@ -156,6 +163,11 @@ impl ClientOptionsBuilder {
 
     pub fn output_queue_capacity(mut self, value: usize) -> Self {
         self.options.output_queue_capacity = value;
+        self
+    }
+
+    pub fn max_output_bytes(mut self, value: usize) -> Self {
+        self.options.max_output_bytes = value;
         self
     }
 
@@ -252,6 +264,7 @@ impl ClientOptions {
                 max_delay: Duration::from_millis(30),
             },
             output_queue_capacity: 16,
+            max_output_bytes: 2 * 1024 * 1024,
             udp_recv_buffer: Some(256 * 1024),
             ..Self::default()
         }

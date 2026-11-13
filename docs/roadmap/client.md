@@ -45,10 +45,11 @@
 - [x] keep-alive/控制面独立任务（RT-7/RT-8）：命令 mpsc + oneshot 应答；`next()` 不再内联 RTSP 往返
 - [x] UDP 收缓冲可配（`UdpPair` 4MB 固定值 → `ClientOptions` 可选覆盖；`low_memory()` 预设 256KiB）
 - [x] UDP 收包使用 `BytesMut::split_to().freeze()`
+- [x] 输出队列字节上限：`ClientOptions::max_output_bytes`（默认 8MiB，低内存 2MiB），计数器随出队递减
 
 ## M5 — 功能扩展（各子阶段独立立项）
 
-- [x] M5.1 发布客户端（ANNOUNCE/RECORD，UDP）：`src/client/publish.rs`，`PublisherSession::push(AccessUnit)`，多轨与并发测试；interleaved 发布待补
+- [x] M5.1 发布客户端（ANNOUNCE/RECORD，UDP + TCP interleaved）：`src/client/publish.rs`，`PublisherSession::push(AccessUnit)`，多轨与并发测试
 - [ ] M5.2 SRTP 接收：`RTP/SAVP` + SDP `a=crypto`，`src/client/srtp_rx.rs`，复用 `src/srtp`
 - [ ] M5.3 WHEP 客户端：`src/client/whep.rs`（feature `webrtc`），与 `ClientSession::next()` 同形态出帧；扩展 `tests/webrtc_e2e.rs`
 
