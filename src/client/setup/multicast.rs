@@ -6,6 +6,7 @@ pub(super) async fn connect_multicast(
     uri: String,
     setup_base: String,
     description: MediaDescription,
+    capabilities: crate::client::ServerCapabilities,
     options: ClientOptions,
     id: SessionId,
 ) -> std::result::Result<ClientSession, Box<SetupFailure>> {
@@ -45,11 +46,11 @@ pub(super) async fn connect_multicast(
                 }));
             }
         };
-        let profile = if track.crypto.is_some() {
-            "RTP/SAVP"
-        } else {
-            "RTP/AVP"
-        };
+        #[cfg(feature = "srtp")]
+        let secure = track.crypto.is_some();
+        #[cfg(not(feature = "srtp"))]
+        let secure = false;
+        let profile = if secure { "RTP/SAVP" } else { "RTP/AVP" };
         let mut extra = format!("Transport: {profile};multicast\r\n");
         if let Some(session) = &session_id {
             extra.push_str(&format!("Session: {session}\r\n"));
@@ -334,6 +335,7 @@ pub(super) async fn connect_multicast(
     );
     Ok(ClientSession::new(SessionParts {
         description,
+        capabilities,
         id,
         receiver: rx,
         control_tx: Some(control_tx),

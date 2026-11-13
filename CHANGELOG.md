@@ -60,6 +60,9 @@
   未按 feature 门控、`dash`/`webrtc` 缺依赖）。
 - fuzz crate 依赖名与包名不一致导致目标无法编译。
 
+- RTSP 客户端补齐 OPTIONS 能力发现、PLAY `Range/Scale/Speed`、PAUSE `Range`、
+  `SET_PARAMETER`/`GET_PARAMETER`、interleaved 控制面 Digest 重试与
+  `ClientOptions::low_memory()` 预设；新增 32 路并发客户端测试。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

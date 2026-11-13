@@ -309,3 +309,13 @@ fn reconnect_policy_validate_rejects_degenerate_delays() {
     };
     assert!(inverted.validate().is_err());
 }
+
+#[test]
+fn low_memory_preset_is_bounded() {
+    let options = ClientOptions::low_memory();
+    assert!(options.output_queue_capacity <= 16);
+    assert!(options.jitter.max_packets <= 32);
+    assert!(options.jitter.max_delay <= Duration::from_millis(30));
+    assert_eq!(options.udp_recv_buffer, Some(256 * 1024));
+    options.validate().unwrap();
+}

@@ -47,6 +47,35 @@ pub(super) fn response_session_id(response: &Response) -> Result<String> {
         .ok_or_else(|| Error::Rtsp("SETUP response has no Session".into()))
 }
 
+pub(super) fn encode_request_body(
+    method: &str,
+    uri: &str,
+    cseq: u32,
+    extra: Option<&str>,
+    authorization: Option<&str>,
+    body: Option<&[u8]>,
+) -> Vec<u8> {
+    let mut wire = format!(
+        "{method} {uri} RTSP/1.0\r\nCSeq: {cseq}\r\nUser-Agent: rtflow/{}\r\n",
+        env!("CARGO_PKG_VERSION")
+    )
+    .into_bytes();
+    if let Some(value) = authorization {
+        wire.extend_from_slice(b"Authorization: ");
+        wire.extend_from_slice(value.as_bytes());
+        wire.extend_from_slice(b"\r\n");
+    }
+    if let Some(value) = extra {
+        wire.extend_from_slice(value.as_bytes());
+    }
+    wire.extend_from_slice(b"\r\n");
+    if let Some(body) = body {
+        wire.extend_from_slice(body);
+    }
+    wire
+}
+
+#[cfg(test)]
 pub(super) fn encode_request(
     method: &str,
     uri: &str,
@@ -54,20 +83,62 @@ pub(super) fn encode_request(
     extra: Option<&str>,
     authorization: Option<&str>,
 ) -> String {
-    let mut wire = format!(
-        "{method} {uri} RTSP/1.0\r\nCSeq: {cseq}\r\nUser-Agent: rtflow/{}\r\n",
-        env!("CARGO_PKG_VERSION")
-    );
-    if let Some(value) = authorization {
-        wire.push_str("Authorization: ");
-        wire.push_str(value);
-        wire.push_str("\r\n");
+    String::from_utf8(encode_request_body(
+        method,
+        uri,
+        cseq,
+        extra,
+        authorization,
+        None,
+    ))
+    .expect("RTSP request headers are UTF-8")
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn request_with_body(
+    stream: &mut ControlConnection,
+    method: &str,
+    uri: &str,
+    cseq: u32,
+    extra: Option<&str>,
+    body: Option<&[u8]>,
+    wait: Duration,
+    credentials: Option<&Credentials>,
+) -> Result<Response> {
+    let mut authorization = credentials.map(basic_authorization);
+    let mut response = send_request_body(
+        stream,
+        method,
+        uri,
+        cseq,
+        extra,
+        body,
+        wait,
+        authorization.as_deref(),
+    )
+    .await?;
+    if response.status == 401
+        && let (Some(credentials), Some(challenge)) =
+            (credentials, response.headers.get("www-authenticate"))
+    {
+        let method = Method::from_str(method)?;
+        let challenged = authorization_from_challenge(challenge, method, uri, credentials)?;
+        if authorization.as_deref() != Some(challenged.as_str()) {
+            authorization = Some(challenged);
+            response = send_request_body(
+                stream,
+                method.as_str(),
+                uri,
+                cseq,
+                extra,
+                body,
+                wait,
+                authorization.as_deref(),
+            )
+            .await?;
+        }
     }
-    if let Some(value) = extra {
-        wire.push_str(value);
-    }
-    wire.push_str("\r\n");
-    wire
+    Ok(response)
 }
 
 pub(super) async fn request(
@@ -158,8 +229,22 @@ pub(super) async fn send_request(
     wait: Duration,
     authorization: Option<&str>,
 ) -> Result<Response> {
-    let wire = encode_request(method, uri, cseq, extra, authorization);
-    timeout(wait, stream.write_all(wire.as_bytes()))
+    send_request_body(stream, method, uri, cseq, extra, None, wait, authorization).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn send_request_body(
+    stream: &mut ControlConnection,
+    method: &str,
+    uri: &str,
+    cseq: u32,
+    extra: Option<&str>,
+    body: Option<&[u8]>,
+    wait: Duration,
+    authorization: Option<&str>,
+) -> Result<Response> {
+    let wire = encode_request_body(method, uri, cseq, extra, authorization, body);
+    timeout(wait, stream.write_all(&wire))
         .await
         .map_err(|_| Error::Rtsp("RTSP write timeout".into()))??;
     let mut temporary = [0u8; 4096];

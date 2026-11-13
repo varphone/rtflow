@@ -5,6 +5,7 @@ pub(super) async fn connect_interleaved(
     uri: String,
     setup_base: String,
     description: MediaDescription,
+    capabilities: crate::client::ServerCapabilities,
     options: ClientOptions,
     id: SessionId,
 ) -> std::result::Result<ClientSession, Box<SetupFailure>> {
@@ -489,6 +490,7 @@ pub(super) async fn connect_interleaved(
     tracing::debug!(session_id = %id, %peer, transport = "tcp-interleaved", "RTSP client session established");
     Ok(ClientSession::new(SessionParts {
         description,
+        capabilities,
         id,
         receiver: rx,
         control_tx: Some(control_tx),

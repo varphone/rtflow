@@ -13,9 +13,11 @@ pub(super) enum ControlTransport {
 }
 
 pub(super) enum ControlCommand {
-    Method {
+    Request {
         method: &'static str,
-        reply: oneshot::Sender<Result<()>>,
+        extra: Option<String>,
+        body: Option<Vec<u8>>,
+        reply: oneshot::Sender<Result<Response>>,
     },
 }
 
@@ -27,26 +29,33 @@ async fn wait_for_instant(deadline: Option<Instant>) {
 }
 
 /// One RTSP control round trip on the session's transport.
+#[allow(clippy::too_many_arguments)]
 async fn perform_control(
     transport: &mut ControlTransport,
     method: &'static str,
     uri: &str,
     cseq: &mut u32,
     session_id: &str,
+    extra: Option<&str>,
+    body: Option<&[u8]>,
     request_timeout: Duration,
     credentials: Option<&Credentials>,
-) -> Result<()> {
-    let extra = format!("Session: {session_id}\r\n");
+) -> Result<Response> {
+    let mut headers = format!("Session: {session_id}\r\n");
+    if let Some(extra) = extra {
+        headers.push_str(extra);
+    }
     let sequence = *cseq;
     *cseq = cseq.wrapping_add(1);
     match transport {
         ControlTransport::Owned(control) => {
-            let response = request(
+            let response = request_with_body(
                 control,
                 method,
                 uri,
                 sequence,
-                Some(&extra),
+                Some(&headers),
+                body,
                 request_timeout,
                 credentials,
             )
@@ -54,56 +63,25 @@ async fn perform_control(
             if response.status != 200 {
                 return Err(status_error(method, response.status));
             }
+            Ok(response)
         }
         ControlTransport::Interleaved { writer, responses } => {
             let mut authorization = credentials.map(basic_authorization);
-            let wire = encode_request(
-                method,
-                uri,
-                sequence,
-                Some(&extra),
-                authorization.as_deref(),
-            );
-            tokio::time::timeout(request_timeout, async {
-                writer.lock().await.write_all(wire.as_bytes()).await
-            })
-            .await
-            .map_err(|_| Error::Limit("interleaved control write timeout"))??;
-            // Pair responses by CSeq: a stale response left over from a
-            // previous exchange (e.g. a timed-out reconnect) must not be
-            // mistaken for the reply to this request.
-            let mut response = loop {
-                let candidate = timeout(request_timeout, responses.recv())
-                    .await
-                    .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
-                    .ok_or(Error::Closed)?;
-                if candidate_headers_cseq(&candidate) == Some(sequence) {
-                    break candidate;
-                }
-            };
-            if response.status == 401
-                && let (Some(credentials), Some(challenge)) =
-                    (credentials, response.headers.get("www-authenticate"))
-            {
-                authorization = Some(authorization_from_challenge(
-                    challenge,
-                    Method::from_str(method)?,
-                    uri,
-                    credentials,
-                )?);
-                let wire = encode_request(
+            let response = loop {
+                let wire = encode_request_body(
                     method,
                     uri,
                     sequence,
-                    Some(&extra),
+                    Some(&headers),
                     authorization.as_deref(),
+                    body,
                 );
                 tokio::time::timeout(request_timeout, async {
-                    writer.lock().await.write_all(wire.as_bytes()).await
+                    writer.lock().await.write_all(&wire).await
                 })
                 .await
                 .map_err(|_| Error::Limit("interleaved control write timeout"))??;
-                response = loop {
+                let candidate = loop {
                     let candidate = timeout(request_timeout, responses.recv())
                         .await
                         .map_err(|_| Error::Rtsp("RTSP response timeout".into()))?
@@ -112,13 +90,31 @@ async fn perform_control(
                         break candidate;
                     }
                 };
-            }
+                if candidate.status != 401 {
+                    break candidate;
+                }
+                let (Some(credentials), Some(challenge)) =
+                    (credentials, candidate.headers.get("www-authenticate"))
+                else {
+                    break candidate;
+                };
+                let challenged = authorization_from_challenge(
+                    challenge,
+                    Method::from_str(method)?,
+                    uri,
+                    credentials,
+                )?;
+                if authorization.as_deref() == Some(challenged.as_str()) {
+                    break candidate;
+                }
+                authorization = Some(challenged);
+            };
             if response.status != 200 {
                 return Err(status_error(method, response.status));
             }
+            Ok(response)
         }
     }
-    Ok(())
 }
 
 /// Dedicated control-plane task: serializes PLAY/PAUSE/TEARDOWN commands and
@@ -155,7 +151,13 @@ pub(super) async fn control_task(
         tokio::select! {
             _ = cancel.cancelled() => return,
             command = commands.recv() => {
-                let Some(ControlCommand::Method { method: requested, reply }) = command else {
+                let Some(ControlCommand::Request {
+                    method: requested,
+                    extra,
+                    body,
+                    reply,
+                }) = command
+                else {
                     return;
                 };
                 let result = perform_control(
@@ -164,6 +166,8 @@ pub(super) async fn control_task(
                     &uri,
                     &mut cseq,
                     &session_id,
+                    extra.as_deref(),
+                    body.as_deref(),
                     request_timeout,
                     credentials.as_ref(),
                 )
@@ -179,6 +183,8 @@ pub(super) async fn control_task(
                             &uri,
                             &mut cseq,
                             &session_id,
+                            None,
+                            None,
                             request_timeout,
                             credentials.as_ref(),
                         )
@@ -187,7 +193,7 @@ pub(super) async fn control_task(
                     other => other,
                 };
                 match &result {
-                    Ok(()) => {
+                    Ok(_) => {
                         failures = 0;
                         last_failure = None;
                         last_control = Instant::now();
@@ -220,6 +226,8 @@ pub(super) async fn control_task(
                     &uri,
                     &mut cseq,
                     &session_id,
+                    None,
+                    None,
                     request_timeout,
                     credentials.as_ref(),
                 )
@@ -237,6 +245,8 @@ pub(super) async fn control_task(
                             &uri,
                             &mut cseq,
                             &session_id,
+                            None,
+                            None,
                             request_timeout,
                             credentials.as_ref(),
                         )
@@ -245,7 +255,7 @@ pub(super) async fn control_task(
                     other => other,
                 };
                 match result {
-                    Ok(()) => {
+                    Ok(_) => {
                         failures = 0;
                         last_failure = None;
                         last_control = Instant::now();

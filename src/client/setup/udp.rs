@@ -19,6 +19,7 @@ pub(super) async fn connect_udp(
     uri: String,
     setup_base: String,
     description: MediaDescription,
+    capabilities: crate::client::ServerCapabilities,
     options: ClientOptions,
     id: SessionId,
 ) -> std::result::Result<ClientSession, Box<SetupFailure>> {
@@ -31,6 +32,7 @@ pub(super) async fn connect_udp(
             uri,
             setup_base,
             description,
+            capabilities,
             options,
             id,
         )
@@ -524,6 +526,7 @@ pub(super) async fn connect_udp(
     tracing::debug!(session_id = %id, %peer, transport = "udp", "RTSP client session established");
     Ok(ClientSession::new(SessionParts {
         description,
+        capabilities,
         id,
         receiver: rx,
         control_tx: Some(control_tx),

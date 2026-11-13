@@ -196,3 +196,64 @@ impl ClientOptionsBuilder {
         Ok(self.options)
     }
 }
+
+/// Methods and extensions advertised by the server in the OPTIONS response
+/// (`Public`, `Supported`, `Server`).
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ServerCapabilities {
+    /// Methods listed in `Public`.
+    pub public: Vec<String>,
+    /// Package/feature tokens listed in `Supported`.
+    pub supported: Vec<String>,
+    /// `Server` product string, when present.
+    pub server: Option<String>,
+}
+
+impl ServerCapabilities {
+    pub(super) fn from_response(response: &Response) -> Self {
+        let split = |value: Option<&String>| {
+            value
+                .map(|value| {
+                    value
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|item| !item.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        Self {
+            public: split(response.headers.get("public")),
+            supported: split(response.headers.get("supported")),
+            server: response.headers.get("server").cloned(),
+        }
+    }
+
+    /// Whether the server advertised a method (case-insensitive).
+    pub fn supports(&self, method: &str) -> bool {
+        self.public
+            .iter()
+            .any(|item| item.eq_ignore_ascii_case(method))
+    }
+}
+
+impl ClientOptions {
+    /// Memory- and latency-oriented defaults for embedded clients.
+    ///
+    /// Caps per-track jitter to 32 packets / 30 ms, the output queue to 16
+    /// frames and UDP receive buffers to 256 KiB. Bandwidth and resilience
+    /// are traded for a small, predictable footprint.
+    pub fn low_memory() -> Self {
+        Self {
+            jitter: JitterBufferConfig {
+                max_packets: 32,
+                max_reorder_window: 32,
+                max_delay: Duration::from_millis(30),
+            },
+            output_queue_capacity: 16,
+            udp_recv_buffer: Some(256 * 1024),
+            ..Self::default()
+        }
+    }
+}

@@ -41,16 +41,27 @@
 ## M4 — 性能
 
 - [ ] `benches/client_receive.rs` 基线：UDP/interleaved 帧吞吐 + p50/p99 投递延迟（数字记录于本文件）
-- [ ] jitter drain 事件驱动（RT-17）：`sleep_until(JitterBuffer::next_deadline())` 替换 1–10ms tick；满队列 `try_send` + 丢弃计数
-- [ ] keep-alive/控制面独立任务（RT-7/RT-8）：命令 mpsc + oneshot 应答；`next()` 不再内联 RTSP 往返
-- [ ] UDP 收缓冲可配（`UdpPair` 4MB 固定值 → `ClientOptions` 可选覆盖）
-- [ ] UDP 收包 `BytesMut::split_to().freeze()` 替代 `copy_from_slice`
+- [x] jitter drain 事件驱动（RT-17）：`sleep_until(JitterBuffer::next_deadline())` 替换 1–10ms tick；满队列 `try_send` + 丢弃计数
+- [x] keep-alive/控制面独立任务（RT-7/RT-8）：命令 mpsc + oneshot 应答；`next()` 不再内联 RTSP 往返
+- [x] UDP 收缓冲可配（`UdpPair` 4MB 固定值 → `ClientOptions` 可选覆盖；`low_memory()` 预设 256KiB）
+- [x] UDP 收包使用 `BytesMut::split_to().freeze()`
 
 ## M5 — 功能扩展（各子阶段独立立项）
 
 - [ ] M5.1 发布客户端（ANNOUNCE/RECORD）：`src/client/publish.rs`，`PublisherSession::push(AccessUnit)`；`tests/client_publish.rs` + ffmpeg 互通
 - [ ] M5.2 SRTP 接收：`RTP/SAVP` + SDP `a=crypto`，`src/client/srtp_rx.rs`，复用 `src/srtp`
 - [ ] M5.3 WHEP 客户端：`src/client/whep.rs`（feature `webrtc`），与 `ClientSession::next()` 同形态出帧；扩展 `tests/webrtc_e2e.rs`
+
+## M6 — RTSP 1.0 方法面
+
+- [x] `RtspClient::options` + `ServerCapabilities`（Public/Supported/Server）
+- [x] `ClientSession::play_with(PlayRequest)`（Range/Scale/Speed）
+- [x] `ClientSession::pause_with(range)`
+- [x] `ClientSession::set_parameter` / `get_parameter`（text/parameters body）
+- [x] interleaved 控制通道 Digest 401 重试
+- [x] `ClientOptions::low_memory()` 有界预设
+- [x] 32 路并发客户端集成测试、控制面方法测试
+- [ ] 发布客户端（ANNOUNCE/RECORD）、server-initiated REDIRECT、RTP-Info/Require
 
 ### Backlog
 

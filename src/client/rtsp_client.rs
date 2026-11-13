@@ -7,8 +7,36 @@ pub struct RtspClient;
 impl RtspClient {
     pub async fn describe(url: url::Url, options: ClientOptions) -> Result<MediaDescription> {
         validate_options(&options)?;
-        let (_, _, _, description, _) = open_and_describe(&url, &options).await?;
+        let (_, _, _, description, _, _) = open_and_describe(&url, &options).await?;
         Ok(description)
+    }
+
+    /// Fetch the server's OPTIONS capabilities (`Public`, `Supported`,
+    /// `Server`). The control connection is closed afterwards.
+    pub async fn options(url: url::Url, options: ClientOptions) -> Result<ServerCapabilities> {
+        validate_options(&options)?;
+        let (mut stream, uri) = open_control(&url, &options).await?;
+        let response = request(
+            &mut stream,
+            "OPTIONS",
+            &uri,
+            1,
+            None,
+            options.request_timeout,
+            options.credentials.as_ref(),
+        )
+        .await?;
+        if response.status != 200 {
+            return Err(status_error("OPTIONS", response.status));
+        }
+        Ok(ServerCapabilities::from_response(&response))
+    }
+
+    /// Convenience entry accepting a URL string; see [`Self::options`].
+    pub async fn options_str(url: &str, options: ClientOptions) -> Result<ServerCapabilities> {
+        let url = url::Url::parse(url)
+            .map_err(|error| Error::Rtsp(format!("invalid RTSP URL: {error}")))?;
+        Self::options(url, options).await
     }
 
     /// Convenience entry accepting a URL string; see [`Self::describe`].
@@ -22,7 +50,7 @@ impl RtspClient {
         validate_options(&options)?;
         let sink = options.event_sink.clone();
         if options.transport != UpstreamTransport::Auto {
-            let (stream, uri, setup_base, description, sdp_mux) =
+            let (stream, uri, setup_base, description, sdp_mux, capabilities) =
                 open_and_describe(&url, &options).await?;
             let mut options = options;
             if options.rtcp_mux.is_none() {
@@ -33,6 +61,7 @@ impl RtspClient {
                 uri,
                 setup_base,
                 description,
+                capabilities,
                 options,
                 next_client_session_id(),
             )
@@ -43,7 +72,7 @@ impl RtspClient {
         let mut udp_options = options.clone();
         udp_options.transport = UpstreamTransport::Udp;
         let udp_open = open_and_describe(&url, &udp_options).await;
-        let (stream, uri, setup_base, description, sdp_mux) = match udp_open {
+        let (stream, uri, setup_base, description, sdp_mux, capabilities) = match udp_open {
             Ok(value) => value,
             Err(error) if should_fallback_to_tcp(&error) => {
                 let id = next_client_session_id();
@@ -58,15 +87,23 @@ impl RtspClient {
                 );
                 let mut tcp_options = options.clone();
                 tcp_options.transport = UpstreamTransport::TcpInterleaved;
-                let (stream, uri, setup_base, description, fallback_mux) =
+                let (stream, uri, setup_base, description, fallback_mux, capabilities) =
                     open_and_describe(&url, &tcp_options).await?;
                 let mut tcp_options = tcp_options;
                 if tcp_options.rtcp_mux.is_none() {
                     tcp_options.rtcp_mux = Some(fallback_mux);
                 }
-                return setup::connect(stream, uri, setup_base, description, tcp_options, id)
-                    .await
-                    .map_err(|failure| failure.error);
+                return setup::connect(
+                    stream,
+                    uri,
+                    setup_base,
+                    description,
+                    capabilities,
+                    tcp_options,
+                    id,
+                )
+                .await
+                .map_err(|failure| failure.error);
             }
             Err(error) => return Err(error),
         };
@@ -80,6 +117,7 @@ impl RtspClient {
             uri.clone(),
             setup_base,
             description,
+            capabilities.clone(),
             udp_options,
             id,
         )
@@ -106,6 +144,7 @@ impl RtspClient {
                     uri.clone(),
                     failure.setup_base,
                     failure.description,
+                    capabilities.clone(),
                     tcp_options.clone(),
                     id,
                 )
@@ -115,15 +154,23 @@ impl RtspClient {
                     Err(_) => {
                         // The server may have closed the connection after the
                         // rejection; recover with a fresh one.
-                        let (stream, uri, setup_base, description, fallback_mux) =
+                        let (stream, uri, setup_base, description, fallback_mux, capabilities) =
                             open_and_describe(&url, &tcp_options).await?;
                         let mut tcp_options = tcp_options;
                         if tcp_options.rtcp_mux.is_none() {
                             tcp_options.rtcp_mux = Some(fallback_mux);
                         }
-                        setup::connect(stream, uri, setup_base, description, tcp_options, id)
-                            .await
-                            .map_err(|failure| failure.error)
+                        setup::connect(
+                            stream,
+                            uri,
+                            setup_base,
+                            description,
+                            capabilities,
+                            tcp_options,
+                            id,
+                        )
+                        .await
+                        .map_err(|failure| failure.error)
                     }
                 }
             }
@@ -278,8 +325,16 @@ impl RtspClient {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum DescribeOutcome {
-    Ready(ControlConnection, String, String, MediaDescription, bool),
+    Ready(
+        ControlConnection,
+        String,
+        String,
+        MediaDescription,
+        bool,
+        ServerCapabilities,
+    ),
     Redirect(url::Url),
 }
 
@@ -303,12 +358,19 @@ fn redirect_outcome(base: &url::Url, response: &Response) -> Result<DescribeOutc
 async fn open_and_describe(
     url: &url::Url,
     options: &ClientOptions,
-) -> Result<(ControlConnection, String, String, MediaDescription, bool)> {
+) -> Result<(
+    ControlConnection,
+    String,
+    String,
+    MediaDescription,
+    bool,
+    ServerCapabilities,
+)> {
     let mut current = url.clone();
     for _ in 0..5 {
         match open_and_describe_once(&current, options).await? {
-            DescribeOutcome::Ready(stream, uri, base, description, mux) => {
-                return Ok((stream, uri, base, description, mux));
+            DescribeOutcome::Ready(stream, uri, base, description, mux, capabilities) => {
+                return Ok((stream, uri, base, description, mux, capabilities));
             }
             DescribeOutcome::Redirect(target) => current = target,
         }
@@ -316,10 +378,10 @@ async fn open_and_describe(
     Err(Error::Rtsp("too many RTSP redirects".into()))
 }
 
-async fn open_and_describe_once(
+async fn open_control(
     url: &url::Url,
     options: &ClientOptions,
-) -> Result<DescribeOutcome> {
+) -> Result<(ControlConnection, String)> {
     let host = url
         .host_str()
         .ok_or_else(|| Error::Rtsp("RTSP URL has no host".into()))?;
@@ -335,7 +397,7 @@ async fn open_and_describe_once(
     tcp.set_nodelay(true)?;
     let local_addr = tcp.local_addr()?;
     let peer_addr = tcp.peer_addr()?;
-    let mut stream = match url.scheme() {
+    let stream = match url.scheme() {
         "rtsp" => ControlConnection::new(tcp, local_addr, peer_addr),
         #[cfg(feature = "tls")]
         "rtsps" => {
@@ -358,6 +420,14 @@ async fn open_and_describe_once(
         scheme => return Err(Error::Rtsp(format!("unsupported RTSP URL scheme {scheme}"))),
     };
     let uri = url.as_str().to_owned();
+    Ok((stream, uri))
+}
+
+async fn open_and_describe_once(
+    url: &url::Url,
+    options: &ClientOptions,
+) -> Result<DescribeOutcome> {
+    let (mut stream, uri) = open_control(url, options).await?;
     let response = request(
         &mut stream,
         "OPTIONS",
@@ -374,6 +444,7 @@ async fn open_and_describe_once(
     if response.status != 200 {
         return Err(status_error("OPTIONS", response.status));
     }
+    let capabilities = ServerCapabilities::from_response(&response);
     let response = request(
         &mut stream,
         "DESCRIBE",
@@ -410,5 +481,6 @@ async fn open_and_describe_once(
         setup_base,
         description,
         rtcp_mux,
+        capabilities,
     ))
 }

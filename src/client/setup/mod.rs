@@ -41,15 +41,34 @@ pub(super) async fn connect(
     uri: String,
     setup_base: String,
     description: MediaDescription,
+    capabilities: crate::client::ServerCapabilities,
     options: ClientOptions,
     id: SessionId,
 ) -> std::result::Result<ClientSession, Box<SetupFailure>> {
     match options.transport {
         crate::transport::UpstreamTransport::Udp => {
-            connect_udp(stream, uri, setup_base, description, options, id).await
+            connect_udp(
+                stream,
+                uri,
+                setup_base,
+                description,
+                capabilities,
+                options,
+                id,
+            )
+            .await
         }
         crate::transport::UpstreamTransport::TcpInterleaved => {
-            connect_interleaved(stream, uri, setup_base, description, options, id).await
+            connect_interleaved(
+                stream,
+                uri,
+                setup_base,
+                description,
+                capabilities,
+                options,
+                id,
+            )
+            .await
         }
         crate::transport::UpstreamTransport::Auto => Err(Box::new(SetupFailure {
             error: Error::Rtsp(

@@ -46,10 +46,11 @@ mod wire;
 
 pub use options::{
     ClientOptions, ClientOptionsBuilder, ClientReconnectPolicy, ClientReconnectPolicyBuilder,
+    ServerCapabilities,
 };
 pub use reconnect::ReconnectingClientSession;
 pub use rtsp_client::RtspClient;
-pub use session::{ClientQualitySnapshot, ClientSession};
+pub use session::{ClientQualitySnapshot, ClientSession, PlayRequest};
 
 static NEXT_CLIENT_SESSION: AtomicU64 = AtomicU64::new(1);
 
