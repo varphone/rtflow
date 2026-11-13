@@ -76,7 +76,7 @@ async fn proxy_forwards_every_upstream_downstream_transport_pair() {
             wait_until(Duration::from_secs(2), || {
                 matches!(
                     proxy_mount.snapshot().proxy_state,
-                    Some(rtflow::proxy::ProxyState::Idle)
+                    Some(rtflow::mount::upstream::ProxyState::Idle)
                 )
             })
             .await;

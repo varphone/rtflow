@@ -15,10 +15,10 @@ use crate::{
     identity::{MountId, SessionId},
     media::MediaDescription,
     observe::{FrameworkEvent, SecurityEvent, emit},
-    protocol::range::{NptPosition, NptRange},
-    protocol::sdp,
     rtcp::Packet as RtcpPacket,
     rtp::{Depacketizer, RtpPacket},
+    rtsp::range::{NptPosition, NptRange},
+    rtsp::sdp,
     rtsp::{self, Message, Method, Response},
     runtime::{
         framing::{ConnectionFramer, InboundFrame},

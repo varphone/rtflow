@@ -67,3 +67,12 @@ rtsp/{message,sdp,range,auth,token_auth,transport,multicast}
 ## 当前边界
 
 共享文件 mount 仍适合循环宣传片；`MountConfig::Vod` 则为每个 RTSP session 创建独立 demux、NPT Range 和 PAUSE 游标。RTSPS 保护 RTSP 控制连接及 TCP interleaved 媒体；UDP RTP 若需加密应使用后续 SRTP transport。组播、SRTP、ONVIF、转码和集群状态复制仍是独立扩展。
+
+## 决策记录与兼容门面
+
+- 架构决策见 [`docs/architecture/decisions/`](decisions/README.md)：
+  单 crate（0001）、文件=模块（0002）、分层规则（0003）、兼容与弃用（0004）。
+- 0.3 的弃用门面：`protocol`（→ `rtsp`）、`proxy`（→ `mount::{upstream,continuity}`）、
+  `protocol_trait`（→ `gateway::protocol`）、`media_pipeline`（→ `pipeline`+`rtp`）、
+  `server::{MountConfig,MountHandle,…}`（→ `mount`）。迁移表见
+  [`docs/guides/migration/0.2-to-0.3.md`](../guides/migration/0.2-to-0.3.md)。

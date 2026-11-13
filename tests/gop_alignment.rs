@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 use rtflow::client::{ClientOptions, RtspClient};
 use rtflow::media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription};
-use rtflow::protocol::transport::UpstreamTransport;
+use rtflow::transport::UpstreamTransport;
 use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::sync::Arc;
 use std::time::Duration;

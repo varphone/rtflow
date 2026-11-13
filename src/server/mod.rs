@@ -5,7 +5,11 @@ mod tasks;
 mod vod_runtime;
 use session::serve_connection;
 
-// Re-export mount types for backward compatibility.
+// Re-export mount types for backward compatibility (deprecated in 0.3).
+#[deprecated(
+    since = "0.3.0",
+    note = "use `rtflow::mount::{LocalPublisher, MountConfig, MountHandle, MountSnapshot, PushResult, StreamStats}`"
+)]
 pub use crate::mount::{
     LocalPublisher, MountConfig, MountHandle, MountSnapshot, PushResult, StreamStats,
 };
@@ -20,11 +24,11 @@ use crate::{
     error::Operation,
     identity::{MountId, SessionId},
     mount::MountRegistry,
+    mount::continuity::{KeyframeCache, StartupCacheConfig},
     observe::{
         EventSink, FrameworkEvent, MountEvent, NoopEventSink, RejectReason, SecurityEvent,
         ServerEvent, SessionEvent, emit,
     },
-    proxy::{KeyframeCache, StartupCacheConfig},
     runtime::{ShutdownReport, TaskSpec, TaskSupervisor, io::ControlConnection},
     security::{ConnectionRateLimiter, SecurityConfig},
 };

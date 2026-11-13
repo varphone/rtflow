@@ -11,10 +11,10 @@ use crate::{
     identity::SessionId,
     media::{AccessUnit, MediaDescription},
     observe::{ClientEvent, EventSink, FrameworkEvent},
-    protocol::range::NptRange,
-    protocol::sdp,
     rtcp::{ReceptionSnapshot, RtcpSession},
     rtp::{Depacketizer, JitterBuffer, JitterBufferConfig, RtpPacket},
+    rtsp::range::NptRange,
+    rtsp::sdp,
     rtsp::{self, Message, Method, Response},
     runtime::io::{ControlConnection, ControlWriteHalf},
 };

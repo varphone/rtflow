@@ -13,7 +13,7 @@
 //! should stay well under the product budget (e.g. < 24MB with `--queue 128`).
 use rtflow::client::{ClientOptions, RtspClient};
 use rtflow::media::{AccessUnit, Codec, MediaDescription, TrackDescription};
-use rtflow::protocol::transport::UpstreamTransport;
+use rtflow::transport::UpstreamTransport;
 use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::time::Duration;
 use url::Url;

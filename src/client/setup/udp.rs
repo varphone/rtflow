@@ -44,7 +44,7 @@ pub(super) async fn connect_udp(
                 }));
             }
         };
-        let setup_uri = match crate::protocol::sdp::control_uri(&setup_base, &track.control) {
+        let setup_uri = match crate::rtsp::sdp::control_uri(&setup_base, &track.control) {
             Ok(uri) => uri,
             Err(error) => {
                 return Err(Box::new(SetupFailure {

@@ -126,7 +126,7 @@ struct StreamConfig {
 }
 
 async fn publish_stream(
-    mount: &rtflow::server::MountHandle,
+    mount: &rtflow::mount::MountHandle,
     config: &StreamConfig,
     fps: u32,
     gop: u32,

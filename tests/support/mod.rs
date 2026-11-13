@@ -304,7 +304,7 @@ pub fn with_header(mut response: Response, name: &str, value: &str) -> Response 
 
 /// A DESCRIBE response whose body is the SDP encoding of `description`.
 pub fn describe_reply(request: &wire_rtsp::Request, description: &MediaDescription) -> Response {
-    let body = rtflow::protocol::sdp::encode(description).into_bytes();
+    let body = rtflow::rtsp::sdp::encode(description).into_bytes();
     let response = with_header(reply(request, 200, "OK"), "content-type", "application/sdp");
     Response { body, ..response }
 }

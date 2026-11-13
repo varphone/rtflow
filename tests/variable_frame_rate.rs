@@ -4,7 +4,7 @@
 //! PTS — no frame-rate assumptions anywhere in the publish path.
 use rtflow::client::{ClientOptions, RtspClient};
 use rtflow::media::{AccessUnit, Codec, MediaDescription, TrackDescription};
-use rtflow::protocol::transport::UpstreamTransport;
+use rtflow::transport::UpstreamTransport;
 use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::time::Duration;
 use url::Url;

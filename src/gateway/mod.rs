@@ -2,6 +2,8 @@
 //!
 //! The [`Gateway`] binds multiple protocol servers (RTSP, HTTP, RTMP, SRT, etc.)
 //! to a shared [`MountRegistry`], enabling cross-protocol stream relay.
+pub mod protocol;
+
 #[cfg(feature = "http")]
 use crate::http::{HttpConfig, HttpServer};
 use crate::mount::{MountConfig, MountOptions, MountRegistry};
@@ -168,7 +170,7 @@ impl Gateway {
                 // Gateway local streams serve from the bootstrap keyframe
                 // snapshot; the RTSP-proxy startup cache is not used.
                 #[cfg(feature = "server")]
-                startup_cache_config: Some(crate::proxy::StartupCacheConfig {
+                startup_cache_config: Some(crate::mount::continuity::StartupCacheConfig {
                     enabled: false,
                     ..Default::default()
                 }),

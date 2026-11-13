@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Reject stale crate names and module paths in user-facing documentation.
+# Reject stale crate names and crate-root module paths in user-facing docs.
 #
-# Historically the crate was called `rtspflow`/`rtsp`; docs and README kept
-# referencing `rtsp::...` and `rtspflow` long after the rename to `rtflow`.
+# Historically the crate was called `rtspflow`/`rtsp`, so docs kept writing
+# `rtsp::Result`, `rtsp::media`, ... long after the rename to `rtflow`.
+# Bare `rtsp::` is *not* flagged: it is the legitimate `rtflow::rtsp` module
+# (e.g. `rtsp::Message`, `rtsp::sdp`).
 set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
 
 status=0
-# `rtsp::` is the crate name used in old doc snippets; the current crate is
-# `rtflow` (the RTSP *module* is `rtflow::rtsp`, which is fine).
-if hits=$(grep -rnE '\brtspflow\b|(^|[^a-z_])rtsp::' README.md docs --include='*.md' \
-    --exclude-dir=archive || true); then
+if hits=$(grep -rnE '\brtspflow\b|(^|[^:a-zA-Z_])rtsp::(Result|media|rtp|rtcp|recording|tls|server|client|mount|error)\b' \
+    README.md docs --include='*.md' --exclude-dir=archive || true); then
   if [ -n "$hits" ]; then
     echo "error: stale crate/module references (use rtflow:: instead):"
     echo "$hits"

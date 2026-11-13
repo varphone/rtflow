@@ -3,11 +3,11 @@ use crate::mount::{Mount, MountConfig};
 use crate::{
     client::{ClientOptions, RtspClient},
     error::Operation,
-    observe::{FrameworkEvent, ProxyEvent, emit},
-    proxy::{
-        PolicySelector, ProxyState, TimelineNormalizer, TrackCompatibility, UpstreamConfig,
-        UpstreamHealth, UpstreamSelector,
+    mount::continuity::{TimelineNormalizer, TrackCompatibility},
+    mount::upstream::{
+        PolicySelector, ProxyState, UpstreamConfig, UpstreamHealth, UpstreamSelector,
     },
+    observe::{FrameworkEvent, ProxyEvent, emit},
     runtime::{TaskSpec, TaskSupervisor},
 };
 
