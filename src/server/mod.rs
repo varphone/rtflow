@@ -158,6 +158,20 @@ impl RtspServer {
             timeline_epoch: std::time::Instant::now(),
             config,
         });
+        // Gateway-style registries may already hold proxy mounts before the
+        // RTSP server binds; start their subscriber watchers now.
+        for id in state.mounts.paths() {
+            if let Some(handle) = state.mounts.get_handle(id.as_str())
+                && matches!(handle.inner.config, MountConfig::Proxy { .. })
+            {
+                proxy_runtime::watch_proxy(
+                    handle.inner.clone(),
+                    state.cancel.clone(),
+                    state.supervisor.clone(),
+                    state.config.no_subscriber_grace,
+                );
+            }
+        }
         emit(
             &state.config.event_sink,
             FrameworkEvent::Server(ServerEvent::Started { local_addr }),
