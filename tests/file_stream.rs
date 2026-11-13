@@ -445,10 +445,10 @@ async fn mainstream_files_demux_and_stream_over_rtsp() {
     let url = url::Url::parse(&format!("rtsp://{}/file", server.local_addr())).unwrap();
     let mut client = RtspClient::connect(
         url,
-        ClientOptions {
-            transport: UpstreamTransport::TcpInterleaved,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();

@@ -107,11 +107,11 @@ async fn joining_mid_gop_waits_for_next_idr() {
 
     let mut client = RtspClient::connect(
         Url::parse(&format!("rtsp://{}/gop", server.local_addr())).unwrap(),
-        ClientOptions {
-            transport: UpstreamTransport::TcpInterleaved,
-            keep_alive_interval: None,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .keep_alive_interval(None)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -168,11 +168,11 @@ async fn joining_near_keyframe_starts_immediately() {
     // to fill: keep a warm client connected.
     let _warm = RtspClient::connect(
         Url::parse(&format!("rtsp://{}/gop2", server.local_addr())).unwrap(),
-        ClientOptions {
-            transport: UpstreamTransport::TcpInterleaved,
-            keep_alive_interval: None,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .keep_alive_interval(None)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -188,11 +188,11 @@ async fn joining_near_keyframe_starts_immediately() {
     // A second client joining now starts from the cached window keyframe.
     let mut client = RtspClient::connect(
         Url::parse(&format!("rtsp://{}/gop2", server.local_addr())).unwrap(),
-        ClientOptions {
-            transport: UpstreamTransport::TcpInterleaved,
-            keep_alive_interval: None,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .keep_alive_interval(None)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();

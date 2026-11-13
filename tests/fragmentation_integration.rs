@@ -25,10 +25,10 @@ async fn round_trip(codec: Codec, transport: UpstreamTransport) {
     let publisher = mount.publisher().unwrap();
     let mut client = RtspClient::connect(
         url::Url::parse(&format!("rtsp://{}/fragmented", server.local_addr())).unwrap(),
-        ClientOptions {
-            transport,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(transport)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();

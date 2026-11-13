@@ -100,10 +100,10 @@ async fn run_publish(transport: &str) {
     let location = format!("rtsp://{}/ingest", server.local_addr());
     let mut player = RtspClient::connect(
         url::Url::parse(&location).unwrap(),
-        ClientOptions {
-            transport: UpstreamTransport::TcpInterleaved,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();

@@ -25,10 +25,10 @@ async fn round_trip(codec: Codec, transport: UpstreamTransport) {
     let url = url::Url::parse(&format!("rtsp://{}/codec", server.local_addr())).unwrap();
     let mut client = RtspClient::connect(
         url,
-        ClientOptions {
-            transport,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(transport)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -83,10 +83,10 @@ async fn pause_blocks_delivery_and_play_resumes() {
         let publisher = mount.publisher().unwrap();
         let mut client = RtspClient::connect(
             url::Url::parse(&format!("rtsp://{}/pause", server.local_addr())).unwrap(),
-            ClientOptions {
-                transport,
-                ..Default::default()
-            },
+            ClientOptions::builder()
+                .transport(transport)
+                .build()
+                .unwrap(),
         )
         .await
         .unwrap();

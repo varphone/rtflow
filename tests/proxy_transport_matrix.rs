@@ -44,10 +44,10 @@ async fn proxy_forwards_every_upstream_downstream_transport_pair() {
                 .unwrap();
             let mut client = RtspClient::connect(
                 url::Url::parse(&format!("rtsp://{}/proxy", proxy.local_addr())).unwrap(),
-                ClientOptions {
-                    transport: downstream_transport,
-                    ..Default::default()
-                },
+                ClientOptions::builder()
+                    .transport(downstream_transport)
+                    .build()
+                    .unwrap(),
             )
             .await
             .unwrap();

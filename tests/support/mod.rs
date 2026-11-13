@@ -8,7 +8,8 @@ use rtflow::{
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
+    net::{TcpListener, TcpStream},
+    sync::Mutex,
 };
 
 pub fn description(name: &str, codecs: &[Codec]) -> MediaDescription {
@@ -152,4 +153,158 @@ impl RawRtsp {
             self.input.extend_from_slice(&buffer[..count]);
         }
     }
+}
+
+/// Scripted RTSP server counterpart to [`RawRtsp`]: accepts connections on
+/// 127.0.0.1, feeds each parsed request to a shared handler, and writes back
+/// whatever the handler decides. Used to exercise client behavior against
+/// misbehaving servers (wrong statuses, stale CSeq, abrupt closes).
+pub enum ServerReply {
+    /// Write the response and keep serving on this connection.
+    Response(Response),
+    /// Write the response, then close the connection.
+    ResponseThenClose(Response),
+    /// Write arbitrary bytes (e.g. a stale response or interleaved frame).
+    Raw(Vec<u8>),
+    /// Close the connection without replying.
+    Close,
+}
+
+pub type RtspServerHandler = Box<dyn FnMut(&wire_rtsp::Request) -> ServerReply + Send>;
+
+pub struct RawRtspServer {
+    address: std::net::SocketAddr,
+    requests: Arc<Mutex<Vec<wire_rtsp::Request>>>,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl RawRtspServer {
+    pub async fn start(handler: RtspServerHandler) -> Self {
+        Self::start_on("127.0.0.1:0", handler).await
+    }
+
+    pub async fn start_on(bind: &str, handler: RtspServerHandler) -> Self {
+        let listener = TcpListener::bind(bind).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let handler = Arc::new(Mutex::new(handler));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let accept_handler = handler.clone();
+        let accept_requests = requests.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => return,
+                    accepted = listener.accept() => {
+                        let Ok((stream, _)) = accepted else { return };
+                        let handler = accept_handler.clone();
+                        let requests = accept_requests.clone();
+                        tokio::spawn(async move {
+                            let _ = Self::serve_connection(stream, handler, requests).await;
+                        });
+                    }
+                }
+            }
+        });
+        Self {
+            address,
+            requests,
+            shutdown: Some(shutdown_tx),
+        }
+    }
+
+    async fn serve_connection(
+        mut stream: TcpStream,
+        handler: Arc<Mutex<RtspServerHandler>>,
+        requests: Arc<Mutex<Vec<wire_rtsp::Request>>>,
+    ) -> std::io::Result<()> {
+        let mut input = bytes::BytesMut::new();
+        let mut buffer = [0u8; 4096];
+        loop {
+            while let Some(Message::Request(request)) =
+                wire_rtsp::parse(&mut input, 64 * 1024, 1024 * 1024).unwrap()
+            {
+                requests.lock().await.push(request.clone());
+                let reply = handler.lock().await(&request);
+                match reply {
+                    ServerReply::Response(response) => {
+                        stream
+                            .write_all(&wire_rtsp::encode_response(&response))
+                            .await?;
+                    }
+                    ServerReply::ResponseThenClose(response) => {
+                        stream
+                            .write_all(&wire_rtsp::encode_response(&response))
+                            .await?;
+                        return Ok(());
+                    }
+                    ServerReply::Raw(bytes) => {
+                        stream.write_all(&bytes).await?;
+                    }
+                    ServerReply::Close => return Ok(()),
+                }
+            }
+            let count = stream.read(&mut buffer).await?;
+            if count == 0 {
+                return Ok(());
+            }
+            input.extend_from_slice(&buffer[..count]);
+        }
+    }
+
+    pub fn address(&self) -> std::net::SocketAddr {
+        self.address
+    }
+
+    pub fn url(&self, path: &str) -> url::Url {
+        url::Url::parse(&format!("rtsp://{}{path}", self.address)).unwrap()
+    }
+
+    pub async fn requests(&self) -> Vec<wire_rtsp::Request> {
+        self.requests.lock().await.clone()
+    }
+
+    pub async fn method_counts(&self) -> std::collections::BTreeMap<String, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        for request in self.requests.lock().await.iter() {
+            *counts
+                .entry(request.method.as_str().to_owned())
+                .or_insert(0) += 1;
+        }
+        counts
+    }
+}
+
+impl Drop for RawRtspServer {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+    }
+}
+
+/// A response that echoes the request CSeq (required for client pairing).
+pub fn reply(request: &wire_rtsp::Request, status: u16, reason: &str) -> Response {
+    let mut headers = std::collections::BTreeMap::new();
+    if let Some(cseq) = request.headers.get("cseq") {
+        headers.insert("cseq".to_owned(), cseq.clone());
+    }
+    Response {
+        status,
+        reason: reason.to_owned(),
+        headers,
+        body: Vec::new(),
+    }
+}
+
+pub fn with_header(mut response: Response, name: &str, value: &str) -> Response {
+    response.headers.insert(name.to_owned(), value.to_owned());
+    response
+}
+
+/// A DESCRIBE response whose body is the SDP encoding of `description`.
+pub fn describe_reply(request: &wire_rtsp::Request, description: &MediaDescription) -> Response {
+    let body = rtflow::protocol::sdp::encode(description).into_bytes();
+    let response = with_header(reply(request, 200, "OK"), "content-type", "application/sdp");
+    Response { body, ..response }
 }

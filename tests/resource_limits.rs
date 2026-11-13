@@ -121,27 +121,22 @@ async fn per_session_byte_budget_drops_oversized_access_units() {
 
 #[tokio::test]
 async fn invalid_client_options_are_checked_before_network_io() {
-    let url = url::Url::parse("rtsp://127.0.0.1:9/missing").unwrap();
+    // The builder validates at build() time, so degenerate options never
+    // even reach RtspClient (which re-validates defensively).
     assert!(matches!(
-        RtspClient::describe(
-            url.clone(),
-            ClientOptions {
-                output_queue_capacity: 0,
-                ..Default::default()
-            },
-        )
-        .await,
+        ClientOptions::builder().output_queue_capacity(0).build(),
         Err(Error::Limit("client output queue capacity"))
     ));
     assert!(matches!(
-        RtspClient::describe(
-            url,
-            ClientOptions {
-                keep_alive_interval: Some(Duration::ZERO),
-                ..Default::default()
-            },
-        )
-        .await,
+        ClientOptions::builder()
+            .keep_alive_interval(Some(Duration::ZERO))
+            .build(),
         Err(Error::Limit("client keep-alive interval"))
+    ));
+    assert!(matches!(
+        ClientOptions::builder()
+            .request_timeout(Duration::ZERO)
+            .build(),
+        Err(Error::Limit("client request timeout"))
     ));
 }

@@ -68,10 +68,10 @@ async fn udp_record_is_forwarded_to_tcp_player() {
     let base = format!("rtsp://{}/published", server.local_addr());
     let mut player = RtspClient::connect(
         url::Url::parse(&base).unwrap(),
-        ClientOptions {
-            transport: UpstreamTransport::TcpInterleaved,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();

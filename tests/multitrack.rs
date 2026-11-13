@@ -56,10 +56,10 @@ async fn run(transport: UpstreamTransport) {
         .await
         .unwrap();
     let publisher = mount.publisher().unwrap();
-    let options = ClientOptions {
-        transport,
-        ..Default::default()
-    };
+    let options = ClientOptions::builder()
+        .transport(transport)
+        .build()
+        .unwrap();
     let mut client = RtspClient::connect(
         url::Url::parse(&format!("rtsp://{}/av", server.local_addr())).unwrap(),
         options,

@@ -73,10 +73,10 @@ async fn credentials_protect_describe_setup_and_play() {
     assert!(matches!(unauthorized, Err(rtflow::Error::Unauthorized)));
     let mut session = RtspClient::connect(
         url,
-        ClientOptions {
-            credentials: Some(credentials),
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .credentials(credentials)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();

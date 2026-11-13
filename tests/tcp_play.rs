@@ -36,10 +36,10 @@ async fn local_h264_frame_reaches_interleaved_client() {
         .unwrap();
     let publisher = mount.publisher().unwrap();
     let url = url::Url::parse(&format!("rtsp://{}/stream", server.local_addr())).unwrap();
-    let options = ClientOptions {
-        transport: UpstreamTransport::TcpInterleaved,
-        ..Default::default()
-    };
+    let options = ClientOptions::builder()
+        .transport(UpstreamTransport::TcpInterleaved)
+        .build()
+        .unwrap();
     let mut client = RtspClient::connect(url, options).await.unwrap();
     client.pause().await.unwrap();
     assert!(!client.is_playing());

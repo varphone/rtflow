@@ -76,20 +76,20 @@ async fn udp_port_range_exhaustion_fails_the_second_setup() {
     let url = url::Url::parse(&format!("rtsp://{}/ports", server.local_addr())).unwrap();
     let first = RtspClient::connect(
         url.clone(),
-        ClientOptions {
-            transport: UpstreamTransport::Udp,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(UpstreamTransport::Udp)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();
     assert!(
         RtspClient::connect(
             url,
-            ClientOptions {
-                transport: UpstreamTransport::Udp,
-                ..Default::default()
-            }
+            ClientOptions::builder()
+                .transport(UpstreamTransport::Udp)
+                .build()
+                .unwrap()
         )
         .await
         .is_err(),

@@ -67,11 +67,11 @@ async fn vfr_frames_are_delivered_losslessly_with_linear_timestamps() {
 
     let mut client = RtspClient::connect(
         Url::parse(&format!("rtsp://{}/vfr", server.local_addr())).unwrap(),
-        ClientOptions {
-            transport: UpstreamTransport::TcpInterleaved,
-            keep_alive_interval: None,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .keep_alive_interval(None)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -148,11 +148,11 @@ async fn vfr_startup_snapshot_replays_at_pts_spacing() {
     // Warm subscriber so the startup cache fills; feed it one keyframe.
     let mut warm = RtspClient::connect(
         Url::parse(&format!("rtsp://{}/vfr2", server.local_addr())).unwrap(),
-        ClientOptions {
-            transport: UpstreamTransport::TcpInterleaved,
-            keep_alive_interval: None,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .keep_alive_interval(None)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();
@@ -174,11 +174,11 @@ async fn vfr_startup_snapshot_replays_at_pts_spacing() {
     // while we keep pushing.
     let mut client = RtspClient::connect(
         Url::parse(&format!("rtsp://{}/vfr2", server.local_addr())).unwrap(),
-        ClientOptions {
-            transport: UpstreamTransport::TcpInterleaved,
-            keep_alive_interval: None,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .keep_alive_interval(None)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();

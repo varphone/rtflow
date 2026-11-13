@@ -49,16 +49,16 @@ async fn mixed_transport_fanout_stays_bounded_under_burst() {
         clients.push(
             RtspClient::connect(
                 url.clone(),
-                ClientOptions {
-                    transport: if index % 2 == 0 {
+                ClientOptions::builder()
+                    .transport(if index % 2 == 0 {
                         UpstreamTransport::Udp
                     } else {
                         UpstreamTransport::TcpInterleaved
-                    },
-                    output_queue_capacity: 128,
-                    keep_alive_interval: None,
-                    ..Default::default()
-                },
+                    })
+                    .output_queue_capacity(128)
+                    .keep_alive_interval(None)
+                    .build()
+                    .unwrap(),
             )
             .await
             .unwrap(),

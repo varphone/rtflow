@@ -48,11 +48,11 @@ async fn run(transport: UpstreamTransport) {
     let publisher = mount.publisher().unwrap();
     let mut client = RtspClient::connect(
         url::Url::parse(&format!("rtsp://{}/live/camera", server.local_addr())).unwrap(),
-        ClientOptions {
-            transport,
-            keep_alive_interval: Some(Duration::from_millis(50)),
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(transport)
+            .keep_alive_interval(Some(Duration::from_millis(50)))
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();

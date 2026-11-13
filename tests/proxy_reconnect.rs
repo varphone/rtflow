@@ -60,10 +60,10 @@ async fn proxy_recovers_when_upstream_appears_after_backoff() {
         .unwrap();
     let mut client = RtspClient::connect(
         url::Url::parse(&format!("rtsp://{}/proxy", proxy.local_addr())).unwrap(),
-        ClientOptions {
-            transport: UpstreamTransport::TcpInterleaved,
-            ..Default::default()
-        },
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .build()
+            .unwrap(),
     )
     .await
     .unwrap();

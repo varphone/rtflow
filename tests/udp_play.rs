@@ -1,34 +1,17 @@
+mod support;
+
 use bytes::Bytes;
 use rtflow::client::{ClientOptions, RtspClient};
-use rtflow::{
-    AccessUnit, Codec, MediaDescription, MediaKind, MountConfig, RtspServer, ServerConfig,
-    TrackDescription,
-};
-use std::{sync::Arc, time::Duration};
+use rtflow::{AccessUnit, Codec, MountConfig, RtspServer, ServerConfig};
+use std::sync::Arc;
+use std::time::Duration;
 
 #[tokio::test]
 async fn local_h264_frame_reaches_udp_client() {
     let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
         .await
         .unwrap();
-    let description = MediaDescription {
-        session_name: Arc::from("test"),
-        tracks: vec![TrackDescription {
-            id: 0,
-            kind: MediaKind::Video,
-            codec: Codec::H264,
-            clock_rate: 90_000,
-            channels: None,
-            payload_type: 96,
-            fmtp: None,
-            control: Arc::from("trackID=0"),
-            crypto: None,
-            width: None,
-            height: None,
-            frame_rate: None,
-        }],
-        connection: None,
-    };
+    let description = support::description("test", &[Codec::H264]);
     let mount = server
         .register_mount(Arc::from("/stream"), MountConfig::Local { description })
         .await
