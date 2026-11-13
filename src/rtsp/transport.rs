@@ -27,6 +27,12 @@ pub enum TransportSpec {
         /// RTCP is multiplexed on the RTP interleaved channel.
         rtcp_mux: bool,
     },
+    /// Server-published multicast group (`RTP/AVP;multicast`).
+    Multicast {
+        destination: Option<IpAddr>,
+        port: Option<u16>,
+        ttl: Option<u8>,
+    },
 }
 impl TransportSpec {
     pub fn parse(value: &str) -> Result<Self> {
@@ -59,6 +65,7 @@ impl TransportSpec {
             .ok_or_else(|| Error::Rtsp("empty Transport".into()))?;
         let mut parameters = std::collections::BTreeMap::new();
         let mut unicast = false;
+        let mut multicast = false;
         let mut rtcp_mux = false;
         for part in parts {
             if part.eq_ignore_ascii_case("rtcp-mux") {
@@ -76,7 +83,13 @@ impl TransportSpec {
                 continue;
             }
             if part.eq_ignore_ascii_case("multicast") {
-                return Err(Error::Rtsp("multicast Transport is unsupported".into()));
+                if multicast {
+                    return Err(Error::Rtsp(
+                        "duplicate multicast Transport parameter".into(),
+                    ));
+                }
+                multicast = true;
+                continue;
             }
             let (name, value) = part
                 .split_once('=')
@@ -88,6 +101,42 @@ impl TransportSpec {
                     "duplicate or malformed Transport parameter".into(),
                 ));
             }
+        }
+        if multicast {
+            if unicast {
+                return Err(Error::Rtsp(
+                    "Transport cannot be both unicast and multicast".into(),
+                ));
+            }
+            let destination = parameters
+                .get("destination")
+                .map(|value| {
+                    value
+                        .parse::<IpAddr>()
+                        .map_err(|_| Error::Rtsp("invalid multicast destination".into()))
+                })
+                .transpose()?;
+            let port = parameters
+                .get("port")
+                .map(|value| {
+                    value
+                        .parse::<u16>()
+                        .map_err(|_| Error::Rtsp("invalid multicast port".into()))
+                })
+                .transpose()?;
+            let ttl = parameters
+                .get("ttl")
+                .map(|value| {
+                    value
+                        .parse::<u8>()
+                        .map_err(|_| Error::Rtsp("invalid multicast TTL".into()))
+                })
+                .transpose()?;
+            return Ok(Self::Multicast {
+                destination,
+                port,
+                ttl,
+            });
         }
         if !unicast {
             return Err(Error::Rtsp("only unicast Transport is supported".into()));
@@ -170,6 +219,23 @@ impl TransportSpec {
                 } else {
                     format!("RTP/AVP/TCP;unicast;interleaved={rtp_channel}-{rtcp_channel}")
                 }
+            }
+            Self::Multicast {
+                destination,
+                port,
+                ttl,
+            } => {
+                let mut rendered = String::from("RTP/AVP;multicast");
+                if let Some(destination) = destination {
+                    rendered.push_str(&format!(";destination={destination}"));
+                }
+                if let Some(port) = port {
+                    rendered.push_str(&format!(";port={port}"));
+                }
+                if let Some(ttl) = ttl {
+                    rendered.push_str(&format!(";ttl={ttl}"));
+                }
+                rendered
             }
         }
     }
@@ -329,6 +395,25 @@ impl UdpPair {
             rtp: socket.clone(),
             rtcp: socket,
         })
+    }
+    /// Set the IPv4 multicast TTL on both sockets (sender side).
+    #[cfg(feature = "multicast")]
+    pub fn set_multicast_ttl(&self, ttl: u8) -> Result<()> {
+        let ttl = u32::from(ttl);
+        socket2::SockRef::from(&*self.rtp)
+            .set_multicast_ttl_v4(ttl)
+            .map_err(Error::Io)?;
+        socket2::SockRef::from(&*self.rtcp)
+            .set_multicast_ttl_v4(ttl)
+            .map_err(Error::Io)?;
+        Ok(())
+    }
+    /// Build a pair from already-bound sockets (multicast joins).
+    pub fn from_sockets(rtp: UdpSocket, rtcp: UdpSocket) -> Self {
+        Self {
+            rtp: Arc::new(rtp),
+            rtcp: Arc::new(rtcp),
+        }
     }
     pub fn rtp_port(&self) -> Result<u16> {
         Ok(self.rtp.local_addr()?.port())

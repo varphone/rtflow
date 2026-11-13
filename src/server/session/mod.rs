@@ -116,6 +116,7 @@ pub(super) async fn serve_connection(
     )> = Vec::new();
     let mut resources = ConnectionResources::default();
     let mut interleaved: Vec<(Arc<Mount>, u8, u8, crate::media::TrackDescription)> = Vec::new();
+    let mut multicast_tracks: Vec<(Arc<Mount>, crate::media::TrackDescription)> = Vec::new();
     let session_id = new_session_token();
     let mut phase = ConnectionPhase::Init;
     let mut has_announced = false;
@@ -194,6 +195,7 @@ pub(super) async fn serve_connection(
                     &mut setups,
                     &mut interleaved,
                     &mut selected_mount,
+                    &mut multicast_tracks,
                     &mut phase,
                 )
                 .await?;
@@ -206,6 +208,7 @@ pub(super) async fn serve_connection(
                     cseq.clone(),
                     &setups,
                     &interleaved,
+                    &multicast_tracks,
                     &mut resources,
                     &mut rtp_sequences,
                     &mut vod_cursor,

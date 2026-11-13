@@ -19,6 +19,7 @@ pub(super) async fn handle_setup(
     )>,
     interleaved: &mut Vec<(Arc<Mount>, u8, u8, TrackDescription)>,
     selected_mount: &mut Option<String>,
+    multicast_tracks: &mut Vec<(Arc<Mount>, TrackDescription)>,
     phase: &mut ConnectionPhase,
 ) -> Result<()> {
     if setups.len() + interleaved.len() >= state.config.resource_limits.max_tracks_per_session {
@@ -93,7 +94,7 @@ pub(super) async fn handle_setup(
                         })
                 }
             }
-            TransportSpec::Udp { .. } => true,
+            TransportSpec::Udp { .. } | TransportSpec::Multicast { .. } => true,
         })
     });
     let Some(transport) = transport else {
@@ -108,6 +109,75 @@ pub(super) async fn handle_setup(
             .await?;
         return Ok(());
     };
+    if matches!(transport, TransportSpec::Multicast { .. }) {
+        #[cfg(feature = "multicast")]
+        {
+            let connection = description_for(&mount.config)?.connection;
+            let Some(connection) =
+                connection.filter(|connection| connection.address.is_multicast())
+            else {
+                writer
+                    .lock()
+                    .await
+                    .write_all(&rtsp::encode_response(&simple_response(
+                        461,
+                        "Unsupported Transport",
+                        cseq,
+                    )))
+                    .await?;
+                return Ok(());
+            };
+            let Ok(track) = track_for_uri(&description_for(&mount.config)?, &req.uri) else {
+                writer
+                    .lock()
+                    .await
+                    .write_all(&rtsp::encode_response(&simple_response(
+                        404,
+                        "Not Found",
+                        cseq,
+                    )))
+                    .await?;
+                return Ok(());
+            };
+            let port = connection.port.unwrap_or(5004);
+            let mut response = simple_response(200, "OK", cseq);
+            response.headers.insert(
+                "session".into(),
+                session_header(session_id, state.config.session_timeout),
+            );
+            response.headers.insert(
+                "transport".into(),
+                TransportSpec::Multicast {
+                    destination: Some(connection.address),
+                    port: Some(port),
+                    ttl: connection.ttl,
+                }
+                .render(),
+            );
+            multicast_tracks.push((mount.clone(), track));
+            selected_mount.get_or_insert(path.clone());
+            *phase = ConnectionPhase::Ready;
+            writer
+                .lock()
+                .await
+                .write_all(&rtsp::encode_response(&response))
+                .await?;
+            return Ok(());
+        }
+        #[cfg(not(feature = "multicast"))]
+        {
+            writer
+                .lock()
+                .await
+                .write_all(&rtsp::encode_response(&simple_response(
+                    461,
+                    "Unsupported Transport",
+                    cseq,
+                )))
+                .await?;
+            return Ok(());
+        }
+    }
     if let TransportSpec::TcpInterleaved {
         rtp_channel,
         rtcp_channel,

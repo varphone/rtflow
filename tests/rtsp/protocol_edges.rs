@@ -193,3 +193,96 @@ async fn set_parameter_public_and_scale_semantics() {
     .await;
     assert_eq!(play.status, 551);
 }
+
+#[cfg(feature = "multicast")]
+#[tokio::test]
+async fn multicast_setup_advertises_group_and_plays() {
+    use rtflow::rtsp::sdp::SdpConnection;
+
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let mut media = description("multicast", &[Codec::H264]);
+    media.connection = Some(SdpConnection {
+        addr_type: "IP4".into(),
+        address: "239.255.0.1".parse().unwrap(),
+        ttl: Some(1),
+        port: Some(5004),
+    });
+    server
+        .register_mount(Arc::from("/mc"), MountConfig::Local { description: media })
+        .await
+        .unwrap();
+    let base = format!("rtsp://{}/mc", server.local_addr());
+    let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+    let describe = request(
+        &mut stream,
+        &format!("DESCRIBE {base} RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(describe.status, 200);
+    let body = String::from_utf8(describe.body.clone()).unwrap();
+    assert!(body.contains("c=IN IP4 239.255.0.1/1"), "{body}");
+    assert!(body.contains("m=video 5004"), "{body}");
+
+    let description = sdp::parse(&describe.body).unwrap();
+    let control = sdp::control_uri(&base, &description.tracks[0].control).unwrap();
+    let setup = request(
+        &mut stream,
+        &format!("SETUP {control} RTSP/1.0\r\nCSeq: 2\r\nTransport: RTP/AVP;multicast\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(setup.status, 200, "{:?}", setup.headers);
+    let transport = setup.headers.get("transport").unwrap();
+    assert!(transport.contains("multicast"), "{transport}");
+    assert!(transport.contains("destination=239.255.0.1"), "{transport}");
+    assert!(transport.contains("port=5004"), "{transport}");
+    let session = setup.headers.get("session").unwrap().clone();
+    let play = request(
+        &mut stream,
+        &format!("PLAY {base} RTSP/1.0\r\nCSeq: 3\r\nSession: {session}\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(play.status, 200, "{:?}", play.headers);
+    server.shutdown().await.unwrap();
+}
+
+#[cfg(feature = "multicast")]
+#[tokio::test]
+async fn multicast_client_receives_group_media() {
+    use rtflow::{
+        client::{ClientOptions, RtspClient},
+        rtsp::sdp::SdpConnection,
+    };
+
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let mut media = description("multicast", &[Codec::H264]);
+    media.connection = Some(SdpConnection {
+        addr_type: "IP4".into(),
+        address: "239.255.0.7".parse().unwrap(),
+        ttl: Some(1),
+        port: Some(15004),
+    });
+    let mount = server
+        .register_mount(Arc::from("/mc"), MountConfig::Local { description: media })
+        .await
+        .unwrap();
+    let publisher = mount.publisher().unwrap();
+    let url = format!("rtsp://{}/mc", server.local_addr());
+    let mut client = RtspClient::connect_str(&url, ClientOptions::default())
+        .await
+        .expect("multicast connect");
+    publisher
+        .try_push(rtflow_testkit::unit(0, Codec::H264, 1))
+        .unwrap();
+    let unit = tokio::time::timeout(Duration::from_secs(2), client.next())
+        .await
+        .expect("multicast frame timeout")
+        .expect("multicast stream ended")
+        .expect("multicast media error");
+    assert_eq!(unit.codec, Codec::H264);
+    client.teardown().await.unwrap();
+    server.shutdown().await.unwrap();
+}

@@ -101,6 +101,15 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
             let Some(&payload_type) = payloads.first() else {
                 continue;
             };
+            #[cfg(feature = "multicast")]
+            if let Some(connection) = connection.as_mut()
+                && connection.address.is_multicast()
+                && connection.port.is_none()
+                && let Ok(port) = fields[1].parse::<u16>()
+                && port > 0
+            {
+                connection.port = Some(port);
+            }
             payload_candidates = payloads.into_iter().collect();
             let (codec, clock_rate, channels) = match (kind, payload_type) {
                 (MediaKind::Audio, 0) => (Codec::Pcmu, 8_000, Some(1)),
@@ -276,6 +285,7 @@ fn parse_connection(value: &str) -> Result<SdpConnection> {
         addr_type,
         address,
         ttl,
+        port: None,
     })
 }
 
@@ -370,8 +380,17 @@ pub fn encode_with(
             Codec::G726_32 => "G726-32",
             Codec::G726_40 => "G726-40",
         };
+        #[cfg(feature = "multicast")]
+        let media_port = description
+            .connection
+            .as_ref()
+            .filter(|connection| connection.address.is_multicast())
+            .and_then(|connection| connection.port)
+            .unwrap_or(0);
+        #[cfg(not(feature = "multicast"))]
+        let media_port = 0;
         output.push_str(&format!(
-            "m={media} 0 RTP/AVP {}\r\na=rtpmap:{} {codec}/{}{}\r\n",
+            "m={media} {media_port} RTP/AVP {}\r\na=rtpmap:{} {codec}/{}{}\r\n",
             track.payload_type,
             track.payload_type,
             track.clock_rate,

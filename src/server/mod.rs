@@ -4,6 +4,7 @@ mod tasks;
 #[cfg(feature = "file-storage")]
 mod vod_runtime;
 use session::serve_connection;
+use tasks::{SenderInput, spawn_udp_sender_from};
 
 // Re-export mount types for backward compatibility (deprecated in 0.3).
 #[deprecated(
@@ -38,7 +39,7 @@ use std::{
     ops::RangeInclusive,
     sync::{
         Arc, Mutex, Weak,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU16, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -389,6 +390,20 @@ impl RtspServer {
                 id: MountId::from(path.clone()),
             }),
         );
+        #[cfg(feature = "multicast")]
+        if let Some(connection) = &description.connection
+            && connection.address.is_multicast()
+        {
+            spawn_multicast_senders(
+                mount.clone(),
+                &description,
+                connection.address,
+                connection.port.unwrap_or(5004),
+                connection.ttl.unwrap_or(1),
+                self.state.config.udp_recv_buffer,
+            )
+            .await;
+        }
         Ok(MountHandle {
             path,
             description,
@@ -452,6 +467,52 @@ impl Drop for RtspServer {
                     .await;
             });
         }
+    }
+}
+
+#[cfg(feature = "multicast")]
+async fn spawn_multicast_senders(
+    mount: Arc<Mount>,
+    description: &crate::media::MediaDescription,
+    group: IpAddr,
+    port: u16,
+    ttl: u8,
+    recv_buffer: usize,
+) {
+    for track in &description.tracks {
+        let (receiver, startup) = mount.subscribe_with_startup(track.id);
+        let bind_ip = match group {
+            IpAddr::V4(_) => IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+            IpAddr::V6(_) => IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+        };
+        let pair = match crate::transport::UdpPair::bind_with_recv_buffer(
+            bind_ip,
+            None,
+            recv_buffer,
+        )
+        .await
+        {
+            Ok(pair) => pair,
+            Err(error) => {
+                tracing::warn!(%error, "multicast sender bind failed");
+                continue;
+            }
+        };
+        if let Err(error) = pair.set_multicast_ttl(ttl) {
+            tracing::warn!(%error, "multicast TTL setup failed");
+        }
+        spawn_udp_sender_from(
+            mount.clone(),
+            SenderInput {
+                receiver,
+                startup,
+                sequence: Arc::new(AtomicU16::new(0)),
+            },
+            pair,
+            SocketAddr::new(group, port),
+            SocketAddr::new(group, port.saturating_add(1)),
+            track.clone(),
+        );
     }
 }
 

@@ -10,4 +10,6 @@ pub struct SdpConnection {
     pub addr_type: String,
     pub address: IpAddr,
     pub ttl: Option<u8>,
+    /// RTP port advertised by the SDP `m=` line (multicast).
+    pub port: Option<u16>,
 }

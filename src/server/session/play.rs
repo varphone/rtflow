@@ -17,6 +17,7 @@ pub(super) async fn handle_play(
         TrackDescription,
     )],
     interleaved: &[(Arc<Mount>, u8, u8, TrackDescription)],
+    multicast_tracks: &[(Arc<Mount>, TrackDescription)],
     resources: &mut ConnectionResources,
     rtp_sequences: &mut HashMap<u8, Arc<AtomicU16>>,
     vod_cursor: &mut std::time::Duration,
@@ -130,7 +131,7 @@ pub(super) async fn handle_play(
             live_udp_inputs.push(input);
         }
     }
-    if interleaved.is_empty() && setups.is_empty() {
+    if interleaved.is_empty() && setups.is_empty() && multicast_tracks.is_empty() {
         writer
             .lock()
             .await
@@ -146,7 +147,8 @@ pub(super) async fn handle_play(
             interleaved
                 .iter()
                 .map(|(mount, _, _, _)| mount)
-                .chain(setups.iter().map(|(mount, _, _, _, _)| mount)),
+                .chain(setups.iter().map(|(mount, _, _, _, _)| mount))
+                .chain(multicast_tracks.iter().map(|(mount, _)| mount)),
         );
         let mut response = simple_response(200, "OK", cseq);
         response.headers.insert(
