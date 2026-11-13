@@ -19,8 +19,9 @@
 - feature 语义修正：`dash` 依赖 `hls`、`webrtc` 依赖 `http`、`hmac`
   改为非可选依赖；19 个 feature 均可独立构建。
 - 大文件拆分：`mount`、`metrics`、`client`、`rtp::payload`、`hls::segmenter`、
-  `http_flv::mux`、`rtmp::session`、`server::{session,mod}`、`file::mpeg_ts`、
-  `storage::recording` 均拆为子模块；`src/` 内不再有 >800 行文件。
+  `http_flv::mux`、`rtmp::session`、`server::{session,mod,tasks}`、`pipeline`、
+  `srt`、`rtsp::auth`、`file::{mpeg_ts,raw}`、`storage::recording` 均拆为子模块；
+  所有 `src/*.rs` 均 ≤600 行（最大 587），SETUP/PLAY/ANNOUNCE 已从连接循环抽取。
 - 测试与示例分组：`tests/<area>/main.rs`（8 个测试二进制）、
   `examples/{server,client,protocols,gateway,embedded}/` + 显式 `[[example]]`；
   共享线束迁移到不发布的 `support/rtflow-testkit`。
