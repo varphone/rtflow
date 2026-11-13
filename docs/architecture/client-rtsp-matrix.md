@@ -53,7 +53,8 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 
 ## Known gaps / next increments
 
-1. Publisher RTCP RR reception (SR is sent; server RR/feedback is not consumed).
+1. Publisher RTCP RR reception (SR is sent and covered by a wire-level
+   test; server RR/feedback is not consumed).
 2. Automatic reconnect after `REDIRECT` (currently the application receives the location).
 3. `551 Unsupported` token-level reporting (status is surfaced, tokens are not split out).
 4. Byte-bounded output queue (currently frame-count bounded; a small number of
