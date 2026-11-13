@@ -430,6 +430,7 @@ impl RtspServer {
                 connection.port.unwrap_or(5004),
                 connection.ttl.unwrap_or(1),
                 self.state.config.udp_recv_buffer,
+                self.state.config.rtcp_report_interval,
             )
             .await;
         }
@@ -504,6 +505,7 @@ async fn spawn_multicast_senders(
     port: u16,
     ttl: u8,
     recv_buffer: usize,
+    report_interval: std::time::Duration,
 ) {
     for track in &description.tracks {
         let (receiver, startup) = mount.subscribe_with_startup(track.id);
@@ -540,6 +542,7 @@ async fn spawn_multicast_senders(
             SocketAddr::new(group, port.saturating_add(1)),
             track.clone(),
             None,
+            report_interval,
         );
     }
 }

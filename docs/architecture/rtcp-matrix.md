@@ -28,7 +28,8 @@ Scope: RFC 3550 RTCP plus RFC 4585/5104/5506 feedback in `src/rtcp/`.
 
 - Reception: packet/expected/lost, EHSN, interarrival jitter, LSR/DLSR, RTT.
 - `RtcpSession` emits scheduled RR + SDES CNAME; `FeedbackSnapshot` counts
-  NACK entries, PLI, FIR, APP and records the latest REMB bitrate.
+  NACK entries, PLI, FIR, APP and records the latest REMB bitrate. Server
+  sender reports use `ServerConfig::rtcp_report_interval` (default 5 s).
 - Publisher emits periodic SR (+SDES) over UDP/interleaved; SRTP uses SRTCP.
 
 ## Optional / application-level follow-ups

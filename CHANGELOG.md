@@ -102,6 +102,7 @@
 - Proxy 上游重试抖动改为每次独立随机采样，避免多个 proxy mount 同步重连。
 - `MountHandle.path` 改为 `MountId`，`path()` 仍返回 `&str`；RTMP/HLS/HTTP 边界显式转换。
 - `MountRegistry::snapshots` 返回 `MountId`，metrics 只在展示边界转字符串。
+- `ServerConfig::rtcp_report_interval` 可配置（默认 5s），UDP/interleaved/组播发送端统一使用；0 值在 validate 拒绝。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

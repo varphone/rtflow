@@ -245,6 +245,7 @@ pub(super) async fn handle_play(
                     track,
                     writer.clone(),
                     timeline_ntp_anchor,
+                    state.config.rtcp_report_interval,
                 )
             } else {
                 let mut input = live_interleaved_inputs.remove(0);
@@ -257,6 +258,7 @@ pub(super) async fn handle_play(
                     track,
                     writer.clone(),
                     timeline_ntp_anchor,
+                    state.config.rtcp_report_interval,
                 )
             });
             start_proxy_if_idle(
@@ -285,6 +287,7 @@ pub(super) async fn handle_play(
                     rtcp_target,
                     track,
                     None,
+                    state.config.rtcp_report_interval,
                 )
             } else {
                 let mut input = live_udp_inputs.remove(0);
@@ -297,6 +300,7 @@ pub(super) async fn handle_play(
                     rtcp_target,
                     track,
                     timeline_ntp_anchor,
+                    state.config.rtcp_report_interval,
                 )
             });
             start_proxy_if_idle(

@@ -1,6 +1,7 @@
 use super::*;
 use crate::server::timed_writer::TimedWriter;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_interleaved_sender_from(
     mount: Arc<Mount>,
     input: SenderInput,
@@ -9,6 +10,7 @@ pub(crate) fn spawn_interleaved_sender_from(
     track: TrackDescription,
     writer: Arc<Mutex<TimedWriter>>,
     anchor_ntp: Option<u64>,
+    report_interval: std::time::Duration,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let SenderInput {
@@ -53,7 +55,7 @@ pub(crate) fn spawn_interleaved_sender_from(
         let mut sent_octets = 0u32;
         let mut last_rtp_timestamp = 0u32;
         let mut ntp_clock: Option<RtpNtpClock> = None;
-        let mut report_tick = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut report_tick = tokio::time::interval(report_interval);
         report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         report_tick.tick().await;
         let mount_cancel = mount.cancel_token();

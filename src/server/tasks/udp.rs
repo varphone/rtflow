@@ -38,6 +38,7 @@ impl Drop for PublisherLease {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_udp_sender_from(
     mount: Arc<Mount>,
     input: SenderInput,
@@ -46,6 +47,7 @@ pub(crate) fn spawn_udp_sender_from(
     rtcp_target: SocketAddr,
     track: TrackDescription,
     anchor_ntp: Option<u64>,
+    report_interval: std::time::Duration,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let SenderInput {
@@ -99,7 +101,7 @@ pub(crate) fn spawn_udp_sender_from(
         // Last sender report's NTP timestamp, for periodic receiver reports
         // (LSR reference).
         let last_sr_ntp: Option<u64> = None;
-        let mut report_tick = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut report_tick = tokio::time::interval(report_interval);
         report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         report_tick.tick().await;
         let mount_cancel = mount.cancel_token();

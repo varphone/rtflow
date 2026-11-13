@@ -18,6 +18,8 @@ pub struct ServerConfig {
     /// NPT origin for live PLAY responses.
     pub timeline: TimelineMode,
     pub consumer_queue_capacity: usize,
+    /// Interval between RTCP sender/receiver reports on a playing session.
+    pub rtcp_report_interval: Duration,
     pub no_subscriber_grace: Duration,
     pub shutdown_grace: Duration,
     pub authenticator: Arc<dyn Authenticator>,
@@ -41,6 +43,7 @@ impl std::fmt::Debug for ServerConfig {
             .field("startup_cache", &self.startup_cache)
             .field("timeline", &self.timeline)
             .field("consumer_queue_capacity", &self.consumer_queue_capacity)
+            .field("rtcp_report_interval", &self.rtcp_report_interval)
             .field("no_subscriber_grace", &self.no_subscriber_grace)
             .field("shutdown_grace", &self.shutdown_grace)
             .field("authenticator", &"<authenticator>")
@@ -66,6 +69,7 @@ impl ServerConfig {
             startup_cache: StartupCacheConfig::default(),
             timeline: TimelineMode::Relative,
             consumer_queue_capacity: 256,
+            rtcp_report_interval: Duration::from_secs(5),
             no_subscriber_grace: Duration::from_secs(5),
             shutdown_grace: Duration::from_secs(5),
             authenticator: Arc::new(AllowAll),
@@ -129,6 +133,9 @@ impl ServerConfig {
         }
         if self.shutdown_grace == Duration::ZERO {
             return Err(ConfigError::Zero("shutdown grace"));
+        }
+        if self.rtcp_report_interval == Duration::ZERO {
+            return Err(ConfigError::Zero("RTCP report interval"));
         }
         if self
             .udp_port_range
