@@ -31,16 +31,17 @@ Scope: RFC 3550 RTCP plus RFC 4585/5104/5506 feedback in `src/rtcp/`.
   NACK entries, PLI, FIR, APP and records the latest REMB bitrate.
 - Publisher emits periodic SR (+SDES) over UDP/interleaved; SRTP uses SRTCP.
 
-## Known gaps
+## Optional / application-level follow-ups
 
-1. `RtcpInterval` implements a bandwidth/membership estimate with randomized
-   intervals and BYE construction; it is opt-in (the session default remains a
-   fixed interval).
-2. RTCP SSRC collision is detected (`RtcpSession::collision_detected`), but no
-   automatic SSRC switch/restart is performed.
-3. PLI/FIR/NACK are forwarded to local sources (`MountHandle::
-   request_keyframe`); an external publisher or retransmission cache cannot
-   currently act on NACK.
-4. RTCP XR has typed RRTR/DLRR helpers; VoIP metrics blocks remain opaque.
+The wire protocol is implemented; these are policy/application choices rather
+than missing packet types:
+
+1. `RtcpInterval` is opt-in (sessions default to a configured fixed interval).
+2. SSRC collision is detected, but automatic SSRC switch/restart is left to
+   the application.
+3. PLI/FIR/NACK request a keyframe from a local source; an external publisher
+   or a retransmission cache may implement NACK recovery itself.
+4. XR RRTR/DLRR have typed helpers; VoIP metrics blocks are exposed as opaque
+   XR payloads.
 5. Reduced-size RTCP is available via `CompoundPacket::new_reduced`; profile
    interoperability is not enforced.
