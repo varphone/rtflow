@@ -1,10 +1,8 @@
-mod common;
-
 use clap::Parser;
-use common::{CodecArg, init_tracing, mount_path, publisher_description};
 use rtflow::http::{HttpConfig, HttpServer, Method};
 use rtflow::http_flv::create_flv_handler;
 use rtflow::{MountConfig, RtspServer, ServerConfig};
+use rtflow_testkit::example::{CodecArg, init_tracing, mount_path, publisher_description};
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
 
 /// Accept RTSP publish and serve HTTP-FLV playback.

@@ -1,10 +1,8 @@
-mod common;
-
 use clap::Parser;
-use common::{CodecArg, init_tracing, mount_path, publisher_description};
 use rtflow::mount::MountRegistry;
 use rtflow::srt::SrtServer;
 use rtflow::{MountConfig, RtspServer, ServerConfig};
+use rtflow_testkit::example::{CodecArg, init_tracing, mount_path, publisher_description};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 /// SRT ingest server with RTSP cross-protocol playback.

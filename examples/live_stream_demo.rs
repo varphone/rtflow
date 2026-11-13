@@ -1,7 +1,6 @@
-mod common;
-
 use clap::Parser;
-use common::{
+use rtflow::{MountConfig, RtspServer, ServerConfig};
+use rtflow_testkit::example::{
     CodecArg, TransportArg, advertised_url, init_tracing,
     live_tools::{
         FfmpegLiveConfig, GstreamerPlayConfig, ManagedChild, VideoSize, require_ffmpeg,
@@ -9,7 +8,6 @@ use common::{
     },
     mount_path, publisher_description,
 };
-use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::{net::SocketAddr, num::NonZeroU64, path::PathBuf, time::Duration};
 use url::Url;
 

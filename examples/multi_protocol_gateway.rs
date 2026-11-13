@@ -1,7 +1,4 @@
-mod common;
-
 use clap::Parser;
-use common::{CodecArg, init_tracing, mount_path, publisher_description};
 use rtflow::dash::{DashConfig, create_dash_handlers};
 use rtflow::gateway::Gateway;
 use rtflow::hls::{HlsConfig, create_hls_handlers};
@@ -11,6 +8,7 @@ use rtflow::http_flv::create_flv_handler;
 use rtflow::token_auth::{TokenConfig, generate_token};
 use rtflow::webrtc::{WebRtcConfig, create_webrtc_handlers};
 use rtflow::{MountConfig, ServerConfig};
+use rtflow_testkit::example::{CodecArg, init_tracing, mount_path, publisher_description};
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 
 /// Multi-protocol streaming gateway.

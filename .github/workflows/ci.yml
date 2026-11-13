@@ -65,7 +65,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Test no default features
+      - name: Check no default features (lib only, no dev-deps)
+        run: cargo check --no-default-features --lib
+      - name: Unit tests without default features
         run: cargo test --no-default-features --lib
       - name: Test each feature individually
         run: |
@@ -97,13 +99,13 @@ jobs:
         run: sha256sum -c SHA256SUMS
       - name: GStreamer live interoperability
         run: |
-          cargo test --test gstreamer_interop -- --ignored --nocapture
-          cargo test --test gstreamer_codec_matrix -- --ignored --nocapture
-          cargo test --test live_tool_stream -- --ignored --nocapture
+          cargo test --test interop -- --ignored --nocapture gstreamer_interop
+          cargo test --test interop -- --ignored --nocapture gstreamer_codec_matrix
+          cargo test --test interop -- --ignored --nocapture live_tool_stream
       - name: FFmpeg publish interoperability
-        run: cargo test --test ffmpeg_publish_interop -- --ignored --nocapture
+        run: cargo test --test interop -- --ignored --nocapture ffmpeg_publish_interop
       - name: Generated file-format interoperability
-        run: cargo test --test file_stream -- --ignored --nocapture
+        run: cargo test --test storage -- --ignored --nocapture file_stream
 
   fuzz-smoke:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -129,7 +131,7 @@ jobs:
       - name: Session churn and fanout soak
         env:
           RTSP_SOAK_SECONDS: 300
-        run: cargo test --test soak -- --ignored --nocapture
+        run: cargo test --test system -- --ignored --nocapture soak
 
   package:
     runs-on: ubuntu-latest

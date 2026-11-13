@@ -1,8 +1,8 @@
-mod common;
-
 use clap::Parser;
-use common::{CodecArg, advertised_url, description, init_tracing, mount_path, sample_unit};
 use rtflow::{MountConfig, RtspServer, ServerConfig};
+use rtflow_testkit::example::{
+    CodecArg, advertised_url, description, init_tracing, mount_path, sample_unit,
+};
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
 
 /// Publish mock hardware-encoder access units into a local RTSP mount.

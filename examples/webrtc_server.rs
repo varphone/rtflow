@@ -1,8 +1,6 @@
-mod common;
-
 use clap::Parser;
-use common::{CodecArg, init_tracing, mount_path, publisher_description};
 use rtflow::http::{HttpConfig, HttpServer, Method};
+use rtflow_testkit::example::{CodecArg, init_tracing, mount_path, publisher_description};
 
 use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};

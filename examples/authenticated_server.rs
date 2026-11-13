@@ -1,11 +1,11 @@
-mod common;
-
 use clap::{Parser, ValueEnum};
-use common::{CodecArg, advertised_url, description, init_tracing, mount_path, sample_unit};
 use futures::future::BoxFuture;
 use rtflow::{
     AccessRole, AuthDecision, Authenticator, Credentials, MountConfig, RtspServer, ServerConfig,
     auth::{AuthRequest, DigestNonceManager, verify_basic, verify_digest_managed},
+};
+use rtflow_testkit::example::{
+    CodecArg, advertised_url, description, init_tracing, mount_path, sample_unit,
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 

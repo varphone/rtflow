@@ -1,11 +1,9 @@
-mod common;
-
 use clap::Parser;
-use common::{TransportArg, credentials, init_tracing};
 use rtflow::{
     AccessUnit, Codec,
     client::{ClientOptions, ClientReconnectPolicy, RtspClient},
 };
+use rtflow_testkit::example::{TransportArg, credentials, init_tracing};
 use std::{
     collections::{BTreeMap, btree_map::Entry},
     path::PathBuf,

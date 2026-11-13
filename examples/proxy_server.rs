@@ -1,10 +1,10 @@
-mod common;
-
 use clap::Parser;
-use common::{TransportArg, advertised_url, credentials, init_tracing, mount_path};
 use rtflow::{
     MountConfig, RtspServer, ServerConfig,
     proxy::{ReconnectPolicy, UpstreamConfig},
+};
+use rtflow_testkit::example::{
+    TransportArg, advertised_url, credentials, init_tracing, mount_path,
 };
 use std::{net::SocketAddr, time::Duration};
 

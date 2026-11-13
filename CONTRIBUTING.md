@@ -11,6 +11,7 @@
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --no-fail-fast
+cargo check --no-default-features --lib   # dev harness enables srtp/multicast (see below)
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 python3 scripts/check-layering.py --baseline scripts/layering-baseline.json
 python3 scripts/check-tree.py
@@ -18,6 +19,11 @@ python3 scripts/check-tree.py
 ```
 
 快速一键：`./scripts/release-check.sh`。
+
+> 说明：`rtflow-testkit` 是 dev-dependency，且 `MediaDescription` 等类型含
+> feature 门控字段，因此它的 `rtflow` 依赖固定启用 `srtp`/`multicast`（两者已在
+> 默认 `full` 中）。真正的 no-default 验证用 `cargo check --no-default-features --lib`
+> （该目标不构建 dev-dependencies）。
 
 ## 模块布局规则
 

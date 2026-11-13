@@ -1,11 +1,11 @@
-mod common;
-
 use clap::Parser;
-use common::{CodecArg, advertised_url, description, init_tracing, mount_path, sample_unit};
 use futures::future::BoxFuture;
 use rtflow::{
     LocalPublisher, MountConfig, RtspServer, ServerConfig,
     pipeline::{Element, ElementOutput, PipelineBuilder, PipelineState, QueueConfig},
+};
+use rtflow_testkit::example::{
+    CodecArg, advertised_url, description, init_tracing, mount_path, sample_unit,
 };
 use std::{future::ready, net::SocketAddr, sync::Arc, time::Duration};
 

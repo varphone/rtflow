@@ -173,11 +173,11 @@ cargo build --examples
 外部互操作测试显式标记为 ignored：
 
 ```bash
-cargo test --test gstreamer_interop -- --ignored --nocapture
-cargo test --test gstreamer_codec_matrix -- --ignored --nocapture
+cargo test --test interop -- --ignored --nocapture gstreamer_interop
+cargo test --test interop -- --ignored --nocapture gstreamer_codec_matrix
 cargo test --test ffmpeg_publish_interop -- --ignored --nocapture
 cargo test --test live_tool_stream -- --ignored --nocapture
-cargo test --test file_stream -- --ignored --nocapture
+cargo test --test storage -- --ignored --nocapture file_stream
 ```
 
 CI 的 `media-interop` 任务安装 FFmpeg 和 GStreamer 后强制执行这些测试，不会把缺少工具误报为通过。

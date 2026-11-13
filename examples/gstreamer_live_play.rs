@@ -1,7 +1,5 @@
-mod common;
-
 use clap::Parser;
-use common::{
+use rtflow_testkit::example::{
     TransportArg, init_tracing,
     live_tools::{GstreamerPlayConfig, ManagedChild, require_gstreamer},
 };

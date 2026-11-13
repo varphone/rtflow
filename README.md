@@ -156,9 +156,9 @@ cargo build --examples
 默认测试使用仓库内的确定性媒体夹具，不依赖 FFmpeg/GStreamer。真实互操作测试显式标记为 ignored，由 CI 的媒体任务强制运行：
 
 ```text
-cargo test --test gstreamer_interop -- --ignored --nocapture
-cargo test --test gstreamer_codec_matrix -- --ignored --nocapture
-cargo test --test ffmpeg_publish_interop -- --ignored --nocapture
-cargo test --test live_tool_stream -- --ignored --nocapture
-cargo test --test file_stream -- --ignored --nocapture
+cargo test --test interop -- --ignored --nocapture gstreamer_interop
+cargo test --test interop -- --ignored --nocapture gstreamer_codec_matrix
+cargo test --test interop -- --ignored --nocapture ffmpeg_publish_interop
+cargo test --test interop -- --ignored --nocapture live_tool_stream
+cargo test --test storage -- --ignored --nocapture file_stream
 ```

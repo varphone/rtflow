@@ -1,0 +1,21 @@
+[package]
+name = "rtflow-testkit"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Test and example harness for rtflow (dev-only, not published)"
+
+[dependencies]
+bytes = "1.10"
+clap = { version = "4.5", features = ["derive"] }
+# Base feature set only: the harness must not pull optional features into the
+# dependency graph (that would break `--no-default-features` verification).
+# `srtp`/`multicast` are needed because MediaDescription/TrackDescription carry
+# feature-gated fields; they are already part of the default `full` profile, so
+# normal dev builds are unaffected. True no-default verification uses
+# `cargo check --no-default-features --lib` (dev-deps are not built there).
+rtflow = { path = "..", default-features = false, features = ["srtp", "multicast"] }
+tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2.5"

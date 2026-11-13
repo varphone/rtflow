@@ -1,8 +1,6 @@
-mod common;
-
 use clap::Parser;
-use common::{advertised_url, init_tracing, mount_path};
 use rtflow::{FileSource, FileSourceOptions, LoopMode, MountConfig, RtspServer, ServerConfig};
+use rtflow_testkit::example::{advertised_url, init_tracing, mount_path};
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 /// Stream a supported media file through a shared RTSP timeline.

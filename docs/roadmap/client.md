@@ -7,7 +7,7 @@
 ## M0 — 测试地基
 
 - [x] `src/client/mod.rs`、`setup.rs` 纯函数单元测试（`jittered_backoff`、`should_fallback_to_tcp`、`encode_request`、`response_session_id`、`status_error`、CSeq 配对、选项/策略校验、`client_ssrc`）
-- [x] `tests/support/mod.rs` 新增 `RawRtspServer` 脚本化"坏服务器"线束（可编程状态码/原始字节/提前关闭，记录请求供断言）
+- [x] `tests/support/mod.rs`（现已迁至 `support/rtflow-testkit`）新增 `RawRtspServer` 脚本化"坏服务器"线束（可编程状态码/原始字节/提前关闭，记录请求供断言）
 - [x] `tests/client_edge.rs`：UDP 461→TCP 回退、过期 CSeq 跳过、401 无凭据/有凭据 Digest 重试、非 200 SETUP/PLAY、`rtsps://` 缺 TLS 配置、`describe()` 成功路径、`connect_reconnecting` max_attempts 耗尽契约、keep-alive 失败基线（R23）
 - [x] `tests/udp_play.rs` 手写 TrackDescription 改用 `support::description` helper
 
