@@ -2,8 +2,10 @@
 mod packet;
 mod stats;
 
-pub use packet::{CompoundPacket, Packet, ReportBlock, SdesChunk, SdesItem};
-pub use stats::{ReceptionSnapshot, ReceptionStats, RtcpSession, RttEstimator, ntp_middle_32};
+pub use packet::{CompoundPacket, NackEntry, Packet, ReportBlock, SdesChunk, SdesItem, XrBlock};
+pub use stats::{
+    FeedbackSnapshot, ReceptionSnapshot, ReceptionStats, RtcpSession, RttEstimator, ntp_middle_32,
+};
 
 #[cfg(test)]
 mod tests {
@@ -64,7 +66,7 @@ mod tests {
                 reason: Some("shutdown".into()),
             },
             Packet::Unknown {
-                packet_type: 204,
+                packet_type: 208,
                 count: 0,
                 payload: Bytes::from_static(&[1, 2, 3, 4]),
             },
@@ -168,5 +170,111 @@ mod tests {
         assert!(Packet::parse(Bytes::from_static(&[0x80, 200, 0, 1, 0, 0, 0, 0])).is_err());
         assert!(Packet::parse(Bytes::from_static(&[0x80, 201, 0, 2, 0, 0, 0, 1])).is_err());
         assert!(Packet::parse(Bytes::from_static(&[0xa0, 203, 0, 1, 0, 0, 0, 0])).is_err());
+    }
+    #[test]
+    fn app_feedback_and_xr_round_trip() {
+        let app = Packet::App {
+            subtype: 3,
+            name: *b"TEST",
+            data: Bytes::from_static(&[1, 2, 3, 4, 5, 6, 7, 8]),
+        };
+        let nack = Packet::nack(
+            7,
+            9,
+            &[
+                NackEntry {
+                    packet_id: 100,
+                    lost: 0b1010_0000_0000_0001,
+                },
+                NackEntry {
+                    packet_id: 200,
+                    lost: 0,
+                },
+            ],
+        )
+        .unwrap();
+        let pli = Packet::pli(7, 9);
+        let fir = Packet::fir(7, 9, 9, 4);
+        let remb = Packet::remb(7, 9, 1_500_000, &[9]).unwrap();
+        let xr = Packet::ExtendedReport {
+            ssrc: 7,
+            blocks: vec![
+                XrBlock {
+                    block_type: 4,
+                    data: Bytes::from_static(&[0, 0, 0, 1, 0, 0, 0, 2]),
+                },
+                XrBlock {
+                    block_type: 5,
+                    data: Bytes::from_static(&[3, 0, 0, 0]),
+                },
+            ],
+        };
+        let packets = vec![app, nack.clone(), pli, fir, remb, xr];
+        let mut wire = Vec::new();
+        for packet in &packets {
+            wire.extend_from_slice(&packet.try_encode().unwrap());
+        }
+        assert_eq!(Packet::parse(Bytes::from(wire)).unwrap(), packets);
+        assert_eq!(nack.nack_entries().unwrap().len(), 2);
+        assert_eq!(nack.nack_entries().unwrap()[0].packet_id, 100);
+    }
+
+    #[test]
+    fn malformed_feedback_app_and_xr_are_rejected() {
+        // RTPFB with a 2-byte body.
+        assert!(Packet::parse(Bytes::from_static(&[0x81, 205, 0, 0, 1, 2])).is_err());
+        // Truncated APP body (header claims 8 bytes, only 6 present).
+        assert!(Packet::parse(Bytes::from_static(&[0x80, 204, 0, 1, b'T', b'E'])).is_err());
+        // XR block length runs past the packet.
+        assert!(
+            Packet::parse(Bytes::from_static(&[
+                0x80, 207, 0, 3, 0, 0, 0, 1, 4, 0, 0, 4
+            ]))
+            .is_err()
+        );
+    }
+    #[test]
+    fn rtcp_feedback_counters_and_remb_decode() {
+        let now = Instant::now();
+        let mut session = RtcpSession::new(
+            7,
+            9,
+            90_000,
+            Bytes::from_static(b"client"),
+            Duration::from_secs(5),
+            now,
+        )
+        .unwrap();
+        session.on_rtcp(
+            &Packet::nack(
+                7,
+                9,
+                &[NackEntry {
+                    packet_id: 10,
+                    lost: 1,
+                }],
+            )
+            .unwrap(),
+            now,
+        );
+        session.on_rtcp(&Packet::pli(7, 9), now);
+        session.on_rtcp(&Packet::fir(7, 9, 9, 1), now);
+        let remb = Packet::remb(7, 9, 1_500_000, &[9]).unwrap();
+        assert_eq!(remb.remb_bitrate(), Some(1_500_000));
+        session.on_rtcp(&remb, now);
+        session.on_rtcp(
+            &Packet::App {
+                subtype: 1,
+                name: *b"TEST",
+                data: Bytes::new(),
+            },
+            now,
+        );
+        let feedback = session.feedback();
+        assert_eq!(feedback.nack_entries, 1);
+        assert_eq!(feedback.pli, 1);
+        assert_eq!(feedback.fir, 1);
+        assert_eq!(feedback.remb, Some(1_500_000));
+        assert_eq!(feedback.app, 1);
     }
 }

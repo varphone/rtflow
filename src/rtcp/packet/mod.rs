@@ -1,5 +1,8 @@
+mod feedback;
 use crate::{Error, Result};
 use bytes::{Buf, Bytes, BytesMut};
+pub use feedback::{NackEntry, XrBlock};
+use feedback::{feedback_body, parse_extended_report, parse_feedback};
 
 const MAX_REPORT_BLOCKS: usize = 31;
 const MIN_SIGNED_24: i32 = -8_388_608;
@@ -62,6 +65,31 @@ pub enum Packet {
     ByeSources {
         sources: Vec<u32>,
         reason: Option<String>,
+    },
+    /// RFC 3550 APP packet.
+    App {
+        subtype: u8,
+        name: [u8; 4],
+        data: Bytes,
+    },
+    /// RFC 4585 RTPFB (PT 205), e.g. NACK (FMT 1), TMMBR (FMT 3).
+    RtpFeedback {
+        fmt: u8,
+        sender_ssrc: u32,
+        media_ssrc: u32,
+        fci: Bytes,
+    },
+    /// RFC 4585 PSFB (PT 206): PLI (FMT 1), FIR (FMT 4), REMB (FMT 15).
+    PayloadFeedback {
+        fmt: u8,
+        sender_ssrc: u32,
+        media_ssrc: u32,
+        fci: Bytes,
+    },
+    /// RFC 3611 Extended Report (PT 207).
+    ExtendedReport {
+        ssrc: u32,
+        blocks: Vec<XrBlock>,
     },
     Unknown {
         packet_type: u8,
@@ -131,6 +159,46 @@ impl Packet {
                     pad_word(&mut body);
                 }
                 (sources.len() as u8, 203, body)
+            }
+            Self::App {
+                subtype,
+                name,
+                data,
+            } => {
+                if *subtype > 31 || data.len() % 4 != 0 {
+                    return Err(Error::Media("invalid RTCP APP packet".into()));
+                }
+                let mut body = BytesMut::with_capacity(4 + data.len());
+                body.extend_from_slice(name);
+                body.extend_from_slice(data);
+                (*subtype, 204, body)
+            }
+            Self::RtpFeedback {
+                fmt,
+                sender_ssrc,
+                media_ssrc,
+                fci,
+            } => (*fmt, 205, feedback_body(*sender_ssrc, *media_ssrc, fci)?),
+            Self::PayloadFeedback {
+                fmt,
+                sender_ssrc,
+                media_ssrc,
+                fci,
+            } => (*fmt, 206, feedback_body(*sender_ssrc, *media_ssrc, fci)?),
+            Self::ExtendedReport { ssrc, blocks } => {
+                let mut body = BytesMut::new();
+                body.extend_from_slice(&ssrc.to_be_bytes());
+                for block in blocks {
+                    if block.data.len() % 4 != 0 {
+                        return Err(Error::Media("RTCP XR block is not 32-bit aligned".into()));
+                    }
+                    let words = u16::try_from(block.data.len() / 4)
+                        .map_err(|_| Error::Limit("RTCP XR block"))?;
+                    body.extend_from_slice(&[block.block_type, 0]);
+                    body.extend_from_slice(&words.to_be_bytes());
+                    body.extend_from_slice(&block.data);
+                }
+                (0, 207, body)
             }
             Self::Unknown {
                 packet_type,
@@ -324,6 +392,19 @@ fn parse_packet(packet_type: u8, count: u8, body: Bytes) -> Result<Packet> {
             chunks: parse_sdes(body, count)?,
         }),
         203 => parse_bye(body, count),
+        204 => {
+            if body.len() < 4 || !(body.len() - 4).is_multiple_of(4) {
+                return Err(Error::Media("invalid RTCP APP length".into()));
+            }
+            Ok(Packet::App {
+                subtype: count,
+                name: [body[0], body[1], body[2], body[3]],
+                data: body.slice(4..),
+            })
+        }
+        205 => parse_feedback(body, count, true),
+        206 => parse_feedback(body, count, false),
+        207 => parse_extended_report(body),
         _ => Ok(Packet::Unknown {
             packet_type,
             count,

@@ -1,0 +1,42 @@
+# RTCP support matrix
+
+Scope: RFC 3550 RTCP plus RFC 4585/5104/5506 feedback in `src/rtcp/`.
+
+## Packets
+
+| Packet | Status | Notes |
+|---|---|---|
+| SR / SR+RR (PT 200) | ✅ | NTP, RTP timestamp, packet/octet counts, report blocks |
+| RR / RR+SR (PT 201) | ✅ | fraction/cumulative loss, EHSN, jitter, LSR/DLSR |
+| SDES (PT 202) | ✅ | arbitrary items/chunks, CNAME in reports |
+| BYE (PT 203) | ✅ | multiple sources + reason |
+| APP (PT 204) | ✅ | subtype, 4-byte name, padded data |
+| RTPFB (PT 205) | ✅ | generic FCI; NACK (FMT 1) typed helpers |
+| PSFB (PT 206) | ✅ | generic FCI; PLI (1), FIR (4), REMB (15) helpers |
+| XR (PT 207) | ✅ | generic extended-report blocks (type + payload) |
+| Unknown PT | ✅ | preserved as `Unknown` |
+
+## Compound / validation
+
+- Version 2, 32-bit alignment, padding, count/body length validation.
+- Compound packets must start with SR/RR.
+- Report blocks limited to 31 (5-bit count).
+- SDES chunk/item lengths and BYE reason are bounds-checked.
+- Feedback FCI and XR blocks must be 32-bit aligned and within the packet.
+
+## Statistics / feedback
+
+- Reception: packet/expected/lost, EHSN, interarrival jitter, LSR/DLSR, RTT.
+- `RtcpSession` emits scheduled RR + SDES CNAME; `FeedbackSnapshot` counts
+  NACK entries, PLI, FIR, APP and records the latest REMB bitrate.
+- Publisher emits periodic SR (+SDES) over UDP/interleaved; SRTP uses SRTCP.
+
+## Known gaps
+
+1. RFC 3550 §6.3.1 bandwidth/membership-based interval randomization
+   (current interval is configured/fixed).
+2. RTCP SSRC collision handling and BYE-on-close.
+3. Feedback actions: PLI/FIR/NACK are counted but a sender does not
+   automatically request an IDR/retransmit.
+4. RTCP XR block bodies are opaque (no typed VoIP/RRTR/DLRR accessors).
+5. Reduced-size RTCP (RFC 5506) / early feedback profile is not enforced.

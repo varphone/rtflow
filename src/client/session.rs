@@ -63,6 +63,7 @@ pub struct ClientSession {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ClientQualitySnapshot {
     pub tracks: BTreeMap<u8, ReceptionSnapshot>,
+    pub feedback: BTreeMap<u8, crate::rtcp::FeedbackSnapshot>,
 }
 
 /// Internal construction bundle so `ClientSession::new` stays readable.
@@ -212,13 +213,15 @@ impl ClientSession {
     }
 
     pub async fn quality_snapshot(&self) -> ClientQualitySnapshot {
+        let quality = self.quality.lock().await;
         ClientQualitySnapshot {
-            tracks: self
-                .quality
-                .lock()
-                .await
+            tracks: quality
                 .iter()
                 .map(|(track, session)| (*track, session.snapshot()))
+                .collect(),
+            feedback: quality
+                .iter()
+                .map(|(track, session)| (*track, session.feedback()))
                 .collect(),
         }
     }

@@ -6,6 +6,16 @@ use tokio::time::Instant;
 
 const RTP_SEQUENCE_MODULUS: u32 = 1 << 16;
 
+/// Counters for RFC 4585/5506 feedback received for one track.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FeedbackSnapshot {
+    pub nack_entries: u64,
+    pub pli: u64,
+    pub fir: u64,
+    pub remb: Option<u64>,
+    pub app: u64,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ReceptionSnapshot {
     pub packets_received: u64,
@@ -228,6 +238,7 @@ pub struct RtcpSession {
     next_report: Instant,
     reception: ReceptionStats,
     rtt: RttEstimator,
+    feedback: FeedbackSnapshot,
 }
 
 impl RtcpSession {
@@ -253,6 +264,7 @@ impl RtcpSession {
             next_report: now + report_interval,
             reception: ReceptionStats::new(remote_ssrc, clock_rate, now)?,
             rtt: RttEstimator::new(32)?,
+            feedback: FeedbackSnapshot::default(),
         })
     }
 
@@ -281,6 +293,25 @@ impl RtcpSession {
                 {
                     self.reception.set_last_rtt(rtt);
                 }
+            }
+            Packet::RtpFeedback { fmt: 1, fci, .. } => {
+                self.feedback.nack_entries = self
+                    .feedback
+                    .nack_entries
+                    .saturating_add((fci.len() / 4) as u64);
+            }
+            Packet::PayloadFeedback { fmt, .. } => match fmt {
+                1 => self.feedback.pli = self.feedback.pli.saturating_add(1),
+                4 => self.feedback.fir = self.feedback.fir.saturating_add(1),
+                15 => {
+                    if let Some(bitrate) = packet.remb_bitrate() {
+                        self.feedback.remb = Some(bitrate);
+                    }
+                }
+                _ => {}
+            },
+            Packet::App { .. } => {
+                self.feedback.app = self.feedback.app.saturating_add(1);
             }
             _ => {}
         }
@@ -318,6 +349,10 @@ impl RtcpSession {
 
     pub fn snapshot(&self) -> ReceptionSnapshot {
         self.reception.snapshot()
+    }
+
+    pub fn feedback(&self) -> FeedbackSnapshot {
+        self.feedback
     }
 }
 
