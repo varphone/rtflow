@@ -319,10 +319,12 @@ pub(super) async fn connect_udp(
         }
         spec.pts_base = pts_base;
     }
-    let (tx, rx) = mpsc::channel(options.output_queue_capacity);
+    let (tx, rx) = crate::client::queue::FrameReceiver::new(
+        options.output_queue_capacity,
+        options.max_output_bytes,
+    );
     let cancel = CancellationToken::new();
     let quality = Arc::new(Mutex::new(HashMap::new()));
-    let queued_bytes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut tasks = Vec::new();
     for spec in receivers {
         let ReceiverSpec {
@@ -351,13 +353,11 @@ pub(super) async fn connect_udp(
         let rtcp_pair = pair.clone();
         let rtp_cancel = cancel.clone();
         let rtp_quality = quality.clone();
-        let rtp_queued = queued_bytes.clone();
-        let byte_limit = options.max_output_bytes;
         let track_id = track.id;
         let mux_rtcp_target = rtcp_target;
         let mux = rtcp_mux;
         let clock_rate = track.clock_rate;
-        let local_ssrc = client_ssrc(track_id);
+        let local_ssrc = client_ssrc(id, track_id);
         tasks.push(tokio::spawn(async move {
             let mut jitter = JitterBuffer::new(jitter_config);
             // Server SSRC is not signaled in SETUP; anchor on the first
@@ -383,7 +383,7 @@ pub(super) async fn connect_udp(
                     _ = rtp_cancel.cancelled() => return,
                     _ = wait_for_deadline(deadline) => {
                         for result in drain_jitter(&mut jitter, &mut depacketizer) {
-                            if !try_deliver(&tx, result, &mut dropped, &rtp_queued, byte_limit) {
+                            if !try_deliver(&tx, result, &mut dropped) {
                                 return;
                             }
                         }
@@ -449,13 +449,7 @@ pub(super) async fn connect_udp(
                         let packet = match RtpPacket::parse(payload) {
                             Ok(packet) => packet,
                             Err(error) => {
-                                if !try_deliver(
-                                    &tx,
-                                    Err(error),
-                                    &mut dropped,
-                                    &rtp_queued,
-                                    byte_limit,
-                                ) {
+                                if !try_deliver(&tx, Err(error), &mut dropped) {
                                     return;
                                 }
                                 continue;
@@ -476,20 +470,19 @@ pub(super) async fn connect_udp(
                             observe_quality(&rtp_quality, track_id, clock_rate, local_ssrc, &packet)
                                 .await
                         {
-                            if !try_deliver(&tx, Err(error), &mut dropped, &rtp_queued, byte_limit)
-                            {
+                            if !try_deliver(&tx, Err(error), &mut dropped) {
                                 return;
                             }
                             continue;
                         }
                         for result in receive_rtp_packet(packet, &mut jitter, &mut depacketizer) {
-                            if !try_deliver(&tx, result, &mut dropped, &rtp_queued, byte_limit) {
+                            if !try_deliver(&tx, result, &mut dropped) {
                                 return;
                             }
                         }
                     }
                     Err(error) => {
-                        let _ = tx.send(Err(error.into())).await;
+                        let _ = tx.try_send(Err(error.into()));
                         return;
                     }
                 }
@@ -582,7 +575,5 @@ pub(super) async fn connect_udp(
         cancel,
         tasks,
         quality,
-        queued_bytes,
-        max_output_bytes: options.max_output_bytes,
     }))
 }

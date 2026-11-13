@@ -14,14 +14,16 @@ use crate::{
 /// connection writer failed.
 pub(super) async fn handle_rtcp(
     frame: &InterleavedFrame,
-    srtcp: Option<&mut crate::srtp::SrtcpContext>,
+    #[cfg(feature = "srtp")] srtcp: Option<&mut crate::srtp::SrtcpContext>,
     quality: &Arc<Mutex<HashMap<u8, RtcpSession>>>,
     track_id: u8,
     clock_rate: u32,
     local_ssrc: u32,
     writer: &Arc<Mutex<ControlWriteHalf>>,
 ) -> bool {
+    #[cfg(feature = "srtp")]
     let mut srtcp = srtcp;
+    #[cfg(feature = "srtp")]
     let payload = match &mut srtcp {
         Some(context) => match context.unprotect(&frame.payload) {
             Ok(payload) => payload,
@@ -29,6 +31,8 @@ pub(super) async fn handle_rtcp(
         },
         None => frame.payload.clone(),
     };
+    #[cfg(not(feature = "srtp"))]
+    let payload = frame.payload.clone();
     let Ok(packets) = RtcpPacket::parse(payload) else {
         return true;
     };
@@ -40,6 +44,7 @@ pub(super) async fn handle_rtcp(
     let Ok(payload) = report.try_encode() else {
         return true;
     };
+    #[cfg(feature = "srtp")]
     let payload = match &mut srtcp {
         Some(context) => match context.protect(&payload) {
             Ok(payload) => payload,
@@ -47,6 +52,8 @@ pub(super) async fn handle_rtcp(
         },
         None => payload,
     };
+    #[cfg(not(feature = "srtp"))]
+    let payload = payload;
     let Ok(wire) = (InterleavedFrame {
         channel: frame.channel,
         payload,

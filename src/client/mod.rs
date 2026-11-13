@@ -37,6 +37,7 @@ use tokio_util::sync::CancellationToken;
 mod control;
 mod options;
 mod publish;
+mod queue;
 mod reconnect;
 mod rtsp_client;
 mod session;

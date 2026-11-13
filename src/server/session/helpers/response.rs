@@ -172,7 +172,13 @@ pub(crate) async fn handle_request(
             // Rewrite absolute control URLs (e.g. proxied upstream SDP)
             // into path-relative forms: a downstream client must SETUP
             // against *this* server, not against the upstream host.
+            let is_proxy = matches!(mount.config, crate::mount::MountConfig::Proxy { .. });
             for track in &mut d.tracks {
+                if is_proxy {
+                    // The downstream client must send RTCP to this server's
+                    // negotiated port, not to the upstream address/port.
+                    track.rtcp = None;
+                }
                 if let Ok(url) = url::Url::parse(&track.control) {
                     let path = url.path().trim_start_matches('/');
                     track.control = Arc::from(path.to_string());

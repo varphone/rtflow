@@ -84,18 +84,23 @@ impl RtpNtpClock {
 /// two servers on the same network do not collide (and a receiver must not
 /// merge sessions from different sources).
 fn initial_ssrc(track_id: u8) -> u32 {
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u32;
+    let mut bytes = [0u8; 4];
+    let seed = if getrandom::getrandom(&mut bytes).is_ok() {
+        u32::from_le_bytes(bytes)
+    } else {
+        std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u32
+    };
     seed ^ (track_id as u32).rotate_left(24) ^ 0x5254_5350
 }
 
 /// SDES CNAME: RFC 3550 wants a globally unique per-session identifier;
 /// `user@host` is the canonical form (statistics tools aggregate by it).
-fn sdes_cname() -> Bytes {
+fn sdes_cname(ssrc: u32) -> Bytes {
     let host = std::env::var("HOSTNAME").unwrap_or_else(|_| "localhost".into());
-    Bytes::from(format!("rtflow@{host}"))
+    Bytes::from(format!("rtflow@{host}-{ssrc:08x}"))
 }
 
 /// Sends an RTCP BYE when the sender task ends (RAII; Drop runs on the
@@ -184,7 +189,7 @@ fn encode_sender_report(
                 ssrc,
                 items: vec![SdesItem {
                     kind: 1,
-                    value: sdes_cname(),
+                    value: sdes_cname(ssrc),
                 }],
             }],
         },
@@ -222,7 +227,7 @@ fn bye_compound(ssrc: u32) -> crate::Result<Bytes> {
                 ssrc,
                 items: vec![SdesItem {
                     kind: 1,
-                    value: sdes_cname(),
+                    value: sdes_cname(ssrc),
                 }],
             }],
         },

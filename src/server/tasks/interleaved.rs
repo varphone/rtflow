@@ -123,13 +123,25 @@ pub(crate) fn spawn_interleaved_sender_from(
                 continue;
             }
             awaiting_key = false;
-            if let Ok(packets) = packetizer.packetize(&frame) {
+            let packets = match packetizer.packetize(&frame) {
+                Ok(packets) => packets,
+                Err(error) => {
+                    mount.stats.add_dropped(1);
+                    tracing::warn!(track = track.id, %error, "RTP packetization failed");
+                    continue;
+                }
+            };
+            {
                 for mut packet in packets {
                     packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
                     let payload_len = packet.payload.len() as u32;
                     let payload = match crypto.protect_rtp(packet.encode()) {
                         Ok(payload) => payload,
-                        Err(_) => continue,
+                        Err(error) => {
+                            mount.stats.add_dropped(1);
+                            tracing::warn!(track = track.id, %error, "SRTP protect failed");
+                            continue;
+                        }
                     };
                     let wire = InterleavedFrame {
                         channel: rtp_channel,

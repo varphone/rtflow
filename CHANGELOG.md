@@ -82,6 +82,7 @@
 - 安全修复：SRTP 发送 ROC 滚动与序号回绕、SRTCP replay/index、SAVP SDP、interleaved/UDP/组播 SRTCP 路径、RTCP BYE；SRTP 扩展/填充边界校验。
 - 架构修复：`RtspServer::bind_with` 共享 Gateway registry；server 统一走 `MountRegistry::register_with`，`MountOptions`（queue/cache/timeline/cancel）生效；rtcp-mux 使用配置的 UDP receive buffer。
 - 稳定性：RTSP 写超时、WS 写超时/帧上限、RTMP writer 退出唤醒、HTTP accept 退避、HLS ring 无 panic/样本上限、`InterleavedFrame::encode` 返回 Result、`SdpCrypto` Debug 脱敏。
+- 低延迟/内存：客户端媒体队列改为字节+条目双上限、满时丢最旧帧（覆盖重连会话）；SSRC/CNAME 按会话随机/唯一；静默失败（packetize/SRTP/录制/发布 keepalive）改为计数与日志；重复 SETUP 拒绝、PLAY 播放中允许重新 PLAY、组播轨计入上限、代理 SDP 去除上游 a=rtcp。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

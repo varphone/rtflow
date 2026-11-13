@@ -190,7 +190,15 @@ pub(crate) fn spawn_udp_sender_from(
                     }
                     awaiting_key = false;
                     let mut consecutive_send_failures = 0u32;
-                    if let Ok(packets) = packetizer.packetize(&frame) {
+                    let packets = match packetizer.packetize(&frame) {
+                        Ok(packets) => packets,
+                        Err(error) => {
+                            mount.stats.add_dropped(1);
+                            tracing::warn!(track = track.id, %error, "RTP packetization failed");
+                            continue;
+                        }
+                    };
+                    {
                         let mut wire = BytesMut::with_capacity(1500);
                         for mut packet in packets {
                             packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
@@ -198,7 +206,11 @@ pub(crate) fn spawn_udp_sender_from(
                             let plain = wire.split().freeze();
                             let protected = match crypto.protect_rtp(plain) {
                                 Ok(wire) => wire,
-                                Err(_) => continue,
+                                Err(error) => {
+                                    mount.stats.add_dropped(1);
+                                    tracing::warn!(track = track.id, %error, "SRTP protect failed");
+                                    continue;
+                                }
                             };
                             if pair.rtp.send_to(&protected, rtp_target).await.is_err() {
                                 // A persistently unreachable target should not

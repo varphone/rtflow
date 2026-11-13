@@ -10,7 +10,7 @@ pub(super) fn jittered_backoff(delay: Duration, attempt: u32) -> Duration {
 pub struct ReconnectingClientSession {
     pub description: MediaDescription,
     pub(super) id: SessionId,
-    pub(super) receiver: mpsc::Receiver<Result<AccessUnit>>,
+    pub(super) receiver: super::queue::FrameReceiver,
     pub(super) cancel: CancellationToken,
     pub(super) task: JoinHandle<()>,
 }

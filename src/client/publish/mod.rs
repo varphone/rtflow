@@ -64,7 +64,7 @@ async fn send_sender_report(control: &PublisherControl, track: &mut PublishTrack
                 ssrc,
                 items: vec![SdesItem {
                     kind: 1,
-                    value: bytes::Bytes::from_static(b"rtsp-client"),
+                    value: bytes::Bytes::from(format!("rtflow@{ssrc:08x}")),
                 }],
             }],
         },
@@ -108,7 +108,6 @@ pub struct PublisherSession {
 }
 
 impl PublisherSession {
-    /// Correlating id for logs/events.
     pub fn session_id(&self) -> SessionId {
         self.id
     }
@@ -182,7 +181,16 @@ impl Drop for PublisherSession {
 }
 
 fn publisher_ssrc(track_id: u8) -> u32 {
-    0x5055_4221 ^ u32::from(track_id)
+    let mut bytes = [0u8; 4];
+    let seed = if getrandom::getrandom(&mut bytes).is_ok() {
+        u32::from_le_bytes(bytes)
+    } else {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u32
+    };
+    seed ^ u32::from(track_id).wrapping_mul(0x85eb_ca6b)
 }
 
 fn packetizer(track: &TrackDescription) -> Result<Packetizer> {
@@ -582,7 +590,9 @@ fn spawn_keepalive(
             tokio::select! {
                 _ = cancel.cancelled() => return,
                 _ = ticker.tick() => {
-                    let _ = control.request("OPTIONS", None, None).await;
+                    if let Err(error) = control.request("OPTIONS", None, None).await {
+                        tracing::warn!(%error, "RTSP publisher keep-alive failed");
+                    }
                 }
             }
         }

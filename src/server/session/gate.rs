@@ -89,7 +89,10 @@ pub(super) async fn gate_request(
     let valid_phase = match req.method {
         Method::Announce => phase == ConnectionPhase::Init && !has_announced,
         Method::Setup => matches!(phase, ConnectionPhase::Init | ConnectionPhase::Ready),
-        Method::Play => matches!(phase, ConnectionPhase::Ready | ConnectionPhase::Paused),
+        Method::Play => matches!(
+            phase,
+            ConnectionPhase::Ready | ConnectionPhase::Paused | ConnectionPhase::Playing
+        ),
         Method::Pause => phase == ConnectionPhase::Playing,
         Method::Record => phase == ConnectionPhase::Ready,
         _ => true,

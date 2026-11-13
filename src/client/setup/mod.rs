@@ -156,6 +156,7 @@ mod interleaved_rtcp;
 mod multicast;
 mod udp;
 
+use super::queue::FrameSender;
 use interleaved::connect_interleaved;
 use udp::connect_udp;
 
@@ -171,52 +172,51 @@ async fn wait_for_deadline(deadline: Option<std::time::Instant>) {
 /// Non-blocking delivery into the frame channel: a full queue drops the
 /// frame instead of stalling the receive loop (audit RT-17). Returns false
 /// when the consumer is gone.
-fn try_deliver(
-    tx: &mpsc::Sender<Result<AccessUnit>>,
-    result: Result<AccessUnit>,
-    dropped: &mut u64,
-    queued_bytes: &Arc<std::sync::atomic::AtomicUsize>,
-    max_output_bytes: usize,
-) -> bool {
-    use std::sync::atomic::Ordering;
-    let size = result.as_ref().map_or(0, |unit| unit.data.len());
-    if size > 0 {
-        let previous = queued_bytes.fetch_add(size, Ordering::Relaxed);
-        if previous.saturating_add(size) > max_output_bytes {
-            queued_bytes.fetch_sub(size, Ordering::Relaxed);
-            *dropped += 1;
-            if *dropped % 64 == 1 {
-                tracing::debug!(dropped = *dropped, "client output byte budget exceeded");
-            }
-            return true;
-        }
-    }
+fn try_deliver(tx: &FrameSender, result: Result<AccessUnit>, dropped: &mut u64) -> bool {
     match tx.try_send(result) {
-        Ok(()) => true,
-        Err(mpsc::error::TrySendError::Closed(_)) => {
-            if size > 0 {
-                queued_bytes.fetch_sub(size, Ordering::Relaxed);
-            }
-            false
-        }
-        Err(mpsc::error::TrySendError::Full(_)) => {
-            if size > 0 {
-                queued_bytes.fetch_sub(size, Ordering::Relaxed);
-            }
-            *dropped += 1;
-            if *dropped % 64 == 1 {
+        Ok(outcome) => {
+            *dropped = dropped.saturating_add(outcome.dropped as u64);
+            if outcome.dropped > 0 && *dropped % 64 <= outcome.dropped as u64 {
                 tracing::debug!(
                     dropped = *dropped,
-                    "client output queue full; dropping frame"
+                    evicted = outcome.dropped,
+                    "client output queue evicted oldest frames"
                 );
             }
             true
         }
+        Err(()) => false,
     }
 }
 
-pub(super) fn client_ssrc(track_id: u8) -> u32 {
-    0x434c_4e54 ^ u32::from(track_id)
+fn ssrc_process_seed() -> u32 {
+    use std::sync::OnceLock;
+    static SEED: OnceLock<u32> = OnceLock::new();
+    *SEED.get_or_init(|| {
+        let mut bytes = [0u8; 4];
+        if getrandom::getrandom(&mut bytes).is_ok() {
+            u32::from_le_bytes(bytes)
+        } else {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u32
+        }
+    })
+}
+
+/// Per-session SSRC: unique enough for RTCP collision detection and never
+/// shared between two concurrently connected clients.
+pub(super) fn client_ssrc(session: crate::identity::SessionId, track_id: u8) -> u32 {
+    let session = session.get() as u32;
+    ssrc_process_seed()
+        .wrapping_mul(0x9e37_79b9)
+        .wrapping_add(session.rotate_left(13))
+        ^ u32::from(track_id).wrapping_mul(0x85eb_ca6b)
+}
+
+fn client_cname(local_ssrc: u32) -> bytes::Bytes {
+    bytes::Bytes::from(format!("rtflow@{local_ssrc:08x}"))
 }
 
 async fn observe_quality(
@@ -234,7 +234,7 @@ async fn observe_quality(
             local_ssrc,
             packet.header.ssrc,
             clock_rate,
-            bytes::Bytes::from_static(b"rtsp-client"),
+            client_cname(local_ssrc),
             std::time::Duration::from_secs(5),
             now,
         )?),
@@ -244,7 +244,7 @@ async fn observe_quality(
             local_ssrc,
             packet.header.ssrc,
             clock_rate,
-            bytes::Bytes::from_static(b"rtsp-client"),
+            client_cname(local_ssrc),
             std::time::Duration::from_secs(5),
             now,
         )?;
@@ -275,7 +275,7 @@ async fn quality_report(
                 local_ssrc,
                 remote_ssrc,
                 clock_rate,
-                bytes::Bytes::from_static(b"rtsp-client"),
+                client_cname(local_ssrc),
                 std::time::Duration::from_secs(5),
                 now,
             )?,
@@ -296,10 +296,18 @@ mod tests {
 
     #[test]
     fn client_ssrc_is_deterministic_and_distinct_per_track() {
+        let session = crate::identity::SessionId::new(7);
         for track_id in 0..=255u8 {
-            assert_eq!(client_ssrc(track_id), client_ssrc(track_id));
+            assert_eq!(
+                client_ssrc(session, track_id),
+                client_ssrc(session, track_id)
+            );
         }
-        let first = client_ssrc(0);
-        assert!((1..=255u8).all(|track_id| client_ssrc(track_id) != first));
+        let first = client_ssrc(session, 0);
+        assert!((1..=255u8).all(|track_id| client_ssrc(session, track_id) != first));
+        assert_ne!(
+            client_ssrc(session, 0),
+            client_ssrc(crate::identity::SessionId::new(8), 0)
+        );
     }
 }

@@ -1,6 +1,28 @@
 use super::*;
 use crate::media::TrackDescription;
 
+fn track_already_setup(
+    mount: &Arc<Mount>,
+    track: &TrackDescription,
+    setups: &[(
+        Arc<Mount>,
+        UdpPair,
+        SocketAddr,
+        SocketAddr,
+        TrackDescription,
+    )],
+    interleaved: &[(Arc<Mount>, u8, u8, TrackDescription)],
+    multicast_tracks: &[(Arc<Mount>, TrackDescription)],
+) -> bool {
+    setups.iter().any(|(current, .., current_track)| {
+        Arc::ptr_eq(current, mount) && current_track.id == track.id
+    }) || interleaved.iter().any(|(current, .., current_track)| {
+        Arc::ptr_eq(current, mount) && current_track.id == track.id
+    }) || multicast_tracks
+        .iter()
+        .any(|(current, current_track)| Arc::ptr_eq(current, mount) && current_track.id == track.id)
+}
+
 /// SETUP: negotiate and remember one transport for this session.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_setup(
@@ -25,7 +47,9 @@ pub(super) async fn handle_setup(
 ) -> Result<()> {
     #[cfg(not(feature = "multicast"))]
     let _ = multicast_tracks;
-    if setups.len() + interleaved.len() >= state.config.resource_limits.max_tracks_per_session {
+    if setups.len() + interleaved.len() + multicast_tracks.len()
+        >= state.config.resource_limits.max_tracks_per_session
+    {
         writer
             .lock()
             .await
@@ -150,6 +174,18 @@ pub(super) async fn handle_setup(
                     .await?;
                 return Ok(());
             };
+            if track_already_setup(&mount, &track, setups, interleaved, multicast_tracks) {
+                writer
+                    .lock()
+                    .await
+                    .write_all(&rtsp::encode_response(&simple_response(
+                        455,
+                        "Method Not Valid in This State",
+                        cseq,
+                    )))
+                    .await?;
+                return Ok(());
+            }
             #[cfg(feature = "srtp")]
             let profile_mismatch = *secure != track.crypto.is_some();
             #[cfg(not(feature = "srtp"))]
@@ -231,6 +267,18 @@ pub(super) async fn handle_setup(
                 .await?;
             return Ok(());
         };
+        if track_already_setup(&mount, &track, setups, interleaved, multicast_tracks) {
+            writer
+                .lock()
+                .await
+                .write_all(&rtsp::encode_response(&simple_response(
+                    455,
+                    "Method Not Valid in This State",
+                    cseq,
+                )))
+                .await?;
+            return Ok(());
+        }
         #[cfg(feature = "srtp")]
         let profile_mismatch = secure != track.crypto.is_some();
         #[cfg(not(feature = "srtp"))]
@@ -347,6 +395,18 @@ pub(super) async fn handle_setup(
             .await?;
         return Ok(());
     };
+    if track_already_setup(&mount, &track, setups, interleaved, multicast_tracks) {
+        writer
+            .lock()
+            .await
+            .write_all(&rtsp::encode_response(&simple_response(
+                455,
+                "Method Not Valid in This State",
+                cseq,
+            )))
+            .await?;
+        return Ok(());
+    }
     #[cfg(feature = "srtp")]
     let profile_mismatch = secure != track.crypto.is_some();
     #[cfg(not(feature = "srtp"))]

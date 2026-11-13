@@ -242,7 +242,10 @@ impl RtspClient {
         policy.validate()?;
         let initial = Self::connect(url.clone(), options.clone()).await?;
         let description = initial.description.clone();
-        let (tx, receiver) = mpsc::channel(options.output_queue_capacity);
+        let (tx, receiver) = super::queue::FrameReceiver::new(
+            options.output_queue_capacity,
+            options.max_output_bytes,
+        );
         let cancel = CancellationToken::new();
         let task_cancel = cancel.clone();
         let id = next_client_session_id();
@@ -278,7 +281,7 @@ impl RtspClient {
                                         error: Some(code),
                                     },
                                 );
-                                let _ = tx.send(Err(error)).await;
+                                let _ = tx.try_send(Err(error));
                                 return;
                             }
                             failures = failures.saturating_add(1);
@@ -294,7 +297,7 @@ impl RtspClient {
                                         error: Some(code),
                                     },
                                 );
-                                let _ = tx.send(Err(error)).await;
+                                let _ = tx.try_send(Err(error));
                                 return;
                             }
                             let jittered = jittered_backoff(delay, failures);
@@ -322,7 +325,7 @@ impl RtspClient {
                         _ = task_cancel.cancelled() => return,
                         frame = session.next() => match frame {
                             Some(Ok(unit)) => {
-                                if tx.send(Ok(unit)).await.is_err() {
+                                if tx.try_send(Ok(unit)).is_err() {
                                     return;
                                 }
                             }
@@ -351,7 +354,7 @@ impl RtspClient {
                                 // session for good.
                                 let permanent =
                                     matches!(error.retry_class(), RetryClass::Never);
-                                if tx.send(Err(error)).await.is_err() {
+                                if tx.try_send(Err(error)).is_err() {
                                     return;
                                 }
                                 if permanent {
@@ -411,7 +414,11 @@ enum DescribeOutcome {
     Redirect(url::Url),
 }
 
-fn redirect_outcome(base: &url::Url, response: &Response) -> Result<DescribeOutcome> {
+fn redirect_outcome(
+    base: &url::Url,
+    response: &Response,
+    options: &ClientOptions,
+) -> Result<DescribeOutcome> {
     let location = response
         .headers
         .get("location")
@@ -419,10 +426,11 @@ fn redirect_outcome(base: &url::Url, response: &Response) -> Result<DescribeOutc
     let target = base
         .join(location)
         .map_err(|error| Error::Rtsp(format!("invalid RTSP redirect Location: {error}")))?;
-    // Do not forward credentials to another origin implicitly.
-    if target.scheme() != base.scheme() || target.host_str() != base.host_str() {
+    // Do not forward credentials to another origin implicitly; compare the
+    // effective port as well (same host on another port is another service).
+    if !redirect_allowed(base, &target, options) {
         return Err(Error::Rtsp(
-            "RTSP redirect to a different scheme/host is not followed".into(),
+            "RTSP redirect to a different origin is not followed".into(),
         ));
     }
     Ok(DescribeOutcome::Redirect(target))
@@ -513,7 +521,7 @@ async fn open_and_describe_once(
     )
     .await?;
     if (300..=399).contains(&response.status) {
-        return redirect_outcome(url, &response);
+        return redirect_outcome(url, &response, options);
     }
     if response.status != 200 {
         return Err(status_error("OPTIONS", response.status));
@@ -534,7 +542,7 @@ async fn open_and_describe_once(
     )
     .await?;
     if (300..=399).contains(&response.status) {
-        return redirect_outcome(url, &response);
+        return redirect_outcome(url, &response, options);
     }
     if response.status != 200 {
         return Err(status_error("DESCRIBE", response.status));

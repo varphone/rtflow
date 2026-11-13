@@ -1,3 +1,4 @@
+use super::queue::FrameSender;
 use super::reconnect::jittered_backoff;
 use super::wire::*;
 use super::*;
@@ -137,7 +138,7 @@ async fn perform_control(
 pub(super) async fn control_task(
     mut transport: ControlTransport,
     mut commands: mpsc::Receiver<ControlCommand>,
-    media_tx: mpsc::Sender<Result<AccessUnit>>,
+    media_tx: FrameSender,
     uri: String,
     session_id: String,
     mut cseq: u32,

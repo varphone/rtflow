@@ -57,7 +57,7 @@ pub(super) async fn handle_record(
                 socket,
                 _rtp_target,
                 track.clone(),
-                MediaCrypto::from_track(&track).unwrap_or_default(),
+                MediaCrypto::from_track(&track)?,
             ));
         }
     }

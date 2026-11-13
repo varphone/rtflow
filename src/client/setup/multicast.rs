@@ -222,21 +222,21 @@ pub(super) async fn connect_multicast(
     }
     let rtp_info = super::parse_rtp_info(&response, &description, &setup_base);
     let pts_base = super::play_pts_base(&response);
-    let (tx, rx) = mpsc::channel(options.output_queue_capacity);
+    let (tx, rx) = crate::client::queue::FrameReceiver::new(
+        options.output_queue_capacity,
+        options.max_output_bytes,
+    );
     let cancel = CancellationToken::new();
     let quality = Arc::new(Mutex::new(HashMap::new()));
-    let queued_bytes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut tasks = Vec::new();
     let track_list: Vec<_> = description.tracks.to_vec();
     let rr_meta: Vec<(u8, u32)> = track_list
         .iter()
-        .map(|track| (track.id, client_ssrc(track.id)))
+        .map(|track| (track.id, client_ssrc(id, track.id)))
         .collect();
     let media_for_control = tx.clone();
     let receiver_cancel = cancel.clone();
     let receiver_quality = quality.clone();
-    let receiver_queued = queued_bytes.clone();
-    let byte_limit = options.max_output_bytes;
     tasks.push(tokio::spawn(async move {
         let mut buffer = bytes::BytesMut::zeroed(65_536);
         let mut rr_tick = tokio::time::interval(std::time::Duration::from_secs(5));
@@ -262,7 +262,7 @@ pub(super) async fn connect_multicast(
                     depacketizer,
                     track.id,
                     track.clock_rate,
-                    client_ssrc(track.id),
+                    client_ssrc(id, track.id),
                 ),
             );
         }
@@ -326,7 +326,7 @@ pub(super) async fn connect_multicast(
             .await;
             let mut dropped = 0u64;
             for result in receive_rtp_packet(packet, jitter, depacketizer) {
-                if !try_deliver(&tx, result, &mut dropped, &receiver_queued, byte_limit) {
+                if !try_deliver(&tx, result, &mut dropped) {
                     return;
                 }
             }
@@ -367,7 +367,5 @@ pub(super) async fn connect_multicast(
         cancel,
         tasks,
         quality,
-        queued_bytes,
-        max_output_bytes: options.max_output_bytes,
     }))
 }
