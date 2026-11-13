@@ -188,6 +188,78 @@ impl ReceptionStats {
     }
 }
 
+/// RFC 3550 §6.3.1-style RTCP transmission interval.
+///
+/// The calculation is intentionally small: it exposes the bandwidth and
+/// membership inputs and the randomized 0.5–1.5 factor, while keeping the
+/// session's existing configurable `report_interval` as the default.
+#[derive(Clone, Debug)]
+pub struct RtcpInterval {
+    members: usize,
+    senders: usize,
+    rtcp_bandwidth: f64,
+    avg_rtcp_size: f64,
+    initial: bool,
+    seed: u64,
+}
+
+impl RtcpInterval {
+    pub fn new(
+        members: usize,
+        senders: usize,
+        bandwidth_bps: f64,
+        avg_rtcp_size: f64,
+    ) -> Result<Self> {
+        if members == 0 || senders > members {
+            return Err(Error::Limit("RTCP membership"));
+        }
+        if !bandwidth_bps.is_finite() || bandwidth_bps <= 0.0 {
+            return Err(Error::Limit("RTCP bandwidth"));
+        }
+        if !avg_rtcp_size.is_finite() || avg_rtcp_size <= 0.0 {
+            return Err(Error::Limit("RTCP average packet size"));
+        }
+        Ok(Self {
+            members,
+            senders,
+            rtcp_bandwidth: bandwidth_bps,
+            avg_rtcp_size,
+            initial: true,
+            seed: 0x9e37_79b9_7f4a_7c15,
+        })
+    }
+
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed.max(1);
+        self
+    }
+
+    /// Name/length word of the next packet updates the average size estimate.
+    pub fn observe_packet_size(&mut self, bytes: usize) {
+        let bytes = bytes as f64;
+        self.avg_rtcp_size = self.avg_rtcp_size * 0.9375 + bytes * 0.0625;
+    }
+
+    /// Compute the next interval; random factor is in [0.5, 1.5].
+    pub fn next_interval(&mut self) -> Duration {
+        let min = if self.initial { 2.5 } else { 5.0 };
+        self.initial = false;
+        let share = if self.senders * 4 <= self.members {
+            0.25
+        } else {
+            1.0
+        };
+        let bandwidth = self.rtcp_bandwidth * 0.05 * share;
+        let deterministic = self.avg_rtcp_size * self.members as f64 / bandwidth;
+        self.seed ^= self.seed << 13;
+        self.seed ^= self.seed >> 7;
+        self.seed ^= self.seed << 17;
+        let random = (self.seed >> 11) as f64 / (1u64 << 53) as f64;
+        let seconds = deterministic.max(min) * (0.5 + random);
+        Duration::from_secs_f64(seconds.max(min * 0.5))
+    }
+}
+
 #[derive(Default)]
 pub struct RttEstimator {
     sent_reports: HashMap<u32, Instant>,
@@ -334,6 +406,28 @@ impl RtcpSession {
             Packet::ReceiverReportWithReports {
                 ssrc: self.local_ssrc,
                 reports: vec![self.reception.report_block(now)],
+            },
+            Packet::SourceDescription {
+                chunks: vec![SdesChunk {
+                    ssrc: self.local_ssrc,
+                    items: vec![SdesItem {
+                        kind: 1,
+                        value: self.cname.clone(),
+                    }],
+                }],
+            },
+        ])
+    }
+
+    /// Build a BYE (+SDES CNAME) compound packet for graceful shutdown.
+    pub fn bye(&self, reason: Option<&str>) -> Result<CompoundPacket> {
+        CompoundPacket::new(vec![
+            Packet::ReceiverReport {
+                ssrc: self.local_ssrc,
+            },
+            Packet::ByeSources {
+                sources: vec![self.local_ssrc],
+                reason: reason.map(str::to_owned),
             },
             Packet::SourceDescription {
                 chunks: vec![SdesChunk {

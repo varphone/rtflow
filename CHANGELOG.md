@@ -75,6 +75,7 @@
 - REDIRECT 在 `connect_reconnecting` 中自动切换目标；551 解析为带 token 的 `Error::RtspUnsupported`。
 - RTSP 客户端完成 RTSP 1.0 方法面与连接行为审计（OPTIONS/DESCRIBE/ANNOUNCE/SETUP/PLAY/PAUSE/RECORD/TEARDOWN/GET_PARAMETER/SET_PARAMETER、REDIRECT、Require、RTP-Info、Range/Scale/Speed、认证/TLS/SRTP/组播、并发与低内存基线）。
 - RTCP 完整包型：APP、RTPFB/PSFB（NACK/PLI/FIR/REMB）、XR；新增反馈计数 `FeedbackSnapshot`。
+- RTCP `RtcpInterval`（带宽/成员数/随机化）与 `RtcpSession::bye` compound 构造。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

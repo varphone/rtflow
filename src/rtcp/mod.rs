@@ -4,7 +4,8 @@ mod stats;
 
 pub use packet::{CompoundPacket, NackEntry, Packet, ReportBlock, SdesChunk, SdesItem, XrBlock};
 pub use stats::{
-    FeedbackSnapshot, ReceptionSnapshot, ReceptionStats, RtcpSession, RttEstimator, ntp_middle_32,
+    FeedbackSnapshot, ReceptionSnapshot, ReceptionStats, RtcpInterval, RtcpSession, RttEstimator,
+    ntp_middle_32,
 };
 
 #[cfg(test)]
@@ -276,5 +277,38 @@ mod tests {
         assert_eq!(feedback.fir, 1);
         assert_eq!(feedback.remb, Some(1_500_000));
         assert_eq!(feedback.app, 1);
+    }
+    #[test]
+    fn rtcp_interval_uses_membership_bandwidth_and_randomization() {
+        let mut interval = RtcpInterval::new(50, 5, 1_000_000.0, 100.0)
+            .unwrap()
+            .with_seed(42);
+        let first = interval.next_interval();
+        assert!(first >= Duration::from_millis(1250));
+        assert!(first <= Duration::from_secs(2));
+        let second = interval.next_interval();
+        assert!(second >= Duration::from_secs(5));
+        assert!(second <= Duration::from_secs(15));
+        interval.observe_packet_size(200);
+        assert!(RtcpInterval::new(0, 0, 1.0, 1.0).is_err());
+        assert!(RtcpInterval::new(2, 3, 1.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn bye_compound_starts_with_bye() {
+        let now = Instant::now();
+        let session = RtcpSession::new(
+            7,
+            9,
+            90_000,
+            Bytes::from_static(b"client"),
+            Duration::from_secs(5),
+            now,
+        )
+        .unwrap();
+        let bye = session.bye(Some("shutdown")).unwrap();
+        assert!(matches!(bye.packets[0], Packet::ReceiverReport { .. }));
+        assert!(matches!(bye.packets[1], Packet::ByeSources { .. }));
+        assert!(bye.try_encode().is_ok());
     }
 }

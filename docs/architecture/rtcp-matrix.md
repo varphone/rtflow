@@ -33,9 +33,11 @@ Scope: RFC 3550 RTCP plus RFC 4585/5104/5506 feedback in `src/rtcp/`.
 
 ## Known gaps
 
-1. RFC 3550 §6.3.1 bandwidth/membership-based interval randomization
-   (current interval is configured/fixed).
-2. RTCP SSRC collision handling and BYE-on-close.
+1. `RtcpInterval` implements a bandwidth/membership estimate with randomized
+   intervals and BYE construction; it is opt-in (the session default remains a
+   fixed interval).
+2. RTCP SSRC collision handling is not implemented; BYE must be sent by the
+   owner when closing.
 3. Feedback actions: PLI/FIR/NACK are counted but a sender does not
    automatically request an IDR/retransmit.
 4. RTCP XR block bodies are opaque (no typed VoIP/RRTR/DLRR accessors).
