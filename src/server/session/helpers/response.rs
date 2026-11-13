@@ -142,7 +142,7 @@ pub(crate) async fn handle_request(
         Method::Options => {
             headers.insert(
                 "public".into(),
-                "OPTIONS, DESCRIBE, ANNOUNCE, SETUP, PLAY, PAUSE, RECORD, TEARDOWN, GET_PARAMETER"
+                "OPTIONS, DESCRIBE, ANNOUNCE, SETUP, PLAY, PAUSE, RECORD, TEARDOWN, GET_PARAMETER, SET_PARAMETER"
                     .into(),
             );
             Response {
@@ -204,10 +204,19 @@ pub(crate) async fn handle_request(
                 status: 200,
                 reason: "OK".into(),
                 headers,
-                body: sdp::encode(&d).into_bytes(),
+                body: sdp::encode_to(&d, Some(local_addr.ip())).into_bytes(),
             }
         }
-        Method::SetParameter | Method::Unsupported => Response {
+        // SET_PARAMETER is accepted and ignored: RTSP 1.0 leaves the
+        // parameter set open, and clients use it for non-critical stream
+        // properties. Unknown methods still get 501.
+        Method::SetParameter => Response {
+            status: 200,
+            reason: "OK".into(),
+            headers,
+            body: vec![],
+        },
+        Method::Unsupported => Response {
             status: 501,
             reason: "Not Implemented".into(),
             headers,

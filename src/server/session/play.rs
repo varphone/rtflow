@@ -22,6 +22,25 @@ pub(super) async fn handle_play(
     vod_cursor: &mut std::time::Duration,
     phase: &mut ConnectionPhase,
 ) -> Result<()> {
+    // Scale/Speed are optional RTSP 1.0 extensions. Only normal speed is
+    // supported; answer 551 instead of silently ignoring a request the
+    // client expects to change playback.
+    for header in ["scale", "speed"] {
+        if let Some(value) = req.headers.get(header)
+            && value.trim().parse::<f64>().ok() != Some(1.0)
+        {
+            writer
+                .lock()
+                .await
+                .write_all(&rtsp::encode_response(&simple_response(
+                    551,
+                    "Option Not Supported",
+                    cseq,
+                )))
+                .await?;
+            return Ok(());
+        }
+    }
     #[cfg(feature = "file-storage")]
     let vod_source = interleaved
         .iter()

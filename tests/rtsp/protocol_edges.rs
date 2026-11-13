@@ -145,3 +145,51 @@ async fn vp8_description_round_trips_through_rtsp() {
     assert_eq!(description.tracks[0].codec, Codec::Vp8);
     tokio::time::sleep(Duration::from_millis(10)).await;
 }
+
+#[tokio::test]
+async fn set_parameter_public_and_scale_semantics() {
+    let server = server_with(Codec::H264).await;
+    let base = format!("rtsp://{}/edge", server.local_addr());
+    let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+    let options = request(
+        &mut stream,
+        &format!("OPTIONS {base} RTSP/1.0\r\nCSeq: 1\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(options.status, 200);
+    let public = options.headers.get("public").unwrap();
+    assert!(public.contains("SET_PARAMETER"), "Public: {public}");
+
+    let describe = request(
+        &mut stream,
+        &format!("DESCRIBE {base} RTSP/1.0\r\nCSeq: 2\r\nAccept: application/sdp\r\n\r\n"),
+    )
+    .await;
+    let description = sdp::parse(&describe.body).unwrap();
+    let control = sdp::control_uri(&base, &description.tracks[0].control).unwrap();
+    let setup = request(
+        &mut stream,
+        &format!(
+            "SETUP {control} RTSP/1.0\r\nCSeq: 3\r\nTransport: RTP/AVP;unicast;client_port=32000-32001\r\n\r\n"
+        ),
+    )
+    .await;
+    assert_eq!(setup.status, 200);
+    let session = setup.headers.get("session").unwrap().clone();
+
+    let set_parameter = request(
+        &mut stream,
+        &format!("SET_PARAMETER {base} RTSP/1.0\r\nCSeq: 4\r\nSession: {session}\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(set_parameter.status, 200);
+
+    let play = request(
+        &mut stream,
+        &format!(
+            "PLAY {base} RTSP/1.0\r\nCSeq: 5\r\nSession: {session}\r\nRange: npt=0-\r\nScale: 2.0\r\n\r\n"
+        ),
+    )
+    .await;
+    assert_eq!(play.status, 551);
+}

@@ -62,6 +62,7 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
     let mut tracks = Vec::new();
     let mut current: Option<TrackDescription> = None;
     let mut mapped_payloads = HashSet::new();
+    let mut payload_candidates: HashSet<u8> = HashSet::new();
     for line in text.lines().map(str::trim) {
         if let Some(value) = line.strip_prefix("s=") {
             name = Arc::from(value)
@@ -86,12 +87,21 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                 "audio" => MediaKind::Audio,
                 _ => continue,
             };
-            let payload_type: u8 = fields[3]
-                .parse()
-                .map_err(|_| Error::Rtsp("invalid SDP payload type".into()))?;
-            if payload_type > 127 {
-                return Err(Error::Rtsp("SDP payload type exceeds 127".into()));
+            // RTSP uses RTP/AVP; RTP/SAVP appears when SRTP is offered. Other
+            // profiles (e.g. WebRTC UDP/TLS/RTP/SAVPF) are not RTSP media.
+            let protocol = fields[2].to_ascii_uppercase();
+            if !matches!(protocol.as_str(), "RTP/AVP" | "RTP/SAVP") {
+                continue;
             }
+            let payloads: Vec<u8> = fields[3..]
+                .iter()
+                .filter_map(|value| value.parse::<u8>().ok())
+                .filter(|payload| *payload <= 127)
+                .collect();
+            let Some(&payload_type) = payloads.first() else {
+                continue;
+            };
+            payload_candidates = payloads.into_iter().collect();
             let (codec, clock_rate, channels) = match (kind, payload_type) {
                 (MediaKind::Audio, 0) => (Codec::Pcmu, 8_000, Some(1)),
                 (MediaKind::Audio, 8) => (Codec::Pcma, 8_000, Some(1)),
@@ -123,9 +133,13 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                 .split_once(' ')
                 .ok_or_else(|| Error::Rtsp("bad rtpmap".into()))?;
             let parts: Vec<_> = encoding.split('/').collect();
+            let pt: u8 = pt
+                .parse()
+                .map_err(|_| Error::Rtsp("invalid rtpmap payload type".into()))?;
             if let Some(track) = current.as_mut()
-                && track.payload_type.to_string() == pt
+                && payload_candidates.contains(&pt)
             {
+                track.payload_type = pt;
                 track.codec = match parts[0].to_ascii_uppercase().as_str() {
                     "H264" => Codec::H264,
                     "H265" | "HEVC" => Codec::H265,
@@ -143,6 +157,17 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                     .unwrap_or(track.clock_rate);
                 track.channels = parts.get(2).and_then(|value| value.parse().ok());
                 mapped_payloads.insert(track.payload_type);
+            }
+        } else if let Some(value) = line.strip_prefix("a=framerate:") {
+            if let Some(track) = current.as_mut()
+                && let Ok(fps) = value.trim().parse::<f64>()
+                && fps.is_finite()
+                && fps > 0.0
+                && fps <= 1_000.0
+            {
+                let numerator = (fps * 1_000.0).round() as u32;
+                let divisor = gcd(numerator, 1_000);
+                track.frame_rate = Some((numerator / divisor, 1_000 / divisor));
             }
         } else if let Some(value) = line.strip_prefix("a=fmtp:") {
             if let Some(track) = current.as_mut() {
@@ -272,7 +297,24 @@ pub fn control_uri(base: &str, control: &str) -> Result<String> {
         .map_err(|error| Error::Rtsp(format!("invalid SDP control URI: {error}")))
 }
 
+fn gcd(mut left: u32, mut right: u32) -> u32 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left.max(1)
+}
+
 pub fn encode(description: &MediaDescription) -> String {
+    encode_to(description, None)
+}
+
+/// Encode SDP, choosing the `c=` address family from `local_ip`.
+///
+/// `None` keeps the historical `c=IN IP4 0.0.0.0` (valid for IPv4 and
+/// accepted by most clients); an IPv6 local address emits `c=IN IP6 ::`.
+pub fn encode_to(description: &MediaDescription, local_ip: Option<std::net::IpAddr>) -> String {
     let mut output = format!(
         "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns={}\r\nt=0 0\r\n",
         description.session_name
@@ -280,17 +322,19 @@ pub fn encode(description: &MediaDescription) -> String {
     // RFC 2326 §C.1: a unicast SDP should carry a c= line too (0.0.0.0
     // means "this host"); multicast uses the explicit connection.
     #[cfg(feature = "multicast")]
-    if let Some(conn) = &description.connection {
+    let connection = description.connection.as_ref().map(|conn| {
         let ttl_str = conn.ttl.map(|t| format!("/{t}")).unwrap_or_default();
-        output.push_str(&format!(
-            "c=IN {} {}{}\r\n",
-            conn.addr_type, conn.address, ttl_str
-        ));
+        format!("c=IN {} {}{}\r\n", conn.addr_type, conn.address, ttl_str)
+    });
+    #[cfg(not(feature = "multicast"))]
+    let connection: Option<String> = None;
+    if let Some(connection) = connection {
+        output.push_str(&connection);
+    } else if matches!(local_ip, Some(std::net::IpAddr::V6(_))) {
+        output.push_str("c=IN IP6 ::\r\n");
     } else {
         output.push_str("c=IN IP4 0.0.0.0\r\n");
     }
-    #[cfg(not(feature = "multicast"))]
-    output.push_str("c=IN IP4 0.0.0.0\r\n");
     for track in &description.tracks {
         let media = match track.kind {
             MediaKind::Video => "video",
@@ -318,6 +362,19 @@ pub fn encode(description: &MediaDescription) -> String {
         ));
         if let Some(fmtp) = &track.fmtp {
             output.push_str(&format!("a=fmtp:{} {}\r\n", track.payload_type, fmtp))
+        }
+        if let Some((numerator, denominator)) = track.frame_rate
+            && numerator > 0
+            && denominator > 0
+        {
+            let mut rate = format!("{:.3}", f64::from(numerator) / f64::from(denominator));
+            while rate.ends_with('0') {
+                rate.pop();
+            }
+            if rate.ends_with('.') {
+                rate.pop();
+            }
+            output.push_str(&format!("a=framerate:{rate}\r\n"));
         }
         #[cfg(feature = "srtp")]
         if let Some(crypto) = &track.crypto {
@@ -379,6 +436,25 @@ mod tests {
                 .len(),
             3
         );
+    }
+
+    #[test]
+    fn sdp_attributes_and_ipv6_encoding() {
+        let input = b"v=0\r\ns=attrs\r\nm=video 0 RTP/AVP 96 97\r\na=rtpmap:97 H265/90000\r\na=framerate:25\r\na=control:trackID=0\r\n";
+        let parsed = parse(input).unwrap();
+        assert_eq!(parsed.tracks[0].codec, Codec::H265);
+        assert_eq!(parsed.tracks[0].payload_type, 97);
+        assert_eq!(parsed.tracks[0].frame_rate, Some((25, 1)));
+        let encoded = encode_to(&parsed, Some("::1".parse().unwrap()));
+        assert!(encoded.contains("c=IN IP6 ::"));
+        assert!(encoded.contains("a=framerate:25"));
+    }
+
+    #[test]
+    fn savp_profile_and_ptime_are_tolerated() {
+        let input = b"v=0\r\ns=secure\r\nm=video 0 RTP/SAVP 96\r\na=rtpmap:96 H264/90000\r\na=ptime:20\r\na=control:trackID=0\r\n";
+        let parsed = parse(input).unwrap();
+        assert_eq!(parsed.tracks[0].codec, Codec::H264);
     }
 
     #[test]
