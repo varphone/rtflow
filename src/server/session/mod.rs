@@ -43,15 +43,21 @@ mod announce;
 mod frames;
 mod gate;
 mod helpers;
+mod pause;
 mod play;
+mod record;
 mod setup;
+mod teardown;
 
 use self::announce::handle_announce;
 use self::frames::handle_incoming_interleaved;
 use self::gate::gate_request;
 use self::helpers::*;
+use self::pause::handle_pause;
 use self::play::handle_play;
+use self::record::handle_record;
 use self::setup::handle_setup;
+use self::teardown::handle_teardown;
 
 pub(super) async fn serve_connection(
     stream: ControlConnection,
@@ -173,123 +179,39 @@ pub(super) async fn serve_connection(
                 )
                 .await?;
             } else if req.method == Method::Record {
-                let candidates = setups
-                    .iter()
-                    .map(|(mount, ..)| mount.clone())
-                    .chain(interleaved.iter().map(|(mount, ..)| mount.clone()))
-                    .collect::<Vec<_>>();
-                match claim_remote_publishers(candidates) {
-                    Ok(claims) => resources.claims = claims,
-                    Err(_) => {
-                        writer
-                            .lock()
-                            .await
-                            .write_all(&rtsp::encode_response(&simple_response(
-                                409, "Conflict", cseq,
-                            )))
-                            .await?;
-                        continue;
-                    }
-                }
-                for task in resources.senders.drain(..) {
-                    task.abort();
-                    // Wait for the old sender to actually stop before a new
-                    // one starts, so the two never interleave on the wire.
-                    let _ = task.await;
-                }
-                if let Some(position) = resources.stop_vod() {
-                    vod_cursor = position;
-                }
-                for (mount, socket, _rtp_target, _rtcp_target, track) in setups.iter().cloned() {
-                    if matches!(mount.config, MountConfig::Publisher { .. }) {
-                        resources.senders.push(spawn_udp_receiver(
-                            mount,
-                            socket,
-                            _rtp_target,
-                            track,
-                        ));
-                    }
-                }
-                let mut has_interleaved_receiver = false;
-                interleaved_ssrcs.clear();
-                for (mount, rtp_channel, _rtcp_channel, track) in interleaved.iter().cloned() {
-                    if matches!(mount.config, MountConfig::Publisher { .. }) {
-                        has_interleaved_receiver = true;
-                        interleaved_depacketizers.insert(
-                            rtp_channel,
-                            Depacketizer::new(track.codec, track.id, track.clock_rate),
-                        );
-                        if !resources
-                            .recording_mounts
-                            .iter()
-                            .any(|current| Arc::ptr_eq(current, &mount))
-                        {
-                            mount.publishers.fetch_add(1, Ordering::AcqRel);
-                            resources.recording_mounts.push(mount);
-                        }
-                    }
-                }
-                if resources.senders.is_empty() && !has_interleaved_receiver {
-                    release_remote_publishers(&mut resources.claims, true);
-                    writer
-                        .lock()
-                        .await
-                        .write_all(&rtsp::encode_response(&simple_response(
-                            455,
-                            "Method Not Valid in This State",
-                            cseq,
-                        )))
-                        .await?;
-                } else {
-                    phase = ConnectionPhase::Recording;
-                    let mut response = simple_response(200, "OK", cseq);
-                    response.headers.insert(
-                        "session".into(),
-                        session_header(&session_id, state.config.session_timeout),
-                    );
-                    writer
-                        .lock()
-                        .await
-                        .write_all(&rtsp::encode_response(&response))
-                        .await?;
-                }
+                handle_record(
+                    &req,
+                    &state,
+                    &writer,
+                    &session_id,
+                    cseq.clone(),
+                    &setups,
+                    &interleaved,
+                    &mut resources,
+                    &mut interleaved_depacketizers,
+                    &mut interleaved_ssrcs,
+                    &mut vod_cursor,
+                    &mut phase,
+                )
+                .await?;
             } else if req.method == Method::Pause {
-                phase = ConnectionPhase::Paused;
-                release_recording_mounts(&mut resources.recording_mounts);
-                // Release publisher claims too: a paused session is not
-                // publishing, and keeping the claim would make a later
-                // RECORD on the same session (or another) fail with 409.
-                release_remote_publishers(&mut resources.claims, true);
-                interleaved_depacketizers.clear();
-                for task in resources.senders.drain(..) {
-                    task.abort();
-                    // Wait for the old sender to actually stop before a new
-                    // one starts, so the two never interleave on the wire.
-                    let _ = task.await;
-                }
-                if let Some(position) = resources.stop_vod() {
-                    vod_cursor = position;
-                }
-                writer
-                    .lock()
-                    .await
-                    .write_all(&rtsp::encode_response(&simple_response(200, "OK", cseq)))
-                    .await?;
+                handle_pause(
+                    &writer,
+                    cseq.clone(),
+                    &mut resources,
+                    &mut interleaved_depacketizers,
+                    &mut vod_cursor,
+                    &mut phase,
+                )
+                .await?;
             } else if req.method == Method::Teardown {
-                release_recording_mounts(&mut resources.recording_mounts);
-                release_remote_publishers(&mut resources.claims, true);
-                interleaved_depacketizers.clear();
-                for task in resources.senders.drain(..) {
-                    task.abort();
-                    // Wait for the old sender to actually stop before a new
-                    // one starts, so the two never interleave on the wire.
-                    let _ = task.await;
-                }
-                writer
-                    .lock()
-                    .await
-                    .write_all(&rtsp::encode_response(&simple_response(200, "OK", cseq)))
-                    .await?;
+                handle_teardown(
+                    &writer,
+                    cseq,
+                    &mut resources,
+                    &mut interleaved_depacketizers,
+                )
+                .await?;
                 return Ok(());
             } else {
                 let response = handle_request(req, &state).await;
