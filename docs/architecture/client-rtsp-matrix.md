@@ -15,7 +15,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 | TEARDOWN | ✅ | waits for the response; Drop aborts tasks |
 | GET_PARAMETER | ✅ | `ClientSession::get_parameter`, keep-alive |
 | SET_PARAMETER | ✅ | `ClientSession::set_parameter` (text/parameters body) |
-| ANNOUNCE / RECORD | ✅ | `RtspClient::publish` + `PublisherSession::push`; UDP/TCP interleaved, multi-track, SRTP |
+| ANNOUNCE / RECORD | ✅ | `RtspClient::publish` + `PublisherSession::push`; UDP/TCP interleaved, multi-track, SRTP, periodic RTCP SR |
 | REDIRECT | ✅ | 3xx `Location` on OPTIONS/DESCRIBE is followed; server-initiated `REDIRECT` is acknowledged with 200 and surfaced as `Error::Redirect`/`ClientEvent::Redirect` for the application to reconnect |
 | UNSUPPORTED | ⚠️ | parsed as a method but no client-side `Require` negotiation |
 
@@ -53,7 +53,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 
 ## Known gaps / next increments
 
-1. Publisher RTCP (SR/RR).
+1. Publisher RTCP RR reception (SR is sent; server RR/feedback is not consumed).
 2. Automatic reconnect after `REDIRECT` (currently the application receives the location).
 3. `551 Unsupported` token-level reporting (status is surfaced, tokens are not split out).
 4. Byte-bounded output queue (currently frame-count bounded; a small number of

@@ -8,6 +8,7 @@ use crate::{
     Error, Result,
     identity::SessionId,
     media::{AccessUnit, MediaDescription, TrackDescription},
+    rtcp::{CompoundPacket, Packet as RtcpPacket, SdesChunk, SdesItem},
     rtp::Packetizer,
     rtsp::sdp,
     runtime::framing::{ConnectionFramer, InboundFrame},
@@ -18,7 +19,7 @@ use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::{Arc, atomic::AtomicU32},
-    time::Duration,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     io::AsyncReadExt,
@@ -35,12 +36,64 @@ enum PublishTransport {
 struct PublishTrack {
     packetizer: Packetizer,
     transport: PublishTransport,
+    rtcp_target: Option<SocketAddr>,
+    rtcp_channel: Option<u8>,
+    packets: u32,
+    octets: u32,
+    last_rtp_timestamp: u32,
+    last_sender_report: Option<Instant>,
     #[cfg(feature = "srtp")]
-    srtp: Option<crate::srtp::SrtpContext>,
+    srtp: Option<(crate::srtp::SrtpContext, crate::srtp::SrtcpContext)>,
 }
 
 mod control;
 use control::{ControlInner, PublisherControl};
+
+async fn send_sender_report(control: &PublisherControl, track: &mut PublishTrack) -> Result<()> {
+    let ssrc = track.packetizer.ssrc;
+    let packet = CompoundPacket::new(vec![
+        RtcpPacket::SenderReport {
+            ssrc,
+            ntp: ntp_now(),
+            rtp_timestamp: track.last_rtp_timestamp,
+            packets: track.packets,
+            octets: track.octets,
+        },
+        RtcpPacket::SourceDescription {
+            chunks: vec![SdesChunk {
+                ssrc,
+                items: vec![SdesItem {
+                    kind: 1,
+                    value: bytes::Bytes::from_static(b"rtsp-client"),
+                }],
+            }],
+        },
+    ])?
+    .try_encode()?;
+    #[cfg(feature = "srtp")]
+    let packet = match track.srtp.as_mut() {
+        Some((_, srtcp)) => srtcp.protect(&packet)?,
+        None => packet,
+    };
+    if let Some(target) = track.rtcp_target {
+        if let PublishTransport::Udp { pair, .. } = &track.transport {
+            pair.rtcp.send_to(&packet, target).await?;
+        }
+    } else if let Some(channel) = track.rtcp_channel {
+        control.write_interleaved(channel, packet).await?;
+    }
+    Ok(())
+}
+
+fn ntp_now() -> u64 {
+    const NTP_EPOCH_OFFSET: u64 = 2_208_988_800;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let seconds = now.as_secs().saturating_add(NTP_EPOCH_OFFSET);
+    let fraction = (u64::from(now.subsec_nanos()) << 32) / 1_000_000_000;
+    (seconds << 32) | fraction
+}
 
 /// A live RTSP publisher. `push` sends one access unit as RTP packets; the
 /// control connection is kept alive in a dedicated task.
@@ -75,9 +128,10 @@ impl PublisherSession {
             let encoded = packet.encode();
             #[cfg(feature = "srtp")]
             let encoded = match track.srtp.as_mut() {
-                Some(context) => context.protect_rtp(&encoded)?,
+                Some((context, _)) => context.protect_rtp(&encoded)?,
                 None => encoded,
             };
+            let encoded_len = encoded.len() as u32;
             match &track.transport {
                 PublishTransport::Udp { pair, target } => {
                     pair.rtp.send_to(&encoded, *target).await?;
@@ -86,6 +140,16 @@ impl PublisherSession {
                     control.write_interleaved(*channel, encoded).await?;
                 }
             }
+            track.packets = track.packets.saturating_add(1);
+            track.octets = track.octets.saturating_add(encoded_len);
+        }
+        track.last_rtp_timestamp = unit.rtp_timestamp;
+        if track
+            .last_sender_report
+            .is_none_or(|sent| sent.elapsed() >= Duration::from_secs(5))
+        {
+            send_sender_report(control, track).await?;
+            track.last_sender_report = Some(Instant::now());
         }
         Ok(())
     }
@@ -282,7 +346,7 @@ pub(super) async fn connect(
         } else {
             let pair = UdpPair::bind(bind_ip, None).await?;
             let port = pair.rtp_port()?;
-            udp_tracks.push((track.clone(), pair, port));
+            udp_tracks.push((track.clone(), pair, port, 0u16));
             format!(
                 "Transport: {profile};unicast;client_port={}-{};mode=record\r\n",
                 port,
@@ -336,6 +400,7 @@ pub(super) async fn connect(
                 .and_then(|value| TransportSpec::parse(value))?;
             let TransportSpec::Udp {
                 server_rtp: Some(server_rtp),
+                server_rtcp: Some(server_rtcp),
                 ..
             } = response_transport
             else {
@@ -345,6 +410,7 @@ pub(super) async fn connect(
             };
             if let Some(last) = udp_tracks.last_mut() {
                 last.2 = server_rtp;
+                last.3 = server_rtcp;
             }
         }
     }
@@ -398,11 +464,17 @@ pub(super) async fn connect(
                 PublishTrack {
                     packetizer: packetizer(&track)?,
                     transport: PublishTransport::Interleaved { channel },
+                    rtcp_target: None,
+                    rtcp_channel: Some(channel.saturating_add(1)),
+                    packets: 0,
+                    octets: 0,
+                    last_rtp_timestamp: 0,
+                    last_sender_report: None,
                     #[cfg(feature = "srtp")]
                     srtp: track
                         .crypto
                         .as_ref()
-                        .map(|crypto| crate::srtp::from_sdp_crypto(crypto).map(|(srtp, _)| srtp))
+                        .map(crate::srtp::from_sdp_crypto)
                         .transpose()?,
                 },
             );
@@ -429,7 +501,7 @@ pub(super) async fn connect(
     }
 
     // UDP: the server_port values were stored in udp_tracks during SETUP.
-    for (track, pair, server_rtp) in udp_tracks {
+    for (track, pair, server_rtp, server_rtcp) in udp_tracks {
         tracks.insert(
             track.id,
             PublishTrack {
@@ -438,11 +510,17 @@ pub(super) async fn connect(
                     pair,
                     target: SocketAddr::new(peer_ip, server_rtp),
                 },
+                rtcp_target: Some(SocketAddr::new(peer_ip, server_rtcp)),
+                rtcp_channel: None,
+                packets: 0,
+                octets: 0,
+                last_rtp_timestamp: 0,
+                last_sender_report: None,
                 #[cfg(feature = "srtp")]
                 srtp: track
                     .crypto
                     .as_ref()
-                    .map(|crypto| crate::srtp::from_sdp_crypto(crypto).map(|(srtp, _)| srtp))
+                    .map(crate::srtp::from_sdp_crypto)
                     .transpose()?,
             },
         );
