@@ -88,11 +88,11 @@ async fn attach_clients(count: usize, url: &str) -> Vec<rtflow::client::ClientSe
     for _ in 0..count {
         let client = RtspClient::connect(
             Url::parse(url).unwrap(),
-            ClientOptions {
-                transport: UpstreamTransport::TcpInterleaved,
-                keep_alive_interval: None,
-                ..Default::default()
-            },
+            ClientOptions::builder()
+                .transport(UpstreamTransport::TcpInterleaved)
+                .keep_alive_interval(None)
+                .build()
+                .unwrap(),
         )
         .await
         .expect("client connect");
