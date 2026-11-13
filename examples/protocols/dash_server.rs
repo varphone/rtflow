@@ -75,7 +75,7 @@ fn dash_player_html(mpd_url: &str) -> String {
 "##,
     );
     // Embed ffmpeg reference data for diagnostic testing
-    html.push_str(include_str!("ref_data.js"));
+    html.push_str(include_str!("../assets/ref_data.js"));
     html.push_str(
         r##"
 function log(msg) {

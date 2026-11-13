@@ -35,7 +35,7 @@
 - [x] **破坏**：`ClientOptions` 加 `event_sink: Option<Arc<dyn EventSink>>`，`ClientOptions`/`ClientReconnectPolicy` 加 `#[non_exhaustive]`。实施中发现 E0639：crate 外**任何**结构体字面量（含 `..Default::default()`）都被禁止，因此仓库内 ~21 处 tests/examples 构造点全部迁移为 builder；`ClientReconnectPolicy` 同步新增 builder。迁移注记已入 `docs/guides/migration/0.1-to-0.2.md`（0.3 预告节）
 - [x] connect/fallback/backoff/keep-alive 失败/终止点 `observe::emit`（含结构化 tracing 字段 session_id/attempt/status）
 - [x] `src/metrics/mod.rs`：client_sessions_total/active、client_reconnect_attempts、client_keep_alive_failures、client_fallbacks + Prometheus 导出（测试 `client_events.rs::reconnect_lifecycle_emits_backoff_failed_closed_and_feeds_metrics`）
-- [x] 易用性：`rtflow::client::UpstreamTransport` re-export；`RtspClient::connect_str/describe_str`；`ClientSession::new` 收敛为 `SessionParts`（删除两处 `too_many_arguments` allow）；`examples/play_client.rs` 加 `--reconnect` 与 5s 质量快照；`docs/guides/examples.md` 增"播放客户端"章节
+- [x] 易用性：`rtflow::client::UpstreamTransport` re-export；`RtspClient::connect_str/describe_str`；`ClientSession::new` 收敛为 `SessionParts`（删除两处 `too_many_arguments` allow）；`examples/client/play_client.rs` 加 `--reconnect` 与 5s 质量快照；`docs/guides/examples.md` 增"播放客户端"章节
 - [x] 事件序列测试：`tests/client_events.rs`（Collector sink 断言 Connected/Fallback 顺序、KeepAliveFailed、重连终止事件 + metrics 计数）
 
 ## M4 — 性能

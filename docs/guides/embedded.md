@@ -2,7 +2,7 @@
 
 本文面向把 rtflow 接入嵌入式平台的客户，重点是**把硬件编码器（HiSilicon
 HiMPP VENC、V4L2 等）输出的帧通过 RTSP 发出去**，实现多码流 IPC。
-`examples/ipc_camera.rs` 是完整的参考实现——把其中的合成帧生成替换为
+`examples/embedded/ipc_camera.rs` 是完整的参考实现——把其中的合成帧生成替换为
 VENC 回调即可。
 
 ## 1. 接入路径总览
@@ -77,7 +77,7 @@ async fn main() -> rtflow::Result<()> {
   之后 IDR 可不再携带参数集。
 - 无订阅者时 `try_push` 返回 `DroppedNoSubscribers`（正常）：IPC 固件
   通常借此**门控 VENC**（无人观看时停编码省电），参考
-  `examples/ipc_camera.rs` 的 `subscriber_count == 0` 检查。
+  `examples/embedded/ipc_camera.rs` 的 `subscriber_count == 0` 检查。
 
 ## 3. 多码流（主/子码流）
 

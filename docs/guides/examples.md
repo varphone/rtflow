@@ -1,6 +1,6 @@
 # 示例程序与联调指南
 
-所有示例都是可运行 CLI。先用 `cargo run --example NAME -- --help` 查看完整参数；日志级别由 `RUST_LOG` 控制。服务端默认监听 `0.0.0.0:8554`，支持 `--listen 127.0.0.1:0` 使用系统分配端口。
+示例源码按域分组在 `examples/{server,client,protocols,gateway,embedded}/`，静态资源在 `examples/assets/`；命令中的 `--example <name>` 不变。所有示例都是可运行 CLI。先用 `cargo run --example NAME -- --help` 查看完整参数；日志级别由 `RUST_LOG` 控制。服务端默认监听 `0.0.0.0:8554`，支持 `--listen 127.0.0.1:0` 使用系统分配端口。
 
 ## 本地编码源
 

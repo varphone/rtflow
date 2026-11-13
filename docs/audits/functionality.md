@@ -27,7 +27,7 @@
 - 后果：Prometheus 导出中"每协议流量/质量"全部恒 0，运维监控失真。修复：在 `mount.stats`（帧计数已接线）、各协议 session 建立/销毁、HTTP handler 处补计数。
 
 **F3. `ffmpeg` feature 为空占位（启用无任何功能）**
-- `Cargo.toml:32`：`ffmpeg = []`，src 下无任何 ffmpeg 模块；`examples/ffmpeg_live_publish.rs:53-62` 只是 spawn 外部 ffmpeg 进程。README/feature profile 未明确承诺 crate 内 FFmpeg 集成，但该 feature 存在即误导。修复：删除 feature 或在文档标注"仅示例依赖"。
+- `Cargo.toml:32`：`ffmpeg = []`，src 下无任何 ffmpeg 模块；`examples/embedded/ffmpeg_live_publish.rs:53-62` 只是 spawn 外部 ffmpeg 进程。README/feature profile 未明确承诺 crate 内 FFmpeg 集成，但该 feature 存在即误导。修复：删除 feature 或在文档标注"仅示例依赖"。
 
 **F4. 公开 API `SrtpContext::srtcp_context()` 为 `todo!()` panic 占位**
 - `src/srtp/mod.rs:261-266`：带完整 doc 注释的公开方法直接 `todo!("SRTCP context creation requires RTCP session keys")`，调用即 panic；该类型在默认 `full` profile 编译（Cargo.toml:17 `srtp`）并从 crate 根导出（lib.rs:102）。修复：改为返回 `Result` + `Error::Unsupported`，或实现 RTCP 密钥派生。
@@ -45,7 +45,7 @@
 - `src/hls/mod.rs:40-42`：`live=false` 只改 playlist 输出 `EXT-X-PLAYLIST-TYPE:VOD`+ENDLIST（playlist.rs:81-117），底层 `SegmentRing` 仍是 `segment_count` 滑动窗口（hls/mod.rs:40）——VOD playlist 声明了完整列表，但旧段被淘汰后 404（hls/handler.rs:40-47）。录制目录无 HLS/DASH 挂载路径。修复：VOD 模式段持久化或禁止 live=false 组合并报错。
 
 **F9. webrtc_server 示例与 README「不可用占位」声明直接矛盾**
-- README:23 明确 WHIP/WHEP 为不可用占位；`examples/webrtc_server.rs:226-260` 仍注册 `/whip*`、`/whep*` 路由并提供完整 player/publisher HTML 引导浏览器接入。且 `examples/webrtc_server.rs:230` 创建**独立** `MountRegistry::new(10)`，与 212 行 RTSP server 的 registry 不共享——即使未来补上媒体管线，WHIP/WHEP 与 RTSP mount 也不互通。修复：删除示例路由/HTML 或标注不可用；registry 与 RTSP 共享。
+- README:23 明确 WHIP/WHEP 为不可用占位；`examples/protocols/webrtc_server.rs:226-260` 仍注册 `/whip*`、`/whep*` 路由并提供完整 player/publisher HTML 引导浏览器接入。且 `examples/protocols/webrtc_server.rs:230` 创建**独立** `MountRegistry::new(10)`，与 212 行 RTSP server 的 registry 不共享——即使未来补上媒体管线，WHIP/WHEP 与 RTSP mount 也不互通。修复：删除示例路由/HTML 或标注不可用；registry 与 RTSP 共享。
 
 ---
 
@@ -109,11 +109,11 @@
 
 # 三、低严重性
 
-- **L1** `examples/webrtc_server.rs` 用独立 MountRegistry（见 F9 佐证）。
-- **L2** `examples/authenticated_server.rs:47` Digest nonce 硬编码 `"example-static-nonce"`（用 `verify_digest` 而非 `ManagedDigestAuthenticator`），README 声称的签名 nonce/防重放未在示例演示。
+- **L1** `examples/protocols/webrtc_server.rs` 用独立 MountRegistry（见 F9 佐证）。
+- **L2** `examples/server/authenticated_server.rs:47` Digest nonce 硬编码 `"example-static-nonce"`（用 `verify_digest` 而非 `ManagedDigestAuthenticator`），README 声称的签名 nonce/防重放未在示例演示。
 - **L3** `ServerConfigBuilder` 缺 `max_rtsp_header_bytes`/`max_rtsp_body_bytes` setter（字段公开可直赋，便利性缺口）。
 - **L4** multicast feature 在默认 `full` 中启用且实现真实（src/multicast/mod.rs:54-70），但 docs/architecture/overview.md:51 称组播"仍是独立扩展"，README 未提及——文档口径偏差。
-- **L5** 实验协议 CLI 未暴露配置：`examples/hls_server.rs:78` 硬编码 `HlsConfig.live=true`；rtmp_server 无 `RtmpSessionConfig` CLI 开关。
+- **L5** 实验协议 CLI 未暴露配置：`examples/server/hls_server.rs:78` 硬编码 `HlsConfig.live=true`；rtmp_server 无 `RtmpSessionConfig` CLI 开关。
 - **L6** `Gateway::register_local_mount`（src/gateway.rs:148-195）手工构造 Mount 内部字段，与 `RtspServer::register_mount` 两套实现，字段演进存在漂移风险（audit-report.md R24 跳过项）。
 - **L7** HTTP 请求行/头非法时直接断连无 400（src/http/mod.rs:184-190）。
 - **L8** HLS playlist 响应无 `Access-Control-Allow-Origin`（hls/handler.rs:20-33），segment 响应有（55 行）——跨域部署时 playlist 请求失败。

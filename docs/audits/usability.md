@@ -4,7 +4,7 @@
 - 目标场景：**海思（HiSilicon）平台 IPC**——HiMPP 的 VENC 输出 H.264/H.265 编码帧，通过 rtflow 以 RTSP 发布，实现主/子多码流网络摄像机
 - 方法：以"嵌入式客户从零接入"的最小路径逐环节走查（README 最小示例 → API 形状 → 帧格式契约 → 平台构建），对照现有 examples/docs 能力
 - 口径：易用性 = 从拿到 SDK 到出流所需的代码量、需要理解的协议概念、需要自行实现的胶水、以及文档/示例覆盖
-- **实施状态（2026-08）：H1-H4 全部落地**——`media::bitstream`/`media::clock` 公开工具、`AccessUnit::video/audio`、`TrackDescription::h264_video/h265_video/aac_audio/pcma_audio/pcmu_audio`、mount 首关键帧自动提取 `sprop-parameter-sets` 并合并进 DESCRIBE、`examples/ipc_camera.rs` 双码流参考、`docs/guides/embedded.md` 交叉编译/调参指南
+- **实施状态（2026-08）：H1-H4 全部落地**——`media::bitstream`/`media::clock` 公开工具、`AccessUnit::video/audio`、`TrackDescription::h264_video/h265_video/aac_audio/pcma_audio/pcmu_audio`、mount 首关键帧自动提取 `sprop-parameter-sets` 并合并进 DESCRIBE、`examples/embedded/ipc_camera.rs` 双码流参考、`docs/guides/embedded.md` 交叉编译/调参指南
 
 ## 结论摘要
 
@@ -106,7 +106,7 @@ HiMPP VENC 回调
 1. **帧侧 helper**（H2 + H1.1/M1）：`AccessUnit::video/audio`、`RtpClock`、公开 `bitstream` 只读工具、`h264_parameter_sets`/`h265_parameter_sets`。
 2. **描述自动生成**（H1.3）：`TrackDescription::h264_video(sps, pps, w, h, fps)`（自动 fmtp）与 `MediaDescription::camera(...)`（主码流/子码流两个 mount 的完整描述）。
 3. **运行时注入**（H1.2）：首关键帧到达时若 fmtp 为空且帧含 SPS/PPS，自动提取并延迟生成 SDP fmtp（复用 `announce_fmtp` 槽位）。
-4. **示例**（H3）：`examples/ipc_camera.rs`——双码流、SPS/PPS 分离注入、订阅感知省电、优雅退出。
+4. **示例**（H3）：`examples/embedded/ipc_camera.rs`——双码流、SPS/PPS 分离注入、订阅感知省电、优雅退出。
 5. **文档**（H4 + M4 + M2/M3/L2）：`docs/guides/embedded.md`（交叉编译 + 调参 + 部署）+ README 导航。
 
 其中 1-4 的代码量估算：约 300-400 行 + 1 个示例 + 2-4 个测试；5 约 200 行文档。1 和 2 是纯增量 API（不破坏现有用法）；3 需要小心 DESCRIBE 时机的改动（fmtp 从"注册时固定"变为"可延迟确定"）。
