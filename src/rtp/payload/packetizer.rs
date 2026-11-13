@@ -99,6 +99,7 @@ impl Packetizer {
         let total = f.data.len().div_ceil(fragment_size);
         let picture_id = self.vp9_picture_id;
         self.vp9_picture_id = self.vp9_picture_id.wrapping_add(1);
+        let mut buffer = BytesMut::with_capacity(f.data.len() + 3 * total);
         let mut out = Vec::with_capacity(total);
         for (index, chunk) in f.data.chunks(fragment_size).enumerate() {
             let mut payload = BytesMut::with_capacity(3 + chunk.len());
@@ -130,13 +131,15 @@ impl Packetizer {
             return Err(Error::Media("MTU too small for VP8".into()));
         }
         let total = f.data.len().div_ceil(fragment_size);
+        let mut buffer = BytesMut::with_capacity(f.data.len() + total);
         let mut out = Vec::with_capacity(total);
         for (index, chunk) in f.data.chunks(fragment_size).enumerate() {
-            let mut payload = BytesMut::with_capacity(1 + chunk.len());
             let start = index == 0;
-            payload.put_u8(((start as u8) << 4) | (index & 0x0f) as u8);
-            payload.extend_from_slice(chunk);
-            out.push(self.packet(payload.freeze(), f.rtp_timestamp, index + 1 == total));
+            buffer.put_u8(((start as u8) << 4) | (index & 0x0f) as u8);
+            buffer.extend_from_slice(chunk);
+            let length = buffer.len();
+            let payload = buffer.split_to(length).freeze();
+            out.push(self.packet(payload, f.rtp_timestamp, index + 1 == total));
         }
         Ok(out)
     }
@@ -145,6 +148,9 @@ impl Packetizer {
             return Err(Error::Media("empty H264 access unit".into()));
         }
         let max = self.mtu.saturating_sub(12);
+        if max <= 2 {
+            return Err(Error::Media("MTU too small for H264".into()));
+        }
         let nals = annex_b_nals(&f.data);
         let nals = if nals.is_empty() {
             vec![f.data.clone()]
@@ -152,10 +158,27 @@ impl Packetizer {
             nals
         };
         let total = nals.len();
-        let mut out = Vec::new();
+        let fragments: usize = nals
+            .iter()
+            .map(|nal| {
+                if nal.len() <= max {
+                    1
+                } else {
+                    (nal.len() - 1).div_ceil(max - 2)
+                }
+            })
+            .sum();
+        // One backing allocation for the whole access unit: every payload is
+        // a slice of this buffer, so fragmentation does not allocate per
+        // packet (the wire encoder reuses its own buffer as well).
+        let mut buffer = BytesMut::with_capacity(f.data.len() + 2 * fragments + 2);
+        let mut out = Vec::with_capacity(fragments);
         for (i, nal) in nals.into_iter().enumerate() {
             if nal.len() <= max {
-                out.push(self.packet(nal, f.rtp_timestamp, i + 1 == total));
+                let length = nal.len();
+                buffer.extend_from_slice(&nal);
+                let payload = buffer.split_to(length).freeze();
+                out.push(self.packet(payload, f.rtp_timestamp, i + 1 == total));
                 continue;
             }
             if nal.len() < 2 {
@@ -166,17 +189,14 @@ impl Packetizer {
             let mut pos = 1;
             while pos < nal.len() {
                 let end = (pos + size).min(nal.len());
-                let mut v = BytesMut::with_capacity(2 + end - pos);
-                v.extend_from_slice(&[
+                buffer.extend_from_slice(&[
                     (hdr & 0xe0) | 28,
                     ((pos == 1) as u8) << 7 | ((end == nal.len()) as u8) << 6 | (hdr & 0x1f),
                 ]);
-                v.extend_from_slice(&nal[pos..end]);
-                out.push(self.packet(
-                    v.freeze(),
-                    f.rtp_timestamp,
-                    end == nal.len() && i + 1 == total,
-                ));
+                buffer.extend_from_slice(&nal[pos..end]);
+                let length = buffer.len();
+                let payload = buffer.split_to(length).freeze();
+                out.push(self.packet(payload, f.rtp_timestamp, end == nal.len() && i + 1 == total));
                 pos = end;
             }
         }
@@ -187,6 +207,9 @@ impl Packetizer {
             return Err(Error::Media("short H265 access unit".into()));
         }
         let max = self.mtu.saturating_sub(12);
+        if max <= 3 {
+            return Err(Error::Media("MTU too small for H265".into()));
+        }
         let nals = annex_b_nals(&f.data);
         let nals = if nals.is_empty() {
             vec![f.data.clone()]
@@ -194,13 +217,27 @@ impl Packetizer {
             nals
         };
         let total = nals.len();
-        let mut out = Vec::new();
+        let fragments: usize = nals
+            .iter()
+            .map(|nal| {
+                if nal.len() <= max {
+                    1
+                } else {
+                    (nal.len().saturating_sub(2)).div_ceil(max - 3)
+                }
+            })
+            .sum();
+        let mut buffer = BytesMut::with_capacity(f.data.len() + 3 * fragments + 3);
+        let mut out = Vec::with_capacity(fragments);
         for (index, nal) in nals.into_iter().enumerate() {
             if nal.len() < 2 {
                 return Err(Error::Media("short H265 NAL".into()));
             }
             if nal.len() <= max {
-                out.push(self.packet(nal, f.rtp_timestamp, index + 1 == total));
+                let length = nal.len();
+                buffer.extend_from_slice(&nal);
+                let payload = buffer.split_to(length).freeze();
+                out.push(self.packet(payload, f.rtp_timestamp, index + 1 == total));
                 continue;
             }
             let h0 = nal[0];
@@ -209,15 +246,16 @@ impl Packetizer {
             let mut pos = 2;
             while pos < nal.len() {
                 let end = (pos + size).min(nal.len());
-                let mut v = BytesMut::with_capacity(3 + end - pos);
-                v.extend_from_slice(&[
+                buffer.extend_from_slice(&[
                     (h0 & 0x81) | (49 << 1),
                     h1,
                     ((pos == 2) as u8) << 7 | ((end == nal.len()) as u8) << 6 | ((h0 >> 1) & 0x3f),
                 ]);
-                v.extend_from_slice(&nal[pos..end]);
+                buffer.extend_from_slice(&nal[pos..end]);
+                let length = buffer.len();
+                let payload = buffer.split_to(length).freeze();
                 out.push(self.packet(
-                    v.freeze(),
+                    payload,
                     f.rtp_timestamp,
                     end == nal.len() && index + 1 == total,
                 ));

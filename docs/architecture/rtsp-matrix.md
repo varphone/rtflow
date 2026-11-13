@@ -80,8 +80,8 @@ UDP 接收缓冲 4 MiB/socket。
 | `embedded`（queue 64） | 4.3 MiB | 7.9–8.2 MiB | 3.5–3.8 MiB |
 | 默认（queue 128） | 4.3 MiB | 8.2–8.4 MiB | 3.9–4.1 MiB |
 
-均低于 24 MiB 目标（不含内核 socket 缓冲）。包化路径实测 **1.35 次分配/RTP 包**
-（20 KB H.264 分片 + 复用 `encode_into` 缓冲），预算 ≤2。
+均低于 24 MiB 目标（不含内核 socket 缓冲）。包化路径实测 **0.29 次分配/RTP 包**
+（20 KB H.264 分片：整帧单缓冲切片 + 复用 `encode_into` 缓冲），预算 ≤1。
 
 ## 6. 验证入口
 

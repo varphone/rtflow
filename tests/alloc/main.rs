@@ -61,7 +61,7 @@ fn packetization_allocations_are_bounded_per_packet() {
     let per_packet = allocations as f64 / packets as f64;
     eprintln!("packetizer: {packets} packets, {allocations} allocations, {per_packet:.2}/packet");
     assert!(
-        per_packet <= 2.0,
+        per_packet <= 1.0,
         "packetization allocates {per_packet:.2} per RTP packet"
     );
 }
