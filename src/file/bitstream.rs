@@ -198,7 +198,17 @@ pub(crate) fn is_keyframe(codec: Codec, data: &[u8]) -> bool {
     let matches = |nal: &[u8]| match codec {
         Codec::H264 => is_h264_idr(nal),
         Codec::H265 => is_h265_random_access(nal),
-        Codec::Aac | Codec::Pcma | Codec::Pcmu | Codec::Opus | Codec::Vp8 | Codec::Vp9 => true,
+        Codec::Aac
+        | Codec::Pcma
+        | Codec::Pcmu
+        | Codec::Opus
+        | Codec::Vp8
+        | Codec::Vp9
+        | Codec::Mp3
+        | Codec::G726_16
+        | Codec::G726_24
+        | Codec::G726_32
+        | Codec::G726_40 => true,
     };
     let mut nals = annex_b_nals(data).peekable();
     if nals.peek().is_none() {

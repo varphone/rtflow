@@ -259,9 +259,17 @@ pub(super) fn nal_properties(codec: Codec, nal: &[u8]) -> (bool, bool, bool, boo
                 matches!(kind, 19..=21),
             )
         }
-        Codec::Aac | Codec::Pcma | Codec::Pcmu | Codec::Opus | Codec::Vp8 | Codec::Vp9 => {
-            (true, true, false, true)
-        }
+        Codec::Aac
+        | Codec::Pcma
+        | Codec::Pcmu
+        | Codec::Opus
+        | Codec::Vp8
+        | Codec::Vp9
+        | Codec::Mp3
+        | Codec::G726_16
+        | Codec::G726_24
+        | Codec::G726_32
+        | Codec::G726_40 => (true, true, false, true),
     }
 }
 

@@ -49,7 +49,7 @@ async fn round_trip(codec: Codec, transport: UpstreamTransport) {
 }
 
 #[tokio::test]
-async fn all_phase_one_codecs_round_trip_over_udp_and_tcp() {
+async fn all_codecs_round_trip_over_udp_and_tcp() {
     for transport in [UpstreamTransport::Udp, UpstreamTransport::TcpInterleaved] {
         for codec in [
             Codec::H264,
@@ -57,6 +57,14 @@ async fn all_phase_one_codecs_round_trip_over_udp_and_tcp() {
             Codec::Aac,
             Codec::Pcma,
             Codec::Pcmu,
+            Codec::Opus,
+            Codec::Vp8,
+            Codec::Vp9,
+            Codec::Mp3,
+            Codec::G726_16,
+            Codec::G726_24,
+            Codec::G726_32,
+            Codec::G726_40,
         ] {
             round_trip(codec, transport).await;
         }

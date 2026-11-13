@@ -79,6 +79,11 @@ fn codec_label(codec: Codec) -> &'static str {
         Codec::Opus => "Opus",
         Codec::Vp8 => "VP8",
         Codec::Vp9 => "VP9",
+        Codec::Mp3 => "MP3",
+        Codec::G726_16 => "G.726-16",
+        Codec::G726_24 => "G.726-24",
+        Codec::G726_32 => "G.726-32",
+        Codec::G726_40 => "G.726-40",
     }
 }
 

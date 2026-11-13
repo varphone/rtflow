@@ -105,6 +105,7 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
             let (codec, clock_rate, channels) = match (kind, payload_type) {
                 (MediaKind::Audio, 0) => (Codec::Pcmu, 8_000, Some(1)),
                 (MediaKind::Audio, 8) => (Codec::Pcma, 8_000, Some(1)),
+                (MediaKind::Audio, 14) => (Codec::Mp3, 90_000, None),
                 (MediaKind::Video, value) if value >= 96 => (Codec::H264, 90_000, None),
                 (MediaKind::Audio, value) if value >= 96 => (Codec::Aac, 48_000, Some(2)),
                 _ => {
@@ -149,6 +150,11 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                     "OPUS" => Codec::Opus,
                     "VP8" => Codec::Vp8,
                     "VP9" => Codec::Vp9,
+                    "MPA" | "MP3" | "MPEG-AUDIO" => Codec::Mp3,
+                    "G726-16" => Codec::G726_16,
+                    "G726-24" => Codec::G726_24,
+                    "G726-32" => Codec::G726_32,
+                    "G726-40" => Codec::G726_40,
                     _ => return Err(Error::Rtsp("unsupported SDP codec".into())),
                 };
                 track.clock_rate = parts
@@ -358,6 +364,11 @@ pub fn encode_with(
             Codec::Opus => "opus",
             Codec::Vp8 => "VP8",
             Codec::Vp9 => "VP9",
+            Codec::Mp3 => "MPA",
+            Codec::G726_16 => "G726-16",
+            Codec::G726_24 => "G726-24",
+            Codec::G726_32 => "G726-32",
+            Codec::G726_40 => "G726-40",
         };
         output.push_str(&format!(
             "m={media} 0 RTP/AVP {}\r\na=rtpmap:{} {codec}/{}{}\r\n",
@@ -467,6 +478,43 @@ mod tests {
         let input = b"v=0\r\ns=secure\r\nm=video 0 RTP/SAVP 96\r\na=rtpmap:96 H264/90000\r\na=ptime:20\r\na=control:trackID=0\r\n";
         let parsed = parse(input).unwrap();
         assert_eq!(parsed.tracks[0].codec, Codec::H264);
+    }
+
+    #[test]
+    fn mp3_and_g726_names_round_trip() {
+        for (codec, name) in [
+            (Codec::Mp3, "MPA"),
+            (Codec::G726_16, "G726-16"),
+            (Codec::G726_24, "G726-24"),
+            (Codec::G726_32, "G726-32"),
+            (Codec::G726_40, "G726-40"),
+        ] {
+            let track = TrackDescription {
+                id: 0,
+                kind: MediaKind::Audio,
+                codec,
+                clock_rate: if codec == Codec::Mp3 { 90_000 } else { 8_000 },
+                channels: Some(1),
+                payload_type: 96,
+                fmtp: None,
+                control: Arc::from("trackID=0"),
+                width: None,
+                height: None,
+                frame_rate: None,
+                #[cfg(feature = "srtp")]
+                crypto: None,
+            };
+            let description = MediaDescription {
+                session_name: Arc::from("audio"),
+                tracks: vec![track],
+                #[cfg(feature = "multicast")]
+                connection: None,
+            };
+            let encoded = encode(&description);
+            assert!(encoded.contains(name), "{encoded}");
+            let parsed = parse(encoded.as_bytes()).unwrap();
+            assert_eq!(parsed.tracks[0].codec, codec);
+        }
     }
 
     #[test]

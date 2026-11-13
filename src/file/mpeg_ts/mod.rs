@@ -71,6 +71,11 @@ impl MpegTsDemuxer {
                 Codec::Pcma | Codec::Pcmu => (8_000, Some(1), None),
                 Codec::Opus => (48_000, Some(2), None),
                 Codec::Vp8 | Codec::Vp9 => (90_000, None, None),
+                Codec::Mp3 | Codec::G726_16 | Codec::G726_24 | Codec::G726_32 | Codec::G726_40 => {
+                    return Err(Error::Media(
+                        "MPEG-TS track uses a codec the demuxer does not support".into(),
+                    ));
+                }
             };
             let track_id =
                 u8::try_from(tracks.len()).map_err(|_| Error::Limit("file media tracks"))?;
@@ -233,6 +238,9 @@ impl MpegTsDemuxer {
                 track,
                 self.max_sample_size,
                 &mut self.pending,
+            ),
+            Codec::Mp3 | Codec::G726_16 | Codec::G726_24 | Codec::G726_32 | Codec::G726_40 => Err(
+                Error::Media("MPEG-TS demuxer does not support this codec".into()),
             ),
             Codec::H264 | Codec::H265 => {
                 if parsed.payload.len() > self.max_sample_size {

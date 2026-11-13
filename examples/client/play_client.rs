@@ -81,6 +81,7 @@ impl Consumer {
                     Codec::Opus => "opus",
                     Codec::Vp8 => "vp8",
                     Codec::Vp9 => "vp9",
+                    _ => "bin",
                 };
                 let path = directory.join(format!("track-{}.{}", unit.track_id, extension));
                 let file = tokio::fs::OpenOptions::new()

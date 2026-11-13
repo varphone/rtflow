@@ -57,11 +57,28 @@ impl Packetizer {
             Codec::H264 => self.h264(frame),
             Codec::H265 => self.h265(frame),
             Codec::Aac => self.aac(frame),
-            Codec::Pcma | Codec::Pcmu | Codec::Opus => Ok(vec![self.packet(
+            Codec::Pcma | Codec::Pcmu | Codec::Opus | Codec::Mp3 => Ok(vec![self.packet(
                 frame.data.clone(),
                 frame.rtp_timestamp,
                 true,
             )]),
+            Codec::G726_16 | Codec::G726_24 | Codec::G726_32 | Codec::G726_40 => {
+                let frame_bytes = match self.codec {
+                    Codec::G726_16 => 40,
+                    Codec::G726_24 => 60,
+                    Codec::G726_32 => 80,
+                    Codec::G726_40 => 100,
+                    _ => unreachable!(),
+                };
+                if frame.data.is_empty() || !frame.data.len().is_multiple_of(frame_bytes) {
+                    return Err(Error::Media("invalid G.726 access unit length".into()));
+                }
+                Ok(vec![self.packet(
+                    frame.data.clone(),
+                    frame.rtp_timestamp,
+                    true,
+                )])
+            }
             Codec::Vp8 => self.vp8(frame),
             Codec::Vp9 => self.vp9(frame),
         }

@@ -44,7 +44,29 @@ impl Depacketizer {
                 }
                 Ok(units)
             }
-            Codec::Opus | Codec::Pcma | Codec::Pcmu => {
+            Codec::G726_16 | Codec::G726_24 | Codec::G726_32 | Codec::G726_40 => {
+                let frame_bytes = match self.codec {
+                    Codec::G726_16 => 40,
+                    Codec::G726_24 => 60,
+                    Codec::G726_32 => 80,
+                    Codec::G726_40 => 100,
+                    _ => unreachable!(),
+                };
+                if p.payload.is_empty() || !p.payload.len().is_multiple_of(frame_bytes) {
+                    return Err(Error::Media("invalid G.726 payload length".into()));
+                }
+                let pts = self.pts_from_timestamp(timestamp);
+                Ok(vec![AccessUnit {
+                    track_id: self.track_id,
+                    codec: self.codec,
+                    pts,
+                    dts: None,
+                    rtp_timestamp: timestamp,
+                    is_keyframe: true,
+                    data: p.payload,
+                }])
+            }
+            Codec::Opus | Codec::Pcma | Codec::Pcmu | Codec::Mp3 => {
                 let pts = self.pts_from_timestamp(timestamp);
                 Ok(vec![AccessUnit {
                     track_id: self.track_id,

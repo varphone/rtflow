@@ -104,6 +104,11 @@ pub(super) fn codec_id(codec: Codec) -> u8 {
         Codec::Opus => 6,
         Codec::Vp8 => 7,
         Codec::Vp9 => 8,
+        Codec::Mp3 => 9,
+        Codec::G726_16 => 10,
+        Codec::G726_24 => 11,
+        Codec::G726_32 => 12,
+        Codec::G726_40 => 13,
     }
 }
 pub(super) fn codec_from_id(id: u8) -> Result<Codec> {
@@ -116,6 +121,11 @@ pub(super) fn codec_from_id(id: u8) -> Result<Codec> {
         6 => Ok(Codec::Opus),
         7 => Ok(Codec::Vp8),
         8 => Ok(Codec::Vp9),
+        9 => Ok(Codec::Mp3),
+        10 => Ok(Codec::G726_16),
+        11 => Ok(Codec::G726_24),
+        12 => Ok(Codec::G726_32),
+        13 => Ok(Codec::G726_40),
         _ => Err(Error::Media("unknown recorded codec".into())),
     }
 }

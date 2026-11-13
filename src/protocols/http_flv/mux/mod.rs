@@ -213,7 +213,14 @@ impl FlvMuxer {
             Codec::Pcma | Codec::Pcmu => {
                 write_g711_audio_tag(&mut self.tag_buffer, &normalized);
             }
-            Codec::Opus | Codec::Vp8 | Codec::Vp9 => {
+            Codec::Opus
+            | Codec::Vp8
+            | Codec::Vp9
+            | Codec::Mp3
+            | Codec::G726_16
+            | Codec::G726_24
+            | Codec::G726_32
+            | Codec::G726_40 => {
                 // FLV does not support these codecs; skip silently.
             }
         }

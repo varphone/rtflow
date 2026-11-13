@@ -56,6 +56,12 @@ pub fn track(id: u8, codec: Codec) -> TrackDescription {
         Codec::Opus => (MediaKind::Audio, 48_000, Some(2), 111, None),
         Codec::Vp8 => (MediaKind::Video, 90_000, None, 99, None),
         Codec::Vp9 => (MediaKind::Video, 90_000, None, 100, None),
+        Codec::Mp3 => (MediaKind::Audio, 90_000, None, 14, None),
+        Codec::G726_16 => (MediaKind::Audio, 8_000, Some(1), 101, None),
+        Codec::G726_24 => (MediaKind::Audio, 8_000, Some(1), 102, None),
+        Codec::G726_32 => (MediaKind::Audio, 8_000, Some(1), 103, None),
+        Codec::G726_40 => (MediaKind::Audio, 8_000, Some(1), 104, None),
+        _ => (MediaKind::Audio, 8_000, Some(1), 120, None),
     };
     TrackDescription {
         id,
@@ -96,6 +102,12 @@ pub fn unit(track_id: u8, codec: Codec, sequence: u32) -> AccessUnit {
         Codec::Pcmu => Bytes::from_static(&[0xff; 160]),
         Codec::Opus => Bytes::from_static(&[0xfc; 80]),
         Codec::Vp8 | Codec::Vp9 => Bytes::from_static(&[0x10, 0x01, 0x02, 0x03]),
+        Codec::Mp3 => Bytes::from_static(&[0xff, 0xfb, 0x90, 0x00, 0x00, 0x00, 0x00]),
+        Codec::G726_16 => Bytes::from_static(&[0x55; 40]),
+        Codec::G726_24 => Bytes::from_static(&[0x55; 60]),
+        Codec::G726_32 => Bytes::from_static(&[0x55; 80]),
+        Codec::G726_40 => Bytes::from_static(&[0x55; 100]),
+        _ => Bytes::from_static(&[0; 4]),
     };
     AccessUnit {
         track_id,

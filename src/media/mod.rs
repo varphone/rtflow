@@ -29,6 +29,7 @@ use std::{sync::Arc, time::Duration};
 pub type TrackId = u8;
 pub type RtpTimestamp = u32;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub enum Codec {
     H264,
     H265,
@@ -38,6 +39,16 @@ pub enum Codec {
     Opus,
     Vp8,
     Vp9,
+    /// MPEG-1/2 Audio (MP3), RFC 2250/5219.
+    Mp3,
+    /// G.726 at 16 kbit/s (RFC 3551).
+    G726_16,
+    /// G.726 at 24 kbit/s.
+    G726_24,
+    /// G.726 at 32 kbit/s.
+    G726_32,
+    /// G.726 at 40 kbit/s.
+    G726_40,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MediaKind {
@@ -60,7 +71,15 @@ impl AccessUnit {
     pub fn kind(&self) -> MediaKind {
         match self.codec {
             Codec::H264 | Codec::H265 | Codec::Vp8 | Codec::Vp9 => MediaKind::Video,
-            Codec::Aac | Codec::Pcma | Codec::Pcmu | Codec::Opus => MediaKind::Audio,
+            Codec::Aac
+            | Codec::Pcma
+            | Codec::Pcmu
+            | Codec::Opus
+            | Codec::Mp3
+            | Codec::G726_16
+            | Codec::G726_24
+            | Codec::G726_32
+            | Codec::G726_40 => MediaKind::Audio,
         }
     }
 
@@ -241,6 +260,60 @@ impl TrackDescription {
             #[cfg(feature = "srtp")]
             crypto: None,
         }
+    }
+
+    /// MPEG-1/2 Audio (MP3) track: 90 kHz clock, static payload type 14.
+    pub fn mp3_audio(id: TrackId) -> Self {
+        Self {
+            id,
+            kind: MediaKind::Audio,
+            codec: Codec::Mp3,
+            clock_rate: 90_000,
+            channels: Some(2),
+            payload_type: 14,
+            fmtp: None,
+            control: Arc::from(format!("track{id}")),
+            width: None,
+            height: None,
+            frame_rate: None,
+            #[cfg(feature = "srtp")]
+            crypto: None,
+        }
+    }
+
+    /// G.726 audio track (8 kHz, 1 channel); `codec` selects the bit rate.
+    fn g726_audio(id: TrackId, codec: Codec) -> Self {
+        Self {
+            id,
+            kind: MediaKind::Audio,
+            codec,
+            clock_rate: 8_000,
+            channels: Some(1),
+            payload_type: 96u8.saturating_add(id),
+            fmtp: None,
+            control: Arc::from(format!("track{id}")),
+            width: None,
+            height: None,
+            frame_rate: None,
+            #[cfg(feature = "srtp")]
+            crypto: None,
+        }
+    }
+
+    pub fn g726_16_audio(id: TrackId) -> Self {
+        Self::g726_audio(id, Codec::G726_16)
+    }
+
+    pub fn g726_24_audio(id: TrackId) -> Self {
+        Self::g726_audio(id, Codec::G726_24)
+    }
+
+    pub fn g726_32_audio(id: TrackId) -> Self {
+        Self::g726_audio(id, Codec::G726_32)
+    }
+
+    pub fn g726_40_audio(id: TrackId) -> Self {
+        Self::g726_audio(id, Codec::G726_40)
     }
 
     /// G.711 μ-law audio track (8 kHz, 1 channel; no fmtp needed).

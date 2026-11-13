@@ -526,8 +526,17 @@ pub(crate) fn track_description(
     let payload_type = match codec {
         Codec::Pcmu => 0,
         Codec::Pcma => 8,
+        Codec::Mp3 => 14,
         Codec::Opus => 111,
-        Codec::H264 | Codec::H265 | Codec::Aac | Codec::Vp8 | Codec::Vp9 => 96u8.saturating_add(id),
+        Codec::H264
+        | Codec::H265
+        | Codec::Aac
+        | Codec::Vp8
+        | Codec::Vp9
+        | Codec::G726_16
+        | Codec::G726_24
+        | Codec::G726_32
+        | Codec::G726_40 => 96u8.saturating_add(id),
     };
     TrackDescription {
         id,
