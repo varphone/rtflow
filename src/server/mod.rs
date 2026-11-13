@@ -399,6 +399,14 @@ impl RtspServer {
             .state
             .mounts
             .register_with(path.clone(), config, effective)?;
+        if matches!(handle.inner.config, MountConfig::Proxy { .. }) {
+            crate::server::proxy_runtime::watch_proxy(
+                handle.inner.clone(),
+                self.state.cancel.clone(),
+                self.state.supervisor.clone(),
+                self.state.config.no_subscriber_grace,
+            );
+        }
         #[cfg(feature = "multicast")]
         let mount = handle.inner.clone();
         #[cfg(feature = "multicast")]

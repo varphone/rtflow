@@ -49,3 +49,10 @@ path = "fuzz_targets/rtsp_message.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "srtp"
+path = "fuzz_targets/srtp.rs"
+test = false
+doc = false
+bench = false

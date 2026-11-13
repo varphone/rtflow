@@ -20,6 +20,41 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+/// Keep an on-demand proxy aware of subscribers from ANY protocol (RTSP,
+/// HLS, HTTP-FLV). Protocol handlers only touch the shared broadcast bus, so
+/// the server-side watcher is what actually starts the upstream pull.
+pub(super) fn watch_proxy(
+    mount: Arc<Mount>,
+    server_cancel: CancellationToken,
+    supervisor: TaskSupervisor,
+    no_subscriber_grace: Duration,
+) {
+    let task_name = format!("proxy-watch-{}", mount.id);
+    supervisor.clone().spawn(
+        TaskSpec::new(task_name, Operation::ProxyConnect),
+        async move {
+            let mut tick = tokio::time::interval(Duration::from_millis(250));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = server_cancel.cancelled() => return Ok(()),
+                    _ = mount.cancel.cancelled() => return Ok(()),
+                    _ = tick.tick() => {
+                        if mount.frames.receiver_count() > 0 {
+                            start_proxy_if_idle(
+                                mount.clone(),
+                                server_cancel.clone(),
+                                supervisor.clone(),
+                                no_subscriber_grace,
+                            );
+                        }
+                    }
+                }
+            }
+        },
+    );
+}
+
 pub(super) fn start_proxy_if_idle(
     mount: Arc<Mount>,
     server_cancel: CancellationToken,

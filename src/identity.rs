@@ -56,21 +56,3 @@ impl From<&str> for MountId {
         Self(Arc::from(value))
     }
 }
-
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct TrackKey(u16);
-
-impl TrackKey {
-    pub const fn new(value: u16) -> Self {
-        Self(value)
-    }
-    pub const fn get(self) -> u16 {
-        self.0
-    }
-}
-
-impl fmt::Display for TrackKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
