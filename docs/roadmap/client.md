@@ -40,7 +40,7 @@
 
 ## M4 — 性能
 
-- [ ] `benches/client_receive.rs` 基线：UDP/interleaved 帧吞吐 + p50/p99 投递延迟（数字记录于本文件）
+- [x] 接收路径基线：`tests/client/performance.rs`，UDP p50≈0.14ms/p99≈1.1ms，interleaved p50≈0.16ms/p99≈0.74ms（loopback）
 - [x] jitter drain 事件驱动（RT-17）：`sleep_until(JitterBuffer::next_deadline())` 替换 1–10ms tick；满队列 `try_send` + 丢弃计数
 - [x] keep-alive/控制面独立任务（RT-7/RT-8）：命令 mpsc + oneshot 应答；`next()` 不再内联 RTSP 往返
 - [x] UDP 收缓冲可配（`UdpPair` 4MB 固定值 → `ClientOptions` 可选覆盖；`low_memory()` 预设 256KiB）

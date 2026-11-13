@@ -15,7 +15,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 | TEARDOWN | ✅ | waits for the response; Drop aborts tasks |
 | GET_PARAMETER | ✅ | `ClientSession::get_parameter`, keep-alive |
 | SET_PARAMETER | ✅ | `ClientSession::set_parameter` (text/parameters body) |
-| ANNOUNCE / RECORD | ✅ | `RtspClient::publish` + `PublisherSession::push`; UDP and TCP interleaved, multi-track |
+| ANNOUNCE / RECORD | ✅ | `RtspClient::publish` + `PublisherSession::push`; UDP/TCP interleaved, multi-track, SRTP |
 | REDIRECT | ✅ | 3xx `Location` on OPTIONS/DESCRIBE is followed; server-initiated `REDIRECT` is acknowledged with 200 and surfaced as `Error::Redirect`/`ClientEvent::Redirect` for the application to reconnect |
 | UNSUPPORTED | ⚠️ | parsed as a method but no client-side `Require` negotiation |
 
@@ -26,7 +26,7 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
 | CSeq / response pairing | ✅ exact match; stale interleaved responses skipped |
 | Session / timeout | ✅ `Session`, `timeout=`, keep-alive capped at half timeout |
 | Authentication | ✅ Basic/Digest for OPTIONS/DESCRIBE/SETUP and control; interleaved control retries Digest |
-| Transport | ✅ UDP, TCP interleaved, multicast, SRTP/RTSPS; fallback on 461/IO; publishing UDP and interleaved |
+| Transport | ✅ UDP, TCP interleaved, multicast, SRTP/RTSPS; fallback on 461/IO; publishing UDP/interleaved incl. SRTP |
 | Range/RTP-Info | `Range` sent; `RTP-Info` `seq` primes the jitter buffer; `rtptime` anchors PTS when a non-zero NPT range is returned |
 | Scale/Speed | ✅ sent on PLAY (`PlayRequest`) |
 | `Require`/`Proxy-Require` | ✅ `ClientOptions::require`/`proxy_require`; 551 `Unsupported` surfaces as `RtspStatus` |
@@ -47,10 +47,13 @@ Scope: RFC 2326 client behaviour in `src/client/`. The server side lives in
   2 MiB, UDP receive buffer 256 KiB. The output queue enforces both a frame
   count and a byte budget (`max_output_bytes`); the largest frame is capped
   by `Depacketizer` at 16 MiB.
+- Loopback smoke (`tests/client/performance.rs`, 160 frames): UDP
+  p50 ≈ 0.14 ms / p99 ≈ 1.1 ms; TCP interleaved p50 ≈ 0.16 ms /
+  p99 ≈ 0.74 ms; both ≈ 310–320 frames/s with a 2 ms publisher cadence.
 
 ## Known gaps / next increments
 
-1. Publisher RTCP (SR/RR) and SRTP publishing.
+1. Publisher RTCP (SR/RR).
 2. Automatic reconnect after `REDIRECT` (currently the application receives the location).
 3. `551 Unsupported` token-level reporting (status is surfaced, tokens are not split out).
 4. Byte-bounded output queue (currently frame-count bounded; a small number of

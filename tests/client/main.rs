@@ -3,6 +3,7 @@
 mod client_edge;
 mod client_events;
 mod concurrency;
+mod performance;
 mod publish;
 mod redirect;
 mod rtsp_methods;

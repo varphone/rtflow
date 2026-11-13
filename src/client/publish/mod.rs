@@ -35,6 +35,8 @@ enum PublishTransport {
 struct PublishTrack {
     packetizer: Packetizer,
     transport: PublishTransport,
+    #[cfg(feature = "srtp")]
+    srtp: Option<crate::srtp::SrtpContext>,
 }
 
 mod control;
@@ -69,15 +71,19 @@ impl PublisherSession {
             )));
         };
         let packets = track.packetizer.packetize(&unit)?;
-        match &track.transport {
-            PublishTransport::Udp { pair, target } => {
-                for packet in packets {
-                    pair.rtp.send_to(&packet.encode(), *target).await?;
+        for packet in packets {
+            let encoded = packet.encode();
+            #[cfg(feature = "srtp")]
+            let encoded = match track.srtp.as_mut() {
+                Some(context) => context.protect_rtp(&encoded)?,
+                None => encoded,
+            };
+            match &track.transport {
+                PublishTransport::Udp { pair, target } => {
+                    pair.rtp.send_to(&encoded, *target).await?;
                 }
-            }
-            PublishTransport::Interleaved { channel } => {
-                for packet in packets {
-                    control.write_interleaved(*channel, packet.encode()).await?;
+                PublishTransport::Interleaved { channel } => {
+                    control.write_interleaved(*channel, encoded).await?;
                 }
             }
         }
@@ -250,16 +256,27 @@ pub(super) async fn connect(
             continue;
         }
         #[cfg(feature = "srtp")]
-        if track.crypto.is_some() {
-            return Err(Error::Rtsp("publishing SRTP is not implemented yet".into()));
-        }
+        let secure = track.crypto.is_some();
+        #[cfg(not(feature = "srtp"))]
+        let secure = false;
+        let profile = if interleaved {
+            if secure {
+                "RTP/SAVP/TCP"
+            } else {
+                "RTP/AVP/TCP"
+            }
+        } else if secure {
+            "RTP/SAVP"
+        } else {
+            "RTP/AVP"
+        };
         let setup_uri = sdp::control_uri(&uri, &track.control)?;
         let mut headers = if interleaved {
             let channel = u8::try_from(index * 2)
                 .map_err(|_| Error::Limit("too many tracks for interleaved publishing"))?;
             interleaved_tracks.push((track.clone(), channel));
             format!(
-                "Transport: RTP/AVP/TCP;unicast;interleaved={channel}-{};mode=record\r\n",
+                "Transport: {profile};unicast;interleaved={channel}-{};mode=record\r\n",
                 channel.saturating_add(1)
             )
         } else {
@@ -267,7 +284,7 @@ pub(super) async fn connect(
             let port = pair.rtp_port()?;
             udp_tracks.push((track.clone(), pair, port));
             format!(
-                "Transport: RTP/AVP;unicast;client_port={}-{};mode=record\r\n",
+                "Transport: {profile};unicast;client_port={}-{};mode=record\r\n",
                 port,
                 port.saturating_add(1)
             )
@@ -381,6 +398,12 @@ pub(super) async fn connect(
                 PublishTrack {
                     packetizer: packetizer(&track)?,
                     transport: PublishTransport::Interleaved { channel },
+                    #[cfg(feature = "srtp")]
+                    srtp: track
+                        .crypto
+                        .as_ref()
+                        .map(|crypto| crate::srtp::from_sdp_crypto(crypto).map(|(srtp, _)| srtp))
+                        .transpose()?,
                 },
             );
         }
@@ -415,6 +438,12 @@ pub(super) async fn connect(
                     pair,
                     target: SocketAddr::new(peer_ip, server_rtp),
                 },
+                #[cfg(feature = "srtp")]
+                srtp: track
+                    .crypto
+                    .as_ref()
+                    .map(|crypto| crate::srtp::from_sdp_crypto(crypto).map(|(srtp, _)| srtp))
+                    .transpose()?,
             },
         );
     }
