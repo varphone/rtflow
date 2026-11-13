@@ -1,0 +1,97 @@
+use super::*;
+use crate::media::TrackDescription;
+use crate::transport::InterleavedFrame;
+
+/// Handle one interleaved RTP/RTCP frame (publishing direction).
+pub(super) async fn handle_incoming_interleaved(
+    frame: InterleavedFrame,
+    phase: ConnectionPhase,
+    interleaved: &[(Arc<Mount>, u8, u8, TrackDescription)],
+    depacketizers: &mut HashMap<u8, Depacketizer>,
+    ssrcs: &mut HashMap<u8, u32>,
+) -> Result<()> {
+    if frame.channel % 2 == 1 {
+        if let Some((mount, _, _, _)) = interleaved
+            .iter()
+            .find(|(_, _, rtcp_channel, _)| *rtcp_channel == frame.channel)
+            && let Ok(packets) = RtcpPacket::parse(frame.payload)
+        {
+            let reports = packets
+                .iter()
+                .filter(|packet| {
+                    matches!(
+                        packet,
+                        RtcpPacket::ReceiverReport { .. }
+                            | RtcpPacket::ReceiverReportWithReports { .. }
+                    )
+                })
+                .count() as u64;
+            mount.stats.add_receiver_reports(reports);
+        }
+        return Ok(());
+    }
+    if phase == ConnectionPhase::Recording
+        && let Some((mount, _, _, track)) = interleaved
+            .iter()
+            .find(|(_, rtp_channel, _, _)| *rtp_channel == frame.channel)
+            .cloned()
+    {
+        let depacketizer = depacketizers
+            .entry(frame.channel)
+            .or_insert_with(|| Depacketizer::new(track.codec, track.id, track.clock_rate));
+        let packet = match RtpPacket::parse(frame.payload) {
+            Ok(packet) => packet,
+            Err(error) => {
+                tracing::warn!(channel=frame.channel, error=%error, "invalid interleaved RTP");
+                return Ok(());
+            }
+        };
+        if tracing::enabled!(tracing::Level::DEBUG) && frame.channel == 0 {
+            tracing::debug!(
+                seq = packet.header.sequence,
+                ts = packet.header.timestamp,
+                marker = packet.header.marker,
+                "rtp in"
+            );
+        }
+        if packet.header.payload_type != track.payload_type
+            && !(packet.header.payload_type >= 96 && track.payload_type >= 96)
+        {
+            tracing::debug!(
+                channel = frame.channel,
+                payload_type = packet.header.payload_type,
+                expected = track.payload_type,
+                "dropping RTP payload type mismatch"
+            );
+            return Ok(());
+        }
+        if let Some(expected) = ssrcs.get(&frame.channel) {
+            if *expected != packet.header.ssrc {
+                tracing::debug!(
+                    channel = frame.channel,
+                    ssrc = packet.header.ssrc,
+                    expected_ssrc = *expected,
+                    "dropping RTP SSRC mismatch"
+                );
+                return Ok(());
+            }
+        } else {
+            ssrcs.insert(frame.channel, packet.header.ssrc);
+        }
+        match depacketizer.push(packet) {
+            Ok(units) => {
+                for unit in units {
+                    if mount.publish_cached(unit).is_ok() {
+                        mount.stats.add_accepted(1);
+                    } else {
+                        mount.stats.add_dropped(1);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(channel=frame.channel, error=%e, "depacketizer error");
+            }
+        }
+    }
+    Ok(())
+}

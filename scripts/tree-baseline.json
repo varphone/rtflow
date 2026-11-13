@@ -2,7 +2,6 @@
   "path_attributes": [],
   "oversized_files": [
     "src/file/mpeg_ts.rs (857 lines)",
-    "src/server/session.rs (1362 lines)",
     "src/storage/recording.rs (811 lines)"
   ],
   "root_entries": [
