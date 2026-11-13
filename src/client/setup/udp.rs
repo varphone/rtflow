@@ -38,6 +38,12 @@ pub(super) async fn connect_udp(
     let mut receivers = Vec::new();
     let track_list: Vec<_> = description.tracks.to_vec();
     for track in track_list {
+        if matches!(
+            track.direction,
+            Some(crate::media::SdpDirection::RecvOnly | crate::media::SdpDirection::Inactive)
+        ) {
+            continue;
+        }
         let bind_ip = match stream.local_addr().ip() {
             std::net::IpAddr::V4(_) => std::net::Ipv4Addr::UNSPECIFIED.into(),
             std::net::IpAddr::V6(_) => std::net::Ipv6Addr::UNSPECIFIED.into(),
@@ -204,7 +210,10 @@ pub(super) async fn connect_udp(
             Some(TransportSpec::Udp { rtcp_mux: true, .. })
         );
         let rtp_target = std::net::SocketAddr::new(peer_ip, server_rtp);
-        let rtcp_target = std::net::SocketAddr::new(peer_ip, server_rtcp);
+        let rtcp_target = track.rtcp.map_or_else(
+            || std::net::SocketAddr::new(peer_ip, server_rtcp),
+            |rtcp| std::net::SocketAddr::new(rtcp.address.unwrap_or(peer_ip), rtcp.port),
+        );
         #[cfg(feature = "srtp")]
         let srtp = match &track.crypto {
             Some(crypto) => match crate::srtp::from_sdp_crypto(crypto) {

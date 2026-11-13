@@ -10,6 +10,32 @@ use std::{
 };
 use tokio::net::UdpSocket;
 
+/// RTSP `Transport: mode=` parameter.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TransportMode {
+    Play,
+    Record,
+}
+
+impl TransportMode {
+    fn parse(value: &str) -> Result<Self> {
+        if value.eq_ignore_ascii_case("play") {
+            Ok(Self::Play)
+        } else if value.eq_ignore_ascii_case("record") {
+            Ok(Self::Record)
+        } else {
+            Err(Error::Rtsp("unsupported Transport mode".into()))
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Play => "play",
+            Self::Record => "record",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum TransportSpec {
@@ -22,6 +48,12 @@ pub enum TransportSpec {
         rtcp_mux: bool,
         /// SRTP (`RTP/SAVP`) is required for this transport.
         secure: bool,
+        /// Optional multicast/unicast destination hint.
+        destination: Option<IpAddr>,
+        /// Optional source-address hint.
+        source: Option<IpAddr>,
+        /// Optional `mode=play|record`.
+        mode: Option<TransportMode>,
     },
     TcpInterleaved {
         rtp_channel: u8,
@@ -30,12 +62,16 @@ pub enum TransportSpec {
         rtcp_mux: bool,
         /// SRTP (`RTP/SAVP`) is required for this transport.
         secure: bool,
+        /// Optional `mode=play|record`.
+        mode: Option<TransportMode>,
     },
     /// Server-published multicast group (`RTP/AVP;multicast`).
     Multicast {
         destination: Option<IpAddr>,
         port: Option<u16>,
         ttl: Option<u8>,
+        source: Option<IpAddr>,
+        mode: Option<TransportMode>,
     },
 }
 impl TransportSpec {
@@ -71,6 +107,9 @@ impl TransportSpec {
         let mut unicast = false;
         let mut multicast = false;
         let mut rtcp_mux = false;
+        let mut destination: Option<IpAddr> = None;
+        let mut source: Option<IpAddr> = None;
+        let mut mode: Option<TransportMode> = None;
         for part in parts {
             if part.eq_ignore_ascii_case("rtcp-mux") {
                 if rtcp_mux {
@@ -136,20 +175,45 @@ impl TransportSpec {
                         .map_err(|_| Error::Rtsp("invalid multicast TTL".into()))
                 })
                 .transpose()?;
+            let source = parameters
+                .get("source")
+                .map(|value| {
+                    value
+                        .parse::<IpAddr>()
+                        .map_err(|_| Error::Rtsp("invalid multicast source".into()))
+                })
+                .transpose()?;
+            let mode = parameters
+                .get("mode")
+                .map(|value| TransportMode::parse(value))
+                .transpose()?;
             return Ok(Self::Multicast {
                 destination,
                 port,
                 ttl,
+                source,
+                mode,
             });
         }
         if !unicast {
             return Err(Error::Rtsp("only unicast Transport is supported".into()));
         }
-        if let Some(mode) = parameters.get("mode")
-            && !mode.eq_ignore_ascii_case("play")
-            && !mode.eq_ignore_ascii_case("record")
-        {
-            return Err(Error::Rtsp("unsupported Transport mode".into()));
+        if let Some(value) = parameters.get("destination") {
+            destination = Some(
+                value
+                    .parse()
+                    .map_err(|_| Error::Rtsp("invalid Transport destination".into()))?,
+            );
+        }
+        if let Some(value) = parameters.get("source") {
+            source = Some(
+                value
+                    .parse()
+                    .map_err(|_| Error::Rtsp("invalid Transport source".into()))?,
+            );
+        }
+        if let Some(value) = parameters.get("mode") {
+            mode = Some(TransportMode::parse(value)?);
         }
 
         let secure = profile.eq_ignore_ascii_case("RTP/SAVP/TCP");
@@ -165,6 +229,7 @@ impl TransportSpec {
                     .map_err(|_| Error::Rtsp("RTCP interleaved channel exceeds 255".into()))?,
                 rtcp_mux,
                 secure,
+                mode,
             });
         }
         let secure = profile.eq_ignore_ascii_case("RTP/SAVP")
@@ -194,6 +259,9 @@ impl TransportSpec {
             server_rtcp,
             rtcp_mux,
             secure,
+            destination,
+            source,
+            mode,
         })
     }
 
@@ -206,6 +274,9 @@ impl TransportSpec {
                 server_rtcp,
                 rtcp_mux,
                 secure,
+                destination,
+                source,
+                mode,
             } => {
                 let profile = if *secure { "RTP/SAVP" } else { "RTP/AVP" };
                 let mut s = if *rtcp_mux {
@@ -220,6 +291,15 @@ impl TransportSpec {
                         s.push_str(&format!(";server_port={a}-{b}"))
                     }
                 }
+                if let Some(destination) = destination {
+                    s.push_str(&format!(";destination={destination}"));
+                }
+                if let Some(source) = source {
+                    s.push_str(&format!(";source={source}"));
+                }
+                if let Some(mode) = mode {
+                    s.push_str(&format!(";mode={}", mode.as_str()));
+                }
                 s
             }
             Self::TcpInterleaved {
@@ -227,22 +307,29 @@ impl TransportSpec {
                 rtcp_channel,
                 rtcp_mux,
                 secure,
+                mode,
             } => {
                 let profile = if *secure {
                     "RTP/SAVP/TCP"
                 } else {
                     "RTP/AVP/TCP"
                 };
-                if *rtcp_mux {
+                let mut rendered = if *rtcp_mux {
                     format!("{profile};unicast;interleaved={rtp_channel};rtcp-mux")
                 } else {
                     format!("{profile};unicast;interleaved={rtp_channel}-{rtcp_channel}")
+                };
+                if let Some(mode) = mode {
+                    rendered.push_str(&format!(";mode={}", mode.as_str()));
                 }
+                rendered
             }
             Self::Multicast {
                 destination,
                 port,
                 ttl,
+                source,
+                mode,
             } => {
                 let mut rendered = String::from("RTP/AVP;multicast");
                 if let Some(destination) = destination {
@@ -253,6 +340,12 @@ impl TransportSpec {
                 }
                 if let Some(ttl) = ttl {
                     rendered.push_str(&format!(";ttl={ttl}"));
+                }
+                if let Some(source) = source {
+                    rendered.push_str(&format!(";source={source}"));
+                }
+                if let Some(mode) = mode {
+                    rendered.push_str(&format!(";mode={}", mode.as_str()));
                 }
                 rendered
             }
@@ -493,6 +586,34 @@ mod tests {
             TransportSpec::parse("RTP/AVP;unicast;client_port=5000").is_err(),
             "single UDP port requires rtcp-mux"
         );
+    }
+
+    #[test]
+    fn destination_source_and_mode_round_trip() {
+        let udp = TransportSpec::parse(
+            "RTP/AVP;unicast;client_port=5000-5001;destination=239.1.1.1;source=192.0.2.7;mode=record",
+        )
+        .unwrap();
+        let rendered = udp.render();
+        assert!(rendered.contains("destination=239.1.1.1"), "{rendered}");
+        assert!(rendered.contains("source=192.0.2.7"), "{rendered}");
+        assert!(rendered.contains("mode=record"), "{rendered}");
+        match udp {
+            TransportSpec::Udp { mode, source, .. } => {
+                assert_eq!(mode, Some(TransportMode::Record));
+                assert_eq!(source, Some("192.0.2.7".parse().unwrap()));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let tcp = TransportSpec::parse("RTP/AVP/TCP;unicast;interleaved=0-1;mode=play").unwrap();
+        assert!(tcp.render().contains("mode=play"));
+        let multicast = TransportSpec::parse(
+            "RTP/AVP;multicast;destination=239.1.1.1;port=5004;ttl=8;source=192.0.2.7;mode=play",
+        )
+        .unwrap();
+        let rendered = multicast.render();
+        assert!(rendered.contains("source=192.0.2.7"), "{rendered}");
+        assert!(rendered.contains("mode=play"), "{rendered}");
     }
 
     #[test]

@@ -331,6 +331,10 @@ async fn rtmp_play_receives_flv_tags() {
             width: None,
             height: None,
             frame_rate: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
         }],
         #[cfg(feature = "multicast")]
         connection: None,

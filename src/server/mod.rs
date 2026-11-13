@@ -547,6 +547,10 @@ mod tests {
                 height: None,
                 frame_rate: None,
                 crypto: None,
+                direction: None,
+                ptime: None,
+                rtcp: None,
+                bandwidth_as: None,
             }],
             connection: None,
         };

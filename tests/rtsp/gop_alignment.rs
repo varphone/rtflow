@@ -31,6 +31,10 @@ fn description() -> MediaDescription {
             frame_rate: Some((30, 1)),
             #[cfg(feature = "srtp")]
             crypto: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
         }],
     }
 }

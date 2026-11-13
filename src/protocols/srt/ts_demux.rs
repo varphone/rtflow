@@ -95,6 +95,10 @@ impl TsStreamDemuxer {
                 frame_rate: None,
                 #[cfg(feature = "srtp")]
                 crypto: None,
+                direction: None,
+                ptime: None,
+                rtcp: None,
+                bandwidth_as: None,
             })
             .collect();
 

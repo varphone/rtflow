@@ -31,6 +31,10 @@ fn h264_description() -> MediaDescription {
             width: Some(1280),
             height: Some(720),
             frame_rate: Some((25, 1)),
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
         }],
         connection: None,
     }

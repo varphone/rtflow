@@ -1,6 +1,6 @@
 use crate::{
     Error, Result,
-    media::{Codec, MediaDescription, MediaKind, TrackDescription},
+    media::{Codec, MediaDescription, MediaKind, RtcpAddress, SdpDirection, TrackDescription},
 };
 use std::{collections::HashSet, sync::Arc};
 
@@ -71,6 +71,12 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
             {
                 connection = Some(parse_connection(_value)?);
             }
+        } else if let Some(value) = line.strip_prefix("b=AS:") {
+            if let Some(track) = current.as_mut()
+                && let Ok(bandwidth) = value.trim().parse::<u32>()
+            {
+                track.bandwidth_as = Some(bandwidth);
+            }
         } else if let Some(value) = line.strip_prefix("m=") {
             if tracks.len() + usize::from(current.is_some()) >= limits.max_tracks {
                 return Err(Error::Limit("SDP tracks"));
@@ -137,6 +143,10 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                 frame_rate: None,
                 #[cfg(feature = "srtp")]
                 crypto: None,
+                direction: None,
+                ptime: None,
+                rtcp: None,
+                bandwidth_as: None,
             });
         } else if let Some(value) = line.strip_prefix("a=rtpmap:") {
             let (pt, encoding) = value
@@ -173,48 +183,63 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                 track.channels = parts.get(2).and_then(|value| value.parse().ok());
                 mapped_payloads.insert(track.payload_type);
             }
-        } else if let Some(value) = line.strip_prefix("a=framerate:") {
-            if let Some(track) = current.as_mut()
-                && let Ok(fps) = value.trim().parse::<f64>()
-                && fps.is_finite()
-                && fps > 0.0
-                && fps <= 1_000.0
-            {
-                let numerator = (fps * 1_000.0).round() as u32;
-                let divisor = gcd(numerator, 1_000);
-                track.frame_rate = Some((numerator / divisor, 1_000 / divisor));
-            }
-        } else if let Some(value) = line.strip_prefix("a=fmtp:") {
+        } else if let Some(value) = line.strip_prefix("a=") {
+            let value = value.trim();
             if let Some(track) = current.as_mut() {
-                let (payload_type, fmtp) = value
-                    .split_once(' ')
-                    .ok_or_else(|| Error::Rtsp("bad fmtp".into()))?;
-                if payload_type.parse::<u8>().ok() == Some(track.payload_type) {
-                    track.fmtp = Some(Arc::from(fmtp));
-                }
-            }
-        } else if let Some(value) = line.strip_prefix("a=control:") {
-            if let Some(track) = current.as_mut() {
-                // Media control URLs are relative to the session-level
-                // control when one exists (RFC 2326 §C.1).
-                let control = match &session_control {
-                    Some(base)
-                        if !value.starts_with('/') && !value.contains("://") && value != "*" =>
-                    {
-                        format!("{}/{}", base.trim_end_matches('/'), value)
+                if let Some(direction) = SdpDirection::parse(value) {
+                    track.direction = Some(direction);
+                } else if let Some(ptime) = value.strip_prefix("ptime:") {
+                    track.ptime = ptime.trim().parse::<u32>().ok().filter(|value| *value > 0);
+                } else if let Some(rtcp) = value.strip_prefix("rtcp:") {
+                    let mut fields = rtcp.split_whitespace();
+                    if let Some(port) = fields.next().and_then(|value| value.parse::<u16>().ok()) {
+                        let address = fields
+                            .find(|field| field.parse::<std::net::IpAddr>().is_ok())
+                            .and_then(|field| field.parse::<std::net::IpAddr>().ok());
+                        track.rtcp = Some(RtcpAddress { port, address });
                     }
-                    _ => value.to_string(),
-                };
-                track.control = Arc::from(control);
-            } else if session_control.is_none() {
-                session_control = Some(value.to_string());
-            }
-        } else if let Some(_value) = line.strip_prefix("a=crypto:")
-            && let Some(_track) = current.as_mut()
-        {
-            #[cfg(feature = "srtp")]
+                } else if let Some(framerate) = value.strip_prefix("framerate:") {
+                    if let Ok(fps) = framerate.trim().parse::<f64>()
+                        && fps.is_finite()
+                        && fps > 0.0
+                        && fps <= 1_000.0
+                    {
+                        let numerator = (fps * 1_000.0).round() as u32;
+                        let divisor = gcd(numerator, 1_000);
+                        track.frame_rate = Some((numerator / divisor, 1_000 / divisor));
+                    }
+                } else if let Some(fmtp) = value.strip_prefix("fmtp:") {
+                    let (payload_type, fmtp) = fmtp
+                        .split_once(' ')
+                        .ok_or_else(|| Error::Rtsp("bad fmtp".into()))?;
+                    if payload_type.parse::<u8>().ok() == Some(track.payload_type) {
+                        track.fmtp = Some(Arc::from(fmtp));
+                    }
+                } else if let Some(control) = value.strip_prefix("control:") {
+                    // Media control URLs are relative to the session-level
+                    // control when one exists (RFC 2326 §C.1).
+                    let control = match &session_control {
+                        Some(base)
+                            if !control.starts_with('/')
+                                && !control.contains("://")
+                                && control != "*" =>
+                        {
+                            format!("{}/{}", base.trim_end_matches('/'), control)
+                        }
+                        _ => control.to_string(),
+                    };
+                    track.control = Arc::from(control);
+                }
+            } else if let Some(control) = value.strip_prefix("control:")
+                && session_control.is_none()
             {
-                let mut parts = _value.splitn(4, ' ');
+                session_control = Some(control.to_string());
+            }
+            #[cfg(feature = "srtp")]
+            if let Some(crypto) = value.strip_prefix("crypto:")
+                && let Some(track) = current.as_mut()
+            {
+                let mut parts = crypto.splitn(4, ' ');
                 let tag = parts
                     .next()
                     .and_then(|t| t.parse::<u32>().ok())
@@ -228,7 +253,7 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                     .ok_or_else(|| Error::Rtsp("bad SDP crypto key-params".into()))?
                     .to_owned();
                 let session_params = parts.next().map(str::to_owned);
-                _track.crypto = Some(SdpCrypto {
+                track.crypto = Some(SdpCrypto {
                     tag,
                     crypto_suite,
                     key_params,
@@ -399,6 +424,23 @@ pub fn encode_with(
                 .map(|value| format!("/{value}"))
                 .unwrap_or_default()
         ));
+        if let Some(bandwidth) = track.bandwidth_as {
+            output.push_str(&format!("b=AS:{bandwidth}\r\n"));
+        }
+        if let Some(direction) = track.direction {
+            output.push_str(&format!("a={}\r\n", direction.as_str()));
+        }
+        if let Some(ptime) = track.ptime {
+            output.push_str(&format!("a=ptime:{ptime}\r\n"));
+        }
+        if let Some(rtcp) = track.rtcp {
+            if let Some(address) = rtcp.address {
+                let family = if address.is_ipv6() { "IP6" } else { "IP4" };
+                output.push_str(&format!("a=rtcp:{} IN {family} {address}\r\n", rtcp.port));
+            } else {
+                output.push_str(&format!("a=rtcp:{}\r\n", rtcp.port));
+            }
+        }
         if let Some(fmtp) = &track.fmtp {
             output.push_str(&format!("a=fmtp:{} {}\r\n", track.payload_type, fmtp))
         }
@@ -500,6 +542,33 @@ mod tests {
     }
 
     #[test]
+    fn direction_ptime_rtcp_and_bandwidth_round_trip() {
+        let input = b"v=0\r\ns=attrs\r\nm=audio 0 RTP/AVP 96\r\na=rtpmap:96 PCMA/8000/1\r\nb=AS:128\r\na=sendonly\r\na=ptime:20\r\na=rtcp:5005 IN IP4 192.0.2.9\r\na=control:trackID=0\r\n";
+        let parsed = parse(input).unwrap();
+        let track = &parsed.tracks[0];
+        assert_eq!(track.direction, Some(SdpDirection::SendOnly));
+        assert_eq!(track.ptime, Some(20));
+        assert_eq!(
+            track.rtcp,
+            Some(RtcpAddress {
+                port: 5005,
+                address: Some("192.0.2.9".parse().unwrap())
+            })
+        );
+        assert_eq!(track.bandwidth_as, Some(128));
+        let encoded = encode(&parsed);
+        assert!(encoded.contains("b=AS:128"), "{encoded}");
+        assert!(encoded.contains("a=sendonly"), "{encoded}");
+        assert!(encoded.contains("a=ptime:20"), "{encoded}");
+        assert!(
+            encoded.contains("a=rtcp:5005 IN IP4 192.0.2.9"),
+            "{encoded}"
+        );
+        let reparsed = parse(encoded.as_bytes()).unwrap();
+        assert_eq!(reparsed.tracks[0].direction, Some(SdpDirection::SendOnly));
+    }
+
+    #[test]
     fn mp3_and_g726_names_round_trip() {
         for (codec, name) in [
             (Codec::Mp3, "MPA"),
@@ -522,6 +591,10 @@ mod tests {
                 frame_rate: None,
                 #[cfg(feature = "srtp")]
                 crypto: None,
+                direction: None,
+                ptime: None,
+                rtcp: None,
+                bandwidth_as: None,
             };
             let description = MediaDescription {
                 session_name: Arc::from("audio"),

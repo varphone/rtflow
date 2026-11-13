@@ -28,6 +28,12 @@ pub(super) async fn connect_multicast(
     let mut session_id = None;
     let mut session_timeout = None;
     for track in description.tracks.iter().cloned() {
+        if matches!(
+            track.direction,
+            Some(crate::media::SdpDirection::RecvOnly | crate::media::SdpDirection::Inactive)
+        ) {
+            continue;
+        }
         let setup_uri = match crate::rtsp::sdp::control_uri(&setup_base, &track.control) {
             Ok(uri) => uri,
             Err(error) => {

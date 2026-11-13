@@ -24,6 +24,10 @@ fn make_h264_description() -> MediaDescription {
                 frame_rate: None,
                 #[cfg(feature = "srtp")]
                 crypto: None,
+                direction: None,
+                ptime: None,
+                rtcp: None,
+                bandwidth_as: None,
             },
             TrackDescription {
                 id: 1,
@@ -39,6 +43,10 @@ fn make_h264_description() -> MediaDescription {
                 frame_rate: None,
                 #[cfg(feature = "srtp")]
                 crypto: None,
+                direction: None,
+                ptime: None,
+                rtcp: None,
+                bandwidth_as: None,
             },
         ],
         #[cfg(feature = "multicast")]
@@ -63,6 +71,10 @@ fn make_h265_description() -> MediaDescription {
             frame_rate: None,
             #[cfg(feature = "srtp")]
             crypto: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
         }],
         #[cfg(feature = "multicast")]
         connection: None,
@@ -95,6 +107,10 @@ fn flv_header_audio_only() {
             frame_rate: None,
             #[cfg(feature = "srtp")]
             crypto: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
         }],
         #[cfg(feature = "multicast")]
         connection: None,
@@ -277,6 +293,10 @@ fn encode_h264_tag_payload_is_avcc() {
             width: None,
             height: None,
             frame_rate: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
         }],
         #[cfg(feature = "multicast")]
         connection: None,
@@ -342,6 +362,10 @@ fn g711_tag_pts_normalized_to_zero() {
             width: None,
             height: None,
             frame_rate: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
         }],
         #[cfg(feature = "multicast")]
         connection: None,

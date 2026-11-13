@@ -55,6 +55,43 @@ pub enum MediaKind {
     Video,
     Audio,
 }
+
+/// SDP media direction (`a=sendonly`/`a=recvonly`/`a=sendrecv`/`a=inactive`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SdpDirection {
+    SendOnly,
+    RecvOnly,
+    SendRecv,
+    Inactive,
+}
+
+impl SdpDirection {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SendOnly => "sendonly",
+            Self::RecvOnly => "recvonly",
+            Self::SendRecv => "sendrecv",
+            Self::Inactive => "inactive",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "sendonly" => Some(Self::SendOnly),
+            "recvonly" => Some(Self::RecvOnly),
+            "sendrecv" => Some(Self::SendRecv),
+            "inactive" => Some(Self::Inactive),
+            _ => None,
+        }
+    }
+}
+
+/// SDP `a=rtcp:<port> [address]` override.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RtcpAddress {
+    pub port: u16,
+    pub address: Option<std::net::IpAddr>,
+}
 #[derive(Clone, Debug)]
 pub struct AccessUnit {
     pub track_id: TrackId,
@@ -140,6 +177,14 @@ pub struct TrackDescription {
     pub height: Option<u32>,
     /// Video frame rate as (numerator, denominator) (if known).
     pub frame_rate: Option<(u32, u32)>,
+    /// SDP media direction; `None` means unspecified.
+    pub direction: Option<SdpDirection>,
+    /// SDP `a=ptime` packetization interval in milliseconds.
+    pub ptime: Option<u32>,
+    /// SDP `a=rtcp` RTCP port/address override.
+    pub rtcp: Option<RtcpAddress>,
+    /// SDP `b=AS` bandwidth in kbit/s.
+    pub bandwidth_as: Option<u32>,
     /// SRTP crypto parameters from SDP `a=crypto:` attribute.
     #[cfg(feature = "srtp")]
     pub crypto: Option<crate::media::crypto::SdpCrypto>,
@@ -183,6 +228,10 @@ impl TrackDescription {
             width: Some(width),
             height: Some(height),
             frame_rate: Some((frame_rate, 1)),
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -216,6 +265,10 @@ impl TrackDescription {
             width: Some(width),
             height: Some(height),
             frame_rate: Some((frame_rate, 1)),
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -238,6 +291,10 @@ impl TrackDescription {
             width: None,
             height: None,
             frame_rate: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -257,6 +314,10 @@ impl TrackDescription {
             width: None,
             height: None,
             frame_rate: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -276,6 +337,10 @@ impl TrackDescription {
             width: None,
             height: None,
             frame_rate: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -295,6 +360,10 @@ impl TrackDescription {
             width: None,
             height: None,
             frame_rate: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -330,6 +399,10 @@ impl TrackDescription {
             width: None,
             height: None,
             frame_rate: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }

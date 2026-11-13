@@ -391,6 +391,10 @@ mod tests {
                     frame_rate: Some((30, 1)),
                     #[cfg(feature = "srtp")]
                     crypto: None,
+                    direction: None,
+                    ptime: None,
+                    rtcp: None,
+                    bandwidth_as: None,
                 },
                 TrackDescription {
                     id: 1,
@@ -406,6 +410,10 @@ mod tests {
                     frame_rate: None,
                     #[cfg(feature = "srtp")]
                     crypto: None,
+                    direction: None,
+                    ptime: None,
+                    rtcp: None,
+                    bandwidth_as: None,
                 },
             ],
             #[cfg(feature = "multicast")]

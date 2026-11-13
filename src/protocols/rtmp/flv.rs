@@ -438,6 +438,10 @@ pub fn tracks_from_rtmp(
             frame_rate: None,
             #[cfg(feature = "srtp")]
             crypto: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
         });
     }
 
@@ -464,7 +468,11 @@ pub fn tracks_from_rtmp(
             frame_rate: None,
             #[cfg(feature = "srtp")]
             crypto: None,
-        });
+                    direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
+});
     }
 
     tracks

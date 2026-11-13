@@ -112,7 +112,7 @@ pub(super) async fn handle_setup(
             .await?;
         return Ok(());
     };
-    if matches!(transport, TransportSpec::Multicast { .. }) {
+    if let TransportSpec::Multicast { source, mode, .. } = &transport {
         #[cfg(feature = "multicast")]
         {
             let connection = description_for(&mount.config)?.connection;
@@ -154,6 +154,8 @@ pub(super) async fn handle_setup(
                     destination: Some(connection.address),
                     port: Some(port),
                     ttl: connection.ttl,
+                    source: *source,
+                    mode: *mode,
                 }
                 .render(),
             );
@@ -186,6 +188,7 @@ pub(super) async fn handle_setup(
         rtcp_channel,
         rtcp_mux,
         secure,
+        mode,
     } = transport
     {
         if secure {
@@ -231,6 +234,7 @@ pub(super) async fn handle_setup(
                 rtcp_channel,
                 rtcp_mux,
                 secure: false,
+                mode,
             }
             .render(),
         );
@@ -254,6 +258,9 @@ pub(super) async fn handle_setup(
         client_rtcp,
         rtcp_mux,
         secure,
+        destination,
+        source,
+        mode,
         ..
     } = transport
     else {
@@ -338,6 +345,9 @@ pub(super) async fn handle_setup(
             server_rtcp: Some(server_rtcp),
             rtcp_mux,
             secure,
+            destination,
+            source,
+            mode,
         }
         .render(),
     );

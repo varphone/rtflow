@@ -15,6 +15,12 @@ pub(super) async fn connect_interleaved(
     let mut rtcp_channels = HashMap::new();
     let track_list: Vec<_> = description.tracks.to_vec();
     for (index, track) in track_list.iter().cloned().enumerate() {
+        if matches!(
+            track.direction,
+            Some(crate::media::SdpDirection::RecvOnly | crate::media::SdpDirection::Inactive)
+        ) {
+            continue;
+        }
         // Two interleaved channels per track; more than 127 tracks would
         // overflow the 8-bit channel space — refuse instead of wrapping.
         let channel = match u8::try_from(index * 2) {
