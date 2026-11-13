@@ -42,6 +42,22 @@ rtflow 的直播发送端使用启动关键帧的 RTP 时间戳生成 `RTP-Info`
 绝对模式下 VLC 会从 `npt=<uptime>` 开始并继续增长；每次重新 PLAY 重新
 取当前 uptime，所以不会归零。
 
+## live_stream_demo
+
+```bash
+# 设备 uptime 风格
+cargo run --example live_stream_demo -- --timeline uptime
+
+# 固定起始 uptime（例如 1,000,000 秒）
+cargo run --example live_stream_demo -- \
+  --timeline absolute --timeline-offset-secs 1000000
+
+# Unix 墙钟时间
+cargo run --example live_stream_demo -- --timeline unix
+```
+
+不传 `--timeline` 时保持 `relative`。
+
 ## 限制
 
 - 只影响**直播**；VOD 仍按文件时间轴。

@@ -15,3 +15,4 @@ pub mod multicast;
 
 #[doc(inline)]
 pub use message::*;
+pub use range::{NptPosition, NptRange, TimelineMode};

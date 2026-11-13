@@ -2,6 +2,22 @@
 use crate::{Error, Result};
 use std::time::Duration;
 
+/// How a live RTSP presentation maps media time to Normal Play Time.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum TimelineMode {
+    /// Per-session live range (`npt=now-`/`npt=0-`); VLC starts at zero.
+    #[default]
+    Relative,
+    /// NPT starts at seconds since the server process started; reconnects
+    /// continue on the same clock.
+    ServerUptime,
+    /// NPT starts at Unix epoch seconds.
+    Unix,
+    /// NPT starts at `offset + seconds since server start`.
+    Absolute { offset: Duration },
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NptPosition {
     Now,

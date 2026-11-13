@@ -6,6 +6,8 @@ pub(crate) struct Mount {
     pub frames: broadcast::Sender<AccessUnit>,
     /// PLI/FIR/NACK feedback forwarded to local sources (track id).
     pub keyframe_requests: broadcast::Sender<u8>,
+    /// Optional per-mount live NPT timeline override.
+    pub timeline: Option<crate::rtsp::range::TimelineMode>,
     pub stats: StreamCounters,
     #[cfg(feature = "server")]
     pub startup_cache: Mutex<KeyframeCache>,

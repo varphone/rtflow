@@ -39,6 +39,8 @@ pub struct MountOptions {
     /// with default limits.
     #[cfg(feature = "server")]
     pub startup_cache_config: Option<crate::mount::continuity::StartupCacheConfig>,
+    /// Per-mount override of the server's live NPT timeline mode.
+    pub timeline: Option<crate::rtsp::range::TimelineMode>,
 }
 
 impl MountRegistry {
@@ -187,6 +189,7 @@ impl MountRegistry {
             config,
             frames: tx,
             keyframe_requests,
+            timeline: options.timeline,
             stats: {
                 #[cfg_attr(not(feature = "metrics"), allow(unused_mut))]
                 let mut counters = StreamCounters::default();

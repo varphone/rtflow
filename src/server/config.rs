@@ -1,23 +1,5 @@
 use super::*;
-
-/// How live PLAY maps media time to Normal Play Time (the value a client
-/// shows as the playback position).
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum TimelineMode {
-    /// Per-session live range (`npt=now-`/`npt=0-`); VLC starts at zero.
-    #[default]
-    Relative,
-    /// NPT starts at seconds since this server process started. Every new
-    /// connection observes a larger start and the clock never resets while
-    /// the process runs (camera-uptime style).
-    ServerUptime,
-    /// NPT starts at Unix epoch seconds (a large wall-clock value).
-    Unix,
-    /// NPT starts at `offset + seconds since server start`; use a fixed
-    /// large offset to emulate a device with an existing uptime.
-    Absolute { offset: Duration },
-}
+use crate::rtsp::range::TimelineMode;
 
 #[derive(Clone)]
 pub struct ServerConfig {

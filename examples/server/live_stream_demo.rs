@@ -1,5 +1,5 @@
-use clap::Parser;
-use rtflow::{MountConfig, RtspServer, ServerConfig};
+use clap::{Parser, ValueEnum};
+use rtflow::{MountConfig, MountOptions, RtspServer, ServerConfig, TimelineMode};
 use rtflow_testkit::example::{
     CodecArg, TransportArg, advertised_url, init_tracing,
     live_tools::{
@@ -11,6 +11,31 @@ use rtflow_testkit::example::{
 use std::{net::SocketAddr, num::NonZeroU64, path::PathBuf, time::Duration};
 use url::Url;
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum TimelineArg {
+    /// Per-session NPT starting at zero/now.
+    Relative,
+    /// Device-uptime style: NPT grows with server uptime.
+    Uptime,
+    /// Unix wall-clock seconds.
+    Unix,
+    /// Fixed offset plus server uptime.
+    Absolute,
+}
+
+impl TimelineArg {
+    fn mode(self, offset_secs: u64) -> TimelineMode {
+        match self {
+            Self::Relative => TimelineMode::Relative,
+            Self::Uptime => TimelineMode::ServerUptime,
+            Self::Unix => TimelineMode::Unix,
+            Self::Absolute => TimelineMode::Absolute {
+                offset: Duration::from_secs(offset_secs),
+            },
+        }
+    }
+}
+
 /// Run an FFmpeg -> Rust RTSP server -> GStreamer live streaming demo.
 #[derive(Debug, Parser)]
 struct Args {
@@ -18,6 +43,12 @@ struct Args {
     listen: SocketAddr,
     #[arg(long, default_value = "/live")]
     mount: String,
+    /// Live NPT progress mode reported to players.
+    #[arg(long, value_enum, default_value_t = TimelineArg::Relative)]
+    timeline: TimelineArg,
+    /// Base seconds for --timeline absolute (for example 1000000).
+    #[arg(long, default_value_t = 0)]
+    timeline_offset_secs: u64,
     #[arg(long, value_enum, default_value_t = TransportArg::Tcp)]
     publish_transport: TransportArg,
     #[arg(long, value_enum, default_value_t = TransportArg::Tcp)]
@@ -100,12 +131,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         vec![CodecArg::H264]
     };
+    let timeline = args.timeline.mode(args.timeline_offset_secs);
     let mount = server
-        .register_mount(
+        .register_mount_with(
             mount_path,
             MountConfig::Publisher {
                 description: publisher_description("live-tool-demo", &codecs),
                 allow_replace_after_disconnect: true,
+            },
+            MountOptions {
+                timeline: Some(timeline),
+                ..Default::default()
             },
         )
         .await?;
@@ -135,6 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(
         %url,
+        ?timeline,
         session_timeout_secs = args.session_timeout_secs.get(),
         "RTSP publisher mount ready"
     );
@@ -223,6 +260,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timeline_defaults_to_relative() {
+        let args = Args::try_parse_from(["live_stream_demo"]).unwrap();
+        assert!(matches!(args.timeline, TimelineArg::Relative));
+        let args = Args::try_parse_from([
+            "live_stream_demo",
+            "--timeline",
+            "absolute",
+            "--timeline-offset-secs",
+            "123",
+        ])
+        .unwrap();
+        assert!(matches!(
+            args.timeline.mode(args.timeline_offset_secs),
+            TimelineMode::Absolute { offset } if offset == Duration::from_secs(123)
+        ));
+    }
 
     #[test]
     fn session_timeout_defaults_to_one_day() {

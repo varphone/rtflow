@@ -88,7 +88,8 @@ pub use file::{
 pub use identity::{MountId, SessionId, StreamEpoch, TaskId, TrackKey};
 pub use media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription, TrackId};
 pub use mount::{
-    LocalPublisher, MountConfig, MountHandle, MountRegistry, MountSnapshot, PushResult, StreamStats,
+    LocalPublisher, MountConfig, MountHandle, MountOptions, MountRegistry, MountSnapshot,
+    PushResult, StreamStats,
 };
 pub use observe::{EventSink, FrameworkEvent, NoopEventSink, TracingEventSink};
 #[cfg(feature = "dash")]

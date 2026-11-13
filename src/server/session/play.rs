@@ -2,6 +2,18 @@ use super::*;
 use crate::media::TrackDescription;
 use crate::server::TimelineMode;
 
+fn timeline_ntp_anchor(state: &State, timeline: TimelineMode) -> Option<u64> {
+    let seconds = match timeline {
+        TimelineMode::Relative | TimelineMode::Unix => return None,
+        TimelineMode::ServerUptime => state.timeline_epoch.elapsed(),
+        TimelineMode::Absolute { offset } => offset + state.timeline_epoch.elapsed(),
+    };
+    const NTP_UNIX_OFFSET: u64 = 2_208_988_800;
+    let secs = seconds.as_secs().saturating_add(NTP_UNIX_OFFSET);
+    let frac = (u64::from(seconds.subsec_nanos()) << 32) / 1_000_000_000;
+    Some((secs << 32) | frac)
+}
+
 /// PLAY: start senders for the negotiated tracks (live or VOD).
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_play(
@@ -95,8 +107,16 @@ pub(super) async fn handle_play(
     if let Some(position) = resources.stop_vod() {
         *vod_cursor = position;
     }
-    let timeline_ntp_anchor = state.timeline_ntp_anchor();
-    let timeline_position = match state.config.timeline {
+    let timeline_mode = interleaved
+        .iter()
+        .map(|(mount, ..)| mount.timeline)
+        .chain(setups.iter().map(|(mount, ..)| mount.timeline))
+        .chain(multicast_tracks.iter().map(|(mount, _)| mount.timeline))
+        .flatten()
+        .next()
+        .unwrap_or(state.config.timeline);
+    let timeline_ntp_anchor = timeline_ntp_anchor(state, timeline_mode);
+    let timeline_position = match timeline_mode {
         TimelineMode::Relative => None,
         TimelineMode::ServerUptime => Some(NptPosition::Time(state.timeline_epoch.elapsed())),
         TimelineMode::Unix => Some(NptPosition::Time(

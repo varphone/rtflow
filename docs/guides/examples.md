@@ -181,3 +181,8 @@ cargo test --test storage -- --ignored --nocapture file_stream
 ```
 
 CI 的 `media-interop` 任务安装 FFmpeg 和 GStreamer 后强制执行这些测试，不会把缺少工具误报为通过。
+
+## 绝对时间进度
+
+`live_stream_demo --timeline uptime|unix|absolute` 可选择 NPT 模式，
+详见 [absolute-timeline.md](absolute-timeline.md)。

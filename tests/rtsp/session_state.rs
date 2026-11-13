@@ -166,22 +166,24 @@ async fn reports_protocol_errors_without_closing_the_session() {
 #[tokio::test]
 async fn absolute_timeline_mode_reports_uptime_range() {
     use rtflow::{
-        TimelineMode,
+        MountOptions, TimelineMode,
         rtsp::range::{NptPosition, NptRange},
     };
-    let server = RtspServer::bind(
-        ServerConfig::builder("127.0.0.1:0".parse().unwrap())
-            .timeline(TimelineMode::Absolute {
-                offset: Duration::from_secs(1_000_000),
-            })
-            .build()
-            .unwrap(),
-    )
-    .await
-    .unwrap();
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
     let description = rtflow_testkit::description("absolute", &[Codec::H264]);
     let mount = server
-        .register_mount(Arc::from("/absolute"), MountConfig::Local { description })
+        .register_mount_with(
+            Arc::from("/absolute"),
+            MountConfig::Local { description },
+            MountOptions {
+                timeline: Some(TimelineMode::Absolute {
+                    offset: Duration::from_secs(1_000_000),
+                }),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     let _warm = mount.subscribe();

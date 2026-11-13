@@ -174,6 +174,7 @@ impl Gateway {
                     enabled: false,
                     ..Default::default()
                 }),
+                timeline: None,
             },
         )
     }

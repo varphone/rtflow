@@ -25,8 +25,8 @@ use crate::{
     client::{ClientOptions, RtspClient},
     error::Operation,
     identity::{MountId, SessionId},
-    mount::MountRegistry,
     mount::continuity::{KeyframeCache, StartupCacheConfig},
+    mount::{MountOptions, MountRegistry},
     observe::{
         EventSink, FrameworkEvent, MountEvent, NoopEventSink, RejectReason, SecurityEvent,
         ServerEvent, SessionEvent, emit,
@@ -51,7 +51,8 @@ use tokio_util::sync::CancellationToken;
 
 mod config;
 
-pub use config::{ConfigError, ResourceLimits, ServerConfig, ServerConfigBuilder, TimelineMode};
+pub use crate::rtsp::range::TimelineMode;
+pub use config::{ConfigError, ResourceLimits, ServerConfig, ServerConfigBuilder};
 
 struct State {
     mounts: Arc<MountRegistry>,
@@ -89,20 +90,6 @@ impl Drop for PeerSessionLease {
 }
 
 impl State {
-    /// NTP anchor matching the configured live timeline, if it differs from
-    /// the wall clock (uptime/absolute modes).
-    fn timeline_ntp_anchor(&self) -> Option<u64> {
-        let seconds = match self.config.timeline {
-            TimelineMode::Relative | TimelineMode::Unix => return None,
-            TimelineMode::ServerUptime => self.timeline_epoch.elapsed(),
-            TimelineMode::Absolute { offset } => offset + self.timeline_epoch.elapsed(),
-        };
-        const NTP_UNIX_OFFSET: u64 = 2_208_988_800;
-        let secs = seconds.as_secs().saturating_add(NTP_UNIX_OFFSET);
-        let frac = (u64::from(seconds.subsec_nanos()) << 32) / 1_000_000_000;
-        Some((secs << 32) | frac)
-    }
-
     fn try_acquire_peer(self: &Arc<Self>, peer: IpAddr) -> Option<PeerSessionLease> {
         let mut sessions = self
             .peer_sessions
@@ -328,7 +315,19 @@ impl RtspServer {
     pub async fn register_mount(
         &self,
         path: impl Into<Arc<str>>,
+        config: MountConfig,
+    ) -> Result<MountHandle> {
+        self.register_mount_with(path, config, MountOptions::default())
+            .await
+    }
+
+    /// Register a mount with per-mount options (currently the live NPT
+    /// timeline override, startup-cache and queue settings).
+    pub async fn register_mount_with(
+        &self,
+        path: impl Into<Arc<str>>,
         mut config: MountConfig,
+        options: MountOptions,
     ) -> Result<MountHandle> {
         let path = path.into();
         if !path.starts_with('/') {
@@ -386,6 +385,7 @@ impl RtspServer {
             config,
             frames: tx,
             keyframe_requests,
+            timeline: options.timeline,
             stats: counters,
             startup_cache: Mutex::new(startup_cache),
             bootstrap: Mutex::new(std::array::from_fn(|_| None)),
