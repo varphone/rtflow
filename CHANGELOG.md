@@ -108,6 +108,7 @@
 - `MountRegistry::paths()`/`snapshots()` 按路径稳定排序，metrics/挂载列表输出可复现。
 - 新增 interleaved NACK 转发单测（PID+BLP 展开）。
 - `RtspServer::bind_with` 为 Gateway 预注册的 proxy mount 启动订阅者 watcher，HLS/HTTP-FLV 在 server 绑定前注册也能按需拉流。
+- 新增 RtcpSession 动态 interval 回归测试（首次固定间隔后按 RtcpInterval 计算）。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

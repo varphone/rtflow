@@ -295,6 +295,38 @@ mod tests {
     }
 
     #[test]
+    fn session_uses_dynamic_interval_after_first_report() {
+        let now = Instant::now();
+        let mut session = RtcpSession::new(
+            7,
+            9,
+            90_000,
+            Bytes::from_static(b"client"),
+            Duration::from_secs(60),
+            now,
+        )
+        .unwrap()
+        .with_interval(
+            RtcpInterval::new(50, 5, 1_000_000.0, 100.0)
+                .unwrap()
+                .with_seed(7),
+        );
+        assert!(
+            session
+                .poll_report(now + Duration::from_secs(60))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            session
+                .poll_report(now + Duration::from_secs(75))
+                .unwrap()
+                .is_some(),
+            "dynamic interval should not wait the fixed 60s"
+        );
+    }
+
+    #[test]
     fn bye_compound_starts_with_bye() {
         let now = Instant::now();
         let session = RtcpSession::new(
