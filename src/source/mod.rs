@@ -1,16 +1,19 @@
-//! Built-in synthetic live source for demos and protocol tests.
+//! Built-in live source for demos and protocol tests.
 //!
-//! Enabled with the `test-source` feature (not part of `full`). The source
-//! produces codec-shaped access units at a fixed frame rate; the payloads are
-//! intentionally tiny and are meant for RTSP/RTP integration tests, not for
-//! decoder conformance.
+//! Enabled with the `test-source` feature (not part of `full`). Video tracks
+//! loop a small, decoder-ready GOP generated from a 176x144/10 fps test
+//! pattern; audio tracks loop real encoded packets (or a generated G.711
+//! tone). The source is paced per track, so audio and video timestamps are
+//! independent and decoders see a normal stream instead of codec-shaped
+//! placeholder bytes.
+
+mod assets;
 
 use crate::{
     Error, Result,
-    media::{AccessUnit, Codec, MediaDescription, MediaKind},
+    media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription},
     mount::LocalPublisher,
 };
-use bytes::{Bytes, BytesMut};
 use std::{sync::Arc, time::Duration};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -18,9 +21,9 @@ use tokio_util::sync::CancellationToken;
 /// Synthetic source pacing and GOP configuration.
 #[derive(Clone, Copy, Debug)]
 pub struct SyntheticSourceConfig {
-    /// Frames per second (1..=1000).
+    /// Video frames per second (1..=1000).
     pub fps: u32,
-    /// Keyframe interval in frames (>= 1).
+    /// Keyframe interval in video frames (>= 1).
     pub keyframe_interval: u32,
 }
 
@@ -33,8 +36,113 @@ impl Default for SyntheticSourceConfig {
     }
 }
 
-/// Generate synthetic access units into a mount publisher.
+/// Generate live access units into a mount publisher.
 pub struct SyntheticSource;
+
+struct Emitter {
+    track: TrackDescription,
+    samples: Option<Arc<[assets::Sample]>>,
+    index: usize,
+    next: Duration,
+    units: u64,
+    duration: Duration,
+    samples_per_packet: u64,
+    sample_rate: u64,
+    fps: u64,
+}
+
+impl Emitter {
+    fn new(track: TrackDescription, config: SyntheticSourceConfig) -> Result<Self> {
+        let samples = assets::load(track.codec)?;
+        if samples.is_none() && !matches!(track.codec, Codec::Pcma | Codec::Pcmu) {
+            return Err(Error::Media(format!(
+                "no built-in samples for {:?}",
+                track.codec
+            )));
+        }
+        let (samples_per_packet, sample_rate) = packet_duration(&track)?;
+        let duration = if track.kind == MediaKind::Video {
+            if config.fps == 0 {
+                return Err(Error::Limit("synthetic source fps"));
+            }
+            Duration::from_secs_f64(1.0 / f64::from(config.fps))
+        } else {
+            Duration::from_secs_f64(samples_per_packet as f64 / sample_rate as f64)
+        };
+        if duration.is_zero() {
+            return Err(Error::Limit("synthetic source frame duration"));
+        }
+        Ok(Self {
+            track,
+            samples: samples.map(Arc::from),
+            index: 0,
+            next: Duration::ZERO,
+            units: 0,
+            duration,
+            samples_per_packet,
+            sample_rate,
+            fps: u64::from(config.fps),
+        })
+    }
+
+    fn unit(&mut self, keyframe_interval: u32) -> AccessUnit {
+        let (data, keyframe) = if let Some(samples) = &self.samples {
+            let index = if self.track.kind == MediaKind::Video {
+                let gop = (self.units % u64::from(keyframe_interval)) as usize;
+                gop.min(samples.len() - 1)
+            } else {
+                self.index % samples.len()
+            };
+            self.index = self.index.wrapping_add(1);
+            let sample = &samples[index];
+            (sample.data.clone(), sample.keyframe)
+        } else {
+            (assets::g711_tone(self.track.codec, self.units), true)
+        };
+        let timestamp = if self.track.kind == MediaKind::Video {
+            (u128::from(self.units) * u128::from(self.track.clock_rate)
+                / u128::from(self.fps.max(1)))
+            .min(u128::from(u32::MAX)) as u32
+        } else {
+            (u128::from(self.units)
+                * u128::from(self.samples_per_packet)
+                * u128::from(self.track.clock_rate)
+                / u128::from(self.sample_rate))
+            .min(u128::from(u32::MAX)) as u32
+        };
+        let pts = Duration::from_secs_f64(f64::from(timestamp) / f64::from(self.track.clock_rate));
+        if self.track.kind == MediaKind::Audio {
+            AccessUnit::audio(self.track.id, self.track.codec, pts, timestamp, data)
+        } else {
+            AccessUnit::video(
+                self.track.id,
+                self.track.codec,
+                pts,
+                timestamp,
+                keyframe,
+                data,
+            )
+        }
+    }
+}
+
+/// Packet duration in samples at the codec sample rate. Video is paced by fps
+/// and returns `(1, clock_rate)`; audio returns the real packet duration.
+fn packet_duration(track: &TrackDescription) -> Result<(u64, u64)> {
+    Ok(match track.codec {
+        Codec::Pcma
+        | Codec::Pcmu
+        | Codec::G726_16
+        | Codec::G726_24
+        | Codec::G726_32
+        | Codec::G726_40 => (160, 8_000),
+        Codec::Aac => (1024, 48_000),
+        Codec::Opus => (960, 48_000),
+        Codec::Mp3 => (1152, 44_100),
+        _ if track.kind == MediaKind::Audio => (1024, u64::from(track.clock_rate)),
+        _ => (1, u64::from(track.clock_rate)),
+    })
+}
 
 impl SyntheticSource {
     /// Spawn the source. The task stops when the publisher closes or when the
@@ -60,123 +168,49 @@ impl SyntheticSource {
         if config.keyframe_interval == 0 {
             return Err(Error::Limit("synthetic source keyframe interval"));
         }
-        let tracks: Arc<[crate::media::TrackDescription]> = description.tracks.into();
+        let tracks: Vec<TrackDescription> = description.tracks;
         if tracks.is_empty() {
             return Err(Error::Media("synthetic source has no tracks".into()));
         }
+
+        let mut emitters = Vec::with_capacity(tracks.len());
+        for track in tracks {
+            emitters.push(Emitter::new(track, config)?);
+        }
+
+        // Wake at 5 ms or at the fastest track rate, whichever is smaller.
+        let mut tick = Duration::from_millis(5);
+        for emitter in &emitters {
+            tick = tick.min(emitter.duration);
+        }
+        if tick.is_zero() {
+            return Err(Error::Limit("synthetic source tick"));
+        }
+
         Ok(tokio::spawn(async move {
-            let frame_duration = Duration::from_secs_f64(1.0 / f64::from(config.fps));
-            let mut ticker = tokio::time::interval(frame_duration);
+            let mut ticker = tokio::time::interval(tick);
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            let mut frame = 0u64;
+            let mut clock = Duration::ZERO;
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => return Ok(()),
                     _ = ticker.tick() => {}
                 }
+                clock = clock.saturating_add(tick);
                 if publisher.is_closed() {
                     return Ok(());
                 }
-                for track in tracks.iter() {
-                    let keyframe = track.kind == MediaKind::Audio
-                        || frame.is_multiple_of(u64::from(config.keyframe_interval));
-                    let unit = make_unit(track, frame, config.fps, keyframe);
-                    if publisher.push(unit).is_err() {
-                        return Ok(());
+                for emitter in &mut emitters {
+                    while emitter.next <= clock {
+                        let unit = emitter.unit(config.keyframe_interval);
+                        if publisher.push(unit).is_err() {
+                            return Ok(());
+                        }
+                        emitter.next = emitter.next.saturating_add(emitter.duration);
+                        emitter.units = emitter.units.wrapping_add(1);
                     }
                 }
-                frame = frame.wrapping_add(1);
             }
         }))
-    }
-}
-
-fn make_unit(
-    track: &crate::media::TrackDescription,
-    frame: u64,
-    fps: u32,
-    keyframe: bool,
-) -> AccessUnit {
-    let data = payload(track.codec, frame, keyframe);
-    let timestamp = (u128::from(frame) * u128::from(track.clock_rate) / u128::from(fps)) as u32;
-    let pts = Duration::from_secs_f64(frame as f64 / f64::from(fps));
-    if track.kind == MediaKind::Audio {
-        AccessUnit::audio(track.id, track.codec, pts, timestamp, data)
-    } else {
-        AccessUnit::video(track.id, track.codec, pts, timestamp, keyframe, data)
-    }
-}
-
-fn payload(codec: Codec, frame: u64, keyframe: bool) -> Bytes {
-    let seed = (frame & 0xff) as u8;
-    match codec {
-        Codec::H264 => {
-            let mut out = BytesMut::new();
-            if keyframe {
-                // Start code + plausible SPS/PPS + IDR.
-                out.extend_from_slice(&[
-                    0, 0, 0, 1, 0x67, 0x42, 0x00, 0x1e, 0x95, 0xa8, 0x28, 0x0f, 0x00, 0x44, 0xfc,
-                    0xb8, 0x08,
-                ]);
-                out.extend_from_slice(&[0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80]);
-                out.extend_from_slice(&[0, 0, 0, 1, 0x65, seed, 0x88, 0x84]);
-            } else {
-                out.extend_from_slice(&[0, 0, 0, 1, 0x41, seed, 0x9a, 0x20]);
-            }
-            out.freeze()
-        }
-        Codec::H265 => {
-            let mut out = BytesMut::new();
-            if keyframe {
-                out.extend_from_slice(&[0, 0, 0, 1, 0x40, 0x01, 0x0c, 0x01]);
-                out.extend_from_slice(&[0, 0, 0, 1, 0x42, 0x01, 0x01, 0x01]);
-                out.extend_from_slice(&[0, 0, 0, 1, 0x26, 0x01, 0xaf, seed]);
-            } else {
-                out.extend_from_slice(&[0, 0, 0, 1, 0x02, 0x01, 0xd0, seed]);
-            }
-            out.freeze()
-        }
-        Codec::Aac => Bytes::from(vec![0x21, 0x10, 0x04, seed]),
-        Codec::Pcma => {
-            let mut out = vec![0xd5; 160];
-            out[0] = seed;
-            Bytes::from(out)
-        }
-        Codec::Pcmu => {
-            let mut out = vec![0xff; 160];
-            out[0] = seed;
-            Bytes::from(out)
-        }
-        Codec::Opus => Bytes::from(vec![0xfc; 80]),
-        Codec::Vp8 => Bytes::from(vec![0x10, seed, 0x00, 0x00]),
-        Codec::Vp9 => Bytes::from(vec![0x82, 0x00, seed, 0x00]),
-        Codec::Mp3 => Bytes::from(vec![0xff, 0xfb, 0x90, seed, 0x00, 0x00, 0x00]),
-        Codec::G726_16 => Bytes::from(vec![0x55; 40]),
-        Codec::G726_24 => Bytes::from(vec![0x55; 60]),
-        Codec::G726_32 => Bytes::from(vec![0x55; 80]),
-        Codec::G726_40 => Bytes::from(vec![0x55; 100]),
-        Codec::Av1 => {
-            let mut out = vec![0x0a, 0x12];
-            out.push(seed);
-            out.extend_from_slice(&[0x55; 17]);
-            Bytes::from(out)
-        }
-        Codec::Jpeg => {
-            let mut out = vec![0xff, 0xd8, 0xff, 0xda, seed];
-            out.extend_from_slice(&[0x33; 16]);
-            out.push(0xff);
-            out.push(0xd9);
-            Bytes::from(out)
-        }
-        Codec::H263 => {
-            let mut out = vec![0x80, seed, 0x00];
-            out.extend_from_slice(&[0x44; 16]);
-            Bytes::from(out)
-        }
-        Codec::Mpeg4 => {
-            let mut out = vec![0x00, 0x00, 0x01, 0xb6, 0x00, seed];
-            out.extend_from_slice(&[0x66; 16]);
-            Bytes::from(out)
-        }
     }
 }

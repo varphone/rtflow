@@ -21,7 +21,33 @@ async fn synthetic_source_feeds_every_codec_over_rtsp() {
         Codec::Opus,
         Codec::Vp8,
         Codec::Vp9,
+        Codec::Mp3,
+        Codec::G726_16,
+        Codec::G726_24,
+        Codec::G726_32,
+        Codec::G726_40,
+        Codec::Av1,
+        Codec::Jpeg,
+        Codec::H263,
+        Codec::Mpeg4,
     ] {
+        let mut media = description("source", &[codec]);
+        if matches!(
+            codec,
+            Codec::H264
+                | Codec::H265
+                | Codec::Vp8
+                | Codec::Vp9
+                | Codec::Av1
+                | Codec::Jpeg
+                | Codec::H263
+                | Codec::Mpeg4
+        ) {
+            for track in &mut media.tracks {
+                track.width = Some(176);
+                track.height = Some(144);
+            }
+        }
         let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
             .await
             .unwrap();
@@ -29,14 +55,14 @@ async fn synthetic_source_feeds_every_codec_over_rtsp() {
             .register_mount(
                 Arc::from("/source"),
                 MountConfig::Local {
-                    description: description("source", &[codec]),
+                    description: media.clone(),
                 },
             )
             .await
             .unwrap();
         let source = SyntheticSource::spawn(
             mount.publisher().unwrap(),
-            description("source", &[codec]),
+            media,
             SyntheticSourceConfig {
                 fps: 50,
                 keyframe_interval: 10,
@@ -63,6 +89,13 @@ async fn synthetic_source_feeds_every_codec_over_rtsp() {
         .await
         .unwrap_or_else(|_| panic!("timed out waiting for {codec:?}"));
         assert_eq!(unit.codec, codec);
+        assert!(!unit.data.is_empty(), "empty first unit for {codec:?}");
+        if unit.kind() == rtflow::media::MediaKind::Video {
+            assert!(
+                unit.is_keyframe,
+                "first video unit is not a keyframe for {codec:?}"
+            );
+        }
         client.teardown().await.unwrap();
         source.abort();
         let _ = source.await;

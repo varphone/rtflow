@@ -30,7 +30,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("--codecs must not contain duplicates".into());
     }
     let mount_path = mount_path(&args.mount)?;
-    let media = description("mock-device", &args.codecs);
+    let mut media = description("mock-device", &args.codecs);
+    for track in &mut media.tracks {
+        if track.kind == rtflow::media::MediaKind::Video {
+            track.width = Some(176);
+            track.height = Some(144);
+        }
+    }
     let server = RtspServer::bind(ServerConfig::new(args.listen)).await?;
     let mount = server
         .register_mount(

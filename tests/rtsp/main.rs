@@ -3,6 +3,7 @@
 mod authentication;
 mod authorization_roles;
 mod builtin_source;
+mod builtin_source_decode;
 mod codec_matrix;
 mod fragmentation_integration;
 mod gop_alignment;

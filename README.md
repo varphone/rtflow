@@ -11,7 +11,8 @@
 - 客户端重连：`RtspClient::connect_reconnecting` 配合 `ClientReconnectPolicy` 提供显式启用的断线退避重连；普通 `connect` 保持一次性连接和直接报错语义。
 - 编码载荷：H.264 RFC 6184、H.265 RFC 7798、AAC MPEG4-GENERIC、G.711 PCMA/PCMU、Opus、VP8/VP9、MP3（MPA）、G.726 16/24/32/40，以及 AV1、JPEG、H.263、MPEG-4 Part 2 的基础 RTP 支持。
 - 组播（`multicast` feature，需显式启用）：RTSP `RTP/AVP;multicast` 发布/接收；SDP `c=`/`m=` 组地址与端口。
-- 安全传输（`srtp` feature，需显式启用）：RTSP `RTP/SAVP` + SDP `a=crypto`（AES_128_CM_HMAC_SHA1_80），RTP/SRTCP 加解密；临时/测试源由 `test-source` feature 提供。
+- 安全传输（`srtp` feature，需显式启用）：RTSP `RTP/SAVP` + SDP `a=crypto`（AES_128_CM_HMAC_SHA1_80），RTP/SRTCP 加解密。
+- `test-source`：内置 17 种 codec 的真实编码样本实时源，供 RTSP 集成测试、示例和播放器冒烟测试使用（不依赖外部编码器）。
 - 文件源：MP4/MOV/M4A、Matroska/MKV、MPEG-TS/M2TS、G.711 WAV，以及裸 H.264/H.265/ADTS AAC/PCMA/PCMU；支持实时节流、起播位置、有限/无限循环、空闲暂停与有界预取。
 - 实时性：有界广播队列和 Element DAG 管线、逐 Link 溢出策略、慢消费者隔离、视频丢包后等待关键帧、乱序/重复/序号回绕处理。
 - 可靠性：完整 RTCP 质量统计、多上游故障转移与时间线连续、关键帧启动缓存、统一任务监督和有期限 shutdown。
@@ -82,7 +83,7 @@ async fn main() -> rtflow::Result<()> {
 }
 ```
 
-完整 CLI 覆盖本地源、文件源、播放客户端、按需代理、外部发布、鉴权和 Element Pipeline。命令与联调组合见 `docs/guides/examples.md`；文件格式矩阵和 VOD 边界见 `docs/guides/file-streaming.md`，模块扩展约定见 `docs/architecture/overview.md`。
+完整 CLI 覆盖本地源、文件源、播放客户端、按需代理、外部发布、鉴权和 Element Pipeline。命令与联调组合见 `docs/guides/examples.md`；内置实时源见 `docs/guides/test-source.md`，文件格式矩阵和 VOD 边界见 `docs/guides/file-streaming.md`，模块扩展约定见 `docs/architecture/overview.md`。
 
 ## 动态实时串流
 

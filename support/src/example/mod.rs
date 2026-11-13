@@ -50,6 +50,11 @@ pub enum CodecArg {
     Jpeg,
     H263,
     Mpeg4,
+    Mp3,
+    G726_16,
+    G726_24,
+    G726_32,
+    G726_40,
 }
 
 impl From<CodecArg> for Codec {
@@ -67,6 +72,11 @@ impl From<CodecArg> for Codec {
             CodecArg::Jpeg => Self::Jpeg,
             CodecArg::H263 => Self::H263,
             CodecArg::Mpeg4 => Self::Mpeg4,
+            CodecArg::Mp3 => Self::Mp3,
+            CodecArg::G726_16 => Self::G726_16,
+            CodecArg::G726_24 => Self::G726_24,
+            CodecArg::G726_32 => Self::G726_32,
+            CodecArg::G726_40 => Self::G726_40,
         }
     }
 }
