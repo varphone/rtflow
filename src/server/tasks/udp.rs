@@ -1,5 +1,34 @@
 use super::*;
 
+/// Small RTP retransmission cache for RFC 4585 NACK feedback (UDP/plain RTP).
+struct RtpCache {
+    max: usize,
+    entries: VecDeque<(u16, Bytes)>,
+}
+
+impl RtpCache {
+    fn new(max: usize) -> Self {
+        Self {
+            max: max.max(1),
+            entries: VecDeque::new(),
+        }
+    }
+
+    fn insert(&mut self, sequence: u16, packet: Bytes) {
+        if self.entries.len() >= self.max {
+            self.entries.pop_front();
+        }
+        self.entries.push_back((sequence, packet));
+    }
+
+    fn get(&self, sequence: u16) -> Option<&Bytes> {
+        self.entries
+            .iter()
+            .find(|(current, _)| *current == sequence)
+            .map(|(_, packet)| packet)
+    }
+}
+
 struct PublisherLease(Arc<Mount>);
 impl Drop for PublisherLease {
     fn drop(&mut self) {
@@ -61,6 +90,8 @@ pub(crate) fn spawn_udp_sender_from(
         let mut sent_octets = 0u32;
         let mut last_rtp_timestamp = 0u32;
         let mut ntp_clock: Option<RtpNtpClock> = None;
+        let mut nack_cache = RtpCache::new(512);
+        let retransmit = !crypto.is_secure();
         let mut rtcp_buffer = BytesMut::zeroed(2048);
         // Last sender report's NTP timestamp, for periodic receiver reports
         // (LSR reference).
@@ -132,6 +163,29 @@ pub(crate) fn spawn_udp_sender_from(
                             })
                             .count() as u64;
                         mount.stats.add_receiver_reports(reports);
+                        if retransmit {
+                            for packet in &packets {
+                                let Some(entries) = packet.nack_entries() else {
+                                    continue;
+                                };
+                                for entry in entries {
+                                    let requested = std::iter::once(entry.packet_id).chain(
+                                        (0..16)
+                                            .filter(|bit| entry.lost & (1 << bit) != 0)
+                                            .map(|bit| entry.packet_id.wrapping_add(1 + bit as u16)),
+                                    );
+                                    for sequence in requested {
+                                        if let Some(cached) = nack_cache.get(sequence).cloned()
+                                            && pair.rtp.send_to(&cached, rtp_target).await.is_ok()
+                                        {
+                                            sent_packets = sent_packets.wrapping_add(1);
+                                            sent_octets =
+                                                sent_octets.wrapping_add(cached.len() as u32);
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         if packets.iter().any(|packet| {
                             matches!(
                                 packet,
@@ -213,6 +267,8 @@ pub(crate) fn spawn_udp_sender_from(
                                     continue;
                                 }
                             };
+                            let cached = retransmit.then(|| protected.clone());
+                            let sequence_number = packet.header.sequence;
                             if pair.rtp.send_to(&protected, rtp_target).await.is_err() {
                                 // A persistently unreachable target should not
                                 // keep the sender spinning silently.
@@ -227,6 +283,9 @@ pub(crate) fn spawn_udp_sender_from(
                                 continue;
                             }
                             consecutive_send_failures = 0;
+                            if let Some(cached) = cached {
+                                nack_cache.insert(sequence_number, cached);
+                            }
                             sent_packets = sent_packets.wrapping_add(1);
                             sent_octets = sent_octets.wrapping_add(packet.payload.len() as u32);
                             last_rtp_timestamp = packet.header.timestamp;
