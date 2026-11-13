@@ -118,6 +118,7 @@ pub(super) async fn serve_connection(
     let mut resources = ConnectionResources::default();
     let mut interleaved: Vec<(Arc<Mount>, u8, u8, crate::media::TrackDescription)> = Vec::new();
     let mut multicast_tracks: Vec<(Arc<Mount>, crate::media::TrackDescription)> = Vec::new();
+    let mut interleaved_crypto: HashMap<u8, MediaCrypto> = HashMap::new();
     let session_id = new_session_token();
     let mut phase = ConnectionPhase::Init;
     let mut has_announced = false;
@@ -142,6 +143,7 @@ pub(super) async fn serve_connection(
                         &interleaved,
                         &mut interleaved_depacketizers,
                         &mut interleaved_ssrcs,
+                        &mut interleaved_crypto,
                     )
                     .await?;
                     continue;
@@ -197,6 +199,7 @@ pub(super) async fn serve_connection(
                     &mut interleaved,
                     &mut selected_mount,
                     &mut multicast_tracks,
+                    &mut interleaved_crypto,
                     &mut phase,
                 )
                 .await?;

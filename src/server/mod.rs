@@ -510,7 +510,7 @@ async fn spawn_multicast_senders(
                 receiver,
                 startup,
                 sequence: Arc::new(AtomicU16::new(0)),
-                crypto: MediaCrypto::default(),
+                crypto: MediaCrypto::from_track(track).unwrap_or_default(),
             },
             pair,
             SocketAddr::new(group, port),

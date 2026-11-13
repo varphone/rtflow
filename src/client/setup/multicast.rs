@@ -45,7 +45,12 @@ pub(super) async fn connect_multicast(
                 }));
             }
         };
-        let mut extra = String::from("Transport: RTP/AVP;multicast;\r\n");
+        let profile = if track.crypto.is_some() {
+            "RTP/SAVP"
+        } else {
+            "RTP/AVP"
+        };
+        let mut extra = format!("Transport: {profile};multicast;\r\n");
         if let Some(session) = &session_id {
             extra.push_str(&format!("Session: {session}\r\n"));
         }
@@ -182,6 +187,27 @@ pub(super) async fn connect_multicast(
             }
         };
     let pair = UdpPair::from_sockets(rtp_socket, rtcp_socket);
+    #[cfg(feature = "srtp")]
+    let mut srtp_contexts: std::collections::HashMap<u8, crate::srtp::SrtpContext> =
+        std::collections::HashMap::new();
+    #[cfg(feature = "srtp")]
+    for track in &description.tracks {
+        if let Some(attribute) = &track.crypto {
+            match crate::srtp::from_sdp_crypto(attribute) {
+                Ok((srtp, _)) => {
+                    srtp_contexts.insert(track.payload_type, srtp);
+                }
+                Err(error) => {
+                    return Err(Box::new(SetupFailure {
+                        error,
+                        stream,
+                        setup_base,
+                        description,
+                    }));
+                }
+            }
+        }
+    }
     let (tx, rx) = mpsc::channel(options.output_queue_capacity);
     let cancel = CancellationToken::new();
     let quality = Arc::new(Mutex::new(HashMap::new()));
@@ -213,8 +239,17 @@ pub(super) async fn connect_multicast(
             let Ok((size, _source)) = received else {
                 return;
             };
-            let payload = buffer.split_to(size).freeze();
+            let mut payload = buffer.split_to(size).freeze();
             buffer.resize(65_536, 0);
+            #[cfg(feature = "srtp")]
+            if let Some(payload_type) = payload.get(1).map(|byte| byte & 0x7f)
+                && let Some(context) = srtp_contexts.get_mut(&payload_type)
+            {
+                payload = match context.unprotect_rtp(&payload) {
+                    Ok(payload) => payload,
+                    Err(_) => continue,
+                };
+            }
             let Ok(packet) = RtpPacket::parse(payload) else {
                 continue;
             };

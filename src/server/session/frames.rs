@@ -9,6 +9,7 @@ pub(super) async fn handle_incoming_interleaved(
     interleaved: &[(Arc<Mount>, u8, u8, TrackDescription)],
     depacketizers: &mut HashMap<u8, Depacketizer>,
     ssrcs: &mut HashMap<u8, u32>,
+    crypto: &mut HashMap<u8, MediaCrypto>,
 ) -> Result<()> {
     // `rtcp-mux` puts RTCP on the RTP channel: classify by payload type
     // (RTCP PT 192..=223) before treating the frame as RTP.
@@ -23,7 +24,11 @@ pub(super) async fn handle_incoming_interleaved(
                 .find(|(_, rtp_channel, rtcp_channel, _)| {
                     *rtcp_channel == frame.channel || (is_rtcp && *rtp_channel == frame.channel)
                 })
-            && let Ok(packets) = RtcpPacket::parse(frame.payload)
+            && let Ok(payload) = match crypto.get_mut(&frame.channel) {
+                Some(crypto) => crypto.unprotect_rtcp(frame.payload),
+                None => Ok(frame.payload),
+            }
+            && let Ok(packets) = RtcpPacket::parse(payload)
         {
             let reports = packets
                 .iter()
@@ -48,7 +53,17 @@ pub(super) async fn handle_incoming_interleaved(
         let depacketizer = depacketizers
             .entry(frame.channel)
             .or_insert_with(|| Depacketizer::new(track.codec, track.id, track.clock_rate));
-        let packet = match RtpPacket::parse(frame.payload) {
+        let payload = match crypto.get_mut(&frame.channel) {
+            Some(crypto) => match crypto.unprotect_rtp(frame.payload) {
+                Ok(payload) => payload,
+                Err(_) => {
+                    tracing::warn!(channel = frame.channel, "invalid interleaved SRTP");
+                    return Ok(());
+                }
+            },
+            None => frame.payload,
+        };
+        let packet = match RtpPacket::parse(payload) {
             Ok(packet) => packet,
             Err(error) => {
                 tracing::warn!(channel=frame.channel, error=%error, "invalid interleaved RTP");

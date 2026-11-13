@@ -332,3 +332,109 @@ async fn srtp_playback_decrypts_media() {
     client.teardown().await.unwrap();
     server.shutdown().await.unwrap();
 }
+
+#[cfg(feature = "srtp")]
+#[tokio::test]
+async fn srtp_over_tcp_playback_decrypts_media() {
+    use base64::Engine as _;
+    use rtflow::{
+        client::{ClientOptions, RtspClient},
+        media::crypto::SdpCrypto,
+        transport::UpstreamTransport,
+    };
+
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let mut media = description("secure-tcp", &[Codec::H264]);
+    media.tracks[0].crypto = Some(SdpCrypto {
+        tag: 1,
+        crypto_suite: "AES_128_CM_HMAC_SHA1_80".into(),
+        key_params: format!(
+            "inline:{}",
+            base64::engine::general_purpose::STANDARD.encode([9u8; 30])
+        ),
+        session_params: None,
+    });
+    let mount = server
+        .register_mount(
+            Arc::from("/secure-tcp"),
+            MountConfig::Local { description: media },
+        )
+        .await
+        .unwrap();
+    let publisher = mount.publisher().unwrap();
+    let url = format!("rtsp://{}/secure-tcp", server.local_addr());
+    let mut client = RtspClient::connect_str(
+        &url,
+        ClientOptions::builder()
+            .transport(UpstreamTransport::TcpInterleaved)
+            .build()
+            .unwrap(),
+    )
+    .await
+    .expect("srtp tcp connect");
+    let expected = rtflow_testkit::unit(0, Codec::H264, 1);
+    publisher.try_push(expected.clone()).unwrap();
+    let received = tokio::time::timeout(Duration::from_secs(2), client.next())
+        .await
+        .expect("srtp tcp frame timeout")
+        .expect("srtp tcp stream ended")
+        .expect("srtp tcp media error");
+    assert_eq!(received.data, expected.data);
+    client.teardown().await.unwrap();
+    server.shutdown().await.unwrap();
+}
+
+#[cfg(all(feature = "srtp", feature = "multicast"))]
+#[tokio::test]
+async fn srtp_multicast_client_decrypts_group_media() {
+    use base64::Engine as _;
+    use rtflow::{
+        client::{ClientOptions, RtspClient},
+        media::crypto::SdpCrypto,
+        rtsp::sdp::SdpConnection,
+    };
+
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let mut media = description("secure-multicast", &[Codec::H264]);
+    media.connection = Some(SdpConnection {
+        addr_type: "IP4".into(),
+        address: "239.255.0.9".parse().unwrap(),
+        ttl: Some(1),
+        port: Some(15014),
+    });
+    media.tracks[0].crypto = Some(SdpCrypto {
+        tag: 1,
+        crypto_suite: "AES_128_CM_HMAC_SHA1_80".into(),
+        key_params: format!(
+            "inline:{}",
+            base64::engine::general_purpose::STANDARD.encode([11u8; 30])
+        ),
+        session_params: None,
+    });
+    let mount = server
+        .register_mount(
+            Arc::from("/secure-mc"),
+            MountConfig::Local { description: media },
+        )
+        .await
+        .unwrap();
+    let publisher = mount.publisher().unwrap();
+    let url = format!("rtsp://{}/secure-mc", server.local_addr());
+    let mut client = RtspClient::connect_str(&url, ClientOptions::default())
+        .await
+        .expect("srtp multicast connect");
+    let expected = rtflow_testkit::unit(0, Codec::H264, 1);
+    publisher.try_push(expected.clone()).unwrap();
+    let received = tokio::time::timeout(Duration::from_secs(2), client.next())
+        .await
+        .expect("srtp multicast timeout")
+        .expect("srtp multicast ended")
+        .expect("srtp multicast media error");
+    assert_eq!(received.data, expected.data);
+    client.teardown().await.unwrap();
+    server.shutdown().await.unwrap();
+}

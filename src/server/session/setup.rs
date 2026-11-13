@@ -20,6 +20,7 @@ pub(super) async fn handle_setup(
     interleaved: &mut Vec<(Arc<Mount>, u8, u8, TrackDescription)>,
     selected_mount: &mut Option<String>,
     multicast_tracks: &mut Vec<(Arc<Mount>, TrackDescription)>,
+    interleaved_crypto: &mut std::collections::HashMap<u8, MediaCrypto>,
     phase: &mut ConnectionPhase,
 ) -> Result<()> {
     #[cfg(not(feature = "multicast"))]
@@ -112,7 +113,13 @@ pub(super) async fn handle_setup(
             .await?;
         return Ok(());
     };
-    if let TransportSpec::Multicast { source, mode, .. } = &transport {
+    if let TransportSpec::Multicast {
+        source,
+        mode,
+        secure,
+        ..
+    } = &transport
+    {
         #[cfg(feature = "multicast")]
         {
             let connection = description_for(&mount.config)?.connection;
@@ -142,6 +149,22 @@ pub(super) async fn handle_setup(
                     .await?;
                 return Ok(());
             };
+            #[cfg(feature = "srtp")]
+            let profile_mismatch = *secure != track.crypto.is_some();
+            #[cfg(not(feature = "srtp"))]
+            let profile_mismatch = *secure;
+            if profile_mismatch {
+                writer
+                    .lock()
+                    .await
+                    .write_all(&rtsp::encode_response(&simple_response(
+                        461,
+                        "Unsupported Transport",
+                        cseq,
+                    )))
+                    .await?;
+                return Ok(());
+            }
             let port = connection.port.unwrap_or(5004);
             let mut response = simple_response(200, "OK", cseq);
             response.headers.insert(
@@ -156,6 +179,7 @@ pub(super) async fn handle_setup(
                     ttl: connection.ttl,
                     source: *source,
                     mode: *mode,
+                    secure: *secure,
                 }
                 .render(),
             );
@@ -191,18 +215,6 @@ pub(super) async fn handle_setup(
         mode,
     } = transport
     {
-        if secure {
-            writer
-                .lock()
-                .await
-                .write_all(&rtsp::encode_response(&simple_response(
-                    461,
-                    "Unsupported Transport",
-                    cseq,
-                )))
-                .await?;
-            return Ok(());
-        }
         let Ok(track) = track_for_uri(&description_for(&mount.config)?, &req.uri) else {
             // Unknown control URI: reply 404 instead of dropping
             // the connection (strict clients treat a dropped
@@ -218,6 +230,25 @@ pub(super) async fn handle_setup(
                 .await?;
             return Ok(());
         };
+        #[cfg(feature = "srtp")]
+        let profile_mismatch = secure != track.crypto.is_some();
+        #[cfg(not(feature = "srtp"))]
+        let profile_mismatch = secure;
+        if profile_mismatch {
+            writer
+                .lock()
+                .await
+                .write_all(&rtsp::encode_response(&simple_response(
+                    461,
+                    "Unsupported Transport",
+                    cseq,
+                )))
+                .await?;
+            return Ok(());
+        }
+        if secure {
+            interleaved_crypto.insert(rtp_channel, MediaCrypto::from_track(&track)?);
+        }
         let proxy_mount = mount.clone();
         interleaved.push((mount, rtp_channel, rtcp_channel, track));
         selected_mount.get_or_insert(path.clone());
@@ -233,7 +264,7 @@ pub(super) async fn handle_setup(
                 rtp_channel,
                 rtcp_channel,
                 rtcp_mux,
-                secure: false,
+                secure,
                 mode,
             }
             .render(),

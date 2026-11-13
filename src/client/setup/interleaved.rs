@@ -13,6 +13,11 @@ pub(super) async fn connect_interleaved(
     let mut session_timeout = None;
     let mut tracks = HashMap::new();
     let mut rtcp_channels = HashMap::new();
+    #[cfg(feature = "srtp")]
+    let mut interleaved_crypto: HashMap<
+        u8,
+        (crate::srtp::SrtpContext, crate::srtp::SrtcpContext),
+    > = HashMap::new();
     let track_list: Vec<_> = description.tracks.to_vec();
     for (index, track) in track_list.iter().cloned().enumerate() {
         if matches!(
@@ -46,11 +51,20 @@ pub(super) async fn connect_interleaved(
             }
         };
         let request_mux = options.rtcp_mux == Some(true);
+        #[cfg(feature = "srtp")]
+        let secure = track.crypto.is_some();
+        #[cfg(not(feature = "srtp"))]
+        let secure = false;
+        let profile = if secure {
+            "RTP/SAVP/TCP"
+        } else {
+            "RTP/AVP/TCP"
+        };
         let mut extra = if request_mux {
-            format!("Transport: RTP/AVP/TCP;unicast;interleaved={channel};rtcp-mux\r\n")
+            format!("Transport: {profile};unicast;interleaved={channel};rtcp-mux\r\n")
         } else {
             format!(
-                "Transport: RTP/AVP/TCP;unicast;interleaved={}-{}\r\n",
+                "Transport: {profile};unicast;interleaved={}-{}\r\n",
                 channel,
                 channel.saturating_add(1)
             )
@@ -113,6 +127,22 @@ pub(super) async fn connect_interleaved(
         session_id = Some(received);
         if session_timeout.is_none() {
             session_timeout = response_session_timeout(&response);
+        }
+        #[cfg(feature = "srtp")]
+        if let Some(crypto) = &track.crypto {
+            match crate::srtp::from_sdp_crypto(crypto) {
+                Ok((srtp, srtcp)) => {
+                    interleaved_crypto.insert(channel, (srtp, srtcp));
+                }
+                Err(error) => {
+                    return Err(Box::new(SetupFailure {
+                        error,
+                        stream,
+                        setup_base,
+                        description,
+                    }));
+                }
+            }
         }
         tracks.insert(
             channel,
@@ -226,9 +256,18 @@ pub(super) async fn connect_interleaved(
                     loop {
                         match framer.next_frame() {
                             Ok(Some(InboundFrame::Interleaved(frame))) => {
+                                #[cfg(feature = "srtp")]
+                                let secure_channel = interleaved_crypto
+                                    .contains_key(&frame.channel)
+                                    || rtcp_channels.get(&frame.channel).is_some_and(|channel| {
+                                        interleaved_crypto.contains_key(channel)
+                                    });
+                                #[cfg(not(feature = "srtp"))]
+                                let secure_channel = false;
                                 // rtcp-mux: RTCP and RTP share a channel;
                                 // classify by payload type before RTP parsing.
-                                if frame.payload.len() >= 2
+                                if !secure_channel
+                                    && frame.payload.len() >= 2
                                     && (192..=223).contains(&frame.payload[1])
                                     && let Some(rtp_channel) = rtcp_channels.get(&frame.channel)
                                     && let Some((_, _, track_id, clock_rate, local_ssrc)) =
@@ -273,7 +312,18 @@ pub(super) async fn connect_interleaved(
                                     local_ssrc,
                                 )) = tracks.get_mut(&frame.channel)
                                 {
-                                    let packet = match RtpPacket::parse(frame.payload) {
+                                    #[cfg(feature = "srtp")]
+                                    let payload = match interleaved_crypto.get_mut(&frame.channel) {
+                                        Some((srtp, _)) => match srtp.unprotect_rtp(&frame.payload)
+                                        {
+                                            Ok(payload) => payload,
+                                            Err(_) => continue,
+                                        },
+                                        None => frame.payload.clone(),
+                                    };
+                                    #[cfg(not(feature = "srtp"))]
+                                    let payload = frame.payload.clone();
+                                    let packet = match RtpPacket::parse(payload) {
                                         Ok(packet) => packet,
                                         Err(error) => {
                                             if !try_deliver(&tx, Err(error), &mut dropped) {
@@ -301,7 +351,8 @@ pub(super) async fn connect_interleaved(
                                             return;
                                         }
                                     }
-                                } else if let Some(rtp_channel) = rtcp_channels.get(&frame.channel)
+                                } else if !secure_channel
+                                    && let Some(rtp_channel) = rtcp_channels.get(&frame.channel)
                                     && let Ok(packets) = RtcpPacket::parse(frame.payload)
                                     && let Some((_, _, track_id, clock_rate, local_ssrc)) =
                                         tracks.get(rtp_channel)

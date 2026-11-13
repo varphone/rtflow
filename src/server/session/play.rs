@@ -201,7 +201,7 @@ pub(super) async fn handle_play(
                         receiver: output.subscribe(),
                         startup: Vec::new(),
                         sequence,
-                        crypto: MediaCrypto::default(),
+                        crypto: MediaCrypto::from_track(&track)?,
                     },
                     rtp_channel,
                     rtcp_channel,
@@ -209,9 +209,11 @@ pub(super) async fn handle_play(
                     writer.clone(),
                 )
             } else {
+                let mut input = live_interleaved_inputs.remove(0);
+                input.crypto = MediaCrypto::from_track(&track)?;
                 spawn_interleaved_sender_from(
                     mount.clone(),
-                    live_interleaved_inputs.remove(0),
+                    input,
                     rtp_channel,
                     rtcp_channel,
                     track,

@@ -13,7 +13,7 @@ pub(crate) fn spawn_interleaved_sender_from(
             mut receiver,
             startup,
             sequence,
-            crypto: _,
+            mut crypto,
         } = input;
         // Frames the startup snapshot already delivered; the broadcast ring
         // will replay the same frames, so skip them.
@@ -112,9 +112,13 @@ pub(crate) fn spawn_interleaved_sender_from(
                 for mut packet in packets {
                     packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
                     let payload_len = packet.payload.len() as u32;
+                    let payload = match crypto.protect_rtp(packet.encode()) {
+                        Ok(payload) => payload,
+                        Err(_) => continue,
+                    };
                     let wire = InterleavedFrame {
                         channel: rtp_channel,
-                        payload: packet.encode(),
+                        payload,
                     }
                     .try_encode();
                     let Ok(wire) = wire else {
@@ -139,9 +143,10 @@ pub(crate) fn spawn_interleaved_sender_from(
                             sent_packets,
                             sent_octets,
                         )
+                        && let Ok(payload) = crypto.protect_rtcp(report)
                         && let Ok(wire) = (InterleavedFrame {
                             channel: rtcp_channel,
-                            payload: report,
+                            payload,
                         })
                         .try_encode()
                     {

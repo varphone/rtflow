@@ -72,6 +72,8 @@ pub enum TransportSpec {
         ttl: Option<u8>,
         source: Option<IpAddr>,
         mode: Option<TransportMode>,
+        /// SRTP (`RTP/SAVP;multicast`) is required for this group.
+        secure: bool,
     },
 }
 impl TransportSpec {
@@ -146,6 +148,12 @@ impl TransportSpec {
             }
         }
         if multicast {
+            let secure = profile.eq_ignore_ascii_case("RTP/SAVP");
+            if !secure && !profile.eq_ignore_ascii_case("RTP/AVP") {
+                return Err(Error::Rtsp(
+                    "unsupported multicast Transport profile".into(),
+                ));
+            }
             if unicast {
                 return Err(Error::Rtsp(
                     "Transport cannot be both unicast and multicast".into(),
@@ -193,6 +201,7 @@ impl TransportSpec {
                 ttl,
                 source,
                 mode,
+                secure,
             });
         }
         if !unicast {
@@ -330,8 +339,13 @@ impl TransportSpec {
                 ttl,
                 source,
                 mode,
+                secure,
             } => {
-                let mut rendered = String::from("RTP/AVP;multicast");
+                let mut rendered = if *secure {
+                    String::from("RTP/SAVP;multicast")
+                } else {
+                    String::from("RTP/AVP;multicast")
+                };
                 if let Some(destination) = destination {
                     rendered.push_str(&format!(";destination={destination}"));
                 }
