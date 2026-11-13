@@ -205,6 +205,7 @@ impl MountRegistry {
         let queue_capacity = options.consumer_queue_capacity.unwrap_or(256);
         let (tx, _) = broadcast::channel(queue_capacity);
         let (keyframe_requests, _) = broadcast::channel(16);
+        let (nack_requests, _) = broadcast::channel(64);
         #[cfg(feature = "server")]
         let startup_cache = KeyframeCache::new(
             &description,
@@ -215,6 +216,7 @@ impl MountRegistry {
             config,
             frames: tx,
             keyframe_requests,
+            nack_requests,
             timeline: options.timeline,
             stats: {
                 #[cfg_attr(not(feature = "metrics"), allow(unused_mut))]

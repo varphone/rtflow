@@ -1,11 +1,20 @@
 use super::*;
 
+/// One RFC 4585 NACK request forwarded to the sender for `track_id`.
+#[derive(Clone, Debug)]
+pub(crate) struct NackRequest {
+    pub track_id: u8,
+    pub sequences: Vec<u16>,
+}
+
 pub(crate) struct Mount {
     pub id: MountId,
     pub config: MountConfig,
     pub frames: broadcast::Sender<AccessUnit>,
     /// PLI/FIR/NACK feedback forwarded to local sources (track id).
     pub keyframe_requests: broadcast::Sender<u8>,
+    /// NACK sequence lists for the interleaved sender's retransmission cache.
+    pub nack_requests: broadcast::Sender<NackRequest>,
     /// Optional per-mount live NPT timeline override.
     #[cfg_attr(not(feature = "server"), allow(dead_code))]
     pub timeline: Option<crate::rtsp::range::TimelineMode>,

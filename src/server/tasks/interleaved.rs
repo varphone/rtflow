@@ -1,6 +1,34 @@
 use super::*;
 use crate::server::timed_writer::TimedWriter;
 
+struct NackCache {
+    max: usize,
+    entries: std::collections::VecDeque<(u16, Bytes)>,
+}
+
+impl NackCache {
+    fn new(max: usize) -> Self {
+        Self {
+            max: max.max(1),
+            entries: std::collections::VecDeque::new(),
+        }
+    }
+
+    fn insert(&mut self, sequence: u16, payload: Bytes) {
+        if self.entries.len() >= self.max {
+            self.entries.pop_front();
+        }
+        self.entries.push_back((sequence, payload));
+    }
+
+    fn get(&self, sequence: u16) -> Option<Bytes> {
+        self.entries
+            .iter()
+            .find(|(current, _)| *current == sequence)
+            .map(|(_, payload)| payload.clone())
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_interleaved_sender_from(
     mount: Arc<Mount>,
@@ -55,6 +83,8 @@ pub(crate) fn spawn_interleaved_sender_from(
         let mut sent_octets = 0u32;
         let mut last_rtp_timestamp = 0u32;
         let mut ntp_clock: Option<RtpNtpClock> = None;
+        let mut nack_cache = NackCache::new(512);
+        let mut nack_rx = mount.nack_requests.subscribe();
         let mut report_tick = tokio::time::interval(report_interval);
         report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         report_tick.tick().await;
@@ -76,6 +106,35 @@ pub(crate) fn spawn_interleaved_sender_from(
                         // Mount unregistered or server shutting down.
                         return;
                     }
+                    nack = nack_rx.recv() => match nack {
+                        Ok(request) => {
+                            if request.track_id != track.id {
+                                continue;
+                            }
+                            let mut batch = BytesMut::with_capacity(1500 * request.sequences.len().max(1));
+                            for sequence in request.sequences {
+                                let Some(payload) = nack_cache.get(sequence) else {
+                                    continue;
+                                };
+                                let Ok(length) = u16::try_from(payload.len()) else {
+                                    continue;
+                                };
+                                batch.extend_from_slice(&[b'$', rtp_channel]);
+                                batch.extend_from_slice(&length.to_be_bytes());
+                                batch.extend_from_slice(&payload);
+                                mount.stats.add_rtp(1, payload.len() as u64);
+                            }
+                            if !batch.is_empty() && !write_interleaved(&writer, &batch).await {
+                                return;
+                            }
+                            continue;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                            mount.stats.add_dropped(count);
+                            continue;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => continue,
+                    },
                     _ = report_tick.tick() => {
                         if sent_packets > 0
                             && let Some(clock) = ntp_clock.as_mut()
@@ -158,6 +217,7 @@ pub(crate) fn spawn_interleaved_sender_from(
                 batch.extend_from_slice(&[b'$', rtp_channel]);
                 batch.extend_from_slice(&length.to_be_bytes());
                 batch.extend_from_slice(&payload);
+                nack_cache.insert(packet.header.sequence, payload);
                 sent_packets = sent_packets.wrapping_add(1);
                 sent_octets = sent_octets.wrapping_add(payload_len);
                 last_rtp_timestamp = packet.header.timestamp;

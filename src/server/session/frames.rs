@@ -41,6 +41,25 @@ pub(super) async fn handle_incoming_interleaved(
                 })
                 .count() as u64;
             mount.stats.add_receiver_reports(reports);
+            let mut nack_sequences = Vec::new();
+            for packet in &packets {
+                if let Some(entries) = packet.nack_entries() {
+                    for entry in entries {
+                        nack_sequences.push(entry.packet_id);
+                        nack_sequences.extend(
+                            (0..16)
+                                .filter(|bit| entry.lost & (1 << bit) != 0)
+                                .map(|bit| entry.packet_id.wrapping_add(1 + bit as u16)),
+                        );
+                    }
+                }
+            }
+            if !nack_sequences.is_empty() {
+                let _ = mount.nack_requests.send(NackRequest {
+                    track_id: track.id,
+                    sequences: nack_sequences,
+                });
+            }
             if packets.iter().any(|packet| {
                 matches!(
                     packet,
