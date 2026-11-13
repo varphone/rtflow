@@ -96,6 +96,9 @@ impl Mount {
         &self,
         frame: AccessUnit,
     ) -> std::result::Result<usize, broadcast::error::SendError<AccessUnit>> {
+        if frame.data.len() > self.max_queued_bytes_per_session {
+            return Err(broadcast::error::SendError(frame));
+        }
         self.auto_inject_fmtp(&frame);
         // A cancelled mount (unregistered, or its server shutting down) must
         // not keep accepting data: publishers would silently write into a

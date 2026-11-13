@@ -33,6 +33,10 @@ impl LocalPublisher {
     /// Push a frame without track validation (for protocol ingest like RTMP
     /// where the description may not yet be populated).
     pub fn push(&self, frame: AccessUnit) -> Result<PushResult> {
+        if frame.data.len() > self.inner.max_queued_bytes_per_session {
+            self.inner.stats.add_dropped(1);
+            return Ok(PushResult::Dropped);
+        }
         if self.inner.frames.receiver_count() == 0 {
             self.inner.stats.add_dropped(1);
             // No subscribers: still keep the startup keyframe cache fresh
@@ -63,6 +67,10 @@ impl LocalPublisher {
     pub fn try_push(&self, frame: AccessUnit) -> Result<PushResult> {
         // O(1) codec validation via the fixed lookup table; no per-frame
         // MediaDescription clone + linear track search.
+        if frame.data.len() > self.inner.max_queued_bytes_per_session {
+            self.inner.stats.add_dropped(1);
+            return Ok(PushResult::Dropped);
+        }
         let Some(expected) = self.inner.codec_by_track[frame.track_id as usize] else {
             return Err(Error::Media(format!(
                 "mount has no track {}",

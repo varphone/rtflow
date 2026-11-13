@@ -307,6 +307,7 @@ pub struct RtcpSession {
     local_ssrc: u32,
     cname: Bytes,
     report_interval: Duration,
+    dynamic_interval: Option<RtcpInterval>,
     next_report: Instant,
     reception: ReceptionStats,
     rtt: RttEstimator,
@@ -334,6 +335,7 @@ impl RtcpSession {
             local_ssrc,
             cname,
             report_interval,
+            dynamic_interval: None,
             next_report: now + report_interval,
             reception: ReceptionStats::new(remote_ssrc, clock_rate, now)?,
             rtt: RttEstimator::new(32)?,
@@ -406,11 +408,22 @@ impl RtcpSession {
         self.rtt.record_sender_report(ntp, sent_at);
     }
 
+    /// Opt into RFC 3550-style bandwidth/membership interval calculation.
+    pub fn with_interval(mut self, interval: RtcpInterval) -> Self {
+        self.dynamic_interval = Some(interval);
+        self
+    }
+
     pub fn poll_report(&mut self, now: Instant) -> Result<Option<CompoundPacket>> {
         if now < self.next_report {
             return Ok(None);
         }
-        self.next_report = now + self.report_interval;
+        let interval = self
+            .dynamic_interval
+            .as_mut()
+            .map(RtcpInterval::next_interval)
+            .unwrap_or(self.report_interval);
+        self.next_report = now + interval;
         self.report_now(now).map(Some)
     }
 

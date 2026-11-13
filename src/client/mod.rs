@@ -55,6 +55,15 @@ pub use reconnect::ReconnectingClientSession;
 pub use rtsp_client::RtspClient;
 pub use session::{ClientQualitySnapshot, ClientSession, PlayRequest};
 
+/// Preferred name for the PLAY-side session (`ClientSession` remains for
+/// compatibility).
+pub type PlaySession = ClientSession;
+/// Preferred name for the RECORD-side session (`PublisherSession` remains for
+/// compatibility).
+pub type RecordSession = PublisherSession;
+/// Preferred name for a reconnecting PLAY session.
+pub type ReconnectingPlaySession = ReconnectingClientSession;
+
 static NEXT_CLIENT_SESSION: AtomicU64 = AtomicU64::new(1);
 
 fn next_client_session_id() -> SessionId {
