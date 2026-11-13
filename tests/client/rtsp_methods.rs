@@ -265,13 +265,16 @@ async fn require_tokens_are_sent_and_551_surfaces() {
     let error = RtspClient::options(server.url("/stream"), options)
         .await
         .expect_err("551 must surface");
-    assert!(matches!(
-        error,
-        Error::RtspStatus {
-            method: "OPTIONS",
-            status: 551
+    match error {
+        Error::RtspUnsupported {
+            ref method,
+            ref unsupported,
+        } => {
+            assert_eq!(method, "OPTIONS");
+            assert_eq!(unsupported, &["com.example.feature"]);
         }
-    ));
+        other => panic!("expected RtspUnsupported, got {other:?}"),
+    }
     assert_eq!(
         seen.lock().unwrap().as_deref(),
         Some("com.example.feature"),
@@ -391,4 +394,61 @@ async fn connect_follows_server_redirect() {
     assert_eq!(session.description.tracks.len(), 1);
     assert!(*redirected.lock().unwrap());
     session.teardown().await.unwrap();
+}
+
+#[tokio::test]
+async fn reconnecting_session_follows_redirect_on_keepalive() {
+    let description = single_h264();
+    let new_seen = Arc::new(AtomicU32::new(0));
+    let state = new_seen.clone();
+    let server = RawRtspServer::start(Box::new(move |request| {
+        let is_new = request.uri.contains("/new");
+        if is_new {
+            state.fetch_add(1, Ordering::SeqCst);
+        }
+        match request.method {
+            rtflow::rtsp::Method::Options => ServerReply::Response(reply(request, 200, "OK")),
+            rtflow::rtsp::Method::Describe => {
+                ServerReply::Response(describe_reply(request, &description))
+            }
+            rtflow::rtsp::Method::Setup => ServerReply::Response(interleaved(request)),
+            rtflow::rtsp::Method::Play => ServerReply::Response(reply(request, 200, "OK")),
+            rtflow::rtsp::Method::GetParameter if !is_new => {
+                let cseq = request.headers.get("cseq").cloned().unwrap_or_default();
+                ServerReply::Raw(
+                    format!(
+                        "REDIRECT rtsp://127.0.0.1:554/new RTSP/1.0\r\nCSeq: {cseq}\r\nLocation: rtsp://{}/new\r\n\r\n",
+                        request.uri.split('/').nth(2).unwrap_or("127.0.0.1")
+                    )
+                    .into_bytes(),
+                )
+            }
+            _ => ServerReply::Response(reply(request, 200, "OK")),
+        }
+    }))
+    .await;
+    let options = ClientOptions::builder()
+        .transport(UpstreamTransport::TcpInterleaved)
+        .keep_alive_interval(Some(Duration::from_millis(100)))
+        .build()
+        .unwrap();
+    let mut session = RtspClient::connect_reconnecting(
+        server.url("/old"),
+        options,
+        rtflow::client::ClientReconnectPolicy::default(),
+    )
+    .await
+    .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while new_seen.load(Ordering::SeqCst) == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "redirect reconnect timeout"
+        );
+        tokio::select! {
+            _ = session.next() => {}
+            _ = tokio::time::sleep(Duration::from_millis(20)) => {}
+        }
+    }
+    assert!(new_seen.load(Ordering::SeqCst) > 0);
 }

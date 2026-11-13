@@ -64,7 +64,8 @@
 - [x] 32 路并发客户端集成测试、控制面方法测试
 - [x] 消费 PLAY `RTP-Info`：seq 预置 jitter、rtptime 锚定非零 NPT 范围 PTS
 - [x] 发布客户端（ANNOUNCE/RECORD，UDP/interleaved）
-- [x] server-initiated REDIRECT：回 200；连接建立阶段自动跟随（同源默认），会话中上抛事件
+- [x] server-initiated REDIRECT：回 200；连接建立阶段与 `connect_reconnecting` 自动跟随（同源默认）
+- [x] `Require`/`Proxy-Require` 头；551 解析为 `Error::RtspUnsupported { method, unsupported }`
 - [x] `Require`/`Proxy-Require` 头与 551 上抛
 - [x] RTP-Info seq/rtptime 消费
 

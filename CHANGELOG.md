@@ -72,6 +72,7 @@
 - RTSP 发布端周期性 RTCP SR（UDP/interleaved，SRTP 时 SRTCP 保护）。
 - 发布端 RTCP SR 增加线级测试（RTP/SR 分别到达协商的 server_port）。
 - RTSP 客户端连接建立阶段自动跟随 server-initiated REDIRECT（同源；跨源需显式开启）。
+- REDIRECT 在 `connect_reconnecting` 中自动切换目标；551 解析为带 token 的 `Error::RtspUnsupported`。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

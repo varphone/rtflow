@@ -1,5 +1,25 @@
 use super::*;
 
+/// Turn a 551 response into a typed error carrying the `Unsupported` tokens.
+pub(super) fn unsupported_error(method: &str, response: &Response) -> Error {
+    let unsupported = response
+        .headers
+        .get("unsupported")
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|token| !token.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    Error::RtspUnsupported {
+        method: method.to_owned(),
+        unsupported,
+    }
+}
+
 pub(super) fn status_error(method: &'static str, status: u16) -> Error {
     if status == 401 || status == 403 {
         Error::Unauthorized
@@ -138,6 +158,9 @@ pub(super) async fn request_with_body(
             .await?;
         }
     }
+    if response.status == 551 {
+        return Err(unsupported_error(method, &response));
+    }
     Ok(response)
 }
 
@@ -253,6 +276,9 @@ pub(super) async fn send_request_body(
             match message {
                 Message::Response(response) => {
                     validate_response_cseq(&response, cseq)?;
+                    if response.status == 551 {
+                        return Err(unsupported_error(method, &response));
+                    }
                     return Ok(response);
                 }
                 Message::Request(request) => {

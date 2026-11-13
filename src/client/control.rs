@@ -60,6 +60,12 @@ async fn perform_control(
                 credentials,
             )
             .await?;
+            if response.status == 551 {
+                return Err(unsupported_error(method, &response));
+            }
+            if response.status == 551 {
+                return Err(unsupported_error(method, &response));
+            }
             if response.status != 200 {
                 return Err(status_error(method, response.status));
             }
@@ -109,6 +115,12 @@ async fn perform_control(
                 }
                 authorization = Some(challenged);
             };
+            if response.status == 551 {
+                return Err(unsupported_error(method, &response));
+            }
+            if response.status == 551 {
+                return Err(unsupported_error(method, &response));
+            }
             if response.status != 200 {
                 return Err(status_error(method, response.status));
             }

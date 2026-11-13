@@ -1,4 +1,6 @@
-use super::super::wire::{candidate_headers_cseq, encode_request_body, request_with_body};
+use super::super::wire::{
+    candidate_headers_cseq, encode_request_body, request_with_body, unsupported_error,
+};
 use crate::{
     Error, Result,
     auth::{authorization_from_challenge, basic_authorization},
@@ -64,6 +66,12 @@ impl PublisherControl {
                     self.credentials.as_ref(),
                 )
                 .await?;
+                if response.status == 551 {
+                    return Err(unsupported_error(method, &response));
+                }
+                if response.status == 551 {
+                    return Err(unsupported_error(method, &response));
+                }
                 if response.status != 200 {
                     return Err(Error::RtspStatus {
                         method,
@@ -120,6 +128,12 @@ impl PublisherControl {
                     }
                     authorization = Some(challenged);
                 };
+                if response.status == 551 {
+                    return Err(unsupported_error(method, &response));
+                }
+                if response.status == 551 {
+                    return Err(unsupported_error(method, &response));
+                }
                 if response.status != 200 {
                     return Err(Error::RtspStatus {
                         method,

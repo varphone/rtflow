@@ -74,6 +74,11 @@ pub enum Error {
     Tls(String),
     #[error("RTSP redirect to {0}")]
     Redirect(String),
+    #[error("{method} returned 551 (unsupported: {unsupported:?})")]
+    RtspUnsupported {
+        method: String,
+        unsupported: Vec<String>,
+    },
     #[error("session closed")]
     Closed,
     #[error("resource limit exceeded: {0}")]
@@ -115,6 +120,7 @@ impl Error {
             #[cfg(not(feature = "tls"))]
             Self::Io(_) => ErrorCode::Io,
             Self::Redirect(_) => ErrorCode::InvalidState,
+            Self::RtspUnsupported { .. } => ErrorCode::Unsupported,
             Self::Closed => ErrorCode::Closed,
             Self::Limit(_) => ErrorCode::ResourceExhausted,
             Self::NotFound(_) | Self::Conflict(_) => ErrorCode::InvalidState,
@@ -153,7 +159,7 @@ impl Error {
             {
                 RetryClass::Backoff
             }
-            Self::Redirect(_) => RetryClass::Never,
+            Self::Redirect(_) | Self::RtspUnsupported { .. } => RetryClass::Never,
             Self::Closed => RetryClass::Immediate,
             Self::RtspStatus {
                 status: 500..=599 | 408 | 453 | 461,
@@ -174,6 +180,7 @@ impl Error {
             Self::Conflict(_) => 455,
             Self::Limit(_) => 453,
             Self::Redirect(_) => 503,
+            Self::RtspUnsupported { .. } => 551,
             Self::Rtsp(_) | Self::Media(_) => 400,
             Self::Http(_) | Self::InvalidConfig(_) => 500,
             Self::Unsupported(_) => 501,

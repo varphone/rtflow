@@ -57,11 +57,7 @@ impl RtspClient {
                     let next = url::Url::parse(&location).map_err(|error| {
                         Error::Rtsp(format!("invalid REDIRECT location: {error}"))
                     })?;
-                    if !options.allow_cross_origin_redirect
-                        && (next.scheme() != current.scheme()
-                            || next.host_str() != current.host_str()
-                            || next.port_or_known_default() != current.port_or_known_default())
-                    {
+                    if !redirect_allowed(&current, &next, &options) {
                         return Err(Error::Redirect(location));
                     }
                     current = next;
@@ -252,6 +248,7 @@ impl RtspClient {
         let id = next_client_session_id();
         let sink = options.event_sink.clone();
         let started = Instant::now();
+        let mut current_url = url;
         let task = tokio::spawn(async move {
             let mut active = Some(initial);
             let mut failures = 0u32;
@@ -259,7 +256,7 @@ impl RtspClient {
             loop {
                 let mut session = match active.take() {
                     Some(session) => session,
-                    None => match Self::connect(url.clone(), options.clone()).await {
+                    None => match Self::connect(current_url.clone(), options.clone()).await {
                         Ok(session) => {
                             failures = 0;
                             delay = policy.initial_delay;
@@ -330,6 +327,24 @@ impl RtspClient {
                                 }
                             }
                             Some(Err(error)) => {
+                                // A server REDIRECT is followed for the next
+                                // reconnect attempt when enabled; it is not a
+                                // media failure.
+                                if let Error::Redirect(location) = &error
+                                    && options.follow_redirects
+                                    && let Ok(next) = url::Url::parse(location)
+                                    && redirect_allowed(&current_url, &next, &options)
+                                {
+                                    emit_client_event(
+                                        &sink,
+                                        ClientEvent::Redirect {
+                                            id,
+                                            location: location.clone(),
+                                        },
+                                    );
+                                    current_url = next;
+                                    break;
+                                }
                                 // Transient errors (keep-alive failures, IO
                                 // hiccups) surface to the consumer and then
                                 // trigger a reconnect; permanent ones end the
@@ -373,6 +388,14 @@ impl RtspClient {
             task,
         })
     }
+}
+
+#[allow(clippy::large_enum_variant)]
+fn redirect_allowed(current: &url::Url, next: &url::Url, options: &ClientOptions) -> bool {
+    options.allow_cross_origin_redirect
+        || (next.scheme() == current.scheme()
+            && next.host_str() == current.host_str()
+            && next.port_or_known_default() == current.port_or_known_default())
 }
 
 #[allow(clippy::large_enum_variant)]
