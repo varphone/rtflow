@@ -278,10 +278,48 @@ impl RtspClient {
     }
 }
 
+enum DescribeOutcome {
+    Ready(ControlConnection, String, String, MediaDescription, bool),
+    Redirect(url::Url),
+}
+
+fn redirect_outcome(base: &url::Url, response: &Response) -> Result<DescribeOutcome> {
+    let location = response
+        .headers
+        .get("location")
+        .ok_or_else(|| Error::Rtsp("RTSP redirect has no Location".into()))?;
+    let target = base
+        .join(location)
+        .map_err(|error| Error::Rtsp(format!("invalid RTSP redirect Location: {error}")))?;
+    // Do not forward credentials to another origin implicitly.
+    if target.scheme() != base.scheme() || target.host_str() != base.host_str() {
+        return Err(Error::Rtsp(
+            "RTSP redirect to a different scheme/host is not followed".into(),
+        ));
+    }
+    Ok(DescribeOutcome::Redirect(target))
+}
+
 async fn open_and_describe(
     url: &url::Url,
     options: &ClientOptions,
 ) -> Result<(ControlConnection, String, String, MediaDescription, bool)> {
+    let mut current = url.clone();
+    for _ in 0..5 {
+        match open_and_describe_once(&current, options).await? {
+            DescribeOutcome::Ready(stream, uri, base, description, mux) => {
+                return Ok((stream, uri, base, description, mux));
+            }
+            DescribeOutcome::Redirect(target) => current = target,
+        }
+    }
+    Err(Error::Rtsp("too many RTSP redirects".into()))
+}
+
+async fn open_and_describe_once(
+    url: &url::Url,
+    options: &ClientOptions,
+) -> Result<DescribeOutcome> {
     let host = url
         .host_str()
         .ok_or_else(|| Error::Rtsp("RTSP URL has no host".into()))?;
@@ -330,6 +368,9 @@ async fn open_and_describe(
         options.credentials.as_ref(),
     )
     .await?;
+    if (300..=399).contains(&response.status) {
+        return redirect_outcome(url, &response);
+    }
     if response.status != 200 {
         return Err(status_error("OPTIONS", response.status));
     }
@@ -343,6 +384,9 @@ async fn open_and_describe(
         options.credentials.as_ref(),
     )
     .await?;
+    if (300..=399).contains(&response.status) {
+        return redirect_outcome(url, &response);
+    }
     if response.status != 200 {
         return Err(status_error("DESCRIBE", response.status));
     }
@@ -360,5 +404,11 @@ async fn open_and_describe(
         })
         .unwrap_or(false);
     let description = sdp::parse(&response.body)?;
-    Ok((stream, uri, setup_base, description, rtcp_mux))
+    Ok(DescribeOutcome::Ready(
+        stream,
+        uri,
+        setup_base,
+        description,
+        rtcp_mux,
+    ))
 }

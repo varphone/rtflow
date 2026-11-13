@@ -356,6 +356,41 @@ pub enum UpstreamTransport {
 mod tests {
     use super::*;
     #[test]
+    fn rtcp_mux_single_port_and_channel() {
+        let udp = TransportSpec::parse("RTP/AVP;unicast;client_port=5000;rtcp-mux").unwrap();
+        match udp {
+            TransportSpec::Udp {
+                client_rtp,
+                client_rtcp,
+                rtcp_mux,
+                ..
+            } => {
+                assert_eq!((client_rtp, client_rtcp), (5000, 5000));
+                assert!(rtcp_mux);
+                assert!(udp.render().contains("client_port=5000;rtcp-mux"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let tcp = TransportSpec::parse("RTP/AVP/TCP;unicast;interleaved=4;rtcp-mux").unwrap();
+        match tcp {
+            TransportSpec::TcpInterleaved {
+                rtp_channel,
+                rtcp_channel,
+                rtcp_mux,
+            } => {
+                assert_eq!((rtp_channel, rtcp_channel), (4, 4));
+                assert!(rtcp_mux);
+                assert!(tcp.render().contains("interleaved=4;rtcp-mux"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(
+            TransportSpec::parse("RTP/AVP;unicast;client_port=5000").is_err(),
+            "single UDP port requires rtcp-mux"
+        );
+    }
+
+    #[test]
     fn udp_roundtrip() {
         let t = TransportSpec::parse("RTP/AVP;unicast;client_port=1000-1001").unwrap();
         assert_eq!(t.render(), "RTP/AVP;unicast;client_port=1000-1001");
