@@ -66,7 +66,22 @@ impl Depacketizer {
                     data: p.payload,
                 }])
             }
-            Codec::Opus | Codec::Pcma | Codec::Pcmu | Codec::Mp3 => {
+            Codec::Mp3 => {
+                if p.payload.len() < 4 {
+                    return Err(Error::Media("short MPEG audio payload".into()));
+                }
+                let pts = self.pts_from_timestamp(timestamp);
+                Ok(vec![AccessUnit {
+                    track_id: self.track_id,
+                    codec: self.codec,
+                    pts,
+                    dts: None,
+                    rtp_timestamp: timestamp,
+                    is_keyframe: true,
+                    data: p.payload.slice(4..),
+                }])
+            }
+            Codec::Opus | Codec::Pcma | Codec::Pcmu => {
                 let pts = self.pts_from_timestamp(timestamp);
                 Ok(vec![AccessUnit {
                     track_id: self.track_id,

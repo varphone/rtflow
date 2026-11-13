@@ -70,11 +70,12 @@ impl Packetizer {
             Codec::H264 => self.h264(frame),
             Codec::H265 => self.h265(frame),
             Codec::Aac => self.aac(frame),
-            Codec::Pcma | Codec::Pcmu | Codec::Opus | Codec::Mp3 => Ok(vec![self.packet(
+            Codec::Pcma | Codec::Pcmu | Codec::Opus => Ok(vec![self.packet(
                 frame.data.clone(),
                 frame.rtp_timestamp,
                 true,
             )]),
+            Codec::Mp3 => self.mpa(frame),
             Codec::G726_16 | Codec::G726_24 | Codec::G726_32 | Codec::G726_40 => {
                 let frame_bytes = match self.codec {
                     Codec::G726_16 => 40,
@@ -125,7 +126,8 @@ impl Packetizer {
             // Always using the 15-bit form keeps the descriptor 3 bytes
             // regardless of the picture-ID value, which every conformant
             // decoder (libwebrtc, ffmpeg) accepts.
-            buffer.put_u8(0x80 | ((first as u8) << 2) | ((last as u8) << 1));
+            // I=1 (picture ID), B=0x08 starts a frame, E=0x04 ends it.
+            buffer.put_u8(0x80 | ((first as u8) << 3) | ((last as u8) << 2));
             buffer.put_u8(0x80 | ((picture_id >> 8) & 0x7f) as u8);
             buffer.put_u8((picture_id & 0xff) as u8);
             buffer.extend_from_slice(chunk);
@@ -294,19 +296,47 @@ impl Packetizer {
         Ok(out)
     }
 
+    /// RFC 2250 MPEG audio: every payload starts with a 4-byte fragment
+    /// header; FFmpeg and GStreamer strip it before the MP3 parser.
+    fn mpa(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        if f.data.is_empty() {
+            return Err(Error::Media("empty MPEG audio frame".into()));
+        }
+        let max = self.mtu.saturating_sub(12);
+        if max <= 4 {
+            return Err(Error::Media("MTU too small for MPEG audio".into()));
+        }
+        let chunk = max - 4;
+        let total = f.data.len().div_ceil(chunk);
+        let mut out = Vec::with_capacity(total);
+        for (index, data) in f.data.chunks(chunk).enumerate() {
+            let offset = (index * chunk) as u16;
+            let mut payload = BytesMut::with_capacity(4 + data.len());
+            payload.extend_from_slice(&offset.to_be_bytes());
+            payload.extend_from_slice(&[0, 0]);
+            payload.extend_from_slice(data);
+            out.push(self.packet(payload.freeze(), f.rtp_timestamp, index + 1 == total));
+        }
+        Ok(out)
+    }
+
     fn jpeg(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
         if f.data.is_empty() {
             return Err(Error::Media("empty JPEG access unit".into()));
+        }
+        let scan = jpeg_scan(&f.data);
+        if scan.is_empty() {
+            return Err(Error::Media("empty JPEG scan".into()));
         }
         let max = self.mtu.saturating_sub(12);
         if max <= 8 {
             return Err(Error::Media("MTU too small for JPEG".into()));
         }
         let chunk = max - 8;
-        let total = f.data.len().div_ceil(chunk);
-        let mut buffer = BytesMut::with_capacity(f.data.len() + 8 * total);
+        let total = scan.len().div_ceil(chunk);
+        let mut buffer = BytesMut::with_capacity(scan.len() + 8 * total);
         let mut out = Vec::with_capacity(total);
-        for (index, data) in f.data.chunks(chunk).enumerate() {
+        for (index, data) in scan.chunks(chunk).enumerate() {
             let offset = (index * chunk) as u32;
             buffer.extend_from_slice(&[
                 1,
@@ -421,4 +451,43 @@ pub(super) fn annex_b_nals(data: &Bytes) -> Vec<Bytes> {
         }
     }
     n
+}
+
+/// Return the entropy-coded scan of a complete JPEG frame (after SOS), with
+/// the trailing EOI removed. Inputs that are already scan data pass through.
+fn jpeg_scan(data: &[u8]) -> &[u8] {
+    if data.len() < 4 || data[0] != 0xff || data[1] != 0xd8 {
+        return data;
+    }
+    let mut index = 2usize;
+    while index + 3 < data.len() {
+        if data[index] != 0xff {
+            break;
+        }
+        let marker = data[index + 1];
+        if marker == 0xd9 {
+            break;
+        }
+        if (0xd0..=0xd7).contains(&marker) || marker == 0x01 {
+            index += 2;
+            continue;
+        }
+        let length = usize::from(u16::from_be_bytes([data[index + 2], data[index + 3]]));
+        if length < 2 {
+            break;
+        }
+        if marker == 0xda {
+            let start = index + 2 + length;
+            if start >= data.len() {
+                break;
+            }
+            let mut end = data.len();
+            if end >= 2 && data[end - 2] == 0xff && data[end - 1] == 0xd9 {
+                end -= 2;
+            }
+            return &data[start..end];
+        }
+        index += 2 + length;
+    }
+    data
 }

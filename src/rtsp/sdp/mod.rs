@@ -433,15 +433,22 @@ pub fn encode_with(
         #[cfg(not(feature = "multicast"))]
         let media_port = 0;
         output.push_str(&format!(
-            "m={media} {media_port} RTP/AVP {}\r\na=rtpmap:{} {codec}/{}{}\r\n",
-            track.payload_type,
-            track.payload_type,
-            track.clock_rate,
-            track
-                .channels
-                .map(|value| format!("/{value}"))
-                .unwrap_or_default()
+            "m={media} {media_port} RTP/AVP {}\r\n",
+            track.payload_type
         ));
+        // PT 14 is the static MPEG audio payload; adding an rtpmap makes
+        // FFmpeg treat the stream as dynamic MPA (MP2) instead of MP3.
+        if !(track.codec == Codec::Mp3 && track.payload_type == 14) {
+            output.push_str(&format!(
+                "a=rtpmap:{} {codec}/{}{}\r\n",
+                track.payload_type,
+                track.clock_rate,
+                track
+                    .channels
+                    .map(|value| format!("/{value}"))
+                    .unwrap_or_default()
+            ));
+        }
         if let Some(bandwidth) = track.bandwidth_as {
             output.push_str(&format!("b=AS:{bandwidth}\r\n"));
         }

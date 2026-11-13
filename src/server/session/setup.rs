@@ -113,6 +113,7 @@ pub(super) async fn handle_setup(
             .await?;
         return Ok(());
     };
+    #[allow(unused_variables)]
     if let TransportSpec::Multicast {
         source,
         mode,

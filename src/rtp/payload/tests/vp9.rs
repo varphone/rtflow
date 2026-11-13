@@ -40,7 +40,7 @@ mod vp9_tests {
             .unwrap();
         assert_eq!(packets.len(), 1);
         // Descriptor: I=1, B=1, E=1.
-        assert_eq!(packets[0].payload[0], 0x80 | 0x04 | 0x02);
+        assert_eq!(packets[0].payload[0], 0x80 | 0x08 | 0x04);
         assert_eq!(
             packets[0].payload[1] & 0x80,
             0x80,
@@ -82,10 +82,10 @@ mod vp9_tests {
             .unwrap();
         assert!(f1.len() >= 3, "fragmented into {}", f1.len());
         // First fragment: B=1, E=0; last: B=0, E=1; picture ID constant.
-        assert_eq!(f1[0].payload[0] & 0x04, 0x04);
-        assert_eq!(f1[0].payload[0] & 0x02, 0);
+        assert_eq!(f1[0].payload[0] & 0x08, 0x08);
+        assert_eq!(f1[0].payload[0] & 0x04, 0);
         let last = f1.last().unwrap();
-        assert_eq!(last.payload[0] & 0x02, 0x02);
+        assert_eq!(last.payload[0] & 0x04, 0x04);
         assert!(last.header.marker);
         let pid0 = u16::from_be_bytes([f1[0].payload[1] & 0x7f, f1[0].payload[2]]);
         let pid_last = u16::from_be_bytes([last.payload[1] & 0x7f, last.payload[2]]);
@@ -131,7 +131,7 @@ mod vp9_tests {
         // must find the payload at offset 2, not 3.
         let mut dep = Depacketizer::new(Codec::Vp9, 0, 90_000);
         let units = dep
-            .push(packet(7, 900, true, &[0x86, 0x2a, 0xde, 0xad, 0xbe]))
+            .push(packet(7, 900, true, &[0x8c, 0x2a, 0xde, 0xad, 0xbe]))
             .unwrap();
         assert_eq!(units.len(), 1);
         assert_eq!(units[0].data.as_ref(), &[0xde, 0xad, 0xbe]);
@@ -142,11 +142,11 @@ mod vp9_tests {
         let mut dep = Depacketizer::new(Codec::Vp9, 0, 90_000);
         // Fragment 1 of a frame (I=1, M=1, B=1, E=0).
         let _ = dep
-            .push(packet(1, 100, false, &[0x84, 0x80, 0x01, 0xaa, 0xbb]))
+            .push(packet(1, 100, false, &[0x88, 0x80, 0x01, 0xaa, 0xbb]))
             .unwrap();
         // Gap (seq 3), new frame I=1 M=1 B=1 E=1.
         let units = dep
-            .push(packet(3, 200, true, &[0x86, 0x80, 0x02, 0xcc]))
+            .push(packet(3, 200, true, &[0x8c, 0x80, 0x02, 0xcc]))
             .unwrap();
         assert_eq!(units.len(), 1);
         assert_eq!(
@@ -160,7 +160,7 @@ mod vp9_tests {
     fn vp9_end_bit_without_marker_completes_frame() {
         let mut dep = Depacketizer::new(Codec::Vp9, 0, 90_000);
         let units = dep
-            .push(packet(1, 500, false, &[0x86, 0x80, 0x05, 0xde, 0xad]))
+            .push(packet(1, 500, false, &[0x8c, 0x80, 0x05, 0xde, 0xad]))
             .unwrap();
         assert_eq!(units.len(), 1, "E bit ends the frame even without marker");
         assert_eq!(units[0].data.as_ref(), &[0xde, 0xad]);

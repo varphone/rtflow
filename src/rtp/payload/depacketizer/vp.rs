@@ -59,8 +59,8 @@ impl Depacketizer {
                 return Err(Error::Media("short VP9 payload descriptor".into()));
             }
             VpFragment {
-                start_bit: first & 0x04 != 0,
-                end_bit: first & 0x02 != 0,
+                start_bit: first & 0x08 != 0,
+                end_bit: first & 0x04 != 0,
                 data: &payload[offset..],
                 // frame_type bit of the VP9 uncompressed header:
                 // bit 4 of the first byte, 0 = keyframe.
