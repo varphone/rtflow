@@ -30,6 +30,15 @@
 
 ### Added
 
+- RTSP：`rtcp-mux`（UDP 单端口/TCP 单 channel）、SDP 多 PT/`a=framerate`/
+  IPv6 `c=`、绝对 `Content-Base`、`Proxy-Require` 551、随机 128-bit 会话 ID、
+  `SET_PARAMETER`、PLAY `Scale/Speed` 551、客户端 3xx REDIRECT 跟随。
+- 码流：VP8/VP9 SDP 往返、MP3（MPA）与 G.726 16/24/32/40 的 RTP/SDP 支持。
+- `test-source` feature 与 `rtflow::source::SyntheticSource`（库内实时测试源，
+  覆盖全部 codec）。
+- `ServerConfig::{udp_recv_buffer, embedded}` 与
+  `StartupCacheConfig.max_bytes_total`（嵌入式 256 KiB UDP 缓冲、512 KiB
+  启动缓存预设）；`RtpPacket::encode_into` 复用发送缓冲。
 - `rtflow::prelude`。
 - `scripts/{check-layering.py,check-tree.py,check-docs-paths.sh}` 布局护栏与
   CI `layout` job；CI 增加 cargo-hack 全 feature 矩阵、cargo-deny、
@@ -39,6 +48,8 @@
 
 ### Fixed
 
+- RTSP：`Content-Base` 非绝对 URI、`Proxy-Require` 未处理、SDP track 无上限、
+  客户端 interleaved RTCP 写无超时、服务端 UDP 接收多一次拷贝。
 - RTSP client keep-alive 失败无退避（审计 R23）、控制面与媒体串行
   （RT-7/RT-8）、jitter 轮询（RT-17）。
 - no-default 与单 feature 构建此前无法编译（`hmac` 可选、gateway/mount
