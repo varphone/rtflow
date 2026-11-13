@@ -12,6 +12,7 @@ pub enum FrameworkEvent {
     Session(SessionEvent),
     Mount(MountEvent),
     Proxy(ProxyEvent),
+    Client(ClientEvent),
     Pipeline(PipelineEvent),
     Runtime(RuntimeEvent),
     Security(SecurityEvent),
@@ -79,6 +80,40 @@ pub enum ProxyEvent {
     Failed {
         mount: MountId,
         code: ErrorCode,
+    },
+}
+
+/// RTSP client lifecycle events (receive/play sessions).
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum ClientEvent {
+    Connected {
+        id: SessionId,
+        transport: &'static str,
+        peer: SocketAddr,
+    },
+    Fallback {
+        id: SessionId,
+        from: &'static str,
+        to: &'static str,
+    },
+    ReconnectBackoff {
+        id: SessionId,
+        attempt: u32,
+        delay: Duration,
+    },
+    KeepAliveFailed {
+        id: SessionId,
+        consecutive: u32,
+    },
+    Failed {
+        id: SessionId,
+        code: ErrorCode,
+    },
+    Closed {
+        id: SessionId,
+        elapsed: Duration,
+        error: Option<ErrorCode>,
     },
 }
 

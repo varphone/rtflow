@@ -9,8 +9,8 @@ pub use histogram::Histogram;
 
 use crate::error::ErrorCode;
 use crate::observe::{
-    EventSink, FrameworkEvent, MountEvent, PipelineEvent, ProxyEvent, RejectReason, RuntimeEvent,
-    SecurityEvent, ServerEvent, SessionEvent,
+    ClientEvent, EventSink, FrameworkEvent, MountEvent, PipelineEvent, ProxyEvent, RejectReason,
+    RuntimeEvent, SecurityEvent, ServerEvent, SessionEvent,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -56,6 +56,13 @@ pub struct MetricsRegistry {
     pub proxy_reconnects: AtomicU64,
     pub proxy_failovers: AtomicU64,
 
+    // Client (outbound RTSP play sessions)
+    pub client_sessions_total: AtomicU64,
+    pub client_sessions_active: AtomicI64,
+    pub client_reconnect_attempts: AtomicU64,
+    pub client_keep_alive_failures: AtomicU64,
+    pub client_fallbacks: AtomicU64,
+
     // Protocol-level: RTMP
     pub rtmp_connections_total: AtomicU64,
     pub rtmp_publishers_active: AtomicI64,
@@ -100,6 +107,11 @@ impl MetricsRegistry {
             errors_by_code: std::array::from_fn(|_| AtomicU64::new(0)),
             proxy_reconnects: AtomicU64::new(0),
             proxy_failovers: AtomicU64::new(0),
+            client_sessions_total: AtomicU64::new(0),
+            client_sessions_active: AtomicI64::new(0),
+            client_reconnect_attempts: AtomicU64::new(0),
+            client_keep_alive_failures: AtomicU64::new(0),
+            client_fallbacks: AtomicU64::new(0),
             rtmp_connections_total: AtomicU64::new(0),
             rtmp_publishers_active: AtomicI64::new(0),
             rtmp_players_active: AtomicI64::new(0),
@@ -272,6 +284,42 @@ impl EventSink for MetricsEventSink {
                 }
                 _ => {}
             },
+            FrameworkEvent::Client(client_event) => match client_event {
+                ClientEvent::Connected { .. } => {
+                    self.registry
+                        .client_sessions_total
+                        .fetch_add(1, Ordering::Relaxed);
+                    self.registry
+                        .client_sessions_active
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                ClientEvent::Closed { error, .. } => {
+                    self.registry
+                        .client_sessions_active
+                        .fetch_sub(1, Ordering::Relaxed);
+                    if let Some(code) = error {
+                        self.registry.record_error(*code);
+                    }
+                }
+                ClientEvent::ReconnectBackoff { .. } => {
+                    self.registry
+                        .client_reconnect_attempts
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                ClientEvent::KeepAliveFailed { .. } => {
+                    self.registry
+                        .client_keep_alive_failures
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                ClientEvent::Fallback { .. } => {
+                    self.registry
+                        .client_fallbacks
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                ClientEvent::Failed { code, .. } => {
+                    self.registry.record_error(*code);
+                }
+            },
             FrameworkEvent::Runtime(RuntimeEvent::TaskFailed { code, .. }) => {
                 self.registry.record_error(*code);
             }
@@ -441,6 +489,36 @@ fn metrics_response(registry: &MetricsRegistry) -> String {
         "rtflow_proxy_failovers_total",
         "Total proxy failovers",
         registry.proxy_failovers.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut out,
+        "rtflow_client_sessions_total",
+        "Total outbound RTSP client sessions",
+        registry.client_sessions_total.load(Ordering::Relaxed),
+    );
+    write_gauge(
+        &mut out,
+        "rtflow_client_sessions_active",
+        "Active outbound RTSP client sessions",
+        registry.client_sessions_active.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut out,
+        "rtflow_client_reconnect_attempts_total",
+        "Total client reconnect backoff attempts",
+        registry.client_reconnect_attempts.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut out,
+        "rtflow_client_keep_alive_failures_total",
+        "Total client keep-alive failures",
+        registry.client_keep_alive_failures.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut out,
+        "rtflow_client_fallbacks_total",
+        "Total client UDP-to-TCP transport fallbacks",
+        registry.client_fallbacks.load(Ordering::Relaxed),
     );
 
     // Protocol-level counters
