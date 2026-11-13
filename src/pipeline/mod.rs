@@ -1,5 +1,4 @@
 //! Extensible bounded media pipeline inspired by GStreamer element graphs.
-#[path = "bus.rs"]
 mod bus;
 pub use bus::{FanoutOutcome, FrameBus};
 

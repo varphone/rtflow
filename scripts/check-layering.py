@@ -103,15 +103,8 @@ ALIASES: dict[str, str] = {
 PATH_GROUPS: dict[str, str] = {
     "media": "media",
     "protocol": "rtsp",
-    "multicast": "rtsp",
-    "events": "core",
-    "hls": "protocols",
-    "dash": "protocols",
-    "http_flv": "protocols",
-    "rtmp": "protocols",
-    "srt": "protocols",
-    "webrtc": "protocols",
-    "gst": "protocols",
+    "rtsp": "rtsp",
+    "protocols": "protocols",
     "pipeline": "pipeline",
     "mount": "mount",
     "metrics": "metrics",
@@ -133,9 +126,7 @@ ROOT_FILE_GROUPS = {
     "error": "core",
     "identity": "core",
     "observe": "core",
-    "gateway": "gateway",
     "mount": "mount",
-    "multicast": "rtsp",
 }
 
 USE_CREATE_RE = re.compile(r"use\s+crate::[^;]*;", re.S)
@@ -150,9 +141,6 @@ def strip_comments(text: str) -> str:
 
 def module_group(path: pathlib.Path) -> str | None:
     rel = path.relative_to(SRC)
-    # pipeline is a top-level module that physically lives under media/ today.
-    if rel.as_posix() in ("media/pipeline.rs", "media/bus.rs"):
-        return "pipeline"
     if len(rel.parts) == 1:
         return ROOT_FILE_GROUPS.get(rel.stem)
     first = rel.parts[0]
