@@ -83,7 +83,30 @@ UDP 接收缓冲 4 MiB/socket。
 均低于 24 MiB 目标（不含内核 socket 缓冲）。包化路径实测 **0.29 次分配/RTP 包**
 （20 KB H.264 分片：整帧单缓冲切片 + 复用 `encode_into` 缓冲），预算 ≤1。
 
-## 6. 验证入口
+## 6. 已确认的验证结果（2026-11）
+
+- `cargo test --no-fail-fast`：293 passed / 0 failed。
+- `cargo test --features experimental-protocols`：358 passed / 0 failed。
+- fuzz（libFuzzer，600 s/目标，无崩溃）：
+  - `sdp`：13,931,778 次执行
+  - `transport`：53,815,772 次执行
+  - `rtsp_message`：22,706,631 次执行
+- 30 分钟会话翻腾浸泡（8 客户端/轮，UDP+TCP 交替）：通过，无 panic/forced task。
+- 包化分配：0.29 次/RTP 包；嵌入式内存：4 会话 × 2 track 稳态 ≈8 MiB。
+
+## 7. 已知未实现（明确边界）
+
+| 项 | 现状 |
+|---|---|
+| `Transport: destination=`/`source=` | 解析后忽略，不回显；单播以 `client_port` 为准 |
+| `Transport: mode=record` 回显 | 不回显；RECORD 由方法本身驱动 |
+| SDP `a=sendonly/recvonly`、`a=ptime`、`a=rtcp:`、`b=AS` | 解析时容忍但不参与决策 |
+| RTSP 2.0（RFC 7826） | 不支持 |
+| `RTP/SAVP/TCP`、组播 SRTP | 461/不支持 |
+| 组播客户端 RTCP、SRTP 客户端 SRTCP RR | 不发送（仅接收媒体） |
+| AV1/JPEG/H.263/MPEG-4 Part 2 | 不支持 |
+
+## 8. 验证入口
 
 ```bash
 cargo test --no-fail-fast
