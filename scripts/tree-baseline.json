@@ -7,7 +7,6 @@
     "src/protocols/hls/segmenter.rs (1424 lines)",
     "src/protocols/http_flv/mux.rs (1035 lines)",
     "src/protocols/rtmp/session.rs (1057 lines)",
-    "src/rtp/payload.rs (1432 lines)",
     "src/server/session.rs (1362 lines)",
     "src/storage/recording.rs (811 lines)"
   ],

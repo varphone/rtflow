@@ -1,0 +1,257 @@
+use crate::rtp::{RtpHeader, RtpPacket};
+use crate::{
+    Error, Result,
+    media::{AccessUnit, Codec},
+};
+use bytes::{BufMut, Bytes, BytesMut};
+
+#[derive(Clone, Debug)]
+pub struct Packetizer {
+    pub codec: Codec,
+    pub payload_type: u8,
+    pub ssrc: u32,
+    pub next_sequence: u16,
+    pub mtu: usize,
+    /// Per-frame picture ID for the VP9 payload descriptor
+    /// (draft-ietf-payload-vp9), incremented and wrapped per frame.
+    vp9_picture_id: u16,
+}
+impl Packetizer {
+    pub fn new(codec: Codec, payload_type: u8, ssrc: u32, mtu: usize) -> Result<Self> {
+        if payload_type > 127 {
+            return Err(Error::Media("RTP payload type must be <= 127".into()));
+        }
+        if mtu <= 16 {
+            return Err(Error::Media(
+                "MTU must exceed RTP and fragment headers".into(),
+            ));
+        }
+        Ok(Self {
+            codec,
+            payload_type,
+            ssrc,
+            next_sequence: 0,
+            mtu,
+            vp9_picture_id: 0,
+        })
+    }
+    fn packet(&mut self, payload: Bytes, timestamp: u32, marker: bool) -> RtpPacket {
+        let p = RtpPacket {
+            header: RtpHeader {
+                marker,
+                payload_type: self.payload_type,
+                sequence: self.next_sequence,
+                timestamp,
+                ssrc: self.ssrc,
+            },
+            payload,
+        };
+        self.next_sequence = self.next_sequence.wrapping_add(1);
+        p
+    }
+    pub fn packetize(&mut self, frame: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        if frame.codec != self.codec {
+            return Err(Error::Media("frame codec does not match packetizer".into()));
+        }
+        match self.codec {
+            Codec::H264 => self.h264(frame),
+            Codec::H265 => self.h265(frame),
+            Codec::Aac => self.aac(frame),
+            Codec::Pcma | Codec::Pcmu | Codec::Opus => Ok(vec![self.packet(
+                frame.data.clone(),
+                frame.rtp_timestamp,
+                true,
+            )]),
+            Codec::Vp8 => self.vp8(frame),
+            Codec::Vp9 => self.vp9(frame),
+        }
+    }
+    /// VP9 payload descriptor (draft-ietf-payload-vp9, the format used by
+    /// WebRTC and ffmpeg): octet 0 = `I P L F B E V Z`, with I=1 followed
+    /// by a 16-bit picture ID. B marks the first fragment of a frame, E
+    /// the last; the picture ID increments per frame.
+    fn vp9(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        if f.data.is_empty() {
+            return Err(Error::Media("empty VP9 access unit".into()));
+        }
+        let max = self.mtu.saturating_sub(12);
+        let fragment_size = max.saturating_sub(3); // descriptor + picture ID
+        if fragment_size == 0 {
+            return Err(Error::Media("MTU too small for VP9".into()));
+        }
+        let total = f.data.len().div_ceil(fragment_size);
+        let picture_id = self.vp9_picture_id;
+        self.vp9_picture_id = self.vp9_picture_id.wrapping_add(1);
+        let mut out = Vec::with_capacity(total);
+        for (index, chunk) in f.data.chunks(fragment_size).enumerate() {
+            let mut payload = BytesMut::with_capacity(3 + chunk.len());
+            let first = index == 0;
+            let last = index + 1 == total;
+            // I=1 (picture ID present), M=1 (15-bit picture ID), B/E flags.
+            // Always using the 15-bit form keeps the descriptor 3 bytes
+            // regardless of the picture-ID value, which every conformant
+            // decoder (libwebrtc, ffmpeg) accepts.
+            payload.put_u8(0x80 | ((first as u8) << 2) | ((last as u8) << 1));
+            payload.put_u8(0x80 | ((picture_id >> 8) & 0x7f) as u8);
+            payload.put_u8((picture_id & 0xff) as u8);
+            payload.extend_from_slice(chunk);
+            out.push(self.packet(payload.freeze(), f.rtp_timestamp, last));
+        }
+        Ok(out)
+    }
+    /// RFC 7741 VP8 packetization: 1-byte payload descriptor
+    /// (X=0 R=0 N=0, S on the first fragment, PID increments per
+    /// fragment, wrapping at 16). Frames larger than the MTU are
+    /// fragmented; marker is set on the last fragment.
+    fn vp8(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        if f.data.is_empty() {
+            return Err(Error::Media("empty VP8 access unit".into()));
+        }
+        let max = self.mtu.saturating_sub(12);
+        let fragment_size = max.saturating_sub(1); // payload descriptor
+        if fragment_size == 0 {
+            return Err(Error::Media("MTU too small for VP8".into()));
+        }
+        let total = f.data.len().div_ceil(fragment_size);
+        let mut out = Vec::with_capacity(total);
+        for (index, chunk) in f.data.chunks(fragment_size).enumerate() {
+            let mut payload = BytesMut::with_capacity(1 + chunk.len());
+            let start = index == 0;
+            payload.put_u8(((start as u8) << 4) | (index & 0x0f) as u8);
+            payload.extend_from_slice(chunk);
+            out.push(self.packet(payload.freeze(), f.rtp_timestamp, index + 1 == total));
+        }
+        Ok(out)
+    }
+    fn h264(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        if f.data.is_empty() {
+            return Err(Error::Media("empty H264 access unit".into()));
+        }
+        let max = self.mtu.saturating_sub(12);
+        let nals = annex_b_nals(&f.data);
+        let nals = if nals.is_empty() {
+            vec![f.data.clone()]
+        } else {
+            nals
+        };
+        let total = nals.len();
+        let mut out = Vec::new();
+        for (i, nal) in nals.into_iter().enumerate() {
+            if nal.len() <= max {
+                out.push(self.packet(nal, f.rtp_timestamp, i + 1 == total));
+                continue;
+            }
+            if nal.len() < 2 {
+                return Err(Error::Media("short H264 NAL".into()));
+            }
+            let hdr = nal[0];
+            let size = max - 2;
+            let mut pos = 1;
+            while pos < nal.len() {
+                let end = (pos + size).min(nal.len());
+                let mut v = BytesMut::with_capacity(2 + end - pos);
+                v.extend_from_slice(&[
+                    (hdr & 0xe0) | 28,
+                    ((pos == 1) as u8) << 7 | ((end == nal.len()) as u8) << 6 | (hdr & 0x1f),
+                ]);
+                v.extend_from_slice(&nal[pos..end]);
+                out.push(self.packet(
+                    v.freeze(),
+                    f.rtp_timestamp,
+                    end == nal.len() && i + 1 == total,
+                ));
+                pos = end;
+            }
+        }
+        Ok(out)
+    }
+    fn h265(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        if f.data.len() < 2 {
+            return Err(Error::Media("short H265 access unit".into()));
+        }
+        let max = self.mtu.saturating_sub(12);
+        let nals = annex_b_nals(&f.data);
+        let nals = if nals.is_empty() {
+            vec![f.data.clone()]
+        } else {
+            nals
+        };
+        let total = nals.len();
+        let mut out = Vec::new();
+        for (index, nal) in nals.into_iter().enumerate() {
+            if nal.len() < 2 {
+                return Err(Error::Media("short H265 NAL".into()));
+            }
+            if nal.len() <= max {
+                out.push(self.packet(nal, f.rtp_timestamp, index + 1 == total));
+                continue;
+            }
+            let h0 = nal[0];
+            let h1 = nal[1];
+            let size = max - 3;
+            let mut pos = 2;
+            while pos < nal.len() {
+                let end = (pos + size).min(nal.len());
+                let mut v = BytesMut::with_capacity(3 + end - pos);
+                v.extend_from_slice(&[
+                    (h0 & 0x81) | (49 << 1),
+                    h1,
+                    ((pos == 2) as u8) << 7 | ((end == nal.len()) as u8) << 6 | ((h0 >> 1) & 0x3f),
+                ]);
+                v.extend_from_slice(&nal[pos..end]);
+                out.push(self.packet(
+                    v.freeze(),
+                    f.rtp_timestamp,
+                    end == nal.len() && index + 1 == total,
+                ));
+                pos = end;
+            }
+        }
+        Ok(out)
+    }
+    fn aac(&mut self, f: &AccessUnit) -> Result<Vec<RtpPacket>> {
+        let size_bytes = f.data.len();
+        if size_bytes > 0x1fff {
+            return Err(Error::Media(
+                "AAC AU exceeds the 13-bit AU-size field".into(),
+            ));
+        }
+        if f.data.len() + 4 > self.mtu.saturating_sub(12) {
+            return Err(Error::Media(
+                "AAC AU exceeds MTU; fragmentation is unsupported".into(),
+            ));
+        }
+        let au_header = (size_bytes as u16) << 3;
+        let mut v = BytesMut::with_capacity(f.data.len() + 4);
+        v.extend_from_slice(&16u16.to_be_bytes());
+        v.extend_from_slice(&au_header.to_be_bytes());
+        v.extend_from_slice(&f.data);
+        Ok(vec![self.packet(v.freeze(), f.rtp_timestamp, true)])
+    }
+}
+pub(super) fn annex_b_nals(data: &Bytes) -> Vec<Bytes> {
+    let mut marks = Vec::new();
+    let b = &data[..];
+    let mut i = 0;
+    while i + 3 <= b.len() {
+        let l = if b[i..].starts_with(&[0, 0, 1]) {
+            3
+        } else if i + 4 <= b.len() && b[i..].starts_with(&[0, 0, 0, 1]) {
+            4
+        } else {
+            i += 1;
+            continue;
+        };
+        marks.push((i, l));
+        i += l;
+    }
+    let mut n = Vec::new();
+    for ix in 0..marks.len() {
+        let start = marks[ix].0 + marks[ix].1;
+        let end = marks.get(ix + 1).map(|x| x.0).unwrap_or(b.len());
+        if start < end {
+            n.push(data.slice(start..end))
+        }
+    }
+    n
+}

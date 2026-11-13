@@ -1,0 +1,197 @@
+mod audio;
+mod h264;
+mod h265;
+mod vp;
+
+use crate::rtp::RtpPacket;
+use crate::{
+    Error, Result,
+    media::{AccessUnit, Codec, TrackId},
+};
+use bytes::{Bytes, BytesMut};
+
+/// Upper bound for a reassembled access unit (FU fragments + multi-NAL
+/// aggregation). A malicious or broken peer must not be able to grow
+/// per-connection buffers without limit; 16 MB covers 8K HEVC frames with
+/// headroom while bounding each session's memory.
+const MAX_ASSEMBLY_BYTES: usize = 16 * 1024 * 1024;
+
+#[derive(Debug)]
+pub struct Depacketizer {
+    codec: Codec,
+    track_id: TrackId,
+    clock_rate: u32,
+    assembling: Option<BytesMut>,
+    /// Keyframe flag of the NAL currently being reassembled from
+    /// fragmentation units (H.264 FU-A / H.265 FU). The FU start packet
+    /// carries the NAL type; continuation packets do not, so the flag is
+    /// latched here until the FU end packet completes the NAL.
+    assembling_is_keyframe: bool,
+    /// VP8/VP9 frame reassembly (RFC 7741 / draft-ietf-payload-vp9): fragments share one timestamp,
+    /// the S bit of the payload descriptor starts a new frame.
+    vp_assembling: Option<BytesMut>,
+    /// Keyframe flag of the VP8/VP9 frame being assembled (VP8 frame header
+    /// P bit, only present on the fragment with S=1).
+    vp_is_keyframe: bool,
+    access_unit: Vec<Bytes>,
+    /// Bytes accumulated in `access_unit` (avoids O(n) re-scans on every
+    /// packet for the assembly limit check).
+    access_unit_bytes: usize,
+    current_timestamp: Option<u32>,
+    expected_sequence: Option<u16>,
+    damaged_timestamp: Option<u32>,
+    /// Keyframe flag accumulated while assembling the current AU (avoids a
+    /// second full-frame Annex-B scan after assembly).
+    assembled_is_keyframe: bool,
+    /// Last raw RTP timestamp, for wrap-extended PTS.
+    last_rtp_ts: u32,
+    /// Wrap-free RTP timestamp clock (units of `clock_rate` ticks).
+    extended_ts: u64,
+}
+impl Depacketizer {
+    pub fn new(codec: Codec, track_id: TrackId, clock_rate: u32) -> Self {
+        Self {
+            codec,
+            track_id,
+            clock_rate,
+            assembling: None,
+            assembling_is_keyframe: false,
+            vp_assembling: None,
+            vp_is_keyframe: false,
+            access_unit: Vec::new(),
+            access_unit_bytes: 0,
+            current_timestamp: None,
+            expected_sequence: None,
+            damaged_timestamp: None,
+            assembled_is_keyframe: false,
+            last_rtp_ts: 0,
+            extended_ts: 0,
+        }
+    }
+
+    /// PTS from the RTP timestamp, extended across the 32-bit wrap:
+    /// without extension the PTS resets to zero every ~13.1h at 90kHz.
+    /// The delta is interpreted as signed so out-of-order timestamps and
+    /// wrap-arounds both extend correctly.
+    fn pts_from_timestamp(&mut self, rtp_ts: u32) -> std::time::Duration {
+        if self.clock_rate == 0 {
+            return std::time::Duration::ZERO;
+        }
+        let raw_delta = rtp_ts.wrapping_sub(self.last_rtp_ts) as i32 as i64;
+        self.extended_ts = self.extended_ts.wrapping_add(raw_delta as u64);
+        self.last_rtp_ts = rtp_ts;
+        std::time::Duration::from_micros(
+            self.extended_ts.saturating_mul(1_000_000) / u64::from(self.clock_rate),
+        )
+    }
+    pub fn push(&mut self, p: RtpPacket) -> Result<Vec<AccessUnit>> {
+        let timestamp = p.header.timestamp;
+        let marker = p.header.marker;
+        if self
+            .expected_sequence
+            .is_some_and(|e| e != p.header.sequence)
+            && matches!(
+                self.codec,
+                Codec::H264 | Codec::H265 | Codec::Vp8 | Codec::Vp9
+            )
+        {
+            let d = self.current_timestamp == Some(timestamp);
+            self.assembling = None;
+            self.assembling_is_keyframe = false;
+            // VP8 fragments share one timestamp; a gap must discard the
+            // in-flight frame too, otherwise fragments of two different
+            // frames get spliced into one corrupted frame.
+            self.vp_assembling = None;
+            self.vp_is_keyframe = false;
+            self.access_unit.clear();
+            self.assembled_is_keyframe = false;
+            self.current_timestamp = None;
+            self.damaged_timestamp = d.then_some(timestamp);
+        }
+        self.expected_sequence = Some(p.header.sequence.wrapping_add(1));
+        if self.damaged_timestamp.is_some_and(|d| d != timestamp) {
+            self.damaged_timestamp = None;
+        }
+        if matches!(self.codec, Codec::Vp8 | Codec::Vp9) {
+            return self.vp9_depacketize(&p);
+        }
+        if matches!(self.codec, Codec::H264 | Codec::H265) {
+            if self.current_timestamp.is_some_and(|v| v != timestamp) {
+                self.access_unit.clear();
+                self.access_unit_bytes = 0;
+                self.assembled_is_keyframe = false;
+                self.assembling = None;
+                self.assembling_is_keyframe = false;
+            }
+            self.current_timestamp = Some(timestamp);
+            let nal = match self.codec {
+                Codec::H264 => self.h264(p.payload)?,
+                Codec::H265 => self.h265(p.payload)?,
+                other => {
+                    return Err(Error::Media(format!(
+                        "depacketization not implemented for {other:?}"
+                    )));
+                }
+            };
+            if let Some((nal, keyframe_nal)) = nal {
+                if self.access_unit_bytes.saturating_add(nal.len()) > MAX_ASSEMBLY_BYTES {
+                    self.access_unit.clear();
+                    self.access_unit_bytes = 0;
+                    self.assembled_is_keyframe = false;
+                    self.assembling = None;
+                    self.assembling_is_keyframe = false;
+                    self.damaged_timestamp = Some(timestamp);
+                    return Err(Error::Media(format!(
+                        "access unit exceeds {MAX_ASSEMBLY_BYTES} bytes"
+                    )));
+                }
+                // Keyframe classification happens inside h264/h265 while the
+                // NAL headers are already being parsed — no second scan.
+                self.assembled_is_keyframe |= keyframe_nal;
+                self.access_unit_bytes += nal.len();
+                self.access_unit.push(nal);
+            }
+            if !marker || self.assembling.is_some() || self.access_unit.is_empty() {
+                return Ok(vec![]);
+            }
+            if self.damaged_timestamp == Some(timestamp) {
+                self.access_unit.clear();
+                self.access_unit_bytes = 0;
+                self.assembled_is_keyframe = false;
+                self.current_timestamp = None;
+                self.damaged_timestamp = None;
+                return Ok(vec![]);
+            }
+            let data = {
+                // Pre-size the output: NAL lengths are known, so assemble
+                // with a single allocation instead of geometric growth.
+                let total: usize = self
+                    .access_unit
+                    .iter()
+                    .map(|nal| nal.len().saturating_add(4))
+                    .sum();
+                let mut output = BytesMut::with_capacity(total);
+                for nal in self.access_unit.drain(..) {
+                    output.extend_from_slice(&[0, 0, 0, 1]);
+                    output.extend_from_slice(&nal);
+                }
+                self.access_unit_bytes = 0;
+                output.freeze()
+            };
+            let is_keyframe = self.assembled_is_keyframe;
+            self.assembled_is_keyframe = false;
+            self.current_timestamp = None;
+            let pts = self.pts_from_timestamp(timestamp);
+            return Ok(vec![AccessUnit {
+                track_id: self.track_id,
+                codec: self.codec,
+                pts,
+                dts: None,
+                rtp_timestamp: timestamp,
+                is_keyframe,
+                data,
+            }]);
+        }
+        self.audio(p)
+    }
+}
