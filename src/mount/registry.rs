@@ -6,7 +6,7 @@ use super::*;
 
 /// Shared mount registry accessible by all protocol servers.
 pub struct MountRegistry {
-    mounts: RwLock<HashMap<Arc<str>, Arc<Mount>>>,
+    mounts: RwLock<HashMap<MountId, Arc<Mount>>>,
     max_mounts: usize,
     /// Global metrics registry mirrored by every mount created through
     /// this registry (R12: frame counters were previously only wired for
@@ -86,17 +86,18 @@ impl MountRegistry {
 
     /// Insert a pre-built mount. Returns error on conflict or limit.
     pub(crate) fn insert(&self, path: Arc<str>, mount: Arc<Mount>) -> Result<()> {
+        let id = MountId::from(path);
         let mut mounts = self
             .mounts
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if mounts.contains_key(&path) {
-            return Err(Error::Conflict(path.to_string()));
+        if mounts.contains_key(&id) {
+            return Err(Error::Conflict(id.to_string()));
         }
         if mounts.len() >= self.max_mounts {
             return Err(Error::Limit("mounts"));
         }
-        mounts.insert(path, mount);
+        mounts.insert(id, mount);
         Ok(())
     }
 
@@ -104,14 +105,14 @@ impl MountRegistry {
         self.mounts
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(path)
+            .remove(&MountId::new(path))
     }
 
     pub(crate) fn get(&self, path: &str) -> Option<Arc<Mount>> {
         self.mounts
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(path)
+            .get(&MountId::new(path))
             .cloned()
     }
 
@@ -142,8 +143,8 @@ impl MountRegistry {
         mounts.clear();
     }
 
-    /// List all registered mount paths.
-    pub fn paths(&self) -> Vec<Arc<str>> {
+    /// List all registered mounts.
+    pub fn paths(&self) -> Vec<MountId> {
         self.mounts
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -154,24 +155,24 @@ impl MountRegistry {
 
     /// Find the mount whose path is the longest prefix of `requested`.
     #[allow(dead_code)] // used by the RTSP server
-    pub(crate) fn find_longest_prefix(&self, requested: &str) -> Option<(Arc<str>, Arc<Mount>)> {
+    pub(crate) fn find_longest_prefix(&self, requested: &str) -> Option<(MountId, Arc<Mount>)> {
         let mounts = self
             .mounts
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Exact match is the overwhelmingly common case: O(1) hash lookup
         // instead of a linear prefix scan over every registered mount.
-        if let Some((path, mount)) = mounts.get_key_value(requested) {
+        if let Some((path, mount)) = mounts.get_key_value(&MountId::new(requested)) {
             return Some((path.clone(), mount.clone()));
         }
         mounts
             .iter()
             .filter(|(path, _)| {
                 requested
-                    .strip_prefix(path.as_ref())
+                    .strip_prefix(path.as_str())
                     .is_some_and(|suffix| suffix.starts_with('/'))
             })
-            .max_by_key(|(path, _)| path.len())
+            .max_by_key(|(path, _)| path.as_str().len())
             .map(|(path, mount)| (path.clone(), mount.clone()))
     }
 
@@ -302,16 +303,16 @@ impl MountRegistry {
             .iter()
             .map(|(path, mount)| {
                 let handle = MountHandle {
-                    path: path.clone(),
+                    path: path.as_str().into(),
                     description: MediaDescription {
-                        session_name: path.clone(),
+                        session_name: path.as_str().into(),
                         tracks: Vec::new(),
                         #[cfg(feature = "multicast")]
                         connection: None,
                     },
                     inner: mount.clone(),
                 };
-                (path.clone(), handle.snapshot())
+                (path.as_str().into(), handle.snapshot())
             })
             .collect()
     }

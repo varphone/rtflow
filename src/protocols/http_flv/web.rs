@@ -122,7 +122,7 @@ fn mounts_json(registry: &MountRegistry) -> Vec<u8> {
     let mut paths: Vec<String> = registry
         .paths()
         .into_iter()
-        .map(|p| p.to_string())
+        .map(|p| p.as_str().to_owned())
         .collect();
     paths.sort();
 
