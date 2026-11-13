@@ -82,6 +82,9 @@ pub enum Error {
     Conflict(String),
     #[error("authentication failed")]
     Unauthorized,
+    /// Non-2xx response to an RTSP control request.
+    #[error("{method} returned {status}")]
+    RtspStatus { method: &'static str, status: u16 },
     #[cfg(feature = "srtp")]
     #[error("SRTP error: {0}")]
     Srtp(String),
@@ -113,6 +116,15 @@ impl Error {
             Self::Limit(_) => ErrorCode::ResourceExhausted,
             Self::NotFound(_) | Self::Conflict(_) => ErrorCode::InvalidState,
             Self::Unauthorized => ErrorCode::Unauthorized,
+            Self::RtspStatus { status: 401, .. } => ErrorCode::Unauthorized,
+            Self::RtspStatus { status: 403, .. } => ErrorCode::Forbidden,
+            Self::RtspStatus { status: 404, .. } => ErrorCode::InvalidState,
+            Self::RtspStatus { status: 453, .. } => ErrorCode::ResourceExhausted,
+            Self::RtspStatus { status: 461, .. } => ErrorCode::Unsupported,
+            Self::RtspStatus {
+                status: 500..=599, ..
+            } => ErrorCode::UpstreamUnavailable,
+            Self::RtspStatus { .. } => ErrorCode::InvalidProtocol,
             #[cfg(feature = "srtp")]
             Self::Srtp(_) => ErrorCode::InvalidMedia,
             #[cfg(feature = "rtmp")]
@@ -139,6 +151,11 @@ impl Error {
                 RetryClass::Backoff
             }
             Self::Closed => RetryClass::Immediate,
+            Self::RtspStatus {
+                status: 500..=599 | 408 | 453 | 461,
+                ..
+            } => RetryClass::Backoff,
+            Self::RtspStatus { .. } => RetryClass::Never,
             #[cfg(feature = "srtp")]
             Self::Srtp(_) => RetryClass::Never,
             _ => RetryClass::Never,
@@ -148,6 +165,7 @@ impl Error {
     pub fn rtsp_status(&self) -> u16 {
         match self {
             Self::Unauthorized => 401,
+            Self::RtspStatus { status, .. } => *status,
             Self::NotFound(_) => 404,
             Self::Conflict(_) => 455,
             Self::Limit(_) => 453,
@@ -202,5 +220,38 @@ mod tests {
             Error::Unsupported("ipv6 multicast".into()).rtsp_status(),
             501
         );
+        // Typed RTSP status errors carry stable operational metadata.
+        let unauthorized = Error::RtspStatus {
+            method: "OPTIONS",
+            status: 401,
+        };
+        assert_eq!(unauthorized.code(), ErrorCode::Unauthorized);
+        assert_eq!(unauthorized.retry_class(), RetryClass::Never);
+        assert_eq!(unauthorized.rtsp_status(), 401);
+        let unsupported_transport = Error::RtspStatus {
+            method: "SETUP",
+            status: 461,
+        };
+        assert_eq!(unsupported_transport.code(), ErrorCode::Unsupported);
+        assert_eq!(unsupported_transport.retry_class(), RetryClass::Backoff);
+        assert_eq!(unsupported_transport.rtsp_status(), 461);
+        let server_error = Error::RtspStatus {
+            method: "SETUP",
+            status: 500,
+        };
+        assert_eq!(server_error.code(), ErrorCode::UpstreamUnavailable);
+        assert_eq!(server_error.retry_class(), RetryClass::Backoff);
+        assert_eq!(server_error.rtsp_status(), 500);
+        let bandwidth = Error::RtspStatus {
+            method: "PLAY",
+            status: 453,
+        };
+        assert_eq!(bandwidth.code(), ErrorCode::ResourceExhausted);
+        assert_eq!(bandwidth.retry_class(), RetryClass::Backoff);
+        let permanent = Error::RtspStatus {
+            method: "PLAY",
+            status: 455,
+        };
+        assert_eq!(permanent.retry_class(), RetryClass::Never);
     }
 }
