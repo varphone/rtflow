@@ -392,3 +392,28 @@ pub(crate) fn spawn_udp_receiver(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::RtpCache;
+    use bytes::Bytes;
+
+    #[test]
+    fn rtp_cache_retains_recent_packets_and_evicts_oldest() {
+        let mut cache = RtpCache::new(2);
+        cache.insert(1, Bytes::from_static(b"one"));
+        cache.insert(2, Bytes::from_static(b"two"));
+        assert_eq!(cache.get(1).map(Bytes::as_ref), Some(&b"one"[..]));
+        cache.insert(3, Bytes::from_static(b"three"));
+        assert!(cache.get(1).is_none());
+        assert_eq!(cache.get(2).map(Bytes::as_ref), Some(&b"two"[..]));
+        assert_eq!(cache.get(3).map(Bytes::as_ref), Some(&b"three"[..]));
+    }
+
+    #[test]
+    fn rtp_cache_normalizes_zero_capacity_without_panicking() {
+        let mut cache = RtpCache::new(0);
+        cache.insert(7, Bytes::from_static(b"packet"));
+        assert!(cache.get(7).is_some());
+    }
+}
