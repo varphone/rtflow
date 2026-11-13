@@ -26,6 +26,22 @@ use tokio::{
 /// freeze every track's sender and the RTCP path.
 const INTERLEAVED_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Send one UDP datagram, falling back to the async path only when the
+/// socket is not immediately writable. Avoids a task wake-up per RTP packet.
+async fn send_udp(
+    socket: &tokio::net::UdpSocket,
+    buf: &[u8],
+    target: SocketAddr,
+) -> std::io::Result<usize> {
+    match socket.try_send_to(buf, target) {
+        Ok(written) => Ok(written),
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+            socket.send_to(buf, target).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Write to the shared interleaved writer with a hard timeout.
 /// Returns `false` on timeout/error (caller should tear down the session).
 async fn write_interleaved(writer: &Arc<Mutex<TimedWriter>>, wire: &[u8]) -> bool {

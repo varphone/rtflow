@@ -123,7 +123,7 @@ pub(crate) fn spawn_udp_sender_from(
                         });
                         if let Some(Ok(report)) = report
                             && let Ok(report) = crypto.protect_rtcp(report)
-                            && pair.rtcp.send_to(&report, rtcp_target).await.is_ok()
+                            && send_udp(&pair.rtcp, &report, rtcp_target).await.is_ok()
                         {
                             mount.stats.add_sender_reports(1);
                         }
@@ -137,7 +137,7 @@ pub(crate) fn spawn_udp_sender_from(
                         }])
                         .and_then(|packet| packet.try_encode())
                         && let Ok(wire) = crypto.protect_rtcp(wire)
-                        && pair.rtcp.send_to(&wire, rtcp_target).await.is_ok()
+                        && send_udp(&pair.rtcp, &wire, rtcp_target).await.is_ok()
                     {
                         mount.stats.add_receiver_reports(1);
                         let _ = sr_ntp;
@@ -272,7 +272,7 @@ pub(crate) fn spawn_udp_sender_from(
                             };
                             let cached = retransmit.then(|| protected.clone());
                             let sequence_number = packet.header.sequence;
-                            if pair.rtp.send_to(&protected, rtp_target).await.is_err() {
+                            if send_udp(&pair.rtp, &protected, rtp_target).await.is_err() {
                                 // A persistently unreachable target should not
                                 // keep the sender spinning silently.
                                 consecutive_send_failures = consecutive_send_failures.saturating_add(1);
@@ -311,7 +311,7 @@ pub(crate) fn spawn_udp_sender_from(
                                     sent_octets,
                                 )
                                 && let Ok(report) = crypto.protect_rtcp(report)
-                                && pair.rtcp.send_to(&report, rtcp_target).await.is_ok()
+                                && send_udp(&pair.rtcp, &report, rtcp_target).await.is_ok()
                             {
                                 mount.stats.add_sender_reports(1);
                             }
