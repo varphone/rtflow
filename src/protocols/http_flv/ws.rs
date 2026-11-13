@@ -33,8 +33,13 @@ use crate::{MountRegistry, Result};
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 /// Upper bound for the HTTP upgrade request.
 const MAX_HANDSHAKE_BYTES: usize = 8 * 1024;
-/// Refuse to buffer an absurd client frame (protects the read loop).
-const MAX_FRAME_PAYLOAD: u64 = 16 * 1024 * 1024;
+/// Client-to-server frames are only control frames in WS-FLV; cap them hard
+/// instead of preallocating a multi-megabyte buffer per viewer.
+const MAX_FRAME_PAYLOAD: u64 = 64 * 1024;
+/// Control frames must be <=125 bytes (RFC 6455 §5.5).
+const MAX_CONTROL_PAYLOAD: u64 = 125;
+/// Bound a stalled viewer's write instead of pinning a session forever.
+const WS_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// WS-FLV server configuration.
 #[derive(Clone, Debug)]
@@ -105,7 +110,8 @@ impl WsFlvServer {
             // Low-latency streaming: disable Nagle so each WS-FLV frame is
             // sent immediately (tokio defaults to true, but be explicit).
             let _ = stream.set_nodelay(true);
-            if ACTIVE_VIEWERS.load(Ordering::Relaxed) >= config.max_connections {
+            if ACTIVE_VIEWERS.fetch_add(1, Ordering::AcqRel) >= config.max_connections {
+                ACTIVE_VIEWERS.fetch_sub(1, Ordering::AcqRel);
                 tracing::debug!("ws-flv {peer}: connection limit reached");
                 drop(stream);
                 continue;
@@ -113,9 +119,8 @@ impl WsFlvServer {
             let mounts = mounts.clone();
             let config = config.clone();
             tokio::spawn(async move {
-                ACTIVE_VIEWERS.fetch_add(1, Ordering::Relaxed);
                 let outcome = handle_connection(stream, mounts, config).await;
-                ACTIVE_VIEWERS.fetch_sub(1, Ordering::Relaxed);
+                ACTIVE_VIEWERS.fetch_sub(1, Ordering::AcqRel);
                 if let Err(e) = outcome {
                     tracing::debug!("ws-flv {peer}: {e}");
                 }
@@ -179,15 +184,15 @@ async fn handle_connection(
     // Reader task: answer pings with pongs, run the heartbeat (server ping
     // + dead-peer reaping), exit on close/disconnect.
     let done = Arc::new(AtomicBool::new(false));
-    {
+    let reader_task = {
         let write_half = write_half.clone();
         let done = done.clone();
         let ping_interval = config.ping_interval;
         tokio::spawn(async move {
             let _ = read_control_loop(read_half, write_half, ping_interval).await;
             done.store(true, Ordering::Relaxed);
-        });
-    }
+        })
+    };
 
     // Send the FLV header + onMetaData, then stream tags.
     {
@@ -312,6 +317,8 @@ async fn handle_connection(
         let _ = write_ws_frame(&mut *guard, 0x8, &[]).await;
         let _ = guard.flush().await;
     }
+    reader_task.abort();
+    let _ = reader_task.await;
     Ok(())
 }
 
@@ -435,7 +442,9 @@ async fn write_ws_frame<W: AsyncWrite + Unpin>(
     ];
     // tokio's write_vectored already loops until every byte is written
     // (unlike std), so the returned amount is always the full length.
-    let _ = w.write_vectored(&bufs).await?;
+    tokio::time::timeout(WS_WRITE_TIMEOUT, w.write_vectored(&bufs))
+        .await
+        .map_err(|_| crate::Error::Http("ws-flv: write timeout".into()))??;
     Ok(())
 }
 
@@ -458,6 +467,9 @@ async fn read_client_frame(r: &mut (impl AsyncRead + Unpin)) -> Result<(u8, Vec<
     }
     if len > MAX_FRAME_PAYLOAD {
         return Err(crate::Error::Http("ws-flv: frame too large".into()));
+    }
+    if opcode >= 0x8 && len > MAX_CONTROL_PAYLOAD {
+        return Err(crate::Error::Http("ws-flv: control frame too large".into()));
     }
     // Mask key precedes the payload (RFC 6455 §5.2); client frames
     // are always masked.

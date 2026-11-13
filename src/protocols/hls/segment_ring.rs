@@ -10,10 +10,9 @@ pub struct SegmentRing {
 
 impl SegmentRing {
     pub fn new(max_segments: usize) -> Self {
-        assert!(
-            max_segments > 0,
-            "HLS segment ring capacity must be non-zero"
-        );
+        // Config validation clamps/normalizes this; keep the type itself
+        // panic-free even for a direct zero-capacity call.
+        let max_segments = max_segments.max(1);
         Self {
             segments: RwLock::new(VecDeque::with_capacity(max_segments)),
             max_segments,
@@ -22,7 +21,10 @@ impl SegmentRing {
 
     /// Push a new segment, evicting the oldest if at capacity.
     pub fn push(&self, segment: Segment) {
-        let mut segments = self.segments.write().unwrap();
+        let mut segments = self
+            .segments
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if segments.len() >= self.max_segments {
             segments.pop_front();
         }
@@ -31,19 +33,28 @@ impl SegmentRing {
 
     /// Get a snapshot of all segments (for playlist generation).
     pub fn snapshot(&self) -> Vec<Segment> {
-        let segments = self.segments.read().unwrap();
+        let segments = self
+            .segments
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         segments.iter().cloned().collect()
     }
 
     /// Get the latest init segment data.
     pub fn latest_init(&self) -> Option<bytes::Bytes> {
-        let segments = self.segments.read().unwrap();
+        let segments = self
+            .segments
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         segments.back().map(|s| s.init.clone())
     }
 
     /// Get a specific segment by sequence number.
     pub fn get(&self, sequence: u64) -> Option<Segment> {
-        let segments = self.segments.read().unwrap();
+        let segments = self
+            .segments
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let first = segments.front()?.sequence;
         let last = segments.back()?.sequence;
         if sequence < first || sequence > last {
@@ -59,10 +70,27 @@ impl SegmentRing {
 
     /// Number of segments currently stored.
     pub fn len(&self) -> usize {
-        self.segments.read().unwrap().len()
+        self.segments
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.segments.read().unwrap().is_empty()
+        self.segments
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_capacity_is_normalized_without_panicking() {
+        let ring = SegmentRing::new(0);
+        assert!(ring.is_empty());
     }
 }

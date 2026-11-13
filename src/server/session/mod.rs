@@ -59,6 +59,7 @@ use self::play::handle_play;
 use self::record::handle_record;
 use self::setup::handle_setup;
 use self::teardown::handle_teardown;
+use crate::server::timed_writer::TimedWriter;
 
 /// Generate an unguessable wire-level session identifier (RFC 2326 §3.4).
 fn new_session_token() -> String {
@@ -101,7 +102,7 @@ pub(super) async fn serve_connection(
     #[cfg(not(feature = "tls"))]
     let scheme = "rtsp";
     let (mut reader, write_half) = tokio::io::split(stream);
-    let writer = Arc::new(Mutex::new(write_half));
+    let writer = Arc::new(Mutex::new(TimedWriter::new(write_half)));
     let mut framer = ConnectionFramer::new(
         state.config.max_rtsp_header_bytes,
         state.config.max_rtsp_body_bytes,

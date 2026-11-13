@@ -1,13 +1,11 @@
 use super::*;
 
-pub(super) type ConnWriter =
-    Arc<Mutex<tokio::io::WriteHalf<crate::runtime::io::ControlConnection>>>;
+pub(super) type ConnWriter = Arc<Mutex<crate::server::timed_writer::TimedWriter>>;
 
 mod authz;
 mod resources;
 mod response;
 mod uri;
-
 pub(crate) use authz::authorize_request;
 pub(crate) use resources::{
     ConnectionResources, claim_remote_publishers, live_sender_input, release_recording_mounts,

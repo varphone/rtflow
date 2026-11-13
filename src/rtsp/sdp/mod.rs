@@ -432,8 +432,16 @@ pub fn encode_with(
             .unwrap_or(0);
         #[cfg(not(feature = "multicast"))]
         let media_port = 0;
+        #[cfg(feature = "srtp")]
+        let profile = if track.crypto.is_some() {
+            "RTP/SAVP"
+        } else {
+            "RTP/AVP"
+        };
+        #[cfg(not(feature = "srtp"))]
+        let profile = "RTP/AVP";
         output.push_str(&format!(
-            "m={media} {media_port} RTP/AVP {}\r\n",
+            "m={media} {media_port} {profile} {}\r\n",
             track.payload_type
         ));
         // PT 14 is the static MPEG audio payload; adding an rtpmap makes

@@ -45,7 +45,7 @@ pub struct SrtpContext {
     // Send direction
     send_cipher: cipher::Aes128Cm,
     send_auth: auth::HmacSha1_80,
-    send_roc: HashMap<u32, u64>,
+    send_state: HashMap<u32, SrtpSendState>,
     // Receive direction (one receiver per SSRC)
     receive: HashMap<u32, SrtpReceiver>,
     // Session keys for creating new receivers on demand
@@ -58,11 +58,22 @@ pub struct SrtpContext {
     rtcp_salt: [u8; 14],
 }
 
+/// Per-SSRC send index state.
+struct SrtpSendState {
+    roc: u32,
+    last_seq: u16,
+    highest_index: u64,
+    initialized: bool,
+}
+
 /// Per-SSRC receiver state.
 struct SrtpReceiver {
     cipher: cipher::Aes128Cm,
     auth: auth::HmacSha1_80,
     replay: replay::ReplayWindow,
+    roc: u32,
+    last_seq: u16,
+    initialized: bool,
 }
 
 impl SrtpContext {
@@ -84,7 +95,7 @@ impl SrtpContext {
         Self {
             send_cipher: cipher::Aes128Cm::new(&keys.rtp_cipher_key, &keys.rtp_salt),
             send_auth: auth::HmacSha1_80::new(&keys.rtp_auth_key),
-            send_roc: HashMap::new(),
+            send_state: HashMap::new(),
             receive: HashMap::new(),
             cipher_key: keys.rtp_cipher_key,
             auth_key: keys.rtp_auth_key,
@@ -122,13 +133,23 @@ impl SrtpContext {
             }
             let ext_len =
                 u16::from_be_bytes([packet[header_end + 2], packet[header_end + 3]]) as usize;
-            header_end + 4 + ext_len * 4
+            let end = header_end
+                .checked_add(4)
+                .and_then(|value| value.checked_add(ext_len.checked_mul(4)?))
+                .ok_or_else(|| Error::Media("RTP extension length overflow".into()))?;
+            if end > packet.len() {
+                return Err(Error::Media("truncated RTP extension data".into()));
+            }
+            end
         } else {
             header_end
         };
 
         // Handle padding.
         let payload_end = if packet[0] & 0x20 != 0 {
+            if ext_end >= packet.len() {
+                return Err(Error::Media("invalid RTP padding".into()));
+            }
             let pad_len = *packet.last().unwrap() as usize;
             if pad_len == 0 || pad_len > packet.len() - ext_end {
                 return Err(Error::Media("invalid RTP padding".into()));
@@ -137,11 +158,32 @@ impl SrtpContext {
         } else {
             packet.len()
         };
+        if payload_end < ext_end {
+            return Err(Error::Media("invalid RTP extension/padding".into()));
+        }
 
         let ssrc = u32::from_be_bytes([packet[8], packet[9], packet[10], packet[11]]);
-        let seq = u16::from_be_bytes([packet[2], packet[3]]) as u64;
-        let roc = *self.send_roc.entry(ssrc).or_insert(0);
-        let index = (roc << 16) | seq;
+        let seq = u16::from_be_bytes([packet[2], packet[3]]);
+        let state = self.send_state.entry(ssrc).or_insert(SrtpSendState {
+            roc: 0,
+            last_seq: seq,
+            highest_index: 0,
+            initialized: false,
+        });
+        if state.initialized {
+            if seq < state.last_seq && state.last_seq - seq > 0x8000 {
+                state.roc = state.roc.wrapping_add(1);
+            } else if seq > state.last_seq && seq - state.last_seq > 0x8000 {
+                state.roc = state.roc.saturating_sub(1);
+            }
+        }
+        let index = (u64::from(state.roc) << 16) | u64::from(seq);
+        if state.initialized && index <= state.highest_index {
+            return Err(Error::Media("SRTP send index reordered or replayed".into()));
+        }
+        state.last_seq = seq;
+        state.highest_index = index;
+        state.initialized = true;
 
         // Build output: header + encrypted extension/payload + ROC + auth tag.
         let mut output = BytesMut::with_capacity(packet.len() + 4 + 10);
@@ -199,24 +241,46 @@ impl SrtpContext {
             cipher: cipher::Aes128Cm::new(&cipher_key, &salt),
             auth: auth::HmacSha1_80::new(&auth_key),
             replay: replay::ReplayWindow::new(),
+            roc: 0,
+            last_seq: 0,
+            initialized: false,
         });
 
-        // Determine the packet index (we use the receiver's leading index as a hint).
-        // For simplicity, we assume sequential ordering within a small window.
+        // Infer the rollover counter from the sequence gap, trying the
+        // adjacent counters for reordered packets around a wrap boundary.
         let seq = u16::from_be_bytes([body[2], body[3]]);
-        let roc = (receiver.replay.leading_index() >> 16) as u32;
-        let index = ((roc as u64) << 16) | (seq as u64);
-
-        // Verify auth tag: body || ROC.
-        let mut auth_input = body.to_vec();
-        auth_input.extend_from_slice(&roc.to_be_bytes());
-        if !receiver.auth.verify(&auth_input, &tag) {
-            return Err(Error::Media("SRTP authentication failed".into()));
+        let mut roc = receiver.roc;
+        if receiver.initialized {
+            if seq < receiver.last_seq && receiver.last_seq - seq > 0x8000 {
+                roc = roc.wrapping_add(1);
+            } else if seq > receiver.last_seq && seq - receiver.last_seq > 0x8000 {
+                roc = roc.saturating_sub(1);
+            }
         }
+        let mut selected = None;
+        for candidate in [roc, roc.wrapping_add(1), roc.saturating_sub(1)] {
+            let candidate_index = (u64::from(candidate) << 16) | u64::from(seq);
+            let mut auth_input = body.to_vec();
+            auth_input.extend_from_slice(&candidate.to_be_bytes());
+            if receiver.auth.verify(&auth_input, &tag) {
+                selected = Some((candidate, candidate_index));
+                break;
+            }
+        }
+        let Some((roc, index)) = selected else {
+            return Err(Error::Media("SRTP authentication failed".into()));
+        };
 
         // Check replay window.
         if !receiver.replay.check(index) {
             return Err(Error::Media("SRTP replay detected".into()));
+        }
+        if !receiver.initialized
+            || index > ((u64::from(receiver.roc) << 16) | u64::from(receiver.last_seq))
+        {
+            receiver.roc = roc;
+            receiver.last_seq = seq;
+            receiver.initialized = true;
         }
 
         // Parse the encryption boundary (same as protect_rtp).
@@ -231,12 +295,22 @@ impl SrtpContext {
                 return Err(Error::Media("truncated RTP extension header".into()));
             }
             let ext_len = u16::from_be_bytes([body[header_end + 2], body[header_end + 3]]) as usize;
-            header_end + 4 + ext_len * 4
+            let end = header_end
+                .checked_add(4)
+                .and_then(|value| value.checked_add(ext_len.checked_mul(4)?))
+                .ok_or_else(|| Error::Media("RTP extension length overflow".into()))?;
+            if end > body.len() {
+                return Err(Error::Media("truncated RTP extension data".into()));
+            }
+            end
         } else {
             header_end
         };
 
         let payload_end = if body[0] & 0x20 != 0 {
+            if ext_end >= body.len() {
+                return Err(Error::Media("invalid RTP padding".into()));
+            }
             let pad_len = *body.last().unwrap() as usize;
             if pad_len == 0 || pad_len > body.len() - ext_end {
                 return Err(Error::Media("invalid RTP padding".into()));
@@ -245,6 +319,9 @@ impl SrtpContext {
         } else {
             body.len()
         };
+        if payload_end < ext_end {
+            return Err(Error::Media("invalid RTP extension/padding".into()));
+        }
 
         // Decrypt extension + payload.
         let mut output = BytesMut::with_capacity(body.len());
@@ -418,5 +495,43 @@ mod tests {
         );
         assert!(ctx.protect_rtp(&[0u8; 5]).is_err());
         assert!(ctx.unprotect_rtp(&[0u8; 5]).is_err());
+    }
+    #[test]
+    fn srtp_roc_rollover_keeps_sender_and_receiver_in_sync() {
+        let mut sender = SrtpContext::new(
+            SrtpProfile::AES_128_CM_HMAC_SHA1_80,
+            &[0x11; 16],
+            &[0x22; 14],
+        );
+        let mut receiver = SrtpContext::new(
+            SrtpProfile::AES_128_CM_HMAC_SHA1_80,
+            &[0x11; 16],
+            &[0x22; 14],
+        );
+        for sequence in 0..=65_536u32 {
+            let seq = sequence as u16;
+            let mut packet = vec![0x80, 96, 0, 0, 0, 0, 0, 0, 0x44, 0x33, 0x22, 0x11, 0xAB];
+            packet[2..4].copy_from_slice(&seq.to_be_bytes());
+            packet[4..8].copy_from_slice(&sequence.to_be_bytes());
+            let protected = sender.protect_rtp(&packet).unwrap();
+            let plain = receiver.unprotect_rtp(&protected).unwrap();
+            assert_eq!(plain.last(), Some(&0xAB), "packet {sequence}");
+        }
+    }
+    #[test]
+    fn malformed_extension_and_padding_do_not_panic() {
+        let mut context = SrtpContext::new(
+            SrtpProfile::AES_128_CM_HMAC_SHA1_80,
+            &[0x11; 16],
+            &[0x22; 14],
+        );
+        // Extension header claims 0xffff words beyond the packet.
+        let packet = vec![
+            0x90, 96, 0, 1, 0, 0, 0, 0, 0x44, 0x33, 0x22, 0x11, 0, 0, 0xff, 0xff,
+        ];
+        assert!(context.protect_rtp(&packet).is_err());
+        // Padding length larger than the packet.
+        let packet = vec![0xa0, 96, 0, 1, 0, 0, 0, 0, 0x44, 0x33, 0x22, 0x11, 0x7f];
+        assert!(context.protect_rtp(&packet).is_err());
     }
 }

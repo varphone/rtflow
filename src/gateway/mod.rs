@@ -68,7 +68,7 @@ impl Gateway {
     /// mount registry.
     #[cfg(feature = "server")]
     pub async fn start_rtsp(&mut self, config: ServerConfig) -> Result<()> {
-        let server = RtspServer::bind(config).await?;
+        let server = RtspServer::bind_with(config, self.mounts.clone()).await?;
         self.rtsp = Some(server);
         Ok(())
     }
@@ -175,6 +175,7 @@ impl Gateway {
                     ..Default::default()
                 }),
                 timeline: None,
+                cancel: None,
             },
         )
     }

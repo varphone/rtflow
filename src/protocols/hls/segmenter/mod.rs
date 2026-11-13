@@ -14,6 +14,9 @@ use self::init::build_init_segment;
 use self::media::build_media_segment;
 use self::util::{annex_b_to_length_prefixed, codec_config_from_annex_b, codec_config_from_fmtp};
 
+/// Hard safety bound for a segment whose timestamps never advance.
+const MAX_SAMPLES_PER_SEGMENT: usize = 10_000;
+
 /// Configuration for the fMP4 segmenter.
 #[derive(Clone, Debug)]
 pub struct SegmenterConfig {
@@ -167,6 +170,12 @@ impl Segmenter {
             return;
         };
         let pts = unit.pts;
+        // Timestamps can stall (broken encoder/ingest). A pure PTS-based cut
+        // then never fires and `samples` grows without bound; force a cut at
+        // the hard sample cap and let the ring/segment duration handle it.
+        if self.tracks[track_index].samples.len() >= MAX_SAMPLES_PER_SEGMENT {
+            self.finalize_segment(pts);
+        }
         // A reset of this track's own timeline (timestamp wrap / source
         // restart) is detected against the track's last PTS. A global
         // comparison against the segment start would mistake independent

@@ -18,13 +18,13 @@ pub(super) async fn handle_incoming_interleaved(
         .get(1)
         .is_some_and(|byte| (192..=223).contains(byte));
     if is_rtcp || frame.channel % 2 == 1 {
-        if let Some((mount, _, _, track)) =
+        if let Some((mount, rtp_channel, _, track)) =
             interleaved
                 .iter()
                 .find(|(_, rtp_channel, rtcp_channel, _)| {
                     *rtcp_channel == frame.channel || (is_rtcp && *rtp_channel == frame.channel)
                 })
-            && let Ok(payload) = match crypto.get_mut(&frame.channel) {
+            && let Ok(payload) = match crypto.get_mut(rtp_channel) {
                 Some(crypto) => crypto.unprotect_rtcp(frame.payload),
                 None => Ok(frame.payload),
             }

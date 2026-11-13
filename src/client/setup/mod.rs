@@ -151,6 +151,7 @@ pub(super) async fn connect(
 }
 
 mod interleaved;
+mod interleaved_rtcp;
 #[cfg(feature = "multicast")]
 mod multicast;
 mod udp;

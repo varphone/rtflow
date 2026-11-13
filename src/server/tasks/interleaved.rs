@@ -1,4 +1,5 @@
 use super::*;
+use crate::server::timed_writer::TimedWriter;
 
 pub(crate) fn spawn_interleaved_sender_from(
     mount: Arc<Mount>,
@@ -6,7 +7,7 @@ pub(crate) fn spawn_interleaved_sender_from(
     rtp_channel: u8,
     rtcp_channel: u8,
     track: TrackDescription,
-    writer: Arc<Mutex<ControlWriteHalf>>,
+    writer: Arc<Mutex<TimedWriter>>,
     anchor_ntp: Option<u64>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -83,6 +84,7 @@ pub(crate) fn spawn_interleaved_sender_from(
                                 sent_packets,
                                 sent_octets,
                             )
+                            && let Ok(report) = crypto.protect_rtcp(report)
                             && let Ok(wire) = (InterleavedFrame {
                                 channel: rtcp_channel,
                                 payload: report,

@@ -188,6 +188,7 @@ pub async fn serve_rtmp_session(
 
     // Writer task: encodes messages with Chunker and writes to socket
     let writer_cancel = cancel.clone();
+    let (writer_done_tx, mut writer_done_rx) = tokio::sync::oneshot::channel::<()>();
     let writer_task = tokio::spawn(async move {
         let mut write_stream = write_half;
         let mut chunker = Chunker::new();
@@ -215,6 +216,7 @@ pub async fn serve_rtmp_session(
                 }
             }
         }
+        let _ = writer_done_tx.send(());
     });
 
     let mut dechunker = Dechunker::new();
@@ -230,6 +232,10 @@ pub async fn serve_rtmp_session(
         tokio::select! {
             _ = cancel.cancelled() => {
                 debug!(?peer, "RTMP: server shutdown");
+                break;
+            }
+            _ = &mut writer_done_rx => {
+                debug!(?peer, "RTMP: writer stopped");
                 break;
             }
             result = async {

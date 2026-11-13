@@ -399,9 +399,9 @@ impl InterleavedFrame {
         Ok(out.freeze())
     }
 
-    pub fn encode(&self) -> Bytes {
+    /// Encode without panicking; prefer [`Self::try_encode`] directly.
+    pub fn encode(&self) -> Result<Bytes> {
         self.try_encode()
-            .expect("interleaved payload must fit its 16-bit wire length")
     }
     pub fn parse(buf: &mut BytesMut, max: usize) -> Result<Option<Self>> {
         if buf.first() != Some(&b'$') {

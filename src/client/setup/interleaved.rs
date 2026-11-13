@@ -334,42 +334,53 @@ pub(super) async fn connect_interleaved(
                                     });
                                 #[cfg(not(feature = "srtp"))]
                                 let secure_channel = false;
-                                // rtcp-mux: RTCP and RTP share a channel;
-                                // classify by payload type before RTP parsing.
-                                if !secure_channel
-                                    && frame.payload.len() >= 2
+                                // RTCP may be plain or SRTCP; in both cases the
+                                // first 8 bytes keep the RTCP payload type clear.
+                                if frame.payload.len() >= 2
                                     && (192..=223).contains(&frame.payload[1])
-                                    && let Some(rtp_channel) = rtcp_channels.get(&frame.channel)
-                                    && let Some((_, _, track_id, clock_rate, local_ssrc)) =
-                                        tracks.get(rtp_channel)
-                                    && let Ok(packets) = RtcpPacket::parse(frame.payload.clone())
-                                    && let Ok(Some(report)) = quality_report(
+                                {
+                                    let rtp_channel = rtcp_channels
+                                        .get(&frame.channel)
+                                        .copied()
+                                        .unwrap_or(frame.channel);
+                                    let Some((_, _, track_id, clock_rate, local_ssrc)) =
+                                        tracks.get(&rtp_channel)
+                                    else {
+                                        continue;
+                                    };
+                                    #[cfg(feature = "srtp")]
+                                    if secure_channel {
+                                        let Some((_, srtcp)) =
+                                            interleaved_crypto.get_mut(&rtp_channel)
+                                        else {
+                                            continue;
+                                        };
+                                        if !super::interleaved_rtcp::handle_rtcp(
+                                            &frame,
+                                            Some(srtcp),
+                                            &reader_quality,
+                                            *track_id,
+                                            *clock_rate,
+                                            *local_ssrc,
+                                            &rtcp_writer,
+                                        )
+                                        .await
+                                        {
+                                            return;
+                                        }
+                                        continue;
+                                    }
+                                    if !super::interleaved_rtcp::handle_rtcp(
+                                        &frame,
+                                        None,
                                         &reader_quality,
                                         *track_id,
                                         *clock_rate,
                                         *local_ssrc,
-                                        &packets,
+                                        &rtcp_writer,
                                     )
                                     .await
-                                    && let Ok(payload) = report.try_encode()
-                                {
-                                    let Ok(wire) = (InterleavedFrame {
-                                        channel: frame.channel,
-                                        payload,
-                                    })
-                                    .try_encode() else {
-                                        return;
-                                    };
-                                    let write =
-                                        async { rtcp_writer.lock().await.write_all(&wire).await };
-                                    if !matches!(
-                                        tokio::time::timeout(
-                                            std::time::Duration::from_secs(10),
-                                            write,
-                                        )
-                                        .await,
-                                        Ok(Ok(()))
-                                    ) {
+                                    {
                                         return;
                                     }
                                     continue;

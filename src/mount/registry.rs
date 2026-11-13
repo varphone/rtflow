@@ -41,6 +41,10 @@ pub struct MountOptions {
     pub startup_cache_config: Option<crate::mount::continuity::StartupCacheConfig>,
     /// Per-mount override of the server's live NPT timeline mode.
     pub timeline: Option<crate::rtsp::range::TimelineMode>,
+    /// Parent cancellation token. Server-owned mounts pass a child token so
+    /// `RtspServer::shutdown` also stops file demuxers/proxies; standalone
+    /// registries may leave this `None`.
+    pub cancel: Option<CancellationToken>,
 }
 
 impl MountRegistry {
@@ -161,29 +165,10 @@ impl MountRegistry {
         let (tx, _) = broadcast::channel(queue_capacity);
         let (keyframe_requests, _) = broadcast::channel(16);
         #[cfg(feature = "server")]
-        let startup_cache = match KeyframeCache::new(
+        let startup_cache = KeyframeCache::new(
             &description,
             options.startup_cache_config.unwrap_or_default(),
-        ) {
-            Ok(cache) => cache,
-            Err(e) => {
-                // Degenerate fallback: a disabled cache always validates.
-                tracing::warn!(%e, "startup cache init failed; disabling");
-                KeyframeCache::new(
-                    &MediaDescription {
-                        session_name: "".into(),
-                        tracks: Vec::new(),
-                        #[cfg(feature = "multicast")]
-                        connection: None,
-                    },
-                    crate::mount::continuity::StartupCacheConfig {
-                        enabled: false,
-                        ..Default::default()
-                    },
-                )
-                .expect("disabled startup cache always validates")
-            }
-        };
+        )?;
         let mount = Arc::new(Mount {
             id: MountId::from(path.clone()),
             config,
@@ -212,7 +197,7 @@ impl MountRegistry {
             event_sink: options
                 .event_sink
                 .unwrap_or_else(|| Arc::new(crate::observe::NoopEventSink)),
-            cancel: CancellationToken::new(),
+            cancel: options.cancel.unwrap_or_default(),
             #[cfg(feature = "server")]
             proxy_running: AtomicBool::new(false),
             publishers: AtomicUsize::new(0),

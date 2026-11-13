@@ -508,8 +508,17 @@ pub(super) async fn connect_udp(
                     let Ok((size, _)) = received else {
                         return;
                     };
-                    if let Ok(packets) =
-                        RtcpPacket::parse(bytes::Bytes::copy_from_slice(&buffer[..size]))
+                    #[cfg(feature = "srtp")]
+                    let payload = match srtcp_rr.as_mut() {
+                        Some(context) => match context.unprotect(&buffer[..size]) {
+                            Ok(payload) => payload,
+                            Err(_) => continue,
+                        },
+                        None => bytes::Bytes::copy_from_slice(&buffer[..size]),
+                    };
+                    #[cfg(not(feature = "srtp"))]
+                    let payload = bytes::Bytes::copy_from_slice(&buffer[..size]);
+                    if let Ok(packets) = RtcpPacket::parse(payload)
                         && let Ok(Some(report)) = quality_report(
                             &rtcp_quality,
                             track_id,

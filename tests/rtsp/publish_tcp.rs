@@ -128,7 +128,8 @@ async fn interleaved_record_is_forwarded_to_a_player() {
                 channel: 0,
                 payload: packet.encode(),
             }
-            .encode(),
+            .try_encode()
+            .unwrap(),
         )
         .await
         .unwrap();

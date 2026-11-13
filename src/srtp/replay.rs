@@ -63,6 +63,7 @@ impl ReplayWindow {
     }
 
     /// Current leading (highest accepted) index.
+    #[allow(dead_code)] // used by unit tests and diagnostics
     pub fn leading_index(&self) -> u64 {
         self.leading_index
     }

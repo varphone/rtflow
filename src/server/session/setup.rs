@@ -315,7 +315,7 @@ pub(super) async fn handle_setup(
         UdpPair::bind_mux(
             bind_ip,
             state.config.udp_port_range.clone(),
-            4 * 1024 * 1024,
+            state.config.udp_recv_buffer,
         )
         .await?
     } else {

@@ -3,7 +3,7 @@ use crate::{
     media::{MediaKind, TrackDescription},
     rtcp::{CompoundPacket, Packet as RtcpPacket, SdesChunk, SdesItem},
     rtp::{Depacketizer, Packetizer, RtpPacket},
-    runtime::io::ControlWriteHalf,
+    server::timed_writer::TimedWriter,
     transport::{InterleavedFrame, UdpPair},
 };
 use bytes::{Bytes, BytesMut};
@@ -28,7 +28,7 @@ const INTERLEAVED_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from
 
 /// Write to the shared interleaved writer with a hard timeout.
 /// Returns `false` on timeout/error (caller should tear down the session).
-async fn write_interleaved(writer: &Arc<Mutex<ControlWriteHalf>>, wire: &[u8]) -> bool {
+async fn write_interleaved(writer: &Arc<Mutex<TimedWriter>>, wire: &[u8]) -> bool {
     match tokio::time::timeout(INTERLEAVED_WRITE_TIMEOUT, async {
         let mut guard = writer.lock().await;
         guard.write_all(wire).await
@@ -210,11 +210,29 @@ struct ByeGuard {
     target: SocketAddr,
     ssrc: u32,
 }
+fn bye_compound(ssrc: u32) -> crate::Result<Bytes> {
+    CompoundPacket::new(vec![
+        RtcpPacket::ReceiverReport { ssrc },
+        RtcpPacket::ByeSources {
+            sources: vec![ssrc],
+            reason: None,
+        },
+        RtcpPacket::SourceDescription {
+            chunks: vec![SdesChunk {
+                ssrc,
+                items: vec![SdesItem {
+                    kind: 1,
+                    value: sdes_cname(),
+                }],
+            }],
+        },
+    ])
+    .and_then(|compound| compound.try_encode())
+}
+
 impl Drop for ByeGuard {
     fn drop(&mut self) {
-        if let Ok(wire) = CompoundPacket::new(vec![RtcpPacket::Bye { ssrc: self.ssrc }])
-            .and_then(|compound| compound.try_encode())
-        {
+        if let Ok(wire) = bye_compound(self.ssrc) {
             let pair = self.pair.clone();
             let target = self.target;
             tokio::spawn(async move {
@@ -227,15 +245,13 @@ impl Drop for ByeGuard {
 /// Interleaved variant of [`ByeGuard`]: writes BYE over the shared RTSP
 /// control connection instead of a UDP socket.
 struct InterleavedByeGuard {
-    writer: Arc<Mutex<ControlWriteHalf>>,
+    writer: Arc<Mutex<TimedWriter>>,
     channel: u8,
     ssrc: u32,
 }
 impl Drop for InterleavedByeGuard {
     fn drop(&mut self) {
-        let Ok(wire) = CompoundPacket::new(vec![RtcpPacket::Bye { ssrc: self.ssrc }])
-            .and_then(|compound| compound.try_encode())
-        else {
+        let Ok(wire) = bye_compound(self.ssrc) else {
             return;
         };
         let Ok(frame) = InterleavedFrame {

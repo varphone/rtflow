@@ -1,6 +1,7 @@
 mod proxy_runtime;
 mod session;
 mod tasks;
+mod timed_writer;
 #[cfg(feature = "file-storage")]
 mod vod_runtime;
 use session::serve_connection;
@@ -8,6 +9,8 @@ use session::serve_connection;
 use tasks::{MediaCrypto, SenderInput, spawn_udp_sender_from};
 
 // Re-export mount types for backward compatibility (deprecated in 0.3).
+#[cfg(feature = "multicast")]
+pub(crate) use crate::mount::Mount;
 #[deprecated(
     since = "0.3.0",
     note = "use `rtflow::mount::{LocalPublisher, MountConfig, MountHandle, MountSnapshot, PushResult, StreamStats}`"
@@ -15,7 +18,6 @@ use tasks::{MediaCrypto, SenderInput, spawn_udp_sender_from};
 pub use crate::mount::{
     LocalPublisher, MountConfig, MountHandle, MountSnapshot, PushResult, StreamStats,
 };
-pub(crate) use crate::mount::{Mount, description_for};
 
 #[cfg(feature = "tls")]
 use crate::security::TlsServerConfig;
@@ -25,7 +27,7 @@ use crate::{
     client::{ClientOptions, RtspClient},
     error::Operation,
     identity::{MountId, SessionId},
-    mount::continuity::{KeyframeCache, StartupCacheConfig},
+    mount::continuity::StartupCacheConfig,
     mount::{MountOptions, MountRegistry},
     observe::{
         EventSink, FrameworkEvent, MountEvent, NoopEventSink, RejectReason, SecurityEvent,
@@ -123,6 +125,22 @@ pub struct RtspServer {
 
 impl RtspServer {
     pub async fn bind(config: ServerConfig) -> Result<Self> {
+        let max_mounts = config.resource_limits.max_mounts;
+        let mut mounts = MountRegistry::new(max_mounts);
+        // R12: mirrors per-mount frame counters into the global metrics
+        // registry so RTMP/SRT/gateway-registered mounts appear in /metrics
+        // too, not just RtspServer mounts.
+        #[cfg(feature = "metrics")]
+        if let Some(registry_ref) = crate::metrics::registry_from_sink(&config.event_sink) {
+            mounts.attach_global(registry_ref);
+        }
+        Self::bind_with(config, Arc::new(mounts)).await
+    }
+
+    /// Bind with an externally owned mount registry. Multi-protocol gateways
+    /// pass their shared registry here so RTSP sees RTMP/SRT-mounted streams;
+    /// the caller is responsible for any metrics attachment on that registry.
+    pub async fn bind_with(config: ServerConfig, mounts: Arc<MountRegistry>) -> Result<Self> {
         config.validate()?;
         let listener = TcpListener::bind(config.listen).await?;
         let local_addr = listener.local_addr()?;
@@ -130,17 +148,7 @@ impl RtspServer {
         let connection_rate_limiter =
             ConnectionRateLimiter::new(config.security.connection_rate_limit)?;
         let state = Arc::new(State {
-            mounts: {
-                let mut registry = MountRegistry::new(config.resource_limits.max_mounts);
-                // R12: mirrors per-mount frame counters into the global
-                // metrics registry so RTMP/SRT/gateway-registered mounts
-                // appear in /metrics too, not just RtspServer mounts.
-                #[cfg(feature = "metrics")]
-                if let Some(registry_ref) = crate::metrics::registry_from_sink(&config.event_sink) {
-                    registry.attach_global(registry_ref);
-                }
-                Arc::new(registry)
-            },
+            mounts,
             session_slots: Arc::new(Semaphore::new(config.max_sessions)),
             next_session: AtomicU64::new(1),
             cancel: supervisor.cancellation_token(),
@@ -362,49 +370,39 @@ impl RtspServer {
                 return Err(last_error.unwrap_or(Error::Limit("proxy upstreams")));
             }
         }
-        let description = description_for(&config)?;
-        // The startup keyframe cache drives GOP-aligned low-latency
-        // startup for EVERY mount type (not just proxies): a joining
-        // player replays at most STARTUP_WINDOW of media from the nearest
-        // keyframe; when no keyframe is inside the window it waits for
-        // the next IDR (surveillance-camera behavior).
-        let startup_cache_config = match &config {
-            MountConfig::Proxy { upstream } => upstream.startup_cache,
-            _ => self.state.config.startup_cache,
+        let effective = MountOptions {
+            consumer_queue_capacity: options
+                .consumer_queue_capacity
+                .or(Some(self.state.config.consumer_queue_capacity)),
+            max_queued_bytes_per_session: options.max_queued_bytes_per_session.or(Some(
+                self.state
+                    .config
+                    .resource_limits
+                    .max_queued_bytes_per_session,
+            )),
+            event_sink: options
+                .event_sink
+                .or_else(|| Some(self.state.config.event_sink.clone())),
+            startup_cache_config: options.startup_cache_config.or(Some(match &config {
+                MountConfig::Proxy { upstream } => upstream.startup_cache,
+                _ => self.state.config.startup_cache,
+            })),
+            timeline: options.timeline.or(Some(self.state.config.timeline)),
+            cancel: options
+                .cancel
+                .or_else(|| Some(self.state.cancel.child_token())),
         };
-        let startup_cache = KeyframeCache::new(&description, startup_cache_config)?;
-        let (tx, _) = tokio::sync::broadcast::channel(self.state.config.consumer_queue_capacity);
-        let (keyframe_requests, _) = tokio::sync::broadcast::channel(16);
-        let mut counters = crate::mount::StreamCounters::default();
-        #[cfg(feature = "metrics")]
-        if let Some(registry) = crate::metrics::registry_from_sink(&self.state.config.event_sink) {
-            counters.attach_global(registry);
-        }
-        let mount = Arc::new(Mount {
-            id: MountId::from(path.clone()),
-            config,
-            frames: tx,
-            keyframe_requests,
-            timeline: options.timeline,
-            stats: counters,
-            startup_cache: Mutex::new(startup_cache),
-            bootstrap: Mutex::new(std::array::from_fn(|_| None)),
-            codec_by_track: crate::mount::codec_lookup_table(&description),
-            event_sink: self.state.config.event_sink.clone(),
-            cancel: self.state.cancel.child_token(),
-            proxy_running: std::sync::atomic::AtomicBool::new(false),
-            publishers: std::sync::atomic::AtomicUsize::new(0),
-            publisher_claimed: std::sync::atomic::AtomicBool::new(false),
-            active_sessions: std::sync::atomic::AtomicUsize::new(0),
-            max_queued_bytes_per_session: self
-                .state
-                .config
-                .resource_limits
-                .max_queued_bytes_per_session,
-            announce_fmtp: Mutex::new(HashMap::new()),
-            rtmp_seq_headers: Mutex::new(HashMap::new()),
-        });
-        self.state.mounts.insert(path.clone(), mount.clone())?;
+        // One Mount construction path for every protocol server. This keeps
+        // queue/cache/event/metrics wiring identical between RTSP, RTMP, SRT
+        // and the gateway instead of maintaining a second copy here.
+        let handle = self
+            .state
+            .mounts
+            .register_with(path.clone(), config, effective)?;
+        #[cfg(feature = "multicast")]
+        let mount = handle.inner.clone();
+        #[cfg(feature = "multicast")]
+        let description = handle.description.clone();
         emit(
             &self.state.config.event_sink,
             FrameworkEvent::Mount(MountEvent::Registered {
@@ -425,11 +423,7 @@ impl RtspServer {
             )
             .await;
         }
-        Ok(MountHandle {
-            path,
-            description,
-            inner: mount,
-        })
+        Ok(handle)
     }
     pub async fn unregister_mount(&self, path: &str) -> Result<()> {
         let mount = self

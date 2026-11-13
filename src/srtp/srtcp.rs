@@ -10,6 +10,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 
 use super::auth::HmacSha1_80;
 use super::cipher::Aes128Cm;
+use super::replay::ReplayWindow;
 
 /// Minimum SRTCP packet size: 8 bytes RTCP header.
 const MIN_SRTCP_SIZE: usize = 8;
@@ -19,6 +20,8 @@ pub struct SrtcpContext {
     cipher: Aes128Cm,
     auth: HmacSha1_80,
     send_index: u32,
+    replay: ReplayWindow,
+    replay_initialized: bool,
 }
 
 impl SrtcpContext {
@@ -28,6 +31,8 @@ impl SrtcpContext {
             cipher: Aes128Cm::new(cipher_key, salt),
             auth: HmacSha1_80::new(auth_key),
             send_index: 0,
+            replay: ReplayWindow::new(),
+            replay_initialized: false,
         }
     }
 
@@ -79,7 +84,7 @@ impl SrtcpContext {
     ///
     /// Input: SRTCP packet (header + encrypted payload + SRTCP index + auth tag).
     /// Output: original RTCP packet (header + payload).
-    pub fn unprotect(&self, packet: &[u8]) -> Result<Bytes> {
+    pub fn unprotect(&mut self, packet: &[u8]) -> Result<Bytes> {
         if packet.len() < MIN_SRTCP_SIZE + 4 + 10 {
             return Err(Error::Media("SRTCP packet too short".into()));
         }
@@ -106,6 +111,12 @@ impl SrtcpContext {
 
         let encrypted = (srtcp_index & 0x8000_0000) != 0;
         let index = srtcp_index & 0x7FFF_FFFF;
+        if !self.replay_initialized {
+            self.replay_initialized = true;
+        }
+        if !self.replay.check(u64::from(index)) {
+            return Err(Error::Media("SRTCP replay detected".into()));
+        }
 
         // RTCP header (first 8 bytes) + payload (rest minus index).
         let header_len = 8;
@@ -152,7 +163,7 @@ mod tests {
         ];
 
         let mut sender = SrtcpContext::new(&cipher_key, &auth_key, &salt);
-        let receiver = SrtcpContext::new(&cipher_key, &auth_key, &salt);
+        let mut receiver = SrtcpContext::new(&cipher_key, &auth_key, &salt);
 
         let protected = sender.protect(&rtcp).unwrap();
         // Protected = 28 (original) + 4 (index) + 10 (tag) = 42 bytes.
@@ -174,7 +185,7 @@ mod tests {
         ];
 
         let mut sender = SrtcpContext::new(&cipher_key, &auth_key, &salt);
-        let receiver = SrtcpContext::new(&cipher_key, &auth_key, &salt);
+        let mut receiver = SrtcpContext::new(&cipher_key, &auth_key, &salt);
 
         let mut protected = sender.protect(&rtcp).unwrap().to_vec();
         // Tamper with a byte in the encrypted payload.
@@ -188,7 +199,24 @@ mod tests {
         let cipher_key = [0x01u8; 16];
         let auth_key = [0x02u8; 20];
         let salt = [0x03u8; 14];
-        let receiver = SrtcpContext::new(&cipher_key, &auth_key, &salt);
+        let mut receiver = SrtcpContext::new(&cipher_key, &auth_key, &salt);
         assert!(receiver.unprotect(&[0u8; 20]).is_err());
+    }
+    #[test]
+    fn rejects_replayed_srtcp_packet() {
+        let cipher_key = [0x01u8; 16];
+        let auth_key = [0x02u8; 20];
+        let salt = [0x03u8; 14];
+        let rtcp = vec![
+            0x80u8, 0xC8, 0x00, 0x06, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0,
+        ];
+        let mut sender = SrtcpContext::new(&cipher_key, &auth_key, &salt);
+        let mut receiver = SrtcpContext::new(&cipher_key, &auth_key, &salt);
+        let first = sender.protect(&rtcp).unwrap();
+        let second = sender.protect(&rtcp).unwrap();
+        receiver.unprotect(&first).unwrap();
+        receiver.unprotect(&second).unwrap();
+        assert!(receiver.unprotect(&first).is_err());
     }
 }

@@ -56,6 +56,22 @@ impl HttpConfig {
         }
     }
 
+    pub fn validate(&self) -> Result<()> {
+        if self.max_connections == 0 {
+            return Err(Error::Limit("HTTP max connections"));
+        }
+        if self.read_timeout == Duration::ZERO
+            || self.response_timeout == Duration::ZERO
+            || self.shutdown_timeout == Duration::ZERO
+        {
+            return Err(Error::Limit("HTTP timeout"));
+        }
+        if self.max_header_bytes == 0 || self.max_body_bytes == 0 {
+            return Err(Error::Limit("HTTP message size"));
+        }
+        Ok(())
+    }
+
     /// Attach a global metrics registry (request/segment counters).
     #[cfg(feature = "metrics")]
     pub fn with_metrics(mut self, metrics: Arc<crate::core::metrics::MetricsRegistry>) -> Self {
@@ -74,6 +90,7 @@ pub struct HttpServer {
 
 impl HttpServer {
     pub async fn bind(config: HttpConfig) -> Result<Self> {
+        config.validate()?;
         let listener = TcpListener::bind(config.listen).await?;
         let local_addr = listener.local_addr()?;
         Ok(Self {
@@ -95,7 +112,11 @@ impl HttpServer {
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        let listener = self.listener.take().expect("run() can only be called once");
+        let Some(listener) = self.listener.take() else {
+            return Err(Error::InvalidConfig(
+                "HTTP server run() can only be called once".into(),
+            ));
+        };
         let router = self.router.clone();
         let cancel = self.cancel.clone();
         let security = self.config.security.clone();
@@ -116,7 +137,15 @@ impl HttpServer {
             loop {
                 tokio::select! {
                     result = listener.accept() => {
-                        let Ok((stream, addr)) = result else { continue; };
+                        let (stream, addr) = match result {
+                            Ok(value) => value,
+                            Err(_) => {
+                                // EMFILE/ENFILE must not turn into a tight
+                                // accept-error spin that burns a core.
+                                tokio::time::sleep(Duration::from_millis(10)).await;
+                                continue;
+                            }
+                        };
                         // Low-latency streaming: disable Nagle so small FLV
                         // tags are not delayed behind unrelated segments
                         // (tokio defaults to true, but be explicit).

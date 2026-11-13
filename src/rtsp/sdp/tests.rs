@@ -192,3 +192,44 @@ fn parse_ffmpeg_av1_announce() {
         Some("profile=0;level-idx=0;tier=0")
     );
 }
+
+#[cfg(feature = "srtp")]
+#[test]
+fn crypto_track_is_advertised_as_savp() {
+    let track = TrackDescription {
+        id: 0,
+        kind: MediaKind::Video,
+        codec: Codec::H264,
+        clock_rate: 90_000,
+        channels: None,
+        payload_type: 96,
+        fmtp: None,
+        control: Arc::from("trackID=0"),
+        width: None,
+        height: None,
+        frame_rate: None,
+        direction: None,
+        ptime: None,
+        rtcp: None,
+        bandwidth_as: None,
+        crypto: Some(crate::media::crypto::SdpCrypto {
+            tag: 1,
+            crypto_suite: "AES_128_CM_HMAC_SHA1_80".into(),
+            key_params: "inline:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+            session_params: None,
+        }),
+    };
+    let description = MediaDescription {
+        session_name: Arc::from("srtp"),
+        tracks: vec![track],
+        #[cfg(feature = "multicast")]
+        connection: None,
+    };
+    let encoded = encode(&description);
+    assert!(
+        encoded.contains("m=video 0 RTP/SAVP 96"),
+        "SRTP track must be advertised as SAVP: {encoded}"
+    );
+    let parsed = parse(encoded.as_bytes()).unwrap();
+    assert!(parsed.tracks[0].crypto.is_some());
+}
