@@ -324,7 +324,7 @@ impl Mount {
 
 #[derive(Clone)]
 pub struct MountHandle {
-    pub path: Arc<str>,
+    pub path: crate::identity::MountId,
     pub description: MediaDescription,
     pub(crate) inner: Arc<Mount>,
 }

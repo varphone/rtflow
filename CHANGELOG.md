@@ -100,6 +100,7 @@
 - 客户端重连/keepalive 抖动改为进程内原子 PRNG 的独立采样，避免多个客户端按 attempt 同步重连。
 - RTMP chunk stream 数上限 4096，避免仅发头部造成每连接状态膨胀；新增回归测试。
 - Proxy 上游重试抖动改为每次独立随机采样，避免多个 proxy mount 同步重连。
+- `MountHandle.path` 改为 `MountId`，`path()` 仍返回 `&str`；RTMP/HLS/HTTP 边界显式转换。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

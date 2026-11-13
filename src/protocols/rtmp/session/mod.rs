@@ -490,7 +490,7 @@ pub async fn serve_rtmp_session(
             mount_handle,
             registered_here: true,
             ..
-        } => Some(mount_handle.path.clone()),
+        } => Some(Arc::from(mount_handle.path.as_str())),
         _ => None,
     };
     drop(state); // releases the LocalPublisher

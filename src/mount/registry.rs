@@ -252,7 +252,7 @@ impl MountRegistry {
         });
         self.insert(path.clone(), mount.clone())?;
         Ok(MountHandle {
-            path,
+            path: MountId::from(path),
             description,
             inner: mount,
         })
@@ -268,7 +268,7 @@ impl MountRegistry {
                 connection: None,
             });
             MountHandle {
-                path: mount.id.as_str().into(),
+                path: mount.id.clone(),
                 description,
                 inner: mount,
             }
@@ -284,7 +284,7 @@ impl MountRegistry {
         let removed = self.remove(path)?;
         removed.cancel.cancel();
         Some(MountHandle {
-            path: removed.id.as_str().into(),
+            path: removed.id.clone(),
             description: description_for(&removed.config).unwrap_or_else(|_| MediaDescription {
                 session_name: path.into(),
                 tracks: Vec::new(),
@@ -303,7 +303,7 @@ impl MountRegistry {
             .iter()
             .map(|(path, mount)| {
                 let handle = MountHandle {
-                    path: path.as_str().into(),
+                    path: path.clone(),
                     description: MediaDescription {
                         session_name: path.as_str().into(),
                         tracks: Vec::new(),
