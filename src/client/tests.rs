@@ -378,3 +378,21 @@ fn jitter_prime_accepts_the_first_hinted_sequence() {
     };
     assert_eq!(jitter.push(packet).len(), 1);
 }
+
+#[test]
+fn client_rtcp_report_interval_must_be_non_zero() {
+    assert!(
+        validate_options(&ClientOptions {
+            rtcp_report_interval: Duration::ZERO,
+            ..ClientOptions::default()
+        })
+        .is_err()
+    );
+    assert!(
+        validate_options(&ClientOptions {
+            rtcp_report_interval: Duration::from_millis(250),
+            ..ClientOptions::default()
+        })
+        .is_ok()
+    );
+}
