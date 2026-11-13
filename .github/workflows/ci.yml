@@ -71,6 +71,8 @@ jobs:
         run: cargo test --all-targets --no-fail-fast
       - name: Experimental protocol tests
         run: cargo test --features experimental-protocols --no-fail-fast
+      - name: SRTP and multicast tests
+        run: cargo test --features "srtp,multicast" --no-fail-fast
       - name: Documentation
         env:
           RUSTDOCFLAGS: -D warnings
