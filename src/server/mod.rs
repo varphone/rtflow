@@ -260,7 +260,7 @@ impl RtspServer {
                                     &sink,
                                     FrameworkEvent::Session(SessionEvent::Accepted { id, peer }),
                                 );
-                                let result = serve_connection(connection, peer, id, state).await;
+                                let result = serve_connection(connection, peer, state).await;
                                 emit(
                                     &sink,
                                     FrameworkEvent::Session(SessionEvent::Closed {

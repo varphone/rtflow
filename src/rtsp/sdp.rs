@@ -30,7 +30,28 @@ impl SdpConnection {
 #[cfg(feature = "srtp")]
 pub use crate::media::crypto::SdpCrypto;
 
+/// Bounds applied while parsing an SDP description.
+#[derive(Clone, Copy, Debug)]
+pub struct SdpLimits {
+    /// Maximum number of media sections (tracks) accepted.
+    pub max_tracks: usize,
+}
+
+impl Default for SdpLimits {
+    fn default() -> Self {
+        Self { max_tracks: 64 }
+    }
+}
+
 pub fn parse(data: &[u8]) -> Result<MediaDescription> {
+    parse_with_limits(data, SdpLimits::default())
+}
+
+/// Parse SDP with explicit resource bounds.
+pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescription> {
+    if limits.max_tracks == 0 {
+        return Err(Error::Limit("SDP tracks"));
+    }
     let text = std::str::from_utf8(data).map_err(|_| Error::Rtsp("SDP is not UTF-8".into()))?;
     let mut name = Arc::<str>::from("RTSP stream");
     // Session-level a=control (RFC 2326) seen before any m= line; media
@@ -50,6 +71,9 @@ pub fn parse(data: &[u8]) -> Result<MediaDescription> {
                 connection = Some(parse_connection(_value)?);
             }
         } else if let Some(value) = line.strip_prefix("m=") {
+            if tracks.len() + usize::from(current.is_some()) >= limits.max_tracks {
+                return Err(Error::Limit("SDP tracks"));
+            }
             if let Some(track) = current.take() {
                 tracks.push(track)
             }
@@ -109,6 +133,8 @@ pub fn parse(data: &[u8]) -> Result<MediaDescription> {
                     "PCMA" => Codec::Pcma,
                     "PCMU" => Codec::Pcmu,
                     "OPUS" => Codec::Opus,
+                    "VP8" => Codec::Vp8,
+                    "VP9" => Codec::Vp9,
                     _ => return Err(Error::Rtsp("unsupported SDP codec".into())),
                 };
                 track.clock_rate = parts
@@ -323,6 +349,35 @@ mod tests {
         assert_eq!(
             control_uri("rtsp://camera/live/", "rtsp://other/track").unwrap(),
             "rtsp://other/track"
+        );
+    }
+
+    #[test]
+    fn vp8_vp9_rtpmap_parse() {
+        let sdp = b"v=0\r\ns=vp\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 VP8/90000\r\na=control:trackID=0\r\n";
+        assert_eq!(parse(sdp).unwrap().tracks[0].codec, Codec::Vp8);
+        let sdp = b"v=0\r\ns=vp\r\nm=video 0 RTP/AVP 97\r\na=rtpmap:97 VP9/90000\r\na=control:trackID=0\r\n";
+        assert_eq!(parse(sdp).unwrap().tracks[0].codec, Codec::Vp9);
+    }
+
+    #[test]
+    fn track_limit_is_enforced() {
+        let mut sdp = String::from("v=0\r\ns=many\r\n");
+        for i in 0..3 {
+            sdp.push_str(&format!(
+                "m=video 0 RTP/AVP {}\r\na=rtpmap:{} H264/90000\r\na=control:trackID={}\r\n",
+                96 + i,
+                96 + i,
+                i
+            ));
+        }
+        assert!(parse_with_limits(sdp.as_bytes(), SdpLimits { max_tracks: 2 }).is_err());
+        assert_eq!(
+            parse_with_limits(sdp.as_bytes(), SdpLimits { max_tracks: 3 })
+                .unwrap()
+                .tracks
+                .len(),
+            3
         );
     }
 

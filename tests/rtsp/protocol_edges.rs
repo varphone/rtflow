@@ -1,0 +1,147 @@
+//! RTSP protocol edge cases: Content-Base, Proxy-Require, session IDs and VP8/VP9.
+
+use bytes::BytesMut;
+use rtflow::{
+    Codec, MountConfig, RtspServer, ServerConfig,
+    rtsp::{self as wire_rtsp, Message, Response, sdp},
+};
+use rtflow_testkit::description;
+use std::{sync::Arc, time::Duration};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
+
+async fn request(stream: &mut TcpStream, wire: &str) -> Response {
+    stream.write_all(wire.as_bytes()).await.unwrap();
+    let mut input = BytesMut::new();
+    let mut buffer = [0u8; 4096];
+    loop {
+        if let Some(Message::Response(response)) =
+            wire_rtsp::parse(&mut input, 16 * 1024, 64 * 1024).unwrap()
+        {
+            return response;
+        }
+        let size = stream.read(&mut buffer).await.unwrap();
+        assert!(size > 0);
+        input.extend_from_slice(&buffer[..size]);
+    }
+}
+
+async fn server_with(codec: Codec) -> RtspServer {
+    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    server
+        .register_mount(
+            Arc::from("/edge"),
+            MountConfig::Local {
+                description: description("edge", &[codec]),
+            },
+        )
+        .await
+        .unwrap();
+    server
+}
+
+#[tokio::test]
+async fn content_base_is_absolute_and_resolves_track_controls() {
+    let server = server_with(Codec::H264).await;
+    let base = format!("rtsp://{}/edge", server.local_addr());
+    let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+    let response = request(
+        &mut stream,
+        &format!("DESCRIBE {base} RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(response.status, 200);
+    let content_base = response
+        .headers
+        .get("content-base")
+        .expect("content-base header");
+    assert!(
+        content_base.starts_with(&format!("rtsp://{}", server.local_addr())),
+        "Content-Base must be absolute, got {content_base}"
+    );
+    assert!(content_base.ends_with("/edge/"), "got {content_base}");
+    let description = sdp::parse(&response.body).unwrap();
+    let setup = sdp::control_uri(content_base, &description.tracks[0].control).unwrap();
+    assert!(setup.starts_with(&format!("rtsp://{}", server.local_addr())));
+}
+
+#[tokio::test]
+async fn unsupported_proxy_require_is_rejected_with_551() {
+    let server = server_with(Codec::H264).await;
+    let base = format!("rtsp://{}/edge", server.local_addr());
+    let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+    let response = request(
+        &mut stream,
+        &format!("OPTIONS {base} RTSP/1.0\r\nCSeq: 7\r\nProxy-Require: funky-option\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(response.status, 551);
+    assert_eq!(
+        response.headers.get("unsupported").map(String::as_str),
+        Some("funky-option")
+    );
+}
+
+async fn setup_session(server: &RtspServer) -> String {
+    let base = format!("rtsp://{}/edge", server.local_addr());
+    let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+    let describe = request(
+        &mut stream,
+        &format!("DESCRIBE {base} RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\n\r\n"),
+    )
+    .await;
+    let description = sdp::parse(&describe.body).unwrap();
+    let control = sdp::control_uri(&base, &description.tracks[0].control).unwrap();
+    let setup = request(
+        &mut stream,
+        &format!(
+            "SETUP {control} RTSP/1.0\r\nCSeq: 2\r\nTransport: RTP/AVP;unicast;client_port=31000-31001\r\n\r\n"
+        ),
+    )
+    .await;
+    assert_eq!(setup.status, 200, "SETUP failed: {:?}", setup.headers);
+    setup
+        .headers
+        .get("session")
+        .expect("session header")
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string()
+}
+
+#[tokio::test]
+async fn wire_session_ids_are_random_hex_and_unique() {
+    let server = server_with(Codec::H264).await;
+    let first = setup_session(&server).await;
+    let second = setup_session(&server).await;
+    for id in [&first, &second] {
+        assert_eq!(id.len(), 32, "expected 128-bit hex session id, got {id}");
+        assert!(
+            id.bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+            "session id must be lowercase hex: {id}"
+        );
+    }
+    assert_ne!(first, second);
+}
+
+#[tokio::test]
+async fn vp8_description_round_trips_through_rtsp() {
+    let server = server_with(Codec::Vp8).await;
+    let base = format!("rtsp://{}/edge", server.local_addr());
+    let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+    let response = request(
+        &mut stream,
+        &format!("DESCRIBE {base} RTSP/1.0\r\nCSeq: 1\r\nAccept: application/sdp\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(response.status, 200);
+    let description = sdp::parse(&response.body).unwrap();
+    assert_eq!(description.tracks[0].codec, Codec::Vp8);
+    tokio::time::sleep(Duration::from_millis(10)).await;
+}

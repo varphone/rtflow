@@ -6,6 +6,7 @@ mod codec_matrix;
 mod fragmentation_integration;
 mod gop_alignment;
 mod multitrack;
+mod protocol_edges;
 mod publish_tcp;
 mod publish_udp;
 mod resource_exhaustion;

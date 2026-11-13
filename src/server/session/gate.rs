@@ -28,21 +28,25 @@ pub(super) async fn gate_request(
             .await?;
         return Ok(false);
     }
-    if let Some(require) = req
-        .headers
-        .get("require")
-        .filter(|value| !value.trim().is_empty())
-    {
-        let mut response = simple_response(551, "Option Not Supported", cseq);
-        response
+    // RFC 2326 §12.32: both Require and Proxy-Require must be answered with
+    // 551 when the option is not implemented.
+    for header in ["require", "proxy-require"] {
+        if let Some(require) = req
             .headers
-            .insert("unsupported".into(), require.clone());
-        writer
-            .lock()
-            .await
-            .write_all(&rtsp::encode_response(&response))
-            .await?;
-        return Ok(false);
+            .get(header)
+            .filter(|value| !value.trim().is_empty())
+        {
+            let mut response = simple_response(551, "Option Not Supported", cseq);
+            response
+                .headers
+                .insert("unsupported".into(), require.clone());
+            writer
+                .lock()
+                .await
+                .write_all(&rtsp::encode_response(&response))
+                .await?;
+            return Ok(false);
+        }
     }
     if let Some(response) = authorize_request(req, peer, state, cseq.clone()).await {
         writer

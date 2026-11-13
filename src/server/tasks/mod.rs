@@ -6,7 +6,7 @@ use crate::{
     runtime::io::ControlWriteHalf,
     transport::{InterleavedFrame, UdpPair},
 };
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use std::{
     collections::VecDeque,
     net::SocketAddr,

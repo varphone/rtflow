@@ -47,7 +47,7 @@ pub(crate) fn spawn_udp_sender_from(
         let mut sent_octets = 0u32;
         let mut last_rtp_timestamp = 0u32;
         let mut ntp_clock: Option<RtpNtpClock> = None;
-        let mut rtcp_buffer = [0u8; 2048];
+        let mut rtcp_buffer = BytesMut::zeroed(2048);
         // Last sender report's NTP timestamp, for periodic receiver reports
         // (LSR reference).
         let last_sr_ntp: Option<u64> = None;
@@ -99,7 +99,9 @@ pub(crate) fn spawn_udp_sender_from(
                         mount.stats.add_dropped(1);
                         continue;
                     }
-                    if let Ok(packets) = RtcpPacket::parse(Bytes::copy_from_slice(&rtcp_buffer[..size])) {
+                    let payload = rtcp_buffer.split_to(size).freeze();
+                    rtcp_buffer.resize(2048, 0);
+                    if let Ok(packets) = RtcpPacket::parse(payload) {
                         let reports = packets
                             .iter()
                             .filter(|packet| {
@@ -220,14 +222,16 @@ pub(crate) fn spawn_udp_receiver(
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let _lease = PublisherLease(mount.clone());
         let mut depacketizer = Depacketizer::new(track.codec, track.id, track.clock_rate);
-        let mut buffer = vec![0u8; 65_536];
+        let mut buffer = BytesMut::zeroed(65_536);
         let mut expected_ssrc = None;
         while let Ok((size, source)) = pair.rtp.recv_from(&mut buffer).await {
             if source != expected_rtp_source {
                 mount.stats.add_dropped(1);
                 continue;
             }
-            let packet = match RtpPacket::parse(Bytes::copy_from_slice(&buffer[..size])) {
+            let payload = buffer.split_to(size).freeze();
+            buffer.resize(65_536, 0);
+            let packet = match RtpPacket::parse(payload) {
                 Ok(packet) => packet,
                 Err(_) => {
                     mount.stats.add_dropped(1);

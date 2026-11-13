@@ -260,7 +260,16 @@ pub(super) async fn connect_interleaved(
                                     .try_encode() else {
                                         return;
                                     };
-                                    if rtcp_writer.lock().await.write_all(&wire).await.is_err() {
+                                    let write =
+                                        async { rtcp_writer.lock().await.write_all(&wire).await };
+                                    if !matches!(
+                                        tokio::time::timeout(
+                                            std::time::Duration::from_secs(10),
+                                            write,
+                                        )
+                                        .await,
+                                        Ok(Ok(()))
+                                    ) {
                                         return;
                                     }
                                 }

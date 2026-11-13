@@ -66,7 +66,63 @@ pub(crate) fn simple_response(status: u16, reason: &str, cseq: String) -> Respon
         body: vec![],
     }
 }
-pub(crate) async fn handle_request(req: crate::rtsp::Request, state: &State) -> Response {
+/// Derive an absolute Content-Base from the request URI (or the accepted
+/// connection address when the URI is relative). RFC 2326 §12.5 requires an
+/// absolute URI here; clients resolve track `a=control` values against it.
+fn content_base(
+    req: &crate::rtsp::Request,
+    local_addr: std::net::SocketAddr,
+    scheme: &str,
+) -> String {
+    let raw = req.uri.split(['?', '#']).next().unwrap_or(&req.uri);
+    let path = if raw.contains("://") {
+        url::Url::parse(raw)
+            .map(|url| url.path().to_string())
+            .unwrap_or_else(|_| raw.to_string())
+    } else {
+        raw.to_string()
+    };
+    let path = if path.is_empty() {
+        "/".to_string()
+    } else {
+        path
+    };
+    let path = format!("{}/", path.trim_end_matches('/'));
+    if let Ok(url) = url::Url::parse(&req.uri)
+        && let Some(host) = url.host_str()
+    {
+        let host = if host.contains(':') {
+            format!("[{host}]")
+        } else {
+            host.to_string()
+        };
+        let port = url
+            .port()
+            .map(|value| format!(":{value}"))
+            .unwrap_or_default();
+        return format!("{}://{host}{port}{path}", url.scheme());
+    }
+    let host = if local_addr.is_ipv6() {
+        format!("[{}]", local_addr.ip())
+    } else {
+        local_addr.ip().to_string()
+    };
+    let port = local_addr.port();
+    let default_port = (scheme == "rtsp" && port == 554) || (scheme == "rtsps" && port == 322);
+    let port = if default_port {
+        String::new()
+    } else {
+        format!(":{port}")
+    };
+    format!("{scheme}://{host}{port}{path}")
+}
+
+pub(crate) async fn handle_request(
+    req: crate::rtsp::Request,
+    state: &State,
+    local_addr: std::net::SocketAddr,
+    scheme: &str,
+) -> Response {
     let path = uri_path(&req.uri);
     let cseq = req.headers.get("cseq").cloned().unwrap_or_default();
     let mut headers = BTreeMap::new();
@@ -139,23 +195,10 @@ pub(crate) async fn handle_request(req: crate::rtsp::Request, state: &State) -> 
             // Content-Base must be a clean request path: the raw URI can
             // carry query strings or (with broken clients) userinfo, which
             // would leak credentials into every relative-URL response.
-            let raw = req.uri.split(['?', '#']).next().unwrap_or(&req.uri);
-            let base_path = if raw.contains("://") {
-                url::Url::parse(raw)
-                    .map(|url| url.path().to_string())
-                    .unwrap_or_else(|_| raw.to_string())
-            } else {
-                raw.to_string()
-            };
-            let base_path = if base_path.is_empty() {
-                "/".to_string()
-            } else {
-                base_path
-            };
             headers.insert("content-type".into(), "application/sdp".into());
             headers.insert(
                 "content-base".into(),
-                format!("{}/", base_path.trim_end_matches('/')),
+                content_base(&req, local_addr, scheme),
             );
             Response {
                 status: 200,

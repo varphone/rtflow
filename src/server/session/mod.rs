@@ -12,7 +12,7 @@ use crate::mount::{Mount, MountConfig, description_for};
 use crate::{
     Error, Result,
     auth::{AccessRole, AuthDecision, AuthRequest},
-    identity::{MountId, SessionId},
+    identity::MountId,
     media::MediaDescription,
     observe::{FrameworkEvent, SecurityEvent, emit},
     rtcp::Packet as RtcpPacket,
@@ -59,12 +59,46 @@ use self::record::handle_record;
 use self::setup::handle_setup;
 use self::teardown::handle_teardown;
 
+/// Generate an unguessable wire-level session identifier (RFC 2326 §3.4).
+fn new_session_token() -> String {
+    static FALLBACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let mut bytes = [0u8; 16];
+    if getrandom::getrandom(&mut bytes).is_err() {
+        // RNG failure must not panic a live RTSP connection: mix the clock
+        // and a process-local counter as a best-effort fallback.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .to_le_bytes();
+        bytes[..16].copy_from_slice(&now[..16]);
+        let counter = FALLBACK.fetch_add(1, Ordering::Relaxed);
+        for (slot, byte) in bytes[..8].iter_mut().zip(counter.to_le_bytes()) {
+            *slot ^= byte;
+        }
+    }
+    let mut out = String::with_capacity(32);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
 pub(super) async fn serve_connection(
     stream: ControlConnection,
     peer: SocketAddr,
-    session_id: SessionId,
     state: Arc<State>,
 ) -> Result<()> {
+    let local_addr = stream.local_addr();
+    #[cfg(feature = "tls")]
+    let scheme = if state.config.tls.is_some() {
+        "rtsps"
+    } else {
+        "rtsp"
+    };
+    #[cfg(not(feature = "tls"))]
+    let scheme = "rtsp";
     let (mut reader, write_half) = tokio::io::split(stream);
     let writer = Arc::new(Mutex::new(write_half));
     let mut framer = ConnectionFramer::new(
@@ -82,7 +116,7 @@ pub(super) async fn serve_connection(
     )> = Vec::new();
     let mut resources = ConnectionResources::default();
     let mut interleaved: Vec<(Arc<Mount>, u8, u8, crate::media::TrackDescription)> = Vec::new();
-    let session_id = session_id.to_string();
+    let session_id = new_session_token();
     let mut phase = ConnectionPhase::Init;
     let mut has_announced = false;
     let mut selected_mount: Option<String> = None;
@@ -214,7 +248,7 @@ pub(super) async fn serve_connection(
                 .await?;
                 return Ok(());
             } else {
-                let response = handle_request(req, &state).await;
+                let response = handle_request(req, &state, local_addr, scheme).await;
                 writer
                     .lock()
                     .await
