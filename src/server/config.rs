@@ -8,6 +8,11 @@ pub struct ServerConfig {
     pub max_rtsp_body_bytes: usize,
     pub max_sessions: usize,
     pub udp_port_range: Option<RangeInclusive<u16>>,
+    /// Receive buffer per UDP RTP/RTCP socket (bytes). The kernel may round
+    /// this up (Linux doubles it); embedded deployments should lower it.
+    pub udp_recv_buffer: usize,
+    /// Startup keyframe cache policy applied to non-proxy mounts.
+    pub startup_cache: StartupCacheConfig,
     pub consumer_queue_capacity: usize,
     pub no_subscriber_grace: Duration,
     pub shutdown_grace: Duration,
@@ -27,6 +32,8 @@ impl ServerConfig {
             max_rtsp_body_bytes: 256 * 1024,
             max_sessions: 256,
             udp_port_range: None,
+            udp_recv_buffer: 4 * 1024 * 1024,
+            startup_cache: StartupCacheConfig::default(),
             consumer_queue_capacity: 256,
             no_subscriber_grace: Duration::from_secs(5),
             shutdown_grace: Duration::from_secs(5),
@@ -37,6 +44,22 @@ impl ServerConfig {
             #[cfg(feature = "tls")]
             tls: None,
         }
+    }
+
+    /// Memory-constrained embedded preset: small UDP socket buffers, fewer
+    /// sessions/tracks and a 512 KiB startup-cache budget per mount.
+    pub fn embedded(listen: SocketAddr) -> Self {
+        let mut config = Self::new(listen);
+        config.udp_recv_buffer = 256 * 1024;
+        config.max_sessions = 32;
+        config.consumer_queue_capacity = 64;
+        config.no_subscriber_grace = Duration::from_secs(2);
+        config.resource_limits.max_sessions_per_ip = 8;
+        config.resource_limits.max_tracks_per_session = 8;
+        config.startup_cache.max_bytes = 512 * 1024;
+        config.startup_cache.max_bytes_total = 512 * 1024;
+        config.startup_cache.max_frames_per_track = 64;
+        config
     }
 
     pub fn builder(listen: SocketAddr) -> ServerConfigBuilder {
@@ -50,6 +73,7 @@ impl ServerConfig {
             (self.max_rtsp_header_bytes, "RTSP header bytes"),
             (self.max_rtsp_body_bytes, "RTSP body bytes"),
             (self.max_sessions, "RTSP sessions"),
+            (self.udp_recv_buffer, "UDP receive buffer"),
             (self.consumer_queue_capacity, "consumer queue capacity"),
             (self.resource_limits.max_sessions_per_ip, "sessions per IP"),
             (self.resource_limits.max_mounts, "mounts"),
@@ -170,6 +194,18 @@ impl ServerConfigBuilder {
 
     pub fn udp_port_range(mut self, value: RangeInclusive<u16>) -> Self {
         self.config.udp_port_range = Some(value);
+        self
+    }
+
+    /// Set the per-socket UDP receive buffer (bytes).
+    pub fn udp_recv_buffer(mut self, value: usize) -> Self {
+        self.config.udp_recv_buffer = value;
+        self
+    }
+
+    /// Set the startup cache policy for non-proxy mounts.
+    pub fn startup_cache(mut self, value: StartupCacheConfig) -> Self {
+        self.config.startup_cache = value;
         self
     }
 

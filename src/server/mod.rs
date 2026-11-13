@@ -351,7 +351,7 @@ impl RtspServer {
         // the next IDR (surveillance-camera behavior).
         let startup_cache_config = match &config {
             MountConfig::Proxy { upstream } => upstream.startup_cache,
-            _ => StartupCacheConfig::default(),
+            _ => self.state.config.startup_cache,
         };
         let startup_cache = KeyframeCache::new(&description, startup_cache_config)?;
         let (tx, _) = tokio::sync::broadcast::channel(self.state.config.consumer_queue_capacity);

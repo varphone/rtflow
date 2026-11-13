@@ -149,7 +149,10 @@ impl TimelineNormalizer {
 #[derive(Clone, Copy, Debug)]
 pub struct StartupCacheConfig {
     pub enabled: bool,
+    /// Per-track byte budget.
     pub max_bytes: usize,
+    /// Total byte budget across all tracks of the mount.
+    pub max_bytes_total: usize,
     pub max_frames_per_track: usize,
 }
 
@@ -158,6 +161,7 @@ impl Default for StartupCacheConfig {
         Self {
             enabled: true,
             max_bytes: crate::mount::DEFAULT_MAX_QUEUED_BYTES_PER_SESSION,
+            max_bytes_total: crate::mount::DEFAULT_MAX_QUEUED_BYTES_PER_SESSION.saturating_mul(4),
             max_frames_per_track: 256,
         }
     }
@@ -177,7 +181,11 @@ pub struct KeyframeCache {
 
 impl KeyframeCache {
     pub fn new(description: &MediaDescription, config: StartupCacheConfig) -> Result<Self> {
-        if config.enabled && (config.max_bytes == 0 || config.max_frames_per_track == 0) {
+        if config.enabled
+            && (config.max_bytes == 0
+                || config.max_bytes_total == 0
+                || config.max_frames_per_track == 0)
+        {
             return Err(Error::Limit("proxy startup cache"));
         }
         Ok(Self {
@@ -232,6 +240,44 @@ impl KeyframeCache {
             if track.kind == MediaKind::Video {
                 while track.frames.front().is_some_and(|frame| !frame.is_keyframe) {
                     pop_front(track);
+                }
+            }
+            if track.frames.is_empty() {
+                track.starts_with_keyframe = false;
+            }
+        }
+        self.enforce_total_budget();
+    }
+
+    /// Evict from the largest track until the mount-wide byte budget holds.
+    fn enforce_total_budget(&mut self) {
+        if !self.config.enabled {
+            return;
+        }
+        let mut total: usize = self.tracks.values().map(|track| track.bytes).sum();
+        while total > self.config.max_bytes_total {
+            let Some(id) = self
+                .tracks
+                .iter()
+                .filter(|(_, track)| !track.frames.is_empty())
+                .max_by_key(|(_, track)| track.bytes)
+                .map(|(id, _)| *id)
+            else {
+                break;
+            };
+            let Some(track) = self.tracks.get_mut(&id) else {
+                break;
+            };
+            if let Some(frame) = track.frames.pop_front() {
+                track.bytes = track.bytes.saturating_sub(frame.data.len());
+                total = total.saturating_sub(frame.data.len());
+            }
+            if track.kind == MediaKind::Video {
+                while track.frames.front().is_some_and(|frame| !frame.is_keyframe) {
+                    if let Some(frame) = track.frames.pop_front() {
+                        track.bytes = track.bytes.saturating_sub(frame.data.len());
+                        total = total.saturating_sub(frame.data.len());
+                    }
                 }
             }
             if track.frames.is_empty() {

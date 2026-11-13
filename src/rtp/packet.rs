@@ -68,6 +68,14 @@ impl RtpPacket {
         b[8..12].copy_from_slice(&self.header.ssrc.to_be_bytes());
         b
     }
+    /// Encode header+payload into an existing buffer, reusing its capacity.
+    pub fn encode_into(&self, out: &mut bytes::BytesMut) {
+        out.clear();
+        out.reserve(12 + self.payload.len());
+        out.extend_from_slice(&self.encode_header());
+        out.extend_from_slice(&self.payload);
+    }
+
     pub fn encode(&self) -> Bytes {
         let mut b = Vec::with_capacity(12 + self.payload.len());
         b.extend_from_slice(&self.encode_header());

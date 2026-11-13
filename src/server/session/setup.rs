@@ -192,7 +192,12 @@ pub(super) async fn handle_setup(
         )
         .await?
     } else {
-        UdpPair::bind(bind_ip, state.config.udp_port_range.clone()).await?
+        UdpPair::bind_with_recv_buffer(
+            bind_ip,
+            state.config.udp_port_range.clone(),
+            state.config.udp_recv_buffer,
+        )
+        .await?
     };
     let server_rtp = pair.rtp_port()?;
     let server_rtcp = if rtcp_mux {

@@ -162,9 +162,10 @@ pub(crate) fn spawn_udp_sender_from(
                     awaiting_key = false;
                     let mut consecutive_send_failures = 0u32;
                     if let Ok(packets) = packetizer.packetize(&frame) {
+                        let mut wire = BytesMut::with_capacity(1500);
                         for mut packet in packets {
                             packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
-                            let wire = packet.encode();
+                            packet.encode_into(&mut wire);
                             if pair.rtp.send_to(&wire, rtp_target).await.is_err() {
                                 // A persistently unreachable target should not
                                 // keep the sender spinning silently.
