@@ -64,6 +64,7 @@ LAYERS: dict[str, int] = {
 # crate-level module name -> target group. Keeps the check useful while the
 # physical layout is still being migrated (P1 moves files, not public paths).
 ALIASES: dict[str, str] = {
+    "core": "core",
     "error": "core",
     "identity": "core",
     "observe": "core",
@@ -101,6 +102,7 @@ ALIASES: dict[str, str] = {
 }
 
 PATH_GROUPS: dict[str, str] = {
+    "core": "core",
     "media": "media",
     "protocol": "rtsp",
     "rtsp": "rtsp",
@@ -123,6 +125,7 @@ PATH_GROUPS: dict[str, str] = {
 }
 
 ROOT_FILE_GROUPS = {
+    "core": "core",
     "error": "core",
     "identity": "core",
     "observe": "core",

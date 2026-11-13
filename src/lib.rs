@@ -5,6 +5,7 @@
 //! decodes or transcodes media, so hardware codecs remain outside the hot path.
 #[cfg(feature = "client")]
 pub mod client;
+pub mod core;
 mod error;
 #[cfg(feature = "file-storage")]
 pub mod file;

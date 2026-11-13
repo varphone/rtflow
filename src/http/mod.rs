@@ -37,7 +37,7 @@ pub struct HttpConfig {
     pub security: SecurityConfig,
     /// Optional global metrics registry for request counting.
     #[cfg(feature = "metrics")]
-    pub metrics: Option<Arc<crate::metrics::MetricsRegistry>>,
+    pub metrics: Option<Arc<crate::core::metrics::MetricsRegistry>>,
 }
 
 impl HttpConfig {
@@ -58,7 +58,7 @@ impl HttpConfig {
 
     /// Attach a global metrics registry (request/segment counters).
     #[cfg(feature = "metrics")]
-    pub fn with_metrics(mut self, metrics: Arc<crate::metrics::MetricsRegistry>) -> Self {
+    pub fn with_metrics(mut self, metrics: Arc<crate::core::metrics::MetricsRegistry>) -> Self {
         self.metrics = Some(metrics);
         self
     }
