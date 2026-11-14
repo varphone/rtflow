@@ -138,6 +138,7 @@
 - 客户端 RTX：SDP 解析保存 `TrackDescription.rtx`（PT/apt），UDP/interleaved/组播收到 RTX 包后按 OSN 还原原 sequence/PT/payload；新增解析与解包单测。
 - 全 feature 445 passed；RTX 客户端/服务端闭环；all-features clippy 干净。
 - SRTP 轨不再广告 RTX（无独立 SRTP context），NACK 保持加密原包重传；RTMP 播放 lag 后等待下一个视频关键帧；FrameBus 增加订阅起点/Lagged 计数/close 排空/receiver_count 单测。
+- WHEP 消费端把 FrameBus `Lagged` 从“关闭流”改为等待下一个关键帧；RTMP/WHEP 的 lag 处理与 HLS/DASH/FLV 一致。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

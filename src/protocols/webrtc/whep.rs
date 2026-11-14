@@ -359,20 +359,39 @@ async fn spawn_play_task(
             }
         };
         let mut startup_iter = startup.into_iter();
+        let mut awaiting_key = codec == crate::media::Codec::H264
+            || codec == crate::media::Codec::H265
+            || codec == crate::media::Codec::Vp8
+            || codec == crate::media::Codec::Vp9
+            || codec == crate::media::Codec::Av1;
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => break,
                 frame = async {
                     if let Some(unit) = startup_iter.next() {
-                        Some(unit)
+                        Ok(unit)
                     } else {
-                        rx.recv().await.ok()
+                        rx.recv().await
                     }
                 } => {
-                    let Some(unit) = frame else { break };
+                    let unit = match frame {
+                        Ok(unit) => unit,
+                        Err(crate::mount::FrameRecvError::Lagged(count)) => {
+                            tracing::debug!(count, "WHEP lagged; waiting for a keyframe");
+                            awaiting_key = true;
+                            continue;
+                        }
+                        Err(crate::mount::FrameRecvError::Closed) => break,
+                    };
 
                     if unit.codec != codec {
                         continue;
+                    }
+                    if awaiting_key && unit.kind() == crate::media::MediaKind::Video {
+                        if !unit.is_keyframe {
+                            continue;
+                        }
+                        awaiting_key = false;
                     }
                     let packets = match packetizer.packetize(&unit) {
                         Ok(pkts) => pkts,
