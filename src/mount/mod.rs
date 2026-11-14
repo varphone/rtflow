@@ -6,6 +6,7 @@
 mod config;
 #[cfg(feature = "server")]
 pub mod continuity;
+mod frame_bus;
 mod handle;
 mod publisher;
 mod registry;

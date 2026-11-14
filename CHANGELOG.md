@@ -130,6 +130,7 @@
 - 新增 raw RTSP + 真实 UDP socket 的 NACK 端到端测试，验证重传缓存生效。
 - broadcast ring 容量 clamp 到 4096，并在 MountSnapshot 暴露生效值；避免错误配置分配无界队列。
 - 全 feature 测试 435 passed；默认 365、experimental 432。
+- 新增 FrameBus 基础实现：帧数+字节双预算、Lagged/Closed、可等待接收；单测覆盖淘汰、唤醒与超大帧拒绝（尚未接入 Mount）。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、
