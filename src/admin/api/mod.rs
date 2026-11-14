@@ -434,11 +434,7 @@ pub(super) async fn register(http: &HttpServer, state: Arc<AdminState>) {
     http.add_route(
         Method::Get,
         &format!("{base}/assets/hls.min.js"),
-        asset_handler(
-            HLS_JS,
-            "text/javascript; charset=utf-8",
-            "public, max-age=86400",
-        ),
+        asset_handler(HLS_JS, "text/javascript; charset=utf-8", "no-cache"),
     )
     .await;
 
