@@ -67,6 +67,58 @@ impl std::fmt::Debug for MountOptions {
     }
 }
 
+pub struct MountOptionsBuilder {
+    options: MountOptions,
+}
+
+impl MountOptions {
+    pub fn builder() -> MountOptionsBuilder {
+        MountOptionsBuilder {
+            options: MountOptions::default(),
+        }
+    }
+}
+
+impl MountOptionsBuilder {
+    pub fn consumer_queue_capacity(mut self, value: usize) -> Self {
+        self.options.consumer_queue_capacity = Some(value);
+        self
+    }
+
+    pub fn max_queued_bytes_per_session(mut self, value: usize) -> Self {
+        self.options.max_queued_bytes_per_session = Some(value);
+        self
+    }
+
+    pub fn event_sink(mut self, value: Arc<dyn EventSink>) -> Self {
+        self.options.event_sink = Some(value);
+        self
+    }
+
+    #[cfg(feature = "server")]
+    pub fn startup_cache_config(
+        mut self,
+        value: crate::mount::continuity::StartupCacheConfig,
+    ) -> Self {
+        self.options.startup_cache_config = Some(value);
+        self
+    }
+
+    pub fn timeline(mut self, value: crate::rtsp::range::TimelineMode) -> Self {
+        self.options.timeline = Some(value);
+        self
+    }
+
+    pub fn cancel(mut self, value: CancellationToken) -> Self {
+        self.options.cancel = Some(value);
+        self
+    }
+
+    pub fn build(self) -> MountOptions {
+        self.options
+    }
+}
+
 impl MountRegistry {
     pub fn new(max_mounts: usize) -> Self {
         Self {
@@ -323,5 +375,27 @@ impl MountRegistry {
             .collect::<Vec<_>>();
         snapshots.sort_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()));
         snapshots
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mount_options_builder_sets_values() {
+        let options = MountOptions::builder()
+            .consumer_queue_capacity(32)
+            .max_queued_bytes_per_session(1024)
+            .timeline(crate::rtsp::range::TimelineMode::Absolute {
+                offset: std::time::Duration::from_secs(10),
+            })
+            .build();
+        assert_eq!(options.consumer_queue_capacity, Some(32));
+        assert_eq!(options.max_queued_bytes_per_session, Some(1024));
+        assert!(matches!(
+            options.timeline,
+            Some(crate::rtsp::range::TimelineMode::Absolute { .. })
+        ));
     }
 }
