@@ -1,11 +1,12 @@
-//! RTMP ingest + HLS live/VOD + read-only browser console.
+//! RTMP ingest + HLS live/VOD + feature-gated admin console.
 //!
 //! Run:
-//! `cargo run --example live_vod_gateway --features "server,rtmp,hls,http-flv,file-storage,mp4,mkv"`
+//! `cargo run --example live_vod_gateway --features "server,rtmp,hls,http-flv,file-storage,mp4,mkv,admin"`
 //! OBS: Server `rtmp://127.0.0.1:1935/live`, Stream Key `cam` (or `cam?token=...`).
 use clap::Parser;
 use rtflow::{
     MountRegistry,
+    admin::{Admin, AdminConfig},
     file::{FileSourceOptions, FileVodSource},
     hls::{
         HlsConfig,
@@ -13,9 +14,6 @@ use rtflow::{
         vod::{HlsVodConfig, HlsVodEntry, HlsVodManager, create_hls_vod_handler},
     },
     http::{HttpConfig, HttpServer, Method},
-    http_flv::console::{
-        create_console_handler, create_health_api, create_mounts_api, create_vods_api,
-    },
     rtmp::{RtmpConfig, RtmpServer, session::RtmpSessionConfig},
     server::{RtspServer, ServerConfig},
     storage::RecordingVodSource,
@@ -41,6 +39,10 @@ struct Args {
     /// HMAC token secret for RTMP publish/play.
     #[arg(long)]
     token: Option<String>,
+    #[arg(long, default_value = "admin")]
+    admin_user: String,
+    #[arg(long, default_value = "rtflow-admin")]
+    admin_password: String,
 }
 
 #[tokio::main]
@@ -111,30 +113,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
     http.add_route(Method::Get, "/vod/*", create_hls_vod_handler(vod.clone()))
         .await;
-    http.add_route(Method::Get, "/", create_console_handler(false))
-        .await;
-    http.add_route(Method::Get, "/admin", create_console_handler(true))
-        .await;
-    http.add_route(
-        Method::Get,
-        "/api/mounts",
-        create_mounts_api(mounts.clone()),
-    )
-    .await;
-    http.add_route(Method::Get, "/api/vods", create_vods_api(Some(vod)))
-        .await;
-    http.add_route(
-        Method::Get,
-        "/api/health",
-        create_health_api(mounts.clone()),
-    )
-    .await;
+    let admin_config = AdminConfig::new(&args.admin_user, &args.admin_password)?
+        .with_title("rtflow 流媒体控制台")
+        .with_hls_prefix("/hls")
+        .with_rtmp_base(format!("rtmp://{rtmp_addr}"))
+        .with_vod(vod);
+    let admin = Admin::new(admin_config, mounts.clone())?;
+    admin.register(&http).await;
     let http_addr = http.local_addr();
     let http_task = tokio::spawn(async move { http.run().await });
 
     println!("RTSP: rtsp://{}/", rtsp.local_addr());
     println!("RTMP: rtmp://{rtmp_addr}/live  (stream key: cam)");
-    println!("Web:  http://{http_addr}/  (admin: /admin)");
+    println!(
+        "Admin: http://{http_addr}/admin  (user: {})",
+        args.admin_user
+    );
     tokio::signal::ctrl_c().await?;
     rtmp_cancel.cancel();
     let _ = rtmp_task.await;

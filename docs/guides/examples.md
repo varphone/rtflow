@@ -71,13 +71,15 @@ ffmpeg -re -i input.mp4 -c copy \
 ## RTMP 推流 + HLS 直播/点播 + 控制台
 
 ```bash
-cargo run --example live_vod_gateway --features "server,rtmp,hls,http-flv,file-storage,mp4,mkv" \
+cargo run --example live_vod_gateway --features "server,rtmp,hls,http-flv,file-storage,mp4,mkv,admin" \
   --vod-file demo=tests/fixtures/h264-aac.mp4 --vod-cache /tmp/rtflow-vod
 ```
 
 - OBS：服务器 `rtmp://127.0.0.1:1935/live`，串流密钥 `cam`；凭据模式可用
   `cam?token=<HMAC>`（`--token secret`）。
-- 浏览器：`http://127.0.0.1:8080/` 浏览直播/VOD，`/admin` 只读状态表。
+- 管理控制台：`http://127.0.0.1:8080/admin`，管理员默认 `admin` /
+  `rtflow-admin`（示例参数，生产请覆盖）。`admin` 只注册控制台/API；
+  HLS live/VOD 路由仍由示例的 `/hls/*`、`/vod/*` 注册。
 - HLS 直播：`/hls/live/cam/index.m3u8`；VOD：`/vod/demo/index.m3u8`。
 
 ## IPC 摄像头 + 网页播放

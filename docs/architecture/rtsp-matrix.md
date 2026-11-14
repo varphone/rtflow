@@ -67,6 +67,7 @@ profile/level 级 fmtp 校验与浏览器/ffmpeg 互操作矩阵。
 | `srtp` | RTSP `RTP/SAVP` + a=crypto | 否，显式启用 |
 | `multicast` | RTSP 组播发布/接收 | 否，显式启用 |
 | `test-source` | `rtflow::source::SyntheticSource` | 否，显式启用 |
+| `admin` | 独立管理控制台（登录/直播/点播/状态，`rtflow::admin`） | 否，显式启用 |
 | `experimental-protocols` | DASH/RTMP/SRT/WebRTC | 否 |
 | `embedded-gateway` | RTSP + TLS + metrics + HTTP-FLV/HLS | 否（profile） |
 

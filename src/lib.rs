@@ -29,6 +29,8 @@
 //!
 //! [`prelude`] re-exports the common types; protocol-specific items live in
 //! their module (`rtflow::server`, `rtflow::client`, `rtflow::protocols::*`).
+#[cfg(feature = "admin")]
+pub mod admin;
 #[cfg(feature = "client")]
 pub mod client;
 pub mod core;

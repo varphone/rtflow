@@ -50,6 +50,19 @@ impl HlsVodManager {
         }
     }
 
+    /// Remove a generated cache entry so the next request regenerates it
+    /// from the (possibly changed) source.
+    pub fn invalidate(&self, id: &str) -> crate::Result<bool> {
+        if !self.entries.contains_key(id) {
+            return Ok(false);
+        }
+        let directory = self.config.cache_dir.join(id);
+        if directory.is_dir() {
+            std::fs::remove_dir_all(directory)?;
+        }
+        Ok(true)
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = &HlsVodEntry> {
         self.entries.values()
     }

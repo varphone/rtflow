@@ -126,6 +126,7 @@ pub struct RtspServer {
 impl RtspServer {
     pub async fn bind(config: ServerConfig) -> Result<Self> {
         let max_mounts = config.resource_limits.max_mounts;
+        #[allow(unused_mut)] // only mutated by the metrics feature
         let mut mounts = MountRegistry::new(max_mounts);
         // R12: mirrors per-mount frame counters into the global metrics
         // registry so RTMP/SRT/gateway-registered mounts appear in /metrics

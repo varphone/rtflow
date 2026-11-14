@@ -18,6 +18,7 @@ pub mod upstream;
 
 pub(crate) use config::description_for;
 pub use config::{MountConfig, PushResult};
+#[allow(unused_imports)] // NackRequest is only read by the RTSP sender feature
 pub(crate) use handle::{Mount, NackRequest, codec_lookup_table};
 pub use handle::{MountHandle, STARTUP_WINDOW, startup_dedup_keys};
 pub use publisher::LocalPublisher;

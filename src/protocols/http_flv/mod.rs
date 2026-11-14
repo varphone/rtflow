@@ -1,4 +1,3 @@
-pub mod console;
 pub mod handler;
 pub mod mux;
 pub mod web;

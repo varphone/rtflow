@@ -13,9 +13,10 @@
 - HLS：注册表驱动的 `/hls/{mount}/index.m3u8` 直播端点，动态 RTMP mount
   无需预注册 handler；`/vod/{id}` 从录制目录或 MP4/MKV/TS 文件生成磁盘
   缓存的 VOD playlist/segment。
-- 前端：`/api/mounts`、`/api/vods` 只读 JSON；`/` 浏览页与 `/admin`
-  只读状态页（直播/VOD 播放、发布状态、订阅数、帧统计）。
-- `FileVodSource`；`live_vod_gateway` 示例（RTMP + HLS + 浏览器控制台）。
+- 管理前端：独立 `admin` feature（`rtflow::admin::{Admin,AdminConfig}`，
+  自包含登录页/仪表盘/直播管理/点播管理/系统状态；HttpOnly 会话 Cookie、
+  Argon2id 口令、CSRF 校验、写操作只读开关）。默认 `full` 不编译该模块。
+- `FileVodSource`；`live_vod_gateway` 示例（RTMP + HLS + admin 控制台）。
 
 ### Changed
 
