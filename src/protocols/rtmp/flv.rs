@@ -300,6 +300,19 @@ fn extract_sps_pps_from_avcc_config(config: &[u8]) -> Option<Vec<Bytes>> {
     Some(params)
 }
 
+fn video_payload_for_flv(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
+    if is_sequence_header {
+        return unit.data.clone();
+    }
+    let bytes = unit.data.as_ref();
+    let annex_b = bytes.starts_with(&[0, 0, 0, 1]) || bytes.starts_with(&[0, 0, 1]);
+    if annex_b {
+        crate::media::bitstream::annexb_to_avcc(bytes)
+    } else {
+        unit.data.clone()
+    }
+}
+
 pub fn build_video_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
     let mut buf = BytesMut::with_capacity(unit.data.len() + 16);
 
@@ -321,7 +334,7 @@ pub fn build_video_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
                 &mut buf,
                 crate::media::flv::composition_time_ms(unit.pts, unit.dts),
             );
-            buf.put_slice(&unit.data);
+            buf.put_slice(&video_payload_for_flv(unit, is_sequence_header));
         }
         Codec::H265 => {
             buf.put_u8((frame_type << 4) | FLV_VIDEO_H265);
@@ -336,7 +349,7 @@ pub fn build_video_tag(unit: &AccessUnit, is_sequence_header: bool) -> Bytes {
                 &mut buf,
                 crate::media::flv::composition_time_ms(unit.pts, unit.dts),
             );
-            buf.put_slice(&unit.data);
+            buf.put_slice(&video_payload_for_flv(unit, is_sequence_header));
         }
         _ => {}
     }

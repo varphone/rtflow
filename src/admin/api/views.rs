@@ -95,7 +95,7 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
         rtp_octets: snapshot.stats.rtp_octets,
         hls_url,
         rtmp_url,
-        protocols: vec!["HLS", "RTSP", "HTTP-FLV"],
+        protocols: vec!["HLS", "RTSP"],
     })
 }
 

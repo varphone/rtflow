@@ -427,6 +427,11 @@ pub async fn serve_rtmp_session(
                                 let base = *base_timestamp.get_or_insert(msg.timestamp);
                                 let ts_ms = msg.timestamp.wrapping_sub(base);
                                 let pts_ms = (ts_ms as i64 + composition_time as i64).max(0) as u32;
+                                let data = if is_keyframe {
+                                    flv::avcc_to_annexb(&data, video_seq_header.as_deref())
+                                } else {
+                                    flv::avcc_to_annexb(&data, None)
+                                };
 
                                 let unit = AccessUnit {
                                     track_id: 0,
@@ -447,6 +452,11 @@ pub async fn serve_rtmp_session(
                                 let base = *base_timestamp.get_or_insert(msg.timestamp);
                                 let ts_ms = msg.timestamp.wrapping_sub(base);
                                 let pts_ms = (ts_ms as i64 + composition_time as i64).max(0) as u32;
+                                let data = if is_keyframe {
+                                    flv::avcc_to_annexb(&data, video_seq_header.as_deref())
+                                } else {
+                                    flv::avcc_to_annexb(&data, None)
+                                };
 
                                 let unit = AccessUnit {
                                     track_id: 0,

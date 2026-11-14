@@ -108,10 +108,12 @@ pub fn create_hls_handlers(
             .iter()
             .any(|track| track.kind == crate::media::MediaKind::Video);
         let mut awaiting_keyframe = has_video;
+        let mut from_startup = true;
         loop {
             let unit = if let Some(unit) = startup.pop_front() {
                 unit
             } else {
+                from_startup = false;
                 tokio::select! {
                     _ = cancel.cancelled() => break,
                     result = receiver.recv() => match result {
@@ -139,7 +141,7 @@ pub fn create_hls_handlers(
             }
             // Skip broadcast replays of frames the startup snapshot already
             // delivered (duplicate keyframes would corrupt segment timing).
-            if startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
+            if !from_startup && startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
                 continue;
             }
             segmenter.push((*unit).clone());

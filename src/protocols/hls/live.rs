@@ -83,10 +83,12 @@ impl HlsLiveManager {
                 .iter()
                 .any(|track| track.kind == crate::media::MediaKind::Video);
             let mut awaiting_keyframe = has_video;
+            let mut from_startup = true;
             loop {
                 let unit = if let Some(unit) = startup.pop_front() {
                     unit
                 } else {
+                    from_startup = false;
                     tokio::select! {
                         _ = cancel.cancelled() => break,
                         result = receiver.recv() => match result {
@@ -112,9 +114,7 @@ impl HlsLiveManager {
                     }
                     awaiting_keyframe = false;
                 }
-                let from_startup = !startup_keys.is_empty()
-                    && startup_keys.contains(&(unit.track_id, unit.rtp_timestamp));
-                if !from_startup {
+                if from_startup || !startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
                     segmenter.push((*unit).clone());
                 }
                 while let Ok(segment) = segments.try_recv() {
@@ -178,13 +178,39 @@ pub fn create_hls_live_handler(manager: Arc<HlsLiveManager>) -> Handler {
                             .await?;
                         return Ok(writer);
                     }
+                    // hls.js treats a live playlist without any segment
+                    // (or without EXT-X-MEDIA-SEQUENCE) as a fatal
+                    // internalException. Wait for the first segment after
+                    // starting the segmenter; keep a bounded wait so a
+                    // publisher that never sends data gets 503 + retry.
+                    if channel.ring.is_empty() {
+                        for _ in 0..60 {
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                            if !channel.ring.is_empty() {
+                                break;
+                            }
+                        }
+                    }
+                    if channel.ring.is_empty() {
+                        writer
+                            .write_headers(
+                                503,
+                                &[
+                                    ("Retry-After", "1"),
+                                    ("Content-Length", "0"),
+                                    ("Connection", "close"),
+                                ],
+                            )
+                            .await?;
+                        return Ok(writer);
+                    }
                     handler::serve_playlist(
                         req,
                         writer,
                         &channel.ring,
                         true,
                         manager.config.segment_duration,
-                        &format!("/hls/{mount_path}"),
+                        "",
                     )
                     .await
                 }

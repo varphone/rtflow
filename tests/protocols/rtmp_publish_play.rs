@@ -335,6 +335,10 @@ async fn rtmp_publish_delivers_video_to_mount() {
 
     assert_eq!(unit.codec, rtflow::media::Codec::H264);
     assert!(unit.is_keyframe);
+    eprintln!(
+        "RTMP UNIT DATA: {:02x?}",
+        &unit.data[..unit.data.len().min(40)]
+    );
 
     // Cleanup
     cancel.cancel();

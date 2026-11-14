@@ -441,9 +441,13 @@
       } else {
         const Hls = await loadHls();
         if (!Hls || !Hls.isSupported()) throw new Error("当前浏览器不支持 HLS 播放");
-        state.hls = new Hls({ liveDurationInfinity: true, enableWorker: true });
+        state.hls = new Hls({ liveDurationInfinity: true, enableWorker: false });
         state.hls.on(Hls.Events.ERROR, (_event, data) => {
-          if (data && data.fatal) status.textContent = "播放失败：" + (data.details || "未知错误");
+          if (data && data.fatal) {
+            status.textContent = "播放失败：" + (data.details || "未知错误") +
+              (data.reason ? " (" + data.reason + ")" : "") +
+              (data.error && data.error.message ? " · " + data.error.message : "");
+          }
         });
         state.hls.loadSource(url);
         state.hls.attachMedia(video);

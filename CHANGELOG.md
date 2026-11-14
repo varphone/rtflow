@@ -18,6 +18,16 @@
   Argon2id 口令、CSRF 校验、写操作只读开关）。默认 `full` 不编译该模块。
 - `FileVodSource`；`live_vod_gateway` 示例（RTMP + HLS + admin 控制台）。
 
+### Fixed
+
+- RTMP 视频帧统一转为 Annex-B 后进入数据面，HLS/RTSP 可正确消费；
+  RTMP 拉流输出时再转回 AVCC。修复 HLS 直播出现
+  `missing picture` / `data partitioning` / hls.js `internalException`。
+- HLS 新 segmenter 首帧来自 startup cache 时不再被去重逻辑跳过，
+  SPS/PPS + 首个 IDR 能进入 init/segment。
+- HLS live playlist 使用相对 URI，并在首个 segment 就绪前最多等待
+  3 秒；harness/hls.js 不再因空 playlist 判为 fatal。
+
 ### Changed
 
 - `Mount` 的描述可动态更新（sequence headers/metadata）；`MountHandle::description()`

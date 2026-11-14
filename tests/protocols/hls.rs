@@ -657,10 +657,10 @@ async fn registry_live_handler_serves_dynamic_mount() {
     let addr = http.local_addr();
     tokio::spawn(async move { http.run().await });
 
-    // First request starts the segmenter and returns an empty live playlist.
-    let body = get(addr, "/hls/live/cam/index.m3u8").await;
-    assert!(body.contains("200 OK"), "{body}");
-    assert!(body.contains("#EXTM3U"), "{body}");
+    // First request starts the segmenter and waits for its first segment;
+    // publish concurrently, as a real encoder/hls.js pair would.
+    let first = tokio::spawn(async move { get(addr, "/hls/live/cam/index.m3u8").await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
     for i in 0..12 {
         let key = i % 5 == 0;
@@ -681,6 +681,9 @@ async fn registry_live_handler_serves_dynamic_mount() {
             .unwrap();
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+    let body = first.await.unwrap();
+    assert!(body.contains("200 OK"), "{body}");
+    assert!(body.contains("#EXTM3U"), "{body}");
 
     let mut playlist = String::new();
     for _ in 0..20 {
