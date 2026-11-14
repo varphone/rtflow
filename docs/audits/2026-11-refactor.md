@@ -39,7 +39,8 @@ experimental 测试；不 push、不运行 CI。
   mount/SRTP 能力过滤。
 - proxy watcher 让 HLS/HTTP-FLV 订阅也触发按需上游。
 - VOD 自然 EOS：排空广播后关闭会话（RTSP 无 EOS 方法）。
-- UDP NACK 512 包缓存，SRTP 复用原索引重传；interleaved 仍走关键帧请求。
+- UDP/interleaved NACK 512 包缓存（2 MiB 字节预算），SRTP 复用原索引重传；
+  NACK PID+BLP 展开统一到 `Packet::nack_sequences()`。
 
 ## P2 性能
 
@@ -54,8 +55,10 @@ experimental 测试；不 push、不运行 CI。
 
 - 0.3.0；`ServerConfig`/`MountOptions` non_exhaustive；`PushResult::Dropped`。
 - `ClientOptions`/`ServerConfig`/`MountOptions` 脱敏 Debug。
-- `MediaDescription::new`；`Request/Response::header`；`PlaySession`/`RecordSession` 别名。
-- `MountRegistry` 以 `MountId` 为键；`MountHandle::mount_id()`。
+- `MediaDescription::new`；`Request/Response::header`；会话主名称改为
+  `PlaySession`/`RecordSession`/`ReconnectingPlaySession`，旧名保留别名。
+- `MountRegistry`/`MountHandle`/`snapshots` 使用 `MountId`；`MountOptions::builder()`。
+- HLS/DASH/WebRTC 提供命名 handler 集合与 `create_*_router`（旧 tuple 保留）。
 - README 示例独立 crate 编译通过；crate 包排除依赖 testkit 的 examples。
 - CI 增加 experimental、SRTP/multicast、protocol clippy、srtp fuzz。
 
@@ -64,7 +67,7 @@ experimental 测试；不 push、不运行 CI。
 ```text
 cargo test --no-fail-fast                         363 passed / 0 failed
 cargo test --features experimental-protocols      430 passed / 0 failed
-cargo test --features "srtp,multicast"            363 passed / 0 failed
+cargo test --features "srtp,multicast"            此前 351 passed / 0 failed
 cargo clippy --all-targets --features ... -D warnings  通过
 cargo test --all-features --no-run                通过
 cargo package --allow-dirty                       通过
@@ -80,8 +83,7 @@ GStreamer legacy-codec interop 在本机偶发一次失败，重跑通过；属�
 | UDP `sendmmsg` | 需要 Linux `libc`/unsafe，当前 crate 默认 `forbid(unsafe_code)` |
 | startup cache Arc | 当前 Bytes 克隆已便宜；改 Arc 需改广播/快照类型 |
 | mount broadcast ring 字节预算 | `tokio::broadcast` 无字节视图，需自研 bus |
-| `ClientSession`/`PublisherSession` 实改名 | 已提供别名；实改名需全仓迁移 |
-| `*_str` 去重、handler 命名 struct | 破坏面大，留待 0.4 |
+| `*_str` 去重 | 保留 URL 字符串便利入口；内部已复用解析逻辑 |
 | 完整审计文档重写 | 旧文已标历史；按本文与 architecture 矩阵为准 |
 | CI semver 阻断 | 0.3.0 基线发布后启用 |
 
