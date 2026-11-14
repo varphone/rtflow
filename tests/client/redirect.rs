@@ -34,7 +34,7 @@ async fn client_follows_same_origin_redirect() {
     let url = format!("rtsp://{}/start", server.address());
     let description = tokio::time::timeout(
         Duration::from_secs(2),
-        RtspClient::describe_str(&url, ClientOptions::default()),
+        RtspClient::describe(&url, ClientOptions::default()),
     )
     .await
     .expect("redirect timed out")

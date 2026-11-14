@@ -230,7 +230,7 @@ async fn options_reports_public_methods() {
     .await;
     let capabilities = tokio::time::timeout(
         Duration::from_secs(2),
-        RtspClient::options_str(server.url("/stream").as_str(), tcp_options()),
+        RtspClient::options(server.url("/stream").as_str(), tcp_options()),
     )
     .await
     .unwrap()

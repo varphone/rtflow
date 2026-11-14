@@ -55,7 +55,7 @@ async fn publisher_sends_sender_report_to_server_rtcp_port() {
         _ => ServerReply::Response(describe_reply(request, &response_description)),
     }))
     .await;
-    let mut publisher = RtspClient::publish_str(
+    let mut publisher = RtspClient::publish(
         server.url("/sr").as_str(),
         description,
         ClientOptions::builder()

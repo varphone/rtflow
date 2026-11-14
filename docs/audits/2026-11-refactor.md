@@ -83,7 +83,7 @@ GStreamer legacy-codec interop 在本机偶发一次失败，重跑通过；属�
 | UDP `sendmmsg` | 需要 Linux `libc`/unsafe，当前 crate 默认 `forbid(unsafe_code)` |
 | startup cache Arc | 当前 Bytes 克隆已便宜；改 Arc 需改广播/快照类型 |
 | mount broadcast ring 字节预算 | `tokio::broadcast` 无字节视图，需自研 bus |
-| `*_str` 去重 | 保留 URL 字符串便利入口；内部已复用解析逻辑 |
+| `*_str` 去重 | 已完成：入口统一接受 `IntoRtspUrl` |
 | 完整审计文档重写 | 旧文已标历史；按本文与 architecture 矩阵为准 |
 | CI semver 阻断 | 0.3.0 基线发布后启用 |
 

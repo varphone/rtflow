@@ -3,9 +3,49 @@ use super::reconnect::{ReconnectingPlaySession, jittered_backoff};
 use super::wire::{request, should_fallback_to_tcp, status_error};
 use super::*;
 
+/// URL conversion accepted by [`RtspClient`] entry points. `Url`, `&str`
+/// and `String` are supported, so `connect`/`describe` are gone.
+pub trait IntoRtspUrl {
+    fn into_rtsp_url(self) -> Result<url::Url>;
+}
+
+impl IntoRtspUrl for url::Url {
+    fn into_rtsp_url(self) -> Result<url::Url> {
+        Ok(self)
+    }
+}
+
+impl IntoRtspUrl for &url::Url {
+    fn into_rtsp_url(self) -> Result<url::Url> {
+        Ok(self.clone())
+    }
+}
+
+impl IntoRtspUrl for &str {
+    fn into_rtsp_url(self) -> Result<url::Url> {
+        url::Url::parse(self).map_err(|error| Error::Rtsp(format!("invalid RTSP URL: {error}")))
+    }
+}
+
+impl IntoRtspUrl for &String {
+    fn into_rtsp_url(self) -> Result<url::Url> {
+        self.as_str().into_rtsp_url()
+    }
+}
+
+impl IntoRtspUrl for String {
+    fn into_rtsp_url(self) -> Result<url::Url> {
+        self.as_str().into_rtsp_url()
+    }
+}
+
 pub struct RtspClient;
 impl RtspClient {
-    pub async fn describe(url: url::Url, options: ClientOptions) -> Result<MediaDescription> {
+    pub async fn describe(
+        url: impl IntoRtspUrl,
+        options: ClientOptions,
+    ) -> Result<MediaDescription> {
+        let url = url.into_rtsp_url()?;
         validate_options(&options)?;
         let (_, _, _, description, _, _) = open_and_describe(&url, &options).await?;
         Ok(description)
@@ -13,7 +53,11 @@ impl RtspClient {
 
     /// Fetch the server's OPTIONS capabilities (`Public`, `Supported`,
     /// `Server`). The control connection is closed afterwards.
-    pub async fn options(url: url::Url, options: ClientOptions) -> Result<ServerCapabilities> {
+    pub async fn options(
+        url: impl IntoRtspUrl,
+        options: ClientOptions,
+    ) -> Result<ServerCapabilities> {
+        let url = url.into_rtsp_url()?;
         validate_options(&options)?;
         let (mut stream, uri) = open_control(&url, &options).await?;
         let require = options.require_headers();
@@ -33,23 +77,9 @@ impl RtspClient {
         Ok(ServerCapabilities::from_response(&response))
     }
 
-    /// Convenience entry accepting a URL string; see [`Self::options`].
-    pub async fn options_str(url: &str, options: ClientOptions) -> Result<ServerCapabilities> {
-        let url = url::Url::parse(url)
-            .map_err(|error| Error::Rtsp(format!("invalid RTSP URL: {error}")))?;
-        Self::options(url, options).await
-    }
-
-    /// Convenience entry accepting a URL string; see [`Self::describe`].
-    pub async fn describe_str(url: &str, options: ClientOptions) -> Result<MediaDescription> {
-        let url = url::Url::parse(url)
-            .map_err(|error| Error::Rtsp(format!("invalid RTSP URL: {error}")))?;
-        Self::describe(url, options).await
-    }
-
-    pub async fn connect(url: url::Url, options: ClientOptions) -> Result<PlaySession> {
+    pub async fn connect(url: impl IntoRtspUrl, options: ClientOptions) -> Result<PlaySession> {
         validate_options(&options)?;
-        let mut current = url;
+        let mut current = url.into_rtsp_url()?;
         for _ in 0..5 {
             match Self::connect_once(current.clone(), options.clone()).await {
                 Ok(session) => return Ok(session),
@@ -200,45 +230,29 @@ impl RtspClient {
         }
     }
 
-    /// Convenience entry accepting a URL string; see [`Self::connect`].
-    pub async fn connect_str(url: &str, options: ClientOptions) -> Result<PlaySession> {
-        let url = url::Url::parse(url)
-            .map_err(|error| Error::Rtsp(format!("invalid RTSP URL: {error}")))?;
-        Self::connect(url, options).await
-    }
-
     /// Publish a stream: OPTIONS + ANNOUNCE + SETUP + RECORD.
     ///
     /// The returned [`RecordSession`] owns the UDP RTP sockets and a
     /// keep-alive task; call [`RecordSession::push`] for every access unit.
     pub async fn publish(
-        url: url::Url,
+        url: impl IntoRtspUrl,
         description: MediaDescription,
         options: ClientOptions,
     ) -> Result<RecordSession> {
+        let url = url.into_rtsp_url()?;
         validate_options(&options)?;
         super::publish::connect(&url, description, &options).await
-    }
-
-    /// Convenience entry accepting a URL string; see [`Self::publish`].
-    pub async fn publish_str(
-        url: &str,
-        description: MediaDescription,
-        options: ClientOptions,
-    ) -> Result<RecordSession> {
-        let url = url::Url::parse(url)
-            .map_err(|error| Error::Rtsp(format!("invalid RTSP URL: {error}")))?;
-        Self::publish(url, description, options).await
     }
 
     /// Connect and keep retrying after a media-session disconnect.
     ///
     /// Initial connection failures are still returned to the caller.
     pub async fn connect_reconnecting(
-        url: url::Url,
+        url: impl IntoRtspUrl,
         options: ClientOptions,
         policy: ClientReconnectPolicy,
     ) -> Result<ReconnectingPlaySession> {
+        let url = url.into_rtsp_url()?;
         policy.validate()?;
         let initial = Self::connect(url.clone(), options.clone()).await?;
         let description = initial.description.clone();

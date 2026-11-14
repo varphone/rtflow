@@ -29,7 +29,7 @@ async fn gateway_mount_is_visible_to_rtsp() {
         .unwrap();
     let server = gateway.rtsp().expect("RTSP server started");
     let url = format!("rtsp://{}/gateway-shared", server.local_addr());
-    let session = RtspClient::connect_str(
+    let session = RtspClient::connect(
         &url,
         ClientOptions::builder()
             .transport(UpstreamTransport::TcpInterleaved)

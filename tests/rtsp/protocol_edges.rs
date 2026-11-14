@@ -271,7 +271,7 @@ async fn multicast_client_receives_group_media() {
         .unwrap();
     let publisher = mount.publisher().unwrap();
     let url = format!("rtsp://{}/mc", server.local_addr());
-    let mut client = RtspClient::connect_str(
+    let mut client = RtspClient::connect(
         &url,
         ClientOptions::builder()
             .transport(rtflow::transport::UpstreamTransport::Udp)
@@ -324,7 +324,7 @@ async fn srtp_playback_decrypts_media() {
         .unwrap();
     let publisher = mount.publisher().unwrap();
     let url = format!("rtsp://{}/secure", server.local_addr());
-    let mut client = RtspClient::connect_str(&url, ClientOptions::default())
+    let mut client = RtspClient::connect(&url, ClientOptions::default())
         .await
         .expect("srtp connect");
     let expected = rtflow_testkit::unit(0, Codec::H264, 1);
@@ -375,7 +375,7 @@ async fn srtp_over_tcp_playback_decrypts_media() {
         .unwrap();
     let publisher = mount.publisher().unwrap();
     let url = format!("rtsp://{}/secure-tcp", server.local_addr());
-    let mut client = RtspClient::connect_str(
+    let mut client = RtspClient::connect(
         &url,
         ClientOptions::builder()
             .transport(UpstreamTransport::TcpInterleaved)
@@ -434,7 +434,7 @@ async fn srtp_multicast_client_decrypts_group_media() {
         .unwrap();
     let publisher = mount.publisher().unwrap();
     let url = format!("rtsp://{}/secure-mc", server.local_addr());
-    let mut client = RtspClient::connect_str(
+    let mut client = RtspClient::connect(
         &url,
         ClientOptions::builder()
             .transport(rtflow::transport::UpstreamTransport::Udp)
@@ -486,7 +486,7 @@ async fn multicast_client_sends_rtcp_reports() {
         .await
         .expect("join RTCP group");
     let url = format!("rtsp://{}/mc-rtcp", server.local_addr());
-    let client = RtspClient::connect_str(
+    let client = RtspClient::connect(
         &url,
         ClientOptions::builder()
             .transport(rtflow::transport::UpstreamTransport::Udp)

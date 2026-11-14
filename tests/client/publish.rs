@@ -25,7 +25,7 @@ async fn publishes_h264_into_publisher_mount() {
         .unwrap();
     let mut subscriber = mount.subscribe();
     let url = format!("rtsp://{}/ingest", server.local_addr());
-    let mut publisher = RtspClient::publish_str(
+    let mut publisher = RtspClient::publish(
         &url,
         media,
         ClientOptions::builder()
@@ -77,7 +77,7 @@ async fn publishes_h264_over_interleaved_transport() {
         .unwrap();
     let mut subscriber = mount.subscribe();
     let url = format!("rtsp://{}/ingest-tcp", server.local_addr());
-    let mut publisher = RtspClient::publish_str(
+    let mut publisher = RtspClient::publish(
         &url,
         media,
         ClientOptions::builder()
@@ -124,7 +124,7 @@ async fn publishes_multiple_tracks_in_one_session() {
         .unwrap();
     let mut subscriber = mount.subscribe();
     let url = format!("rtsp://{}/ingest-av", server.local_addr());
-    let mut publisher = RtspClient::publish_str(
+    let mut publisher = RtspClient::publish(
         &url,
         media,
         ClientOptions::builder()
@@ -190,7 +190,7 @@ async fn publishes_srtp_udp() {
         .unwrap();
     let mut subscriber = mount.subscribe();
     let url = format!("rtsp://{}/ingest-srtp", server.local_addr());
-    let mut publisher = RtspClient::publish_str(
+    let mut publisher = RtspClient::publish(
         &url,
         media,
         ClientOptions::builder()
@@ -247,7 +247,7 @@ async fn publishes_srtp_interleaved() {
         .unwrap();
     let mut subscriber = mount.subscribe();
     let url = format!("rtsp://{}/ingest-srtp-tcp", server.local_addr());
-    let mut publisher = RtspClient::publish_str(
+    let mut publisher = RtspClient::publish(
         &url,
         media,
         ClientOptions::builder()

@@ -51,7 +51,7 @@ async fn thirty_two_clients_pull_independently() {
                 options = ClientOptions::low_memory();
                 options.transport = UpstreamTransport::TcpInterleaved;
             }
-            let mut client = RtspClient::connect_str(&url, options)
+            let mut client = RtspClient::connect(&url, options)
                 .await
                 .unwrap_or_else(|error| panic!("client {index} connect: {error}"));
             let unit = tokio::time::timeout(Duration::from_secs(5), client.next())

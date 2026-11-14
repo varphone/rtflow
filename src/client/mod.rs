@@ -52,7 +52,7 @@ pub use options::{
 };
 pub use publish::RecordSession;
 pub use reconnect::ReconnectingPlaySession;
-pub use rtsp_client::RtspClient;
+pub use rtsp_client::{IntoRtspUrl, RtspClient};
 pub use session::{ClientQualitySnapshot, PlayRequest, PlaySession};
 
 /// Backwards-compatible name for [`PlaySession`].

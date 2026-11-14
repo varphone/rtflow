@@ -70,7 +70,7 @@ async fn synthetic_source_feeds_every_codec_over_rtsp() {
         )
         .unwrap();
         let url = format!("rtsp://{}/source", server.local_addr());
-        let mut client = RtspClient::connect_str(
+        let mut client = RtspClient::connect(
             &url,
             ClientOptions::builder()
                 .transport(UpstreamTransport::Udp)

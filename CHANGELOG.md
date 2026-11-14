@@ -126,6 +126,7 @@
 - ServerConfigBuilder::rtcp_report_interval 的 0 值拒绝/正常值单测。
 - 新增 LocalPublisher 超大帧直接 Dropped 且不进入广播的回归测试。
 - prelude 补齐客户端：PlaySession/RecordSession/ReconnectingPlaySession、ClientQualitySnapshot、UpstreamTransport。
+- `RtspClient` 入口统一接受 `IntoRtspUrl`（Url/&str/&String/String），删除 `options_str`/`describe_str`/`connect_str`/`publish_str` 重复 API。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

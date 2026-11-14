@@ -27,7 +27,7 @@ async fn measure(transport: UpstreamTransport) -> (Duration, Duration, f64) {
         )
         .await
         .unwrap();
-    let mut client = RtspClient::connect_str(
+    let mut client = RtspClient::connect(
         &format!("rtsp://{}/perf", server.local_addr()),
         ClientOptions::builder()
             .transport(transport)

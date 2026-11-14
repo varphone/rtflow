@@ -125,7 +125,7 @@ struct StreamConfig {
     audio: Option<AudioMode>,
 }
 
-async fn publish_stream(
+async fn publisheam(
     mount: &rtflow::mount::MountHandle,
     config: &StreamConfig,
     fps: u32,
@@ -348,7 +348,7 @@ async fn main() -> rtflow::Result<()> {
         let mount = mount.clone();
         let config = *config;
         handles.push(tokio::spawn(async move {
-            publish_stream(&mount, &config, args.fps, args.gop, stop).await
+            publisheam(&mount, &config, args.fps, args.gop, stop).await
         }));
     }
 
