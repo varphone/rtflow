@@ -19,6 +19,9 @@ pub struct MountRegistry {
 /// Default per-consumer buffering limit (bytes) applied to every mount
 /// unless overridden via [`MountOptions`] or the server/gateway config.
 pub const DEFAULT_MAX_QUEUED_BYTES_PER_SESSION: usize = 4 * 1024 * 1024;
+/// Hard upper bound for the per-mount broadcast ring. A configuration typo
+/// must not allocate an unbounded queue.
+pub const MAX_CONSUMER_QUEUE_CAPACITY: usize = 4096;
 
 /// Per-mount tuning knobs for [`MountRegistry::register_with`].
 ///
@@ -257,7 +260,10 @@ impl MountRegistry {
             ));
         }
         let description = description_for(&config)?;
-        let queue_capacity = options.consumer_queue_capacity.unwrap_or(256);
+        let queue_capacity = options
+            .consumer_queue_capacity
+            .unwrap_or(256)
+            .clamp(1, MAX_CONSUMER_QUEUE_CAPACITY);
         let (tx, _) = broadcast::channel(queue_capacity);
         let (keyframe_requests, _) = broadcast::channel(16);
         let (nack_requests, _) = broadcast::channel(64);
@@ -270,6 +276,7 @@ impl MountRegistry {
             id: MountId::from(path.clone()),
             config,
             frames: tx,
+            consumer_queue_capacity: queue_capacity,
             keyframe_requests,
             nack_requests,
             timeline: options.timeline,
@@ -447,6 +454,26 @@ mod tests {
         registry.cancel_all();
         assert!(handle.cancellation_token().is_cancelled());
         assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn queue_capacity_is_clamped() {
+        let registry = MountRegistry::new(1);
+        let handle = registry
+            .register_with(
+                Arc::from("/capacity"),
+                MountConfig::Local {
+                    description: local("capacity"),
+                },
+                MountOptions::builder()
+                    .consumer_queue_capacity(usize::MAX)
+                    .build(),
+            )
+            .unwrap();
+        assert_eq!(
+            handle.snapshot().consumer_queue_capacity,
+            MAX_CONSUMER_QUEUE_CAPACITY
+        );
     }
 
     #[test]

@@ -26,6 +26,8 @@ pub struct MountSnapshot {
     pub stats: StreamStats,
     pub startup_cache_frames: usize,
     pub startup_cache_bytes: usize,
+    /// Effective per-mount broadcast ring capacity (after clamping).
+    pub consumer_queue_capacity: usize,
 }
 
 // ---------------------------------------------------------------------------

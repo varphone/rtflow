@@ -11,6 +11,7 @@ pub(crate) struct Mount {
     pub id: MountId,
     pub config: MountConfig,
     pub frames: broadcast::Sender<AccessUnit>,
+    pub(crate) consumer_queue_capacity: usize,
     /// PLI/FIR/NACK feedback forwarded to local sources (track id).
     pub keyframe_requests: broadcast::Sender<u8>,
     /// NACK sequence lists for the interleaved sender's retransmission cache.
@@ -453,6 +454,7 @@ impl MountHandle {
             stats: s,
             startup_cache_frames,
             startup_cache_bytes,
+            consumer_queue_capacity: self.inner.consumer_queue_capacity,
         }
     }
 }

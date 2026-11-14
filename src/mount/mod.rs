@@ -18,7 +18,9 @@ pub use config::{MountConfig, PushResult};
 pub(crate) use handle::{Mount, NackRequest, codec_lookup_table};
 pub use handle::{MountHandle, STARTUP_WINDOW, startup_dedup_keys};
 pub use publisher::LocalPublisher;
-pub use registry::{DEFAULT_MAX_QUEUED_BYTES_PER_SESSION, MountOptions, MountRegistry};
+pub use registry::{
+    DEFAULT_MAX_QUEUED_BYTES_PER_SESSION, MAX_CONSUMER_QUEUE_CAPACITY, MountOptions, MountRegistry,
+};
 pub use stats::{MountSnapshot, StreamStats};
 
 pub(crate) use stats::StreamCounters;
