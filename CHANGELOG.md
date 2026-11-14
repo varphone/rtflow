@@ -120,6 +120,7 @@
 - RtmpServer/SrtServer 实现 Drop cancel，未进入 run 即被丢弃时不会残留 accept 任务。
 - NACK 重传发送路径抽出 `retransmit_cached` 并用真实 UDP socket 回归测试。
 - HLS/DASH/WebRTC 增加命名 handler struct（HlsHandlers/DashHandlers/WebRtcHandlers）与 create_*_router，避免位置元组。
+- 新增 registry 路径边界、稳定排序与 cancel_all 单测。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

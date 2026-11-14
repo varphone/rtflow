@@ -382,6 +382,73 @@ impl MountRegistry {
 mod tests {
     use super::*;
 
+    fn local(path: &str) -> crate::media::MediaDescription {
+        crate::media::MediaDescription::new(
+            path,
+            vec![crate::media::TrackDescription::h264_video(
+                0,
+                &[],
+                &[],
+                640,
+                360,
+                30,
+            )],
+        )
+    }
+
+    #[test]
+    fn longest_prefix_respects_path_boundaries() {
+        let registry = MountRegistry::new(4);
+        registry
+            .register(
+                Arc::from("/cam"),
+                MountConfig::Local {
+                    description: local("cam"),
+                },
+            )
+            .unwrap();
+        registry
+            .register(
+                Arc::from("/cam/main"),
+                MountConfig::Local {
+                    description: local("main"),
+                },
+            )
+            .unwrap();
+        let (path, _) = registry
+            .find_longest_prefix("/cam/main/track0")
+            .expect("prefix");
+        assert_eq!(path.as_str(), "/cam/main");
+        assert!(registry.find_longest_prefix("/camera").is_none());
+    }
+
+    #[test]
+    fn paths_are_sorted_and_cancel_all_clears() {
+        let registry = MountRegistry::new(4);
+        for path in ["/b", "/a"] {
+            registry
+                .register(
+                    Arc::from(path),
+                    MountConfig::Local {
+                        description: local(path),
+                    },
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            registry
+                .paths()
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["/a", "/b"]
+        );
+        let handle = registry.get_handle("/a").unwrap();
+        registry.cancel_all();
+        assert!(handle.cancellation_token().is_cancelled());
+        assert!(registry.is_empty());
+    }
+
     #[test]
     fn mount_options_builder_sets_values() {
         let options = MountOptions::builder()
