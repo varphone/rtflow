@@ -38,6 +38,23 @@ impl Default for HlsConfig {
     }
 }
 
+/// Named HLS handler set. Prefer this over positional tuples.
+pub struct HlsHandlers {
+    pub playlist: Handler,
+    pub segment: Handler,
+    pub init: Handler,
+}
+
+/// Named-constructor variant of [`create_hls_handlers`].
+pub fn create_hls_router(config: HlsConfig, mount: &crate::mount::MountHandle) -> HlsHandlers {
+    let (playlist, segment, init) = create_hls_handlers(config, mount);
+    HlsHandlers {
+        playlist,
+        segment,
+        init,
+    }
+}
+
 /// Create HLS HTTP handlers backed by a mount startup snapshot and tied to its lifetime.
 pub fn create_hls_handlers(
     config: HlsConfig,

@@ -65,6 +65,23 @@ impl Default for DashConfig {
 /// 1. MPD manifest handler (`/manifest.mpd`)
 /// 2. Media segment handler (`/segment_$Number$.m4s`)
 /// 3. Init segment handler (`/init.mp4`)
+/// Named DASH handler set. Prefer this over positional tuples.
+pub struct DashHandlers {
+    pub manifest: Handler,
+    pub segment: Handler,
+    pub init: Handler,
+}
+
+/// Named-constructor variant of [`create_dash_handlers`].
+pub fn create_dash_router(config: DashConfig, mount: &crate::mount::MountHandle) -> DashHandlers {
+    let (manifest, segment, init) = create_dash_handlers(config, mount);
+    DashHandlers {
+        manifest,
+        segment,
+        init,
+    }
+}
+
 pub fn create_dash_handlers(
     config: DashConfig,
     mount: &crate::mount::MountHandle,

@@ -69,6 +69,18 @@ impl Default for WebRtcConfig {
 /// Returns two handlers:
 /// 1. WHIP handler (for `/whip/*` routes)
 /// 2. WHEP handler (for `/whep/*` routes)
+/// Named WHIP/WHEP handler set. Prefer this over positional tuples.
+pub struct WebRtcHandlers {
+    pub whip: Handler,
+    pub whep: Handler,
+}
+
+/// Named-constructor variant of [`create_webrtc_handlers`].
+pub fn create_webrtc_router(config: WebRtcConfig, mounts: Arc<MountRegistry>) -> WebRtcHandlers {
+    let (whip, whep) = create_webrtc_handlers(config, mounts);
+    WebRtcHandlers { whip, whep }
+}
+
 pub fn create_webrtc_handlers(
     config: WebRtcConfig,
     mounts: Arc<MountRegistry>,
