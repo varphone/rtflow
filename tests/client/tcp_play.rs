@@ -31,6 +31,7 @@ async fn local_h264_frame_reaches_interleaved_client() {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         }],
         connection: None,
     };
@@ -109,6 +110,7 @@ async fn live_stream_accepts_gstreamer_style_zero_npt_range() {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         }],
         connection: None,
     };

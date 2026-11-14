@@ -84,6 +84,7 @@ pub fn track(id: u8, codec: Codec) -> TrackDescription {
         ptime: None,
         rtcp: None,
         bandwidth_as: None,
+        rtx: None,
     }
 }
 

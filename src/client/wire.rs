@@ -28,6 +28,36 @@ pub(super) fn status_error(method: &'static str, status: u16) -> Error {
     }
 }
 
+pub(super) fn unwrap_rtx(
+    packet: crate::rtp::RtpPacket,
+    track: &crate::media::TrackDescription,
+) -> crate::rtp::RtpPacket {
+    unwrap_rtx_config(packet, track.rtx)
+}
+
+pub(super) fn unwrap_rtx_config(
+    packet: crate::rtp::RtpPacket,
+    rtx: Option<crate::media::RtxConfig>,
+) -> crate::rtp::RtpPacket {
+    let Some(rtx) = rtx else {
+        return packet;
+    };
+    if packet.header.payload_type != rtx.payload_type || packet.payload.len() < 2 {
+        return packet;
+    }
+    let sequence = u16::from_be_bytes([packet.payload[0], packet.payload[1]]);
+    crate::rtp::RtpPacket {
+        header: crate::rtp::RtpHeader {
+            marker: packet.header.marker,
+            payload_type: rtx.apt,
+            sequence,
+            timestamp: packet.header.timestamp,
+            ssrc: packet.header.ssrc,
+        },
+        payload: packet.payload.slice(2..),
+    }
+}
+
 pub(super) fn receive_rtp_packet(
     packet: RtpPacket,
     jitter: &mut JitterBuffer,
@@ -333,4 +363,36 @@ pub(super) fn response_session_timeout(response: &Response) -> Option<Duration> 
         })
         .filter(|seconds| *seconds > 0)
         .map(Duration::from_secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::media::RtxConfig;
+
+    #[test]
+    fn unwrap_rtx_restores_original_sequence_and_payload_type() {
+        let packet = crate::rtp::RtpPacket {
+            header: crate::rtp::RtpHeader {
+                marker: true,
+                payload_type: 127,
+                sequence: 5,
+                timestamp: 9000,
+                ssrc: 99,
+            },
+            payload: bytes::Bytes::from_static(&[0, 100, 1, 2, 3]),
+        };
+        let packet = unwrap_rtx_config(
+            packet,
+            Some(RtxConfig {
+                payload_type: 127,
+                ssrc: 99,
+                apt: 96,
+            }),
+        );
+        assert_eq!(packet.header.payload_type, 96);
+        assert_eq!(packet.header.sequence, 100);
+        assert_eq!(packet.header.timestamp, 9000);
+        assert_eq!(&packet.payload[..], &[1, 2, 3]);
+    }
 }

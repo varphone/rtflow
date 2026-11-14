@@ -39,6 +39,7 @@ async fn mixed_transport_fanout_stays_bounded_under_burst() {
                         ptime: None,
                         rtcp: None,
                         bandwidth_as: None,
+                        rtx: None,
                     }],
                     connection: None,
                 },

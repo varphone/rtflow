@@ -407,6 +407,7 @@ mod tests {
                     ptime: None,
                     rtcp: None,
                     bandwidth_as: None,
+                    rtx: None,
                 },
                 TrackDescription {
                     id: 1,
@@ -426,6 +427,7 @@ mod tests {
                     ptime: None,
                     rtcp: None,
                     bandwidth_as: None,
+                    rtx: None,
                 },
             ],
             #[cfg(feature = "multicast")]

@@ -43,6 +43,7 @@ async fn gstreamer_rtspsrc_receives_interleaved_h264() {
                         ptime: None,
                         rtcp: None,
                         bandwidth_as: None,
+                        rtx: None,
                     }],
                     connection: None,
                 },

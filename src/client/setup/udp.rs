@@ -445,7 +445,7 @@ pub(super) async fn connect_udp(
                             None => payload,
                         };
                         let packet = match RtpPacket::parse(payload) {
-                            Ok(packet) => packet,
+                            Ok(packet) => unwrap_rtx(packet, &track),
                             Err(error) => {
                                 if !try_deliver(&tx, Err(error), &mut dropped) {
                                     return;

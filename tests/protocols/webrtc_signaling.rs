@@ -108,6 +108,7 @@ async fn setup_server() -> (std::net::SocketAddr, Arc<MountRegistry>) {
                         ptime: None,
                         rtcp: None,
                         bandwidth_as: None,
+                        rtx: None,
                     }],
                     connection: None,
                 },

@@ -564,6 +564,7 @@ pub(crate) fn track_description(
         bandwidth_as: None,
         #[cfg(feature = "srtp")]
         crypto: None,
+        rtx: None,
     }
 }
 

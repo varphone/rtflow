@@ -1,6 +1,8 @@
 use crate::{
     Error, Result,
-    media::{Codec, MediaDescription, MediaKind, RtcpAddress, SdpDirection, TrackDescription},
+    media::{
+        Codec, MediaDescription, MediaKind, RtcpAddress, RtxConfig, SdpDirection, TrackDescription,
+    },
 };
 use std::{collections::HashSet, sync::Arc};
 
@@ -149,6 +151,7 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                 ptime: None,
                 rtcp: None,
                 bandwidth_as: None,
+                rtx: None,
             });
         } else if let Some(value) = line.strip_prefix("a=rtpmap:") {
             let (pt, encoding) = value
@@ -162,6 +165,11 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                 && payload_candidates.contains(&pt)
             {
                 if parts[0].eq_ignore_ascii_case("RTX") {
+                    track.rtx = Some(RtxConfig {
+                        payload_type: pt,
+                        ssrc: 0,
+                        apt: 0,
+                    });
                     continue;
                 }
                 track.payload_type = pt;
@@ -229,7 +237,18 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                     let (payload_type, fmtp) = fmtp
                         .split_once(' ')
                         .ok_or_else(|| Error::Rtsp("bad fmtp".into()))?;
-                    if payload_type.parse::<u8>().ok() == Some(track.payload_type) {
+                    let parsed_pt = payload_type.parse::<u8>().ok();
+                    if let Some(rtx) = track.rtx.as_mut()
+                        && parsed_pt == Some(rtx.payload_type)
+                    {
+                        if let Some(apt) = fmtp
+                            .split(';')
+                            .find_map(|part| part.trim().strip_prefix("apt="))
+                            .and_then(|value| value.parse::<u8>().ok())
+                        {
+                            rtx.apt = apt;
+                        }
+                    } else if parsed_pt == Some(track.payload_type) {
                         track.fmtp = Some(Arc::from(fmtp));
                     }
                 } else if let Some(control) = value.strip_prefix("control:") {
@@ -291,6 +310,11 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                 "dynamic payload type {} has no rtpmap",
                 track.payload_type
             )));
+        }
+        if let Some(rtx) = track.rtx.as_mut()
+            && rtx.apt == 0
+        {
+            rtx.apt = track.payload_type;
         }
         if track.control.is_empty() {
             track.control = Arc::from(format!("trackID={}", track.id));

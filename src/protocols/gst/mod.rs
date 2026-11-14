@@ -176,6 +176,7 @@ impl GStreamerSource {
                 ptime: None,
                 rtcp: None,
                 bandwidth_as: None,
+                rtx: None,
             })
             .collect();
 

@@ -242,7 +242,11 @@ pub(super) async fn connect_multicast(
         let mut rr_tick = tokio::time::interval(options.rtcp_report_interval);
         rr_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut active: HashMap<u8, (JitterBuffer, Depacketizer, u8, u32, u32)> = HashMap::new();
+        let mut rtx_map = HashMap::new();
         for track in track_list {
+            if let Some(rtx) = track.rtx {
+                rtx_map.insert(rtx.payload_type, rtx);
+            }
             let mut jitter = JitterBuffer::new(crate::rtp::JitterBufferConfig::default());
             let mut depacketizer = Depacketizer::new(track.codec, track.id, track.clock_rate);
             if let Some(info) = rtp_info.get(&track.id) {
@@ -313,6 +317,8 @@ pub(super) async fn connect_multicast(
             let Ok(packet) = RtpPacket::parse(payload) else {
                 continue;
             };
+            let rtx = rtx_map.get(&packet.header.payload_type).copied();
+            let packet = super::unwrap_rtx_config(packet, rtx);
             let Some((jitter, depacketizer, track_id, clock_rate, local_ssrc)) =
                 active.get_mut(&packet.header.payload_type)
             else {

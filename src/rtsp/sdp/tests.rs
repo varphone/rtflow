@@ -118,6 +118,7 @@ fn mp3_and_g726_names_round_trip() {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         };
         let description = MediaDescription {
             session_name: Arc::from("audio"),
@@ -158,6 +159,7 @@ fn legacy_and_av1_video_names_round_trip() {
             bandwidth_as: None,
             #[cfg(feature = "srtp")]
             crypto: None,
+            rtx: None,
         };
         let description = MediaDescription {
             session_name: Arc::from("video"),
@@ -218,6 +220,7 @@ fn crypto_track_is_advertised_as_savp() {
             key_params: "inline:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
             session_params: None,
         }),
+        rtx: None,
     };
     let description = MediaDescription {
         session_name: Arc::from("srtp"),
@@ -259,4 +262,7 @@ fn rtx_is_advertised_and_ignored_by_media_selection() {
     let parsed = parse(encoded.as_bytes()).unwrap();
     assert_eq!(parsed.tracks.len(), 1);
     assert_eq!(parsed.tracks[0].payload_type, 96);
+    let parsed_rtx = parsed.tracks[0].rtx.expect("RTX mapping");
+    assert_eq!(parsed_rtx.payload_type, rtx.payload_type);
+    assert_eq!(parsed_rtx.apt, 96);
 }

@@ -135,6 +135,7 @@
 - Startup cache 与 FrameBus 共享 Arc<AccessUnit>：发布只分配一次，cache/broadcast/startup snapshot 复用；HLS/DASH 仅在需要修改时间戳时 clone。
 - UDP 媒体帧与 NACK 重传使用 Linux `sendmmsg` 批量发送（nix 0.31，target linux）；非 Linux/部分发送/错误自动回退逐包。FrameBus/Startup cache 共享 Arc<AccessUnit>。
 - RTX（RFC 4588）服务端：`ServerConfig.rtx` 开启后 SDP 广告独立 PT/SSRC，NACK 以 RTX 包（OSN+原 payload）重传；SRTP/非 Linux 保持原包重传。客户端 RTX 解包仍未实现。
+- 客户端 RTX：SDP 解析保存 `TrackDescription.rtx`（PT/apt），UDP/interleaved/组播收到 RTX 包后按 OSN 还原原 sequence/PT/payload；新增解析与解包单测。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

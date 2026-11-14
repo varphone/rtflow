@@ -200,6 +200,8 @@ pub struct TrackDescription {
     pub rtcp: Option<RtcpAddress>,
     /// SDP `b=AS` bandwidth in kbit/s.
     pub bandwidth_as: Option<u32>,
+    /// RFC 4588 RTX mapping when the SDP advertised a retransmission stream.
+    pub rtx: Option<RtxConfig>,
     /// SRTP crypto parameters from SDP `a=crypto:` attribute.
     #[cfg(feature = "srtp")]
     pub crypto: Option<crate::media::crypto::SdpCrypto>,
@@ -247,6 +249,7 @@ impl TrackDescription {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -284,6 +287,7 @@ impl TrackDescription {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -310,6 +314,7 @@ impl TrackDescription {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -333,6 +338,7 @@ impl TrackDescription {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -356,6 +362,7 @@ impl TrackDescription {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -379,6 +386,7 @@ impl TrackDescription {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -437,6 +445,7 @@ impl TrackDescription {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }
@@ -460,6 +469,7 @@ impl TrackDescription {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
             #[cfg(feature = "srtp")]
             crypto: None,
         }

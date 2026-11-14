@@ -30,6 +30,7 @@ fn h264_description() -> MediaDescription {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         }],
         #[cfg(feature = "multicast")]
         connection: None,
@@ -381,6 +382,7 @@ fn segmenter_rotates_audio_only_stream_by_time() {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         }],
         #[cfg(feature = "multicast")]
         connection: None,

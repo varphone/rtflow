@@ -58,6 +58,7 @@ pub(super) fn read_description(reader: &mut impl Read) -> Result<MediaDescriptio
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         });
     }
     Ok(MediaDescription {

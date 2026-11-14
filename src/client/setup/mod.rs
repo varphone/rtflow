@@ -5,6 +5,7 @@ use super::{
     session::{PlaySession, SessionParts},
     wire::{
         drain_jitter, receive_rtp_packet, request, response_session_id, response_session_timeout,
+        unwrap_rtx, unwrap_rtx_config,
     },
 };
 use crate::{

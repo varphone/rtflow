@@ -27,6 +27,7 @@ fn description() -> MediaDescription {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         }],
         connection: None,
     }

@@ -15,6 +15,7 @@ pub(super) async fn connect_interleaved(
     let mut session_timeout = None;
     let mut tracks = HashMap::new();
     let mut rtcp_channels = HashMap::new();
+    let mut rtx_map = HashMap::new();
     #[cfg(feature = "srtp")]
     let mut interleaved_crypto: HashMap<
         u8,
@@ -149,6 +150,9 @@ pub(super) async fn connect_interleaved(
                     }));
                 }
             }
+        }
+        if let Some(rtx) = track.rtx {
+            rtx_map.insert(channel, rtx);
         }
         tracks.insert(
             channel,
@@ -420,7 +424,10 @@ pub(super) async fn connect_interleaved(
                                     #[cfg(not(feature = "srtp"))]
                                     let payload = frame.payload.clone();
                                     let packet = match RtpPacket::parse(payload) {
-                                        Ok(packet) => packet,
+                                        Ok(packet) => unwrap_rtx_config(
+                                            packet,
+                                            rtx_map.get(&frame.channel).copied(),
+                                        ),
                                         Err(error) => {
                                             if !try_deliver(&tx, Err(error), &mut dropped) {
                                                 return;

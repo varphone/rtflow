@@ -446,6 +446,7 @@ pub fn tracks_from_rtmp(
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         });
     }
 
@@ -476,6 +477,7 @@ pub fn tracks_from_rtmp(
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+rtx: None,
 });
     }
 

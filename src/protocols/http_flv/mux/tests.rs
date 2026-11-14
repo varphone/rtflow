@@ -28,6 +28,7 @@ fn make_h264_description() -> MediaDescription {
                 ptime: None,
                 rtcp: None,
                 bandwidth_as: None,
+                rtx: None,
             },
             TrackDescription {
                 id: 1,
@@ -47,6 +48,7 @@ fn make_h264_description() -> MediaDescription {
                 ptime: None,
                 rtcp: None,
                 bandwidth_as: None,
+                rtx: None,
             },
         ],
         #[cfg(feature = "multicast")]
@@ -75,6 +77,7 @@ fn make_h265_description() -> MediaDescription {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         }],
         #[cfg(feature = "multicast")]
         connection: None,
@@ -111,6 +114,7 @@ fn flv_header_audio_only() {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         }],
         #[cfg(feature = "multicast")]
         connection: None,
@@ -297,6 +301,7 @@ fn encode_h264_tag_payload_is_avcc() {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         }],
         #[cfg(feature = "multicast")]
         connection: None,
@@ -366,6 +371,7 @@ fn g711_tag_pts_normalized_to_zero() {
             ptime: None,
             rtcp: None,
             bandwidth_as: None,
+            rtx: None,
         }],
         #[cfg(feature = "multicast")]
         connection: None,

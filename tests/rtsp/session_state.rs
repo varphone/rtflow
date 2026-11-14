@@ -52,6 +52,7 @@ async fn rejects_invalid_session_and_state_transitions() {
                         ptime: None,
                         rtcp: None,
                         bandwidth_as: None,
+                        rtx: None,
                     }],
                     connection: None,
                 },
