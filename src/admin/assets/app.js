@@ -448,9 +448,9 @@
           // default; high-fps streams produce short segments and can hit
           // the edge before the next segment finishes.
           liveSyncDurationCount: 3,
-          maxBufferLength: 30,
+          maxBufferLength: 10,
           liveMaxLatencyDurationCount: 6,
-          backBufferLength: 30,
+          backBufferLength: 10,
         });
         state.hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data && data.fatal) {
@@ -461,14 +461,40 @@
         });
         state.hls.loadSource(url);
         state.hls.attachMedia(video);
+        const startHlsPlayback = () => {
+          // Firefox can attach MSE data starting at a live-edge PTS while
+          // currentTime stays 0; seeking into the first buffered range
+          // avoids a long spinner before the player corrects itself.
+          if (video.currentTime === 0 && video.buffered.length) {
+            const start = video.buffered.start(0);
+            video.currentTime = start + 0.05;
+          }
+          video.play().catch(() => {
+            status.textContent = "hls.js 播放（点击播放开始）";
+          });
+        };
+        state.hls.once(Hls.Events.MANIFEST_PARSED, startHlsPlayback);
+        state.hls.on(Hls.Events.LEVEL_LOADED, startHlsPlayback);
+        state.hls.on(Hls.Events.BUFFER_APPENDED, startHlsPlayback);
         status.textContent = "hls.js 播放";
       } else if (native) {
         video.src = url;
+        video.addEventListener(
+          "loadedmetadata",
+          () => video.play().catch(() => { status.textContent += "（点击播放开始）"; }),
+          { once: true },
+        );
         status.textContent = "使用浏览器原生 HLS 播放";
       } else {
         throw new Error("当前浏览器不支持 HLS 播放");
       }
-      video.play().catch(() => { status.textContent += "（点击播放开始）"; });
+      // A media element with no source yet can reject play() in Firefox
+      // before MSE attaches. Retry when the first data is playable.
+      video.addEventListener(
+        "canplay",
+        () => video.play().catch(() => {}),
+        { once: true },
+      );
     } catch (error) {
       status.textContent = error.message;
     }
