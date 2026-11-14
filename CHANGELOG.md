@@ -38,6 +38,9 @@
   足够回看窗口。
 - HLS live 每 mount 严格单 segmenter 所有权；worker 退出只清自己的
   ring，避免两个 sequence 计数器交叉写入产生 114/115/116/115。
+- HLS ring 保留 3× playlist 窗口（默认 30 段 playlist / 90 段历史），
+  多标签页或后台节流导致晚到的 segment 请求仍能命中，不再反复 404
+  重试同一序号。
 - segment sequence 跨 segmenter 重启保持单调；SegmentRing 拒绝
   非递增序列，playlist 不会再回退。
 - HLS live playlist 使用相对 URI，并在首个 segment 就绪前最多等待

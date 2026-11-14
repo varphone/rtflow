@@ -9,17 +9,29 @@ pub const MAX_SEGMENTS: usize = 128;
 /// Bounded ring buffer for completed segments.
 pub struct SegmentRing {
     segments: RwLock<VecDeque<Segment>>,
+    /// Playlist window (`EXT-X-MEDIA-SEQUENCE` .. last).
+    playlist_segments: usize,
+    /// Total retained segments. Larger than the playlist window so a
+    /// client that falls behind (background tab, slow segment fetch) can
+    /// still fetch a segment that has just left the playlist instead of
+    /// retrying a 404 forever.
     max_segments: usize,
 }
 
 impl SegmentRing {
     pub fn new(max_segments: usize) -> Self {
-        // Config validation clamps/normalizes this; keep the type itself
-        // panic-free even for a direct zero-capacity call.
-        let max_segments = max_segments.clamp(1, MAX_SEGMENTS);
+        Self::with_retention(max_segments, max_segments)
+    }
+
+    /// `playlist_segments` is the advertised window; `retained_segments`
+    /// (at least the window) is kept for late segment requests.
+    pub fn with_retention(playlist_segments: usize, retained_segments: usize) -> Self {
+        let retained = retained_segments.clamp(1, MAX_SEGMENTS);
+        let playlist = playlist_segments.clamp(1, retained);
         Self {
-            segments: RwLock::new(VecDeque::with_capacity(max_segments)),
-            max_segments,
+            segments: RwLock::new(VecDeque::with_capacity(retained)),
+            playlist_segments: playlist,
+            max_segments: retained,
         }
     }
 
@@ -50,7 +62,16 @@ impl SegmentRing {
             .segments
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        segments.iter().cloned().collect()
+        let mut snapshot: Vec<Segment> = segments
+            .iter()
+            .rev()
+            .take(self.playlist_segments)
+            .cloned()
+            .collect();
+        // Push already enforces monotonic order, but sorting makes the
+        // playlist deterministic even if a future producer changes that.
+        snapshot.sort_by_key(|segment| segment.sequence);
+        snapshot
     }
 
     /// Get the latest init segment data.
@@ -73,11 +94,12 @@ impl SegmentRing {
         if sequence < first || sequence > last {
             return None;
         }
-        // Sequences are contiguous; index directly instead of a linear scan.
-        let index = (sequence - first) as usize;
+        // Do not index by (sequence - first): a dropped segment (e.g. a
+        // broadcast lag in an older producer) leaves a gap and would make
+        // every later segment 404, which hls.js retries indefinitely.
         segments
-            .get(index)
-            .filter(|s| s.sequence == sequence)
+            .iter()
+            .find(|segment| segment.sequence == sequence)
             .cloned()
     }
 
@@ -119,5 +141,44 @@ mod tests {
     fn oversized_window_is_clamped() {
         let ring = SegmentRing::new(usize::MAX);
         assert_eq!(ring.max_segments, MAX_SEGMENTS);
+    }
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::*;
+    use crate::protocols::hls::segmenter::Segment;
+    use bytes::Bytes;
+    use std::time::Duration;
+
+    fn segment(sequence: u64) -> Segment {
+        Segment {
+            sequence,
+            duration: Duration::from_secs(1),
+            init: Bytes::new(),
+            data: Bytes::new(),
+            starts_with_keyframe: true,
+            discontinuity: false,
+            discontinuity_sequence: None,
+            timestamp: Duration::from_secs(sequence),
+        }
+    }
+
+    #[test]
+    fn playlist_window_is_smaller_than_retention() {
+        let ring = SegmentRing::with_retention(2, 5);
+        for sequence in 0..5 {
+            ring.push(segment(sequence));
+        }
+        let playlist = ring.snapshot();
+        assert_eq!(
+            playlist.iter().map(|s| s.sequence).collect::<Vec<_>>(),
+            vec![3, 4]
+        );
+        assert!(
+            ring.get(0).is_some(),
+            "evicted playlist segment stays fetchable"
+        );
+        assert_eq!(ring.len(), 5);
     }
 }

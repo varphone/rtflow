@@ -58,7 +58,10 @@ impl HlsLiveManager {
             .entry(key)
             .or_insert_with(|| {
                 Arc::new(Channel {
-                    ring: Arc::new(SegmentRing::new(self.config.segment_count)),
+                    ring: Arc::new(SegmentRing::with_retention(
+                        self.config.segment_count,
+                        self.config.segment_count.saturating_mul(3),
+                    )),
                     active: Arc::new(Mutex::new(None)),
                     next_generation: AtomicU64::new(0),
                     next_sequence: Arc::new(AtomicU64::new(0)),

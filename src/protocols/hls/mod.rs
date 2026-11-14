@@ -72,7 +72,10 @@ pub fn create_hls_handlers(
     config: HlsConfig,
     mount: &crate::mount::MountHandle,
 ) -> (Handler, Handler, Handler) {
-    let ring = Arc::new(SegmentRing::new(config.segment_count));
+    let ring = Arc::new(SegmentRing::with_retention(
+        config.segment_count,
+        config.segment_count.saturating_mul(3),
+    ));
     let target_duration = config.segment_duration;
     let is_live = config.live;
     let mut description: MediaDescription = mount.description();
