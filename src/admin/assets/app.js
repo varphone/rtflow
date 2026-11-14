@@ -441,7 +441,17 @@
     try {
       const Hls = await loadHls().catch(() => null);
       if (Hls && Hls.isSupported()) {
-        state.hls = new Hls({ liveDurationInfinity: true, enableWorker: false });
+        state.hls = new Hls({
+          liveDurationInfinity: true,
+          enableWorker: false,
+          // Keep more of the live window buffered than hls.js's 3-target
+          // default; high-fps streams produce short segments and can hit
+          // the edge before the next segment finishes.
+          liveSyncDurationCount: 3,
+          maxBufferLength: 10,
+          liveMaxLatencyDurationCount: 6,
+          backBufferLength: 10,
+        });
         state.hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data && data.fatal) {
             status.textContent = "播放失败：" + (data.details || "未知错误") +

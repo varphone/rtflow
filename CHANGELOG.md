@@ -32,6 +32,9 @@
   `Cannot read properties of undefined (reading 'toString')`。
 - HLS init/segment 改为 `no-store`，live playlist 内嵌 URI 带每次
   启动唯一的 `?v=` 令牌，避免浏览器磁盘缓存复用旧 init。
+- HLS segmenter 在首个视频 IDR 前丢弃音频，segment 不再从音频 PTS
+  开始；60 fps 短分段起播不再等待/卡顿。示例 live 窗口增至 10 段，
+  hls.js 使用 3 个目标时长同步和 10 秒缓冲。
 - HLS live playlist 使用相对 URI，并在首个 segment 就绪前最多等待
   3 秒；harness/hls.js 不再因空 playlist 判为 fatal。
 - 管理台播放器在 Chromium/Edge 上优先使用 hls.js，而不是信任

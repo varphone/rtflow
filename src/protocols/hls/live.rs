@@ -114,16 +114,23 @@ impl HlsLiveManager {
                         },
                     }
                 };
-                if awaiting_keyframe
-                    && matches!(
+                if awaiting_keyframe {
+                    let video = matches!(
                         unit.codec,
                         crate::media::Codec::H264 | crate::media::Codec::H265
-                    )
-                {
-                    if !unit.is_keyframe {
+                    );
+                    if video {
+                        if !unit.is_keyframe {
+                            continue;
+                        }
+                        awaiting_keyframe = false;
+                    } else {
+                        // Do not let audio start a segment before the first
+                        // video IDR: the segment would begin at an audio PTS
+                        // and the video track would join it mid-GOP. hls.js
+                        // then has no decodable video at the segment start.
                         continue;
                     }
-                    awaiting_keyframe = false;
                 }
                 if from_startup || !startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
                     segmenter.push((*unit).clone());

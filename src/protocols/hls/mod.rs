@@ -128,16 +128,19 @@ pub fn create_hls_handlers(
                     },
                 }
             };
-            if awaiting_keyframe
-                && matches!(
+            if awaiting_keyframe {
+                let video = matches!(
                     unit.codec,
                     crate::media::Codec::H264 | crate::media::Codec::H265
-                )
-            {
-                if !unit.is_keyframe {
+                );
+                if video {
+                    if !unit.is_keyframe {
+                        continue;
+                    }
+                    awaiting_keyframe = false;
+                } else {
                     continue;
                 }
-                awaiting_keyframe = false;
             }
             // Skip broadcast replays of frames the startup snapshot already
             // delivered (duplicate keyframes would corrupt segment timing).
