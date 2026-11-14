@@ -42,6 +42,28 @@ pub struct HlsLiveManager {
 }
 
 impl HlsLiveManager {
+    /// Start segmenters for all existing/future live mounts. Without this,
+    /// the first viewer pays the first-segment startup latency and every
+    /// viewer's first playlist starts with an empty ring.
+    pub fn start(self: &Arc<Self>) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            loop {
+                for path in manager.registry.paths() {
+                    let Some(mount) = manager.registry.get_handle(path.as_str()) else {
+                        continue;
+                    };
+                    if mount.description().tracks.is_empty() {
+                        continue;
+                    }
+                    let channel = manager.channel(&mount);
+                    manager.ensure_started(&mount, &channel);
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        });
+    }
+
     pub fn new(registry: Arc<MountRegistry>, config: HlsConfig) -> Self {
         Self {
             registry,

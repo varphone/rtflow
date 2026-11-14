@@ -44,6 +44,9 @@
 - 管理台 hls.js 升级到 1.6.15；Firefox 在 MSE 首帧到达前 play() 失败
   时于 MANIFEST_PARSED/LEVEL_LOADED/BUFFER_APPENDED 重试，并 seek 到
   首个 buffered 区间，避免长时间停在 0 秒。
+- HLS live manager 可在 mount 发布后主动启动 segmenter（示例调用
+  `HlsLiveManager::start`），观众打开页面时 playlist 已有切片，首帧
+  不再等待首个分段生成。
 - segment sequence 跨 segmenter 重启保持单调；SegmentRing 拒绝
   非递增序列，playlist 不会再回退。
 - HLS live playlist 使用相对 URI，并在首个 segment 就绪前最多等待

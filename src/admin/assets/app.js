@@ -403,6 +403,10 @@
 
   function closeModal() {
     state.modal = null;
+    if (state.playTimer) {
+      clearInterval(state.playTimer);
+      state.playTimer = null;
+    }
     modalRoot.innerHTML = "";
     if (state.hls) { try { state.hls.destroy(); } catch (_) {} state.hls = null; }
   }
@@ -418,7 +422,7 @@
         // Fallback for deployments that serve an older asset cache; the
         // console remains usable with the bundled copy in normal builds.
         const fallback = document.createElement("script");
-        fallback.src = "https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js";
+        fallback.src = "https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js";
         fallback.crossOrigin = "anonymous";
         fallback.onload = () => resolve(window.Hls);
         fallback.onerror = () => reject(new Error("无法加载 HLS 播放器"));
@@ -459,8 +463,6 @@
               (data.error && data.error.message ? " · " + data.error.message : "");
           }
         });
-        state.hls.loadSource(url);
-        state.hls.attachMedia(video);
         const startHlsPlayback = () => {
           // Firefox can attach MSE data starting at a live-edge PTS while
           // currentTime stays 0; seeking into the first buffered range
@@ -473,10 +475,30 @@
             status.textContent = "hls.js 播放（点击播放开始）";
           });
         };
+        // Register listeners before loadSource/attachMedia: MANIFEST_PARSED
+        // can fire synchronously for a cached local playlist.
         state.hls.once(Hls.Events.MANIFEST_PARSED, startHlsPlayback);
         state.hls.on(Hls.Events.LEVEL_LOADED, startHlsPlayback);
         state.hls.on(Hls.Events.BUFFER_APPENDED, startHlsPlayback);
+        state.hls.on(Hls.Events.MEDIA_ATTACHED, () => state.hls.loadSource(url));
+        state.hls.attachMedia(video);
         status.textContent = "hls.js 播放";
+        // Some Firefox/Windows MSE builds do not fire the events above
+        // while currentTime is still 0. Nudge it into the first buffered
+        // range for the first 10 seconds; real user pauses are untouched
+        // once playback advances past zero.
+        if (state.playTimer) clearInterval(state.playTimer);
+        let nudges = 0;
+        state.playTimer = setInterval(() => {
+          if (video.currentTime === 0 && video.buffered.length) {
+            video.currentTime = video.buffered.start(0) + 0.05;
+            video.play().catch(() => {});
+          }
+          if (++nudges > 20) {
+            clearInterval(state.playTimer);
+            state.playTimer = null;
+          }
+        }, 500);
       } else if (native) {
         video.src = url;
         video.addEventListener(

@@ -112,6 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             live: true,
         },
     ));
+    live.start();
     let mut http = HttpServer::bind(HttpConfig::new(args.http)).await?;
     http.add_route(Method::Get, "/hls/*", create_hls_live_handler(live))
         .await;
