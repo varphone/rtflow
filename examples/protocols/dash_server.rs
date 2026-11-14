@@ -1,5 +1,5 @@
 use clap::Parser;
-use rtflow::dash::{DashConfig, create_dash_handlers};
+use rtflow::dash::{DashConfig, create_dash_router};
 use rtflow::http::{HttpConfig, HttpServer, Method};
 use rtflow::{MountConfig, RtspServer, ServerConfig};
 use rtflow_testkit::example::{CodecArg, init_tracing, mount_path, publisher_description};
@@ -329,7 +329,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         segment_count: args.segment_count,
         ..Default::default()
     };
-    let (mpd_handler, segment_handler, init_handler) = create_dash_handlers(dash_config, &mount);
+    let handlers = create_dash_router(dash_config, &mount);
+    let (mpd_handler, segment_handler, init_handler) =
+        (handlers.manifest, handlers.segment, handlers.init);
 
     // Register DASH routes
     let mpd_path = format!("{}/manifest.mpd", args.mount);

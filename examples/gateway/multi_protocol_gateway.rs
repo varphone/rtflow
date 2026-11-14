@@ -1,12 +1,12 @@
 use clap::Parser;
-use rtflow::dash::{DashConfig, create_dash_handlers};
+use rtflow::dash::{DashConfig, create_dash_router};
 use rtflow::gateway::Gateway;
-use rtflow::hls::{HlsConfig, create_hls_handlers};
+use rtflow::hls::{HlsConfig, create_hls_router};
 use rtflow::http::auth_middleware::with_token_auth_bypass;
 use rtflow::http::{HttpConfig, Method};
 use rtflow::http_flv::create_flv_handler;
 use rtflow::token_auth::{TokenConfig, generate_token};
-use rtflow::webrtc::{WebRtcConfig, create_webrtc_handlers};
+use rtflow::webrtc::{WebRtcConfig, create_webrtc_router};
 use rtflow::{MountConfig, ServerConfig};
 use rtflow_testkit::example::{CodecArg, init_tracing, mount_path, publisher_description};
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
@@ -110,7 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         segment_count: 5,
         live: true,
     };
-    let (hls_playlist, hls_segment, hls_init) = create_hls_handlers(hls_config, &mount);
+    let handlers = create_hls_router(hls_config, &mount);
+    let (hls_playlist, hls_segment, hls_init) =
+        (handlers.playlist, handlers.segment, handlers.init);
 
     // Token auth configuration (if --auth-secret is provided)
     let token_config = args.auth_secret.as_ref().map(|secret| TokenConfig {
@@ -158,7 +160,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         segment_count: 5,
         ..Default::default()
     };
-    let (dash_mpd, dash_segment, dash_init) = create_dash_handlers(dash_config, &mount);
+    let handlers = create_dash_router(dash_config, &mount);
+    let (dash_mpd, dash_segment, dash_init) = (handlers.manifest, handlers.segment, handlers.init);
     http_server
         .add_route(
             Method::Get,
@@ -197,7 +200,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
     let webrtc_mounts = Arc::new(rtflow::mount::MountRegistry::new(10));
-    let (whip_handler, whep_handler) = create_webrtc_handlers(webrtc_config, webrtc_mounts);
+    let handlers = create_webrtc_router(webrtc_config, webrtc_mounts);
+    let (whip_handler, whep_handler) = (handlers.whip, handlers.whep);
     let whip_path = format!("/whip{}", args.mount);
     let whep_path = format!("/whep{}", args.mount);
     http_server

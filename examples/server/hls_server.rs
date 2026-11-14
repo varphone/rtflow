@@ -1,5 +1,5 @@
 use clap::Parser;
-use rtflow::hls::{HlsConfig, create_hls_handlers};
+use rtflow::hls::{HlsConfig, create_hls_router};
 use rtflow::http::{HttpConfig, HttpServer, Method};
 use rtflow::{MountConfig, RtspServer, ServerConfig};
 use rtflow_testkit::example::{CodecArg, init_tracing, mount_path, publisher_description};
@@ -75,7 +75,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         segment_count: args.segment_count,
         live: true,
     };
-    let (playlist_handler, segment_handler, init_handler) = create_hls_handlers(hls_config, &mount);
+    let handlers = create_hls_router(hls_config, &mount);
+    let (playlist_handler, segment_handler, init_handler) =
+        (handlers.playlist, handlers.segment, handlers.init);
 
     // Register HLS routes
     let playlist_path = format!("{}.m3u8", args.mount);

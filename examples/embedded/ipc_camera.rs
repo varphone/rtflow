@@ -21,7 +21,7 @@
 //!   # browser playback (WS-FLV / HTTP-FLV / HLS): open
 //!   #   http://127.0.0.1:8080/   (--no-web to disable the HTTP/WS servers)
 use clap::{Parser, ValueEnum};
-use rtflow::hls::{HlsConfig, create_hls_handlers};
+use rtflow::hls::{HlsConfig, create_hls_router};
 use rtflow::http::{HttpConfig, HttpServer, Method};
 use rtflow::http_flv::create_flv_handler;
 use rtflow::http_flv::web::{WebPlayerConfig, WebPlayerMode, create_web_player_handler};
@@ -306,7 +306,8 @@ async fn main() -> rtflow::Result<()> {
                 segment_count: 5,
                 live: true,
             };
-            let (playlist, segment, init) = create_hls_handlers(hls_config, mount);
+            let handlers = create_hls_router(hls_config, mount);
+            let (playlist, segment, init) = (handlers.playlist, handlers.segment, handlers.init);
             web.add_route(Method::Get, &format!("{path}.m3u8"), playlist)
                 .await;
             web.add_route(Method::Get, &format!("{path}/init.m4s"), init)
