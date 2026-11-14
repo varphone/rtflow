@@ -208,6 +208,28 @@ async fn rtmp_publish_delivers_video_to_mount() {
         .and_then(|v| v.as_str());
     assert_eq!(code, Some("NetStream.Publish.Start"));
 
+    // Send onMetaData with dimensions/framerate before the sequence header.
+    let metadata = encode_values(&[
+        AmfValue::Str("@setDataFrame".into()),
+        AmfValue::Str("onMetaData".into()),
+        AmfValue::EcmaArray(vec![
+            ("width".into(), AmfValue::Number(640.0)),
+            ("height".into(), AmfValue::Number(360.0)),
+            ("framerate".into(), AmfValue::Number(30.0)),
+        ]),
+    ]);
+    let metadata_msg = RtmpMessage {
+        chunk_stream_id: 5,
+        timestamp: 0,
+        msg_type: MessageType::DataAmf0 as u8,
+        msg_stream_id: 1,
+        payload: metadata,
+    };
+    stream
+        .write_all(&chunker.encode(&metadata_msg))
+        .await
+        .unwrap();
+
     // Now send H.264 sequence header (AVC decoder configuration record)
     // Minimal AVCDecoderConfigurationRecord: version=1, profile=66, compat=0, level=30
     // numSPS=1, spsLen=4, sps=[67 42 00 1e], numPPS=1, ppsLen=4, pps=[68 ce 3c 80]
@@ -271,6 +293,16 @@ async fn rtmp_publish_delivers_video_to_mount() {
     assert!(handle.is_some(), "Mount /live/test_stream should exist");
 
     let handle = handle.unwrap();
+    let description = handle.description();
+    assert_eq!(
+        description.tracks.len(),
+        1,
+        "sequence header must create a video track"
+    );
+    assert_eq!(description.tracks[0].codec, rtflow::Codec::H264);
+    assert_eq!(description.tracks[0].width, Some(640));
+    assert_eq!(description.tracks[0].height, Some(360));
+    assert_eq!(description.tracks[0].frame_rate, Some((30, 1)));
     let (mut rx, _startup) = handle.subscribe_with_startup();
 
     // Send another frame to verify live delivery
@@ -483,5 +515,80 @@ async fn rtmp_idle_timeout_disconnects() {
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(!cancel.is_cancelled());
 
+    cancel.cancel();
+}
+
+#[tokio::test]
+async fn rtmp_publish_rejects_invalid_url_token() {
+    use rtflow::rtmp::{RtmpConfig, session::RtmpSessionConfig};
+    use rtflow::token_auth::TokenConfig;
+
+    let mounts = Arc::new(MountRegistry::new(4));
+    let token = TokenConfig::new(b"secret".to_vec());
+    let mut config = RtmpConfig {
+        bind_addr: "127.0.0.1:0".parse().unwrap(),
+        ..RtmpConfig::default()
+    };
+    config.session = RtmpSessionConfig {
+        token: Some(token),
+        ..RtmpSessionConfig::default()
+    };
+    let server = RtmpServer::with_config(config, mounts.clone())
+        .await
+        .unwrap();
+    let addr = server.local_addr().unwrap();
+    let cancel = server.cancellation_token();
+    tokio::spawn(server.run());
+
+    let mut stream = connect_client(addr).await;
+    let chunker = Chunker::new();
+    let mut dechunker = Dechunker::new();
+    send_command(
+        &mut stream,
+        &chunker,
+        3,
+        &[
+            AmfValue::Str("connect".into()),
+            AmfValue::Number(1.0),
+            AmfValue::Object(vec![("app".into(), AmfValue::Str("live".into()))]),
+        ],
+    )
+    .await;
+    let _ = read_messages(&mut stream, &mut dechunker, 2000).await;
+    send_command(
+        &mut stream,
+        &chunker,
+        3,
+        &[
+            AmfValue::Str("createStream".into()),
+            AmfValue::Number(2.0),
+            AmfValue::Null,
+        ],
+    )
+    .await;
+    let _ = read_messages(&mut stream, &mut dechunker, 2000).await;
+    send_command(
+        &mut stream,
+        &chunker,
+        3,
+        &[
+            AmfValue::Str("publish".into()),
+            AmfValue::Number(3.0),
+            AmfValue::Null,
+            AmfValue::Str("cam?token=invalid".into()),
+            AmfValue::Str("live".into()),
+        ],
+    )
+    .await;
+    let messages = read_messages(&mut stream, &mut dechunker, 2000).await;
+    let error = find_command(&messages, "_error").expect("denied status");
+    assert_eq!(
+        error
+            .get(3)
+            .and_then(|object| object.get("code"))
+            .and_then(|value| value.as_str()),
+        Some("NetStream.Publish.Denied")
+    );
+    assert!(mounts.get_handle("/live/cam").is_none());
     cancel.cancel();
 }

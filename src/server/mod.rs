@@ -426,7 +426,7 @@ impl RtspServer {
         #[cfg(feature = "multicast")]
         let mount = handle.inner.clone();
         #[cfg(feature = "multicast")]
-        let description = handle.description.clone();
+        let description = handle.description();
         emit(
             &self.state.config.event_sink,
             FrameworkEvent::Mount(MountEvent::Registered {

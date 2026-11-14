@@ -238,13 +238,10 @@ pub(super) async fn handle_play(
                 .config
                 .rtx
                 .then(|| {
-                    crate::mount::description_for(&mount.config)
-                        .ok()
-                        .and_then(|description| {
-                            crate::media::rtx_configs(&description)
-                                .get(&track.id)
-                                .copied()
-                        })
+                    let description = mount.description_snapshot();
+                    crate::media::rtx_configs(&description)
+                        .get(&track.id)
+                        .copied()
                 })
                 .flatten();
             resources.senders.push(if let Some(output) = &vod_output {
@@ -295,13 +292,10 @@ pub(super) async fn handle_play(
                 .config
                 .rtx
                 .then(|| {
-                    crate::mount::description_for(&mount.config)
-                        .ok()
-                        .and_then(|description| {
-                            crate::media::rtx_configs(&description)
-                                .get(&track.id)
-                                .copied()
-                        })
+                    let description = mount.description_snapshot();
+                    crate::media::rtx_configs(&description)
+                        .get(&track.id)
+                        .copied()
                 })
                 .flatten();
             resources.senders.push(if let Some(output) = &vod_output {

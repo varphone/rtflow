@@ -68,6 +68,18 @@ ffmpeg -re -i input.mp4 -c copy \
 
 其他客户端可以同时拉取同一 `/ingest`。框架本期只提供 RECORD 接收服务，不提供 Rust ANNOUNCE/RECORD 客户端 API。
 
+## RTMP 推流 + HLS 直播/点播 + 控制台
+
+```bash
+cargo run --example live_vod_gateway --features "server,rtmp,hls,http-flv,file-storage,mp4,mkv" \
+  --vod-file demo=tests/fixtures/h264-aac.mp4 --vod-cache /tmp/rtflow-vod
+```
+
+- OBS：服务器 `rtmp://127.0.0.1:1935/live`，串流密钥 `cam`；凭据模式可用
+  `cam?token=<HMAC>`（`--token secret`）。
+- 浏览器：`http://127.0.0.1:8080/` 浏览直播/VOD，`/admin` 只读状态表。
+- HLS 直播：`/hls/live/cam/index.m3u8`；VOD：`/vod/demo/index.m3u8`。
+
 ## IPC 摄像头 + 网页播放
 
 `ipc_camera` 模拟 HiMPP 双码流（main/sub）+ 可选音频，并默认同时启动

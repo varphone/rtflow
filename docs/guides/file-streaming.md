@@ -56,3 +56,12 @@ cargo run --example recording_vod_server -- recordings --mount /archive
 ```
 
 普通 MP4/MKV/TS 的每会话 VOD 可实现同一 `VodSource` 接口；共享 `FileSource` 不会被隐式改成 N 份 reader。
+
+### HLS 点播
+
+录制目录或普通文件可作为 HLS VOD 源：`HlsVodEntry` 接受任意
+`Arc<dyn VodSource>`（录制用 `RecordingVodSource`，文件用
+`FileVodSource`），`HlsVodManager` 首次请求时用现有 fMP4 Segmenter
+生成段并原子写入 `cache_dir/vod/{id}`，之后直接服务 playlist/segment。
+生成失败不会暴露半成品；VOD playlist 使用 `EXT-X-ENDLIST`。
+支持 `/vod/{id}/index.m3u8`、`init.m4s`、`{seq}.m4s`，播放器按段 seek。

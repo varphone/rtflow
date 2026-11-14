@@ -103,7 +103,7 @@ pub fn create_dash_handlers(
     #[cfg(feature = "metrics")]
     let metrics = crate::metrics::registry_from_sink(&mount.inner.event_sink);
     let dash_state = Arc::new(DashState::new());
-    let mut description: MediaDescription = mount.description.clone();
+    let mut description: MediaDescription = mount.description();
     let announced_fmtp = mount.announce_fmtp();
     for track in &mut description.tracks {
         if let Some(fmtp) = announced_fmtp.get(&track.id) {

@@ -1,3 +1,4 @@
+pub mod console;
 pub mod handler;
 pub mod mux;
 pub mod web;
@@ -12,7 +13,7 @@ use std::sync::Arc;
 /// Each client receives the cached decodable stream start, followed by a
 /// fresh subscription to live frames.
 pub fn create_flv_handler(mount: &crate::mount::MountHandle) -> Handler {
-    let description = mount.description.clone();
+    let description = mount.description();
     let mount_clone = mount.clone();
     // Track active FLV viewer count in the global registry (if mounted).
     #[cfg(feature = "metrics")]

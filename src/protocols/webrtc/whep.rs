@@ -81,7 +81,7 @@ pub async fn handle_whep_post(
         .ok_or_else(|| Error::Http("WHEP: mount not found".into()))?;
     // At least one WebRTC-playable track (video, or Opus/G.711/AAC audio)
     // must exist; audio-only mounts are valid (e.g. voice intercom).
-    let playable = mount.description.tracks.iter().any(|t| match t.kind {
+    let playable = mount.description().tracks.iter().any(|t| match t.kind {
         crate::media::MediaKind::Video => true,
         crate::media::MediaKind::Audio => {
             matches!(
@@ -128,7 +128,7 @@ pub async fn handle_whep_post(
     // AAC-LC (Chrome/Safari). AAC/G.711 sources have no transcoding, the
     // frames pass through as-is.
     let mut senders = Vec::new();
-    for track in &mount.description.tracks {
+    for track in &mount.description().tracks {
         let (kind, codec) = match track.kind {
             crate::media::MediaKind::Video => (RtpCodecKind::Video, track.codec),
             crate::media::MediaKind::Audio

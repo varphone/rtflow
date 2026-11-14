@@ -71,7 +71,12 @@ impl LocalPublisher {
             self.inner.stats.add_dropped(1);
             return Ok(PushResult::Dropped);
         }
-        let Some(expected) = self.inner.codec_by_track[frame.track_id as usize] else {
+        let expected = self
+            .inner
+            .codec_by_track
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)[frame.track_id as usize];
+        let Some(expected) = expected else {
             return Err(Error::Media(format!(
                 "mount has no track {}",
                 frame.track_id

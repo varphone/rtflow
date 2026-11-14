@@ -132,18 +132,13 @@ fn mounts_json(registry: &MountRegistry) -> Vec<u8> {
             out.push(',');
         }
         let handle = registry.get_handle(path);
-        let video = handle.as_ref().and_then(|h| {
-            h.description
-                .tracks
-                .iter()
-                .find(|t| t.kind == MediaKind::Video)
-        });
-        let audio = handle.as_ref().and_then(|h| {
-            h.description
-                .tracks
-                .iter()
-                .find(|t| t.kind == MediaKind::Audio)
-        });
+        let description = handle.as_ref().map(|h| h.description());
+        let video = description
+            .as_ref()
+            .and_then(|d| d.tracks.iter().find(|t| t.kind == MediaKind::Video));
+        let audio = description
+            .as_ref()
+            .and_then(|d| d.tracks.iter().find(|t| t.kind == MediaKind::Audio));
         let name = path.rsplit('/').next().unwrap_or(path);
         out.push_str(&format!(
             "{{\"path\":\"{}\",\"name\":\"{}\",\"video\":\"{}\",\"audio\":\"{}\",\

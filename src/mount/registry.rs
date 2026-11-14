@@ -298,10 +298,13 @@ impl MountRegistry {
                 }
                 counters
             },
+            description: std::sync::RwLock::new(description.clone()),
             #[cfg(feature = "server")]
             startup_cache: Mutex::new(startup_cache),
+            #[cfg(feature = "server")]
+            startup_cache_config: options.startup_cache_config.unwrap_or_default(),
             bootstrap: Mutex::new(std::array::from_fn(|_| None)),
-            codec_by_track: codec_lookup_table(&description),
+            codec_by_track: std::sync::RwLock::new(codec_lookup_table(&description)),
             event_sink: options
                 .event_sink
                 .unwrap_or_else(|| Arc::new(crate::observe::NoopEventSink)),
@@ -326,12 +329,7 @@ impl MountRegistry {
     /// Get a mount handle by path.
     pub fn get_handle(&self, path: &str) -> Option<MountHandle> {
         self.get(path).map(|mount| {
-            let description = description_for(&mount.config).unwrap_or_else(|_| MediaDescription {
-                session_name: path.into(),
-                tracks: Vec::new(),
-                #[cfg(feature = "multicast")]
-                connection: None,
-            });
+            let description = mount.description_snapshot();
             MountHandle {
                 path: mount.id.clone(),
                 description,

@@ -165,7 +165,8 @@ pub(crate) async fn handle_request(
                     body: vec![],
                 };
             };
-            let Ok(mut d) = description_for(&mount.config) else {
+            let mut d = mount.description_snapshot();
+            if d.tracks.is_empty() {
                 return Response {
                     status: 503,
                     reason: "Service Unavailable".into(),

@@ -587,3 +587,180 @@ fn pcmu_segment_uses_ulaw_sample_entry() {
         &segment.init[..segment.init.len().min(256)]
     );
 }
+
+#[cfg(feature = "server")]
+#[tokio::test]
+async fn registry_live_handler_serves_dynamic_mount() {
+    use rtflow::{
+        MountConfig, MountRegistry, RtspServer, ServerConfig,
+        hls::{HlsConfig, live::HlsLiveManager},
+        http::{HttpConfig, HttpServer, Method},
+    };
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
+    };
+
+    async fn get(addr: std::net::SocketAddr, path: &str) -> String {
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        stream
+            .write_all(
+                format!("GET {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut body = Vec::new();
+        stream.read_to_end(&mut body).await.unwrap();
+        String::from_utf8_lossy(&body).into_owned()
+    }
+
+    let _server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let registry = Arc::new(MountRegistry::new(4));
+    let empty = MediaDescription {
+        session_name: Arc::from("cam"),
+        tracks: Vec::new(),
+        #[cfg(feature = "multicast")]
+        connection: None,
+    };
+    let mount = registry
+        .register(
+            Arc::from("/live/cam"),
+            MountConfig::Publisher {
+                description: empty,
+                allow_replace_after_disconnect: true,
+            },
+        )
+        .unwrap();
+    mount.update_description(h264_description()).unwrap();
+    let publisher = mount.publisher().unwrap();
+
+    let manager = Arc::new(HlsLiveManager::new(
+        registry.clone(),
+        HlsConfig {
+            segment_duration: Duration::from_millis(100),
+            segment_count: 5,
+            live: true,
+        },
+    ));
+    let mut http = HttpServer::bind(HttpConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    http.add_route(
+        Method::Get,
+        "/hls/*",
+        rtflow::hls::live::create_hls_live_handler(manager),
+    )
+    .await;
+    let addr = http.local_addr();
+    tokio::spawn(async move { http.run().await });
+
+    // First request starts the segmenter and returns an empty live playlist.
+    let body = get(addr, "/hls/live/cam/index.m3u8").await;
+    assert!(body.contains("200 OK"), "{body}");
+    assert!(body.contains("#EXTM3U"), "{body}");
+
+    for i in 0..12 {
+        let key = i % 5 == 0;
+        publisher
+            .push(AccessUnit {
+                track_id: 0,
+                codec: Codec::H264,
+                pts: Duration::from_millis(i * 40),
+                dts: None,
+                rtp_timestamp: i as u32 * 3600,
+                is_keyframe: key,
+                data: if key {
+                    h264_keyframe()
+                } else {
+                    h264_interframe()
+                },
+            })
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let mut playlist = String::new();
+    for _ in 0..20 {
+        playlist = get(addr, "/hls/live/cam/index.m3u8").await;
+        if playlist.contains(".m4s") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        playlist.contains(".m4s"),
+        "playlist has no segment: {playlist}"
+    );
+    let init = get(addr, "/hls/live/cam/init.m4s").await;
+    assert!(init.contains("200 OK"), "{init}");
+}
+
+#[cfg(all(feature = "file-storage", feature = "mp4", feature = "server"))]
+#[tokio::test]
+async fn vod_handler_generates_playlist_and_segments_from_file() {
+    use rtflow::{
+        FileSourceOptions, FileVodSource,
+        hls::vod::{HlsVodConfig, HlsVodEntry, HlsVodManager, create_hls_vod_handler},
+        http::{HttpConfig, HttpServer, Method},
+    };
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
+    };
+
+    async fn get(addr: std::net::SocketAddr, path: &str) -> String {
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        stream
+            .write_all(
+                format!("GET {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut body = Vec::new();
+        stream.read_to_end(&mut body).await.unwrap();
+        String::from_utf8_lossy(&body).into_owned()
+    }
+
+    let source =
+        FileVodSource::open("tests/fixtures/h264-aac.mp4", FileSourceOptions::default()).unwrap();
+    let cache = std::env::temp_dir().join(format!("rtflow-hls-vod-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cache);
+    let manager = Arc::new(HlsVodManager::new(
+        vec![HlsVodEntry {
+            id: "fixture".into(),
+            title: "fixture".into(),
+            duration: None,
+            source: Arc::new(source),
+        }],
+        HlsVodConfig {
+            segment_duration: Duration::from_millis(500),
+            cache_dir: cache.clone(),
+        },
+    ));
+    let mut http = HttpServer::bind(HttpConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    http.add_route(Method::Get, "/vod/*", create_hls_vod_handler(manager))
+        .await;
+    let addr = http.local_addr();
+    tokio::spawn(async move { http.run().await });
+
+    let playlist = get(addr, "/vod/fixture/index.m3u8").await;
+    assert!(playlist.contains("200 OK"), "{playlist}");
+    assert!(playlist.contains("#EXT-X-PLAYLIST-TYPE:VOD"), "{playlist}");
+    assert!(playlist.contains("#EXT-X-ENDLIST"), "{playlist}");
+    assert!(playlist.contains("init.m4s"), "{playlist}");
+    let init = get(addr, "/vod/fixture/init.m4s").await;
+    assert!(init.contains("200 OK"), "{init}");
+    let segment = playlist
+        .lines()
+        .find(|line| line.ends_with(".m4s") && !line.contains("init"))
+        .expect("segment URI");
+    let segment = get(addr, &format!("/vod/fixture/{segment}")).await;
+    assert!(segment.contains("200 OK"), "{segment}");
+    let _ = std::fs::remove_dir_all(cache);
+}

@@ -128,6 +128,11 @@ path = "examples/protocols/webrtc_server.rs"
 required-features = ["webrtc", "http", "server"]
 
 [[example]]
+name = "live_vod_gateway"
+path = "examples/gateway/live_vod_gateway.rs"
+required-features = ["server", "rtmp", "hls", "http-flv", "file-storage", "mp4", "mkv"]
+
+[[example]]
 name = "multi_protocol_gateway"
 path = "examples/gateway/multi_protocol_gateway.rs"
 required-features = ["rtmp", "srt", "dash", "webrtc", "server", "hls", "http-flv"]

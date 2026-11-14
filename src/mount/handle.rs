@@ -20,14 +20,20 @@ pub(crate) struct Mount {
     #[cfg_attr(not(feature = "server"), allow(dead_code))]
     pub timeline: Option<crate::rtsp::range::TimelineMode>,
     pub stats: StreamCounters,
+    /// Live media description. RTMP/SRT publishers update this from
+    /// sequence headers/metadata after the mount was created.
+    pub description: std::sync::RwLock<MediaDescription>,
     #[cfg(feature = "server")]
     pub startup_cache: Mutex<KeyframeCache>,
+    #[cfg(feature = "server")]
+    #[allow(dead_code)] // read by update_description from protocol crates
+    pub startup_cache_config: crate::mount::continuity::StartupCacheConfig,
     /// Per-track bootstrap frame: fixed slots indexed by track_id (avoids
     /// hashing + allocating on every pushed frame).
     pub bootstrap: Mutex<[Option<AccessUnit>; 256]>,
     /// Expected codec per track id, for O(1) push validation without
     /// cloning the whole MediaDescription on every frame.
-    pub codec_by_track: [Option<Codec>; 256],
+    pub codec_by_track: std::sync::RwLock<[Option<Codec>; 256]>,
     /// Read by feature-gated adapters (metrics exporter, RTMP/WebRTC).
     #[allow(dead_code)]
     pub event_sink: Arc<dyn EventSink>,
@@ -145,6 +151,40 @@ impl Mount {
         result
     }
 
+    /// Current media description snapshot.
+    pub fn description_snapshot(&self) -> MediaDescription {
+        self.description
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Replace the media description (RTMP/SRT sequence headers/metadata).
+    /// Rebuilds the codec lookup table and startup cache; protocol senders
+    /// take a snapshot per session/request, so this must happen before the
+    /// first PLAY/segmenter subscription.
+    #[allow(dead_code)] // called by RTMP/SRT ingest when those features are enabled
+    pub fn update_description(&self, description: MediaDescription) -> crate::Result<()> {
+        let mut current = self
+            .description
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *current = description.clone();
+        *self
+            .codec_by_track
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = codec_lookup_table(&description);
+        #[cfg(feature = "server")]
+        {
+            let cache = KeyframeCache::new(&description, self.startup_cache_config)?;
+            *self
+                .startup_cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = cache;
+        }
+        Ok(())
+    }
+
     /// Keep the latest (key)frame per track for RTP-Info/SDP timing even
     /// while no subscriber is attached: PLAY answers need a rtptime base
     /// the moment a client connects, before the first GOP lands in the
@@ -159,12 +199,14 @@ impl Mount {
         if !frame.is_keyframe {
             return;
         }
-        let Some(codec) = self
+        let codec = self
             .codec_by_track
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(frame.track_id as usize)
             .copied()
-            .flatten()
-        else {
+            .flatten();
+        let Some(codec) = codec else {
             return;
         };
         if !matches!(
@@ -353,6 +395,16 @@ pub struct MountHandle {
 }
 
 impl MountHandle {
+    /// Current dynamic description (reflects RTMP/SRT sequence headers).
+    pub fn description(&self) -> MediaDescription {
+        self.inner.description_snapshot()
+    }
+
+    /// Replace the media description for an ingest-created mount.
+    pub fn update_description(&self, description: MediaDescription) -> crate::Result<()> {
+        self.inner.update_description(description)
+    }
+
     pub fn publisher(&self) -> Result<LocalPublisher> {
         match &self.inner.config {
             MountConfig::Local { .. } => {

@@ -1,7 +1,9 @@
 pub mod handler;
+pub mod live;
 pub mod playlist;
 pub mod segment_ring;
 pub mod segmenter;
+pub mod vod;
 
 use crate::http::Handler;
 use crate::media::MediaDescription;
@@ -73,7 +75,7 @@ pub fn create_hls_handlers(
     let ring = Arc::new(SegmentRing::new(config.segment_count));
     let target_duration = config.segment_duration;
     let is_live = config.live;
-    let mut description: MediaDescription = mount.description.clone();
+    let mut description: MediaDescription = mount.description();
     let announced_fmtp = mount.announce_fmtp();
     for track in &mut description.tracks {
         if let Some(fmtp) = announced_fmtp.get(&track.id) {

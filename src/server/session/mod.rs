@@ -9,7 +9,7 @@ use super::{
         spawn_udp_sender_from,
     },
 };
-use crate::mount::{Mount, MountConfig, NackRequest, description_for};
+use crate::mount::{Mount, MountConfig, NackRequest};
 use crate::{
     Error, Result,
     auth::{AccessRole, AuthDecision, AuthRequest},

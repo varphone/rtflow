@@ -1,4 +1,163 @@
 use super::*;
+use crate::rtmp::amf::AmfValue;
+
+fn gcd(mut left: u32, mut right: u32) -> u32 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left.max(1)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn sync_description(
+    mount_handle: &MountHandle,
+    stream_name: &str,
+    video_codec: Option<Codec>,
+    has_video: bool,
+    has_audio: bool,
+    width: Option<u32>,
+    height: Option<u32>,
+    frame_rate: Option<(u32, u32)>,
+    audio_sample_rate: Option<u32>,
+    audio_channels: Option<u8>,
+) -> crate::Result<()> {
+    if !has_video && !has_audio {
+        return Ok(());
+    }
+    let video_id = 0u8;
+    let audio_id = if has_video { 1 } else { 0 };
+    let mut tracks = Vec::new();
+    if has_video {
+        tracks.push(crate::media::TrackDescription {
+            id: video_id,
+            kind: crate::media::MediaKind::Video,
+            codec: video_codec.unwrap_or(Codec::H264),
+            clock_rate: 90_000,
+            channels: None,
+            payload_type: 96,
+            fmtp: None,
+            control: Arc::from("trackID=0"),
+            width,
+            height,
+            frame_rate,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
+            #[cfg(feature = "srtp")]
+            crypto: None,
+            rtx: None,
+        });
+    }
+    if has_audio {
+        tracks.push(crate::media::TrackDescription {
+            id: audio_id,
+            kind: crate::media::MediaKind::Audio,
+            codec: Codec::Aac,
+            clock_rate: audio_sample_rate.unwrap_or(48_000),
+            channels: Some(audio_channels.unwrap_or(2).max(1)),
+            payload_type: 97,
+            fmtp: None,
+            control: Arc::from(format!("trackID={audio_id}")),
+            width: None,
+            height: None,
+            frame_rate: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
+            #[cfg(feature = "srtp")]
+            crypto: None,
+            rtx: None,
+        });
+    }
+    mount_handle
+        .inner
+        .update_description(crate::media::MediaDescription::new(stream_name, tracks))
+}
+
+pub(crate) fn split_stream_token<'a>(
+    stream_name: &'a str,
+    token: &crate::rtsp::token_auth::TokenConfig,
+) -> (&'a str, Option<&'a str>) {
+    let Some((name, query)) = stream_name.split_once('?') else {
+        return (stream_name, None);
+    };
+    let value = query.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == token.param_name).then_some(value)
+    });
+    (name, value)
+}
+
+pub(crate) fn token_allows(
+    token: Option<&crate::rtsp::token_auth::TokenConfig>,
+    app: &str,
+    stream: &str,
+    value: Option<&str>,
+) -> bool {
+    let Some(token) = token else {
+        return true;
+    };
+    let Some(value) = value else {
+        return false;
+    };
+    crate::rtsp::token_auth::verify_token(token, &format!("/{app}/{stream}"), value)
+}
+
+pub(crate) fn apply_metadata(state: &mut SessionState, data: &AmfValue) {
+    let SessionState::Publishing {
+        mount_handle,
+        video_codec,
+        has_video,
+        has_audio,
+        width,
+        height,
+        frame_rate,
+        audio_sample_rate,
+        audio_channels,
+        stream_name,
+        ..
+    } = state
+    else {
+        return;
+    };
+    if let Some(value) = data.get("width").and_then(|v| v.as_number()) {
+        *width = Some(value.max(0.0) as u32);
+    }
+    if let Some(value) = data.get("height").and_then(|v| v.as_number()) {
+        *height = Some(value.max(0.0) as u32);
+    }
+    if let Some(value) = data.get("framerate").and_then(|v| v.as_number())
+        && value > 0.0
+    {
+        let numerator = (value * 1_000.0).round() as u32;
+        let divisor = gcd(numerator, 1_000);
+        *frame_rate = Some((numerator / divisor, 1_000 / divisor));
+    }
+    if let Some(value) = data.get("audiosamplerate").and_then(|v| v.as_number())
+        && value > 0.0
+    {
+        *audio_sample_rate = Some(value as u32);
+    }
+    if let Some(stereo) = data.get("stereo").and_then(|v| v.as_bool()) {
+        *audio_channels = Some(if stereo { 2 } else { 1 });
+    }
+    let _ = sync_description(
+        mount_handle,
+        stream_name,
+        *video_codec,
+        *has_video,
+        *has_audio,
+        *width,
+        *height,
+        *frame_rate,
+        *audio_sample_rate,
+        *audio_channels,
+    );
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_command(
@@ -89,6 +248,25 @@ pub(super) async fn handle_command(
                 _ => String::new(),
             };
 
+            let (stream_name, token_value) = match config.token.as_ref() {
+                Some(token) => split_stream_token(stream_name, token),
+                None => (stream_name.as_str(), None),
+            };
+            if !token_allows(config.token.as_ref(), &app, stream_name, token_value) {
+                warn!("RTMP: publish denied by URL token for /{app}/{stream_name}");
+                let error_payload = command::error_response(
+                    *transaction_id,
+                    "NetStream.Publish.Denied",
+                    "Authentication failed: invalid token.",
+                );
+                return Some(vec![RtmpMessage {
+                    chunk_stream_id: 5,
+                    timestamp: 0,
+                    msg_type: MessageType::CommandAmf0 as u8,
+                    msg_stream_id: 1,
+                    payload: error_payload,
+                }]);
+            }
             // Authenticate publish request
             if let Some(ref auth) = config.authenticator
                 && !auth.authorize_publish(&app, stream_name)
@@ -114,7 +292,7 @@ pub(super) async fn handle_command(
             // Create a publisher mount with a placeholder description.
             // The actual tracks will be determined from sequence headers.
             let description = MediaDescription {
-                session_name: stream_name.as_str().into(),
+                session_name: stream_name.into(),
                 tracks: Vec::new(),
                 #[cfg(feature = "multicast")]
                 connection: None,
@@ -186,7 +364,7 @@ pub(super) async fn handle_command(
 
             *state = SessionState::Publishing {
                 app,
-                stream_name: stream_name.clone(),
+                stream_name: stream_name.to_string(),
                 publisher,
                 mount_handle,
                 registered_here,
@@ -195,6 +373,11 @@ pub(super) async fn handle_command(
                 video_codec: None,
                 has_video: false,
                 has_audio: false,
+                width: None,
+                height: None,
+                frame_rate: None,
+                audio_sample_rate: None,
+                audio_channels: None,
                 base_timestamp: None,
             };
 
@@ -228,6 +411,25 @@ pub(super) async fn handle_command(
                 _ => String::new(),
             };
 
+            let (stream_name, token_value) = match config.token.as_ref() {
+                Some(token) => split_stream_token(stream_name, token),
+                None => (stream_name.as_str(), None),
+            };
+            if !token_allows(config.token.as_ref(), &app, stream_name, token_value) {
+                warn!("RTMP: play denied by URL token for /{app}/{stream_name}");
+                let error_payload = command::error_response(
+                    *transaction_id,
+                    "NetStream.Play.Denied",
+                    "Authentication failed: invalid token.",
+                );
+                return Some(vec![RtmpMessage {
+                    chunk_stream_id: 5,
+                    timestamp: 0,
+                    msg_type: MessageType::CommandAmf0 as u8,
+                    msg_stream_id: 1,
+                    payload: error_payload,
+                }]);
+            }
             let mount_path = format!("/{app}/{stream_name}");
             info!("RTMP: play {mount_path}");
 
@@ -281,7 +483,7 @@ pub(super) async fn handle_command(
 
             *state = SessionState::Playing {
                 app,
-                stream_name: stream_name.clone(),
+                stream_name: stream_name.to_string(),
                 mount_handle: mount_handle.clone(),
             };
 
@@ -320,7 +522,7 @@ pub(super) async fn handle_command(
             let cancel_clone = cancel.clone();
             let tx_clone = tx.clone();
             let handle = mount_handle.clone();
-            let description = mount_handle.description.clone();
+            let description = mount_handle.description();
 
             let has_video = description
                 .tracks
@@ -365,7 +567,12 @@ pub(super) async fn handle_command(
                         headers
                             .iter()
                             .filter_map(|(track_id, header)| {
-                                handle.inner.codec_by_track[*track_id as usize]
+                                handle
+                                    .inner
+                                    .codec_by_track
+                                    .read()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                    [*track_id as usize]
                                     .map(|codec| (*track_id, header.clone(), codec))
                             })
                             .collect()
@@ -511,7 +718,12 @@ pub(super) async fn handle_command(
             }])
         }
 
-        RtmpCommand::MetaData { .. } => None,
+        RtmpCommand::MetaData { data, .. } => {
+            if let Some(data) = data {
+                apply_metadata(state, data);
+            }
+            None
+        }
 
         RtmpCommand::GetStreamLength { transaction_id, .. } => {
             // Return 0 for live streams

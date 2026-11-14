@@ -3,6 +3,27 @@
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Added
+
+- RTMP：`onMetaData` 宽高/帧率进入动态 `MediaDescription`，AVC/HEVC/AAC
+  sequence header 自动建立 track；`RtmpSessionConfig::token` 支持 OBS
+  stream key `name?token=...`（HMAC，日志脱敏）。
+- HLS：注册表驱动的 `/hls/{mount}/index.m3u8` 直播端点，动态 RTMP mount
+  无需预注册 handler；`/vod/{id}` 从录制目录或 MP4/MKV/TS 文件生成磁盘
+  缓存的 VOD playlist/segment。
+- 前端：`/api/mounts`、`/api/vods` 只读 JSON；`/` 浏览页与 `/admin`
+  只读状态页（直播/VOD 播放、发布状态、订阅数、帧统计）。
+- `FileVodSource`；`live_vod_gateway` 示例（RTMP + HLS + 浏览器控制台）。
+
+### Changed
+
+- `Mount` 的描述可动态更新（sequence headers/metadata）；`MountHandle::description()`
+  返回当前快照，旧的 `description` 字段保留为初始快照。
+- HLS VOD playlist 的 segment URI 与 VOD 目录一致，`EXT-X-ENDLIST` 语义
+  由持久化段保证；不再用滑动窗口冒充 VOD。
+
 ## [0.3.0] — 2026-11（布局与可靠性基线）
 
 ### Changed

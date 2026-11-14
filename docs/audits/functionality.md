@@ -40,9 +40,11 @@
 
 **F7. RTMP play 无任何鉴权（publish 有鉴权，拉流裸奔）**
 - `src/rtmp/session.rs:667-696`：Play 分支仅 `mounts.get_handle` + StreamNotFound，无 `authorize_*` 调用；`StreamKeyAuthenticator`/`PublishAuthenticator` 只保护 publish（session.rs:550-557）。修复：play 路径按 app/stream 校验（可复用 `RtmpConfig.authenticator`）。
+> 状态（2026-11）：play 已走 `authorize_play`，并新增 `RtmpSessionConfig::token`（URL stream key token）。
 
 **F8. HLS/DASH 无 VOD/录制目录输出；`HlsConfig.live=false` 语义不成立**
 - `src/hls/mod.rs:40-42`：`live=false` 只改 playlist 输出 `EXT-X-PLAYLIST-TYPE:VOD`+ENDLIST（playlist.rs:81-117），底层 `SegmentRing` 仍是 `segment_count` 滑动窗口（hls/mod.rs:40）——VOD playlist 声明了完整列表，但旧段被淘汰后 404（hls/handler.rs:40-47）。录制目录无 HLS/DASH 挂载路径。修复：VOD 模式段持久化或禁止 live=false 组合并报错。
+> 状态（2026-11）：已实现 `HlsVodManager`（录制目录/普通文件 → 磁盘持久化 fMP4 + VOD playlist/segment），`live=false` 不再用滑动窗口冒充 VOD。
 
 **F9. webrtc_server 示例与 README「不可用占位」声明直接矛盾**
 - README:23 明确 WHIP/WHEP 为不可用占位；`examples/protocols/webrtc_server.rs:226-260` 仍注册 `/whip*`、`/whep*` 路由并提供完整 player/publisher HTML 引导浏览器接入。且 `examples/protocols/webrtc_server.rs:230` 创建**独立** `MountRegistry::new(10)`，与 212 行 RTSP server 的 registry 不共享——即使未来补上媒体管线，WHIP/WHEP 与 RTSP mount 也不互通。修复：删除示例路由/HTML 或标注不可用；registry 与 RTSP 共享。

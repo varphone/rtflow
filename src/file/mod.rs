@@ -11,9 +11,11 @@ mod mp4;
 mod mpeg_ts;
 mod raw;
 mod source;
+mod vod;
 
 pub use crate::media::demux::{DemuxedSample, Demuxer};
 pub use source::{
     ContainerFormat, FilePlayback, FileSource, FileSourceOptions, LoopMode, PlaybackStats,
     RawFormat,
 };
+pub use vod::FileVodSource;

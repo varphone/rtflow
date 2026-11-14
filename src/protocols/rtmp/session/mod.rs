@@ -86,6 +86,8 @@ pub struct RtmpSessionConfig {
     pub write_timeout: Duration,
     /// Optional publish authenticator. If `None`, all publishes are allowed.
     pub authenticator: Option<Arc<dyn PublishAuthenticator>>,
+    /// Optional HMAC URL token (OBS stream key: `name?token=...`).
+    pub token: Option<crate::rtsp::token_auth::TokenConfig>,
 }
 
 impl Default for RtmpSessionConfig {
@@ -96,6 +98,7 @@ impl Default for RtmpSessionConfig {
             window_ack_size: 2_500_000,
             write_timeout: Duration::from_secs(30),
             authenticator: None,
+            token: None,
         }
     }
 }
@@ -125,6 +128,11 @@ enum SessionState {
         video_codec: Option<Codec>,
         has_video: bool,
         has_audio: bool,
+        width: Option<u32>,
+        height: Option<u32>,
+        frame_rate: Option<(u32, u32)>,
+        audio_sample_rate: Option<u32>,
+        audio_channels: Option<u8>,
         base_timestamp: Option<u32>,
     },
     /// Playing from a mount.
@@ -353,9 +361,16 @@ pub async fn serve_rtmp_session(
                     if let SessionState::Publishing {
                         publisher,
                         mount_handle,
+                        stream_name,
                         video_seq_header,
                         video_codec,
                         has_video,
+                        has_audio,
+                        width,
+                        height,
+                        frame_rate,
+                        audio_sample_rate,
+                        audio_channels,
                         base_timestamp,
                         ..
                     } = &mut state
@@ -370,6 +385,18 @@ pub async fn serve_rtmp_session(
                                 }
                                 *video_codec = Some(Codec::H264);
                                 *has_video = true;
+                                let _ = commands::sync_description(
+                                    mount_handle,
+                                    stream_name,
+                                    Some(Codec::H264),
+                                    true,
+                                    *has_audio,
+                                    *width,
+                                    *height,
+                                    *frame_rate,
+                                    *audio_sample_rate,
+                                    *audio_channels,
+                                );
                             }
                             VideoData::HevcSequenceHeader(data) => {
                                 *video_seq_header = Some(data.clone());
@@ -379,6 +406,18 @@ pub async fn serve_rtmp_session(
                                 }
                                 *video_codec = Some(Codec::H265);
                                 *has_video = true;
+                                let _ = commands::sync_description(
+                                    mount_handle,
+                                    stream_name,
+                                    Some(Codec::H265),
+                                    true,
+                                    *has_audio,
+                                    *width,
+                                    *height,
+                                    *frame_rate,
+                                    *audio_sample_rate,
+                                    *audio_channels,
+                                );
                             }
                             VideoData::AvcNalu {
                                 data,
@@ -427,9 +466,16 @@ pub async fn serve_rtmp_session(
                     if let SessionState::Publishing {
                         publisher,
                         mount_handle,
+                        stream_name,
                         audio_seq_header,
+                        video_codec,
                         has_audio,
                         has_video,
+                        width,
+                        height,
+                        frame_rate,
+                        audio_sample_rate,
+                        audio_channels,
                         base_timestamp,
                         ..
                     } = &mut state
@@ -438,12 +484,28 @@ pub async fn serve_rtmp_session(
                         match audio_data {
                             AudioData::AacSequenceHeader(data) => {
                                 *audio_seq_header = Some(data.clone());
+                                if let Some((rate, channels)) = aac_audio_config(&data) {
+                                    *audio_sample_rate = Some(rate);
+                                    *audio_channels = Some(channels);
+                                }
                                 let track_id: u8 = if *has_video { 1 } else { 0 };
                                 if let Ok(mut headers) = mount_handle.inner.rtmp_seq_headers.lock()
                                 {
                                     headers.insert(track_id, data);
                                 }
                                 *has_audio = true;
+                                let _ = commands::sync_description(
+                                    mount_handle,
+                                    stream_name,
+                                    *video_codec,
+                                    *has_video,
+                                    true,
+                                    *width,
+                                    *height,
+                                    *frame_rate,
+                                    *audio_sample_rate,
+                                    *audio_channels,
+                                );
                             }
                             AudioData::AacRaw(data) => {
                                 let base = *base_timestamp.get_or_insert(msg.timestamp);
@@ -458,7 +520,10 @@ pub async fn serve_rtmp_session(
                                     // 44.1/48/32kHz from ms: use 64-bit
                                     // intermediate so 44100/1000 is not
                                     // truncated to an integer ×44.
-                                    rtp_timestamp: ((ts_ms as u64 * 44100) / 1000) as u32,
+                                    rtp_timestamp: ((ts_ms as u64
+                                        * u64::from(audio_sample_rate.unwrap_or(48_000)))
+                                        / 1000)
+                                        as u32,
                                     is_keyframe: true,
                                     data,
                                 };
@@ -468,7 +533,17 @@ pub async fn serve_rtmp_session(
                     }
                 }
                 t if t == MessageType::DataAmf0 as u8 || t == MessageType::DataAmf3 as u8 => {
-                    debug!(?peer, "RTMP: received metadata");
+                    let payload = if t == MessageType::DataAmf3 as u8 && !msg.payload.is_empty() {
+                        &msg.payload[1..]
+                    } else {
+                        &msg.payload[..]
+                    };
+                    if let Some(RtmpCommand::MetaData {
+                        data: Some(data), ..
+                    }) = RtmpCommand::parse(payload)
+                    {
+                        commands::apply_metadata(&mut state, &data);
+                    }
                 }
                 _ => {}
             }
@@ -507,6 +582,18 @@ pub async fn serve_rtmp_session(
     }
 
     Ok(())
+}
+
+fn aac_audio_config(data: &[u8]) -> Option<(u32, u8)> {
+    const RATES: [u32; 13] = [
+        96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350,
+    ];
+    let first = *data.first()?;
+    let second = *data.get(1)?;
+    let index = (((first & 0x07) as usize) << 1) | ((second as usize) >> 7);
+    let rate = *RATES.get(index)?;
+    let channels = (second >> 3) & 0x0F;
+    Some((rate, channels.max(1)))
 }
 
 mod commands;

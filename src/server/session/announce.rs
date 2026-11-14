@@ -64,7 +64,7 @@ pub(super) async fn handle_announce(
             return Ok(());
         }
     };
-    let expected = description_for(&mount.config)?;
+    let expected = mount.description_snapshot();
     let fmtp = match announced_fmtp(&expected, &announced) {
         Ok(fmtp) => fmtp,
         Err(_) => {

@@ -82,8 +82,8 @@ pub mod media_pipeline {
 pub use error::{Error, ErrorCode, Operation, Result, RetryClass};
 #[cfg(feature = "file-storage")]
 pub use file::{
-    ContainerFormat, DemuxedSample, Demuxer, FilePlayback, FileSource, FileSourceOptions, LoopMode,
-    PlaybackStats, RawFormat,
+    ContainerFormat, DemuxedSample, Demuxer, FilePlayback, FileSource, FileSourceOptions,
+    FileVodSource, LoopMode, PlaybackStats, RawFormat,
 };
 pub use identity::{MountId, SessionId, StreamEpoch, TaskId};
 pub use media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription, TrackId};

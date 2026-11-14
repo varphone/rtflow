@@ -101,7 +101,7 @@ pub(super) async fn handle_setup(
         return Ok(());
     };
     #[cfg(any(feature = "srtp", feature = "multicast"))]
-    let mount_description = description_for(&mount.config)?;
+    let mount_description = mount.description_snapshot();
     #[cfg(feature = "srtp")]
     let requested_track = track_for_uri(&mount_description, &req.uri).ok();
     let secure_matches = |secure: bool| {
@@ -173,7 +173,7 @@ pub(super) async fn handle_setup(
     {
         #[cfg(feature = "multicast")]
         {
-            let connection = description_for(&mount.config)?.connection;
+            let connection = mount.description_snapshot().connection;
             let Some(connection) =
                 connection.filter(|connection| connection.address.is_multicast())
             else {
@@ -188,7 +188,7 @@ pub(super) async fn handle_setup(
                     .await?;
                 return Ok(());
             };
-            let Ok(track) = track_for_uri(&description_for(&mount.config)?, &req.uri) else {
+            let Ok(track) = track_for_uri(&mount.description_snapshot(), &req.uri) else {
                 writer
                     .lock()
                     .await
@@ -278,7 +278,7 @@ pub(super) async fn handle_setup(
         mode,
     } = transport
     {
-        let Ok(track) = track_for_uri(&description_for(&mount.config)?, &req.uri) else {
+        let Ok(track) = track_for_uri(&mount.description_snapshot(), &req.uri) else {
             // Unknown control URI: reply 404 instead of dropping
             // the connection (strict clients treat a dropped
             // connection as a network failure).
@@ -409,7 +409,7 @@ pub(super) async fn handle_setup(
     let client_rtcp = if rtcp_mux { client_rtp } else { client_rtcp };
     let rtp_target = SocketAddr::new(peer.ip(), client_rtp);
     let rtcp_target = SocketAddr::new(peer.ip(), client_rtcp);
-    let Ok(track) = track_for_uri(&description_for(&mount.config)?, &req.uri) else {
+    let Ok(track) = track_for_uri(&mount.description_snapshot(), &req.uri) else {
         writer
             .lock()
             .await

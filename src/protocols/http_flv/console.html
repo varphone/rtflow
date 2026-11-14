@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rtflow 控制台</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #111; color: #eee; font: 14px/1.5 system-ui, sans-serif; }
+  header { max-width: 1100px; margin: auto; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  h1 { font-size: 20px; margin: 0 auto 0 0; }
+  button, select { background: #222; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+  button.active { background: #2a6df4; border-color: #2a6df4; }
+  main { max-width: 1100px; margin: 16px auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .card { background: #1b1b1b; border: 1px solid #333; border-radius: 8px; padding: 12px; }
+  .card h3 { margin: 0 0 6px; font-size: 15px; }
+  .muted { color: #999; font-size: 12px; word-break: break-all; }
+  .ok { color: #51cf66; } .bad { color: #ff6b6b; }
+  video { width: 100%; max-height: 62vh; background: #000; border-radius: 8px; display: block; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #2c2c2c; white-space: nowrap; }
+  .status { margin: 8px 0; min-height: 1.4em; color: #bbb; }
+</style>
+</head>
+<body>
+<header>
+  <h1>rtflow 控制台</h1>
+  <button id="tab-browse" class="active">浏览</button>
+  <button id="tab-admin">管理状态</button>
+</header>
+<main>
+  <div id="player-wrap" style="display:none">
+    <video id="video" controls autoplay muted playsinline></video>
+    <div class="status" id="status"></div>
+  </div>
+  <div id="browse">
+    <h2>直播</h2>
+    <div class="grid" id="mounts">加载中…</div>
+    <h2>点播</h2>
+    <div class="grid" id="vods">加载中…</div>
+  </div>
+  <div id="admin" style="display:none">
+    <div class="status" id="admin-status"></div>
+    <table><thead><tr><th>路径</th><th>视频</th><th>分辨率</th><th>发布者</th><th>订阅</th><th>接收帧</th><th>丢帧</th><th>RTP</th></tr></thead><tbody id="admin-rows"></tbody></table>
+  </div>
+</main>
+<script>
+"use strict";
+const MODE = "__MODE__";
+const statusEl = document.getElementById("status");
+const video = document.getElementById("video");
+let currentHls = null;
+function setStatus(text) { if (statusEl) statusEl.textContent = text || ""; }
+async function json(url) { const r = await fetch(url, {cache:"no-store"}); if (!r.ok) throw new Error(url + " " + r.status); return r.json(); }
+function playHls(url, title) {
+  document.getElementById("player-wrap").style.display = "block";
+  setStatus("正在播放 " + title);
+  if (currentHls) { try { currentHls.destroy(); } catch (e) {} currentHls = null; }
+  if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = url;
+  } else {
+    if (typeof Hls === "undefined") {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js";
+      script.onload = () => playHls(url, title);
+      document.head.appendChild(script);
+      return;
+    }
+    currentHls = new Hls({liveDurationInfinity: true});
+    currentHls.loadSource(url);
+    currentHls.attachMedia(video);
+  }
+  video.play().catch(() => {});
+}
+async function loadMounts() {
+  const mounts = await json("/api/mounts");
+  const box = document.getElementById("mounts");
+  const rows = document.getElementById("admin-rows");
+  box.textContent = ""; rows.textContent = "";
+  if (!mounts.length) box.textContent = "暂无直播流";
+  for (const m of mounts) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<h3>${m.name}</h3><div class="muted">${m.path}</div>
+      <div>${m.video || "-"} ${m.width > 0 ? m.width + "×" + m.height : ""} ${m.audio || ""}</div>
+      <div class="${m.publisher ? "ok" : "bad"}">${m.publisher ? "发布中" : "无发布者"}</div>
+      <div class="muted">订阅 ${m.subscribers} · 帧 ${m.accepted} · 丢 ${m.dropped}</div>
+      <div class="muted">推流 rtmp://&lt;host&gt;:1935/${m.path.replace(/^\\//, "")}</div>`;
+    const button = document.createElement("button");
+    button.textContent = "播放 HLS";
+    button.onclick = () => playHls(m.hls, m.name);
+    card.appendChild(button);
+    box.appendChild(card);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${m.path}</td><td>${m.video}</td><td>${m.width > 0 ? m.width+"×"+m.height : "-"}</td>
+      <td>${m.publisher ? "是" : "否"}</td><td>${m.subscribers}</td><td>${m.accepted}</td><td>${m.dropped}</td><td>${m.rtp_packets}</td>`;
+    rows.appendChild(tr);
+  }
+}
+async function loadVods() {
+  const vods = await json("/api/vods");
+  const box = document.getElementById("vods");
+  box.textContent = "";
+  if (!vods.length) box.textContent = "暂无点播";
+  for (const v of vods) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<h3>${v.title}</h3><div class="muted">${v.id}</div>`;
+    const button = document.createElement("button");
+    button.textContent = "播放 VOD";
+    button.onclick = () => playHls(v.playlist, v.title);
+    card.appendChild(button); box.appendChild(card);
+  }
+}
+function showTab(admin) {
+  document.getElementById("browse").style.display = admin ? "none" : "block";
+  document.getElementById("admin").style.display = admin ? "block" : "none";
+  document.getElementById("tab-browse").classList.toggle("active", !admin);
+  document.getElementById("tab-admin").classList.toggle("active", admin);
+}
+document.getElementById("tab-browse").onclick = () => showTab(false);
+document.getElementById("tab-admin").onclick = () => showTab(true);
+showTab(MODE === "admin");
+loadMounts().catch(e => setStatus(String(e)));
+loadVods().catch(e => setStatus(String(e)));
+setInterval(() => { loadMounts().catch(()=>{}); }, 3000);
+</script>
+</body>
+</html>

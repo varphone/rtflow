@@ -147,7 +147,7 @@ async fn handle_connection(
     let mount = mounts
         .get_handle(&mount_path)
         .ok_or_else(|| crate::Error::Media("ws-flv: mount not found".into()))?;
-    let description = mount.description.clone();
+    let description = mount.description();
     let (mut rx, startup) = mount.subscribe_with_startup();
     let fmtp_source = mount;
 

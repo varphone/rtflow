@@ -72,6 +72,14 @@ impl SegmentRing {
             .cloned()
     }
 
+    /// Remove all segments (mount restart/reuse).
+    pub fn clear(&self) {
+        self.segments
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+    }
+
     /// Number of segments currently stored.
     pub fn len(&self) -> usize {
         self.segments
