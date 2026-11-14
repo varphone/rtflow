@@ -143,7 +143,7 @@ impl FrameReceiver {
             // and await cannot be lost.
             let notified = self.bus.notify.notified();
             {
-                let mut state = self.bus.lock();
+                let state = self.bus.lock();
                 if self.cursor < state.front_sequence {
                     let dropped = (state.front_sequence - self.cursor) as usize;
                     self.cursor = state.front_sequence;
@@ -168,7 +168,7 @@ impl FrameReceiver {
     }
 
     pub(crate) fn try_recv(&mut self) -> Result<AccessUnit, FrameRecvError> {
-        let mut state = self.bus.lock();
+        let state = self.bus.lock();
         if self.cursor < state.front_sequence {
             let dropped = (state.front_sequence - self.cursor) as usize;
             self.cursor = state.front_sequence;
