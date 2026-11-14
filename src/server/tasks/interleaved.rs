@@ -11,6 +11,7 @@ pub(crate) fn spawn_interleaved_sender_from(
     writer: Arc<Mutex<TimedWriter>>,
     anchor_ntp: Option<u64>,
     report_interval: std::time::Duration,
+    rtx: Option<crate::media::RtxConfig>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let SenderInput {
@@ -56,6 +57,7 @@ pub(crate) fn spawn_interleaved_sender_from(
         let mut last_rtp_timestamp = 0u32;
         let mut ntp_clock: Option<RtpNtpClock> = None;
         let mut nack_cache = RetransmitCache::new(512);
+        let mut rtx_sequence = 0u16;
         let mut nack_rx = mount.nack_requests.subscribe();
         let mut report_tick = tokio::time::interval(report_interval);
         report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -85,8 +87,17 @@ pub(crate) fn spawn_interleaved_sender_from(
                             }
                             let mut batch = BytesMut::with_capacity(1500 * request.sequences.len().max(1));
                             for sequence in request.sequences {
-                                let Some(payload) = nack_cache.get(sequence) else {
-                                    continue;
+                                let payload = if let Some(rtx) = rtx
+                                    && let Some(original) = nack_cache.get_rtp(sequence)
+                                {
+                                    let payload = build_rtx_packet(&original, rtx, rtx_sequence);
+                                    rtx_sequence = rtx_sequence.wrapping_add(1);
+                                    payload
+                                } else {
+                                    let Some(payload) = nack_cache.get(sequence) else {
+                                        continue;
+                                    };
+                                    payload
                                 };
                                 let Ok(length) = u16::try_from(payload.len()) else {
                                     continue;

@@ -53,14 +53,27 @@ async fn exchange(
 
 #[tokio::test]
 async fn udp_nack_retransmits_cached_rtp_packet() {
-    let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
-        .await
-        .unwrap();
+    nack_case(false).await;
+}
+
+#[tokio::test]
+async fn udp_rtx_retransmits_with_separate_payload_type() {
+    nack_case(true).await;
+}
+
+async fn nack_case(rtx_enabled: bool) {
+    let mut config = ServerConfig::new("127.0.0.1:0".parse().unwrap());
+    config.rtx = rtx_enabled;
+    let server = RtspServer::bind(config).await.unwrap();
+    let description = description("nack", &[Codec::H264]);
+    let rtx = rtx_enabled
+        .then(|| rtflow::media::rtx_configs(&description).get(&0).copied())
+        .flatten();
     let mount = server
         .register_mount(
             Arc::from("/nack"),
             MountConfig::Local {
-                description: description("nack", &[Codec::H264]),
+                description: description.clone(),
             },
         )
         .await
@@ -200,11 +213,20 @@ async fn udp_nack_retransmits_cached_rtp_packet() {
         else {
             break;
         };
-        if let Ok(parsed) = RtpPacket::parse(Bytes::copy_from_slice(&packet[..size]))
-            && parsed.header.sequence == sequence
-        {
-            retransmitted = true;
-            break;
+        if let Ok(parsed) = RtpPacket::parse(Bytes::copy_from_slice(&packet[..size])) {
+            if let Some(rtx) = rtx {
+                if parsed.header.payload_type == rtx.payload_type
+                    && parsed.header.ssrc == rtx.ssrc
+                    && parsed.payload.len() >= 2
+                    && u16::from_be_bytes([parsed.payload[0], parsed.payload[1]]) == sequence
+                {
+                    retransmitted = true;
+                    break;
+                }
+            } else if parsed.header.sequence == sequence {
+                retransmitted = true;
+                break;
+            }
         }
     }
     assert!(retransmitted, "NACK did not produce a retransmission");

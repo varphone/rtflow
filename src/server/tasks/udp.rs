@@ -15,11 +15,22 @@ async fn retransmit_cached(
     socket: &tokio::net::UdpSocket,
     target: SocketAddr,
     sequences: &[u16],
+    rtx: Option<crate::media::RtxConfig>,
+    rtx_sequence: &mut u16,
 ) -> (u32, u32) {
-    let pending = sequences
-        .iter()
-        .filter_map(|sequence| cache.get(*sequence))
-        .collect::<Vec<_>>();
+    let mut pending = Vec::with_capacity(sequences.len());
+    for sequence in sequences {
+        if let Some(rtx) = rtx
+            && let Some(original) = cache.get_rtp(*sequence)
+        {
+            pending.push(build_rtx_packet(&original, rtx, *rtx_sequence));
+            *rtx_sequence = rtx_sequence.wrapping_add(1);
+            continue;
+        }
+        if let Some(wire) = cache.get(*sequence) {
+            pending.push(wire);
+        }
+    }
     let mut sent = crate::runtime::udp_batch::send_batch(socket, &pending, target)
         .await
         .unwrap_or(0)
@@ -47,6 +58,7 @@ pub(crate) fn spawn_udp_sender_from(
     track: TrackDescription,
     anchor_ntp: Option<u64>,
     report_interval: std::time::Duration,
+    rtx: Option<crate::media::RtxConfig>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let SenderInput {
@@ -92,6 +104,7 @@ pub(crate) fn spawn_udp_sender_from(
         let mut last_rtp_timestamp = 0u32;
         let mut ntp_clock: Option<RtpNtpClock> = None;
         let mut nack_cache = RetransmitCache::new(512);
+        let mut rtx_sequence = 0u16;
         // Cache the protected bytes too: retransmitting an SRTP packet with
         // its original index is safe (the original was lost) and avoids
         // reusing the sender's keystream state.
@@ -177,6 +190,8 @@ pub(crate) fn spawn_udp_sender_from(
                                     &pair.rtp,
                                     rtp_target,
                                     &requested,
+                                    rtx,
+                                    &mut rtx_sequence,
                                 )
                                 .await;
                                 sent_packets = sent_packets.wrapping_add(packets);
@@ -428,6 +443,33 @@ mod tests {
         assert_eq!(cache.get(3).as_deref(), Some(&b"three"[..]));
     }
 
+    #[test]
+    fn rtx_packet_carries_original_sequence_in_osn() {
+        let original = crate::rtp::RtpPacket {
+            header: crate::rtp::RtpHeader {
+                marker: true,
+                payload_type: 96,
+                sequence: 100,
+                timestamp: 9000,
+                ssrc: 7,
+            },
+            payload: bytes::Bytes::from_static(b"payload"),
+        };
+        let rtx = crate::media::RtxConfig {
+            payload_type: 97,
+            ssrc: 99,
+            apt: 96,
+        };
+        let wire = super::build_rtx_packet(&original, rtx, 5);
+        let parsed = crate::rtp::RtpPacket::parse(wire).unwrap();
+        assert_eq!(parsed.header.payload_type, 97);
+        assert_eq!(parsed.header.sequence, 5);
+        assert_eq!(parsed.header.timestamp, 9000);
+        assert_eq!(parsed.header.ssrc, 99);
+        assert_eq!(&parsed.payload[..2], &100u16.to_be_bytes());
+        assert_eq!(&parsed.payload[2..], b"payload");
+    }
+
     #[tokio::test]
     async fn retransmit_cache_sends_requested_packets() {
         let receiver = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -435,7 +477,8 @@ mod tests {
         let target = receiver.local_addr().unwrap();
         let mut cache = RetransmitCache::new(8);
         cache.insert(7, Bytes::from_static(b"packet"));
-        let (packets, octets) = retransmit_cached(&cache, &sender, target, &[7, 8]).await;
+        let (packets, octets) =
+            retransmit_cached(&cache, &sender, target, &[7, 8], None, &mut 0).await;
         assert_eq!((packets, octets), (1, 6));
         let mut buffer = [0u8; 32];
         let (size, _) = tokio::time::timeout(

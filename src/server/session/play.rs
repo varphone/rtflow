@@ -234,6 +234,19 @@ pub(super) async fn handle_play(
                 .entry(track.id)
                 .or_insert_with(|| Arc::new(AtomicU16::new(0)))
                 .clone();
+            let rtx = state
+                .config
+                .rtx
+                .then(|| {
+                    crate::mount::description_for(&mount.config)
+                        .ok()
+                        .and_then(|description| {
+                            crate::media::rtx_configs(&description)
+                                .get(&track.id)
+                                .copied()
+                        })
+                })
+                .flatten();
             resources.senders.push(if let Some(output) = &vod_output {
                 spawn_interleaved_sender_from(
                     mount.clone(),
@@ -249,6 +262,7 @@ pub(super) async fn handle_play(
                     writer.clone(),
                     timeline_ntp_anchor,
                     state.config.rtcp_report_interval,
+                    rtx,
                 )
             } else {
                 let mut input = live_interleaved_inputs.remove(0);
@@ -262,6 +276,7 @@ pub(super) async fn handle_play(
                     writer.clone(),
                     timeline_ntp_anchor,
                     state.config.rtcp_report_interval,
+                    rtx,
                 )
             });
             start_proxy_if_idle(
@@ -276,6 +291,19 @@ pub(super) async fn handle_play(
                 .entry(track.id)
                 .or_insert_with(|| Arc::new(AtomicU16::new(0)))
                 .clone();
+            let rtx = state
+                .config
+                .rtx
+                .then(|| {
+                    crate::mount::description_for(&mount.config)
+                        .ok()
+                        .and_then(|description| {
+                            crate::media::rtx_configs(&description)
+                                .get(&track.id)
+                                .copied()
+                        })
+                })
+                .flatten();
             resources.senders.push(if let Some(output) = &vod_output {
                 spawn_udp_sender_from(
                     mount.clone(),
@@ -291,6 +319,7 @@ pub(super) async fn handle_play(
                     track,
                     None,
                     state.config.rtcp_report_interval,
+                    rtx,
                 )
             } else {
                 let mut input = live_udp_inputs.remove(0);
@@ -304,6 +333,7 @@ pub(super) async fn handle_play(
                     track,
                     timeline_ntp_anchor,
                     state.config.rtcp_report_interval,
+                    rtx,
                 )
             });
             start_proxy_if_idle(

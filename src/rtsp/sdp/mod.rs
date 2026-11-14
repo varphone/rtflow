@@ -161,6 +161,9 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
             if let Some(track) = current.as_mut()
                 && payload_candidates.contains(&pt)
             {
+                if parts[0].eq_ignore_ascii_case("RTX") {
+                    continue;
+                }
                 track.payload_type = pt;
                 track.codec = match parts[0].to_ascii_uppercase().as_str() {
                     "H264" => Codec::H264,
@@ -379,6 +382,30 @@ pub fn encode_with(
     local_ip: Option<std::net::IpAddr>,
     rtcp_mux: bool,
 ) -> String {
+    encode_with_options(description, local_ip, rtcp_mux, false)
+}
+
+/// Encode SDP with optional RTX (RFC 4588) advertisement.
+pub fn encode_with_rtx(
+    description: &MediaDescription,
+    local_ip: Option<std::net::IpAddr>,
+    rtcp_mux: bool,
+    rtx: bool,
+) -> String {
+    encode_with_options(description, local_ip, rtcp_mux, rtx)
+}
+
+fn encode_with_options(
+    description: &MediaDescription,
+    local_ip: Option<std::net::IpAddr>,
+    rtcp_mux: bool,
+    rtx: bool,
+) -> String {
+    let rtx_configs = if rtx {
+        crate::media::rtx_configs(description)
+    } else {
+        std::collections::HashMap::new()
+    };
     let mut output = format!(
         "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns={}\r\nt=0 0\r\n",
         description.session_name
@@ -440,10 +467,17 @@ pub fn encode_with(
         };
         #[cfg(not(feature = "srtp"))]
         let profile = "RTP/AVP";
-        output.push_str(&format!(
-            "m={media} {media_port} {profile} {}\r\n",
-            track.payload_type
-        ));
+        if let Some(rtx) = rtx_configs.get(&track.id) {
+            output.push_str(&format!(
+                "m={media} {media_port} {profile} {} {}\r\n",
+                track.payload_type, rtx.payload_type
+            ));
+        } else {
+            output.push_str(&format!(
+                "m={media} {media_port} {profile} {}\r\n",
+                track.payload_type
+            ));
+        }
         // PT 14 is the static MPEG audio payload; adding an rtpmap makes
         // FFmpeg treat the stream as dynamic MPA (MP2) instead of MP3.
         if !(track.codec == Codec::Mp3 && track.payload_type == 14) {
@@ -484,6 +518,16 @@ pub fn encode_with(
         }
         if let Some(fmtp) = &track.fmtp {
             output.push_str(&format!("a=fmtp:{} {}\r\n", track.payload_type, fmtp))
+        }
+        if let Some(rtx) = rtx_configs.get(&track.id) {
+            output.push_str(&format!(
+                "a=rtpmap:{} rtx/{}\r\n",
+                rtx.payload_type, track.clock_rate
+            ));
+            output.push_str(&format!(
+                "a=fmtp:{} apt={}\r\n",
+                rtx.payload_type, track.payload_type
+            ));
         }
         if rtcp_mux {
             output.push_str("a=rtcp-mux\r\n");

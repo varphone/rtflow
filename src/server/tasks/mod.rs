@@ -23,11 +23,16 @@ use tokio::{io::AsyncWriteExt, sync::Mutex, task::JoinHandle};
 const INTERLEAVED_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Bounded RTP retransmission cache shared by UDP and interleaved senders.
+struct CachedRtp {
+    wire: Bytes,
+    rtp: Option<RtpPacket>,
+}
+
 pub(super) struct RetransmitCache {
     max: usize,
     max_bytes: usize,
     bytes: usize,
-    entries: VecDeque<(u16, Bytes)>,
+    entries: VecDeque<(u16, CachedRtp)>,
 }
 
 impl RetransmitCache {
@@ -40,28 +45,53 @@ impl RetransmitCache {
         }
     }
 
-    pub(super) fn insert(&mut self, sequence: u16, packet: Bytes) {
-        if packet.len() > self.max_bytes {
+    pub(super) fn insert(&mut self, sequence: u16, wire: Bytes) {
+        if wire.len() > self.max_bytes {
             return;
         }
         while self.entries.len() >= self.max
-            || self.bytes.saturating_add(packet.len()) > self.max_bytes
+            || self.bytes.saturating_add(wire.len()) > self.max_bytes
         {
             let Some((_, removed)) = self.entries.pop_front() else {
                 break;
             };
-            self.bytes = self.bytes.saturating_sub(removed.len());
+            self.bytes = self.bytes.saturating_sub(removed.wire.len());
         }
-        self.bytes = self.bytes.saturating_add(packet.len());
-        self.entries.push_back((sequence, packet));
+        self.bytes = self.bytes.saturating_add(wire.len());
+        let rtp = RtpPacket::parse(wire.clone()).ok();
+        self.entries.push_back((sequence, CachedRtp { wire, rtp }));
     }
 
     pub(super) fn get(&self, sequence: u16) -> Option<Bytes> {
         self.entries
             .iter()
             .find(|(current, _)| *current == sequence)
-            .map(|(_, packet)| packet.clone())
+            .map(|(_, packet)| packet.wire.clone())
     }
+
+    pub(super) fn get_rtp(&self, sequence: u16) -> Option<RtpPacket> {
+        self.entries
+            .iter()
+            .find(|(current, _)| *current == sequence)
+            .and_then(|(_, packet)| packet.rtp.clone())
+    }
+}
+
+fn build_rtx_packet(original: &RtpPacket, rtx: crate::media::RtxConfig, sequence: u16) -> Bytes {
+    let mut payload = BytesMut::with_capacity(2 + original.payload.len());
+    payload.extend_from_slice(&original.header.sequence.to_be_bytes());
+    payload.extend_from_slice(&original.payload);
+    RtpPacket {
+        header: crate::rtp::RtpHeader {
+            marker: original.header.marker,
+            payload_type: rtx.payload_type,
+            sequence,
+            timestamp: original.header.timestamp,
+            ssrc: rtx.ssrc,
+        },
+        payload: payload.freeze(),
+    }
+    .encode()
 }
 
 /// Send one UDP datagram, falling back to the async path only when the

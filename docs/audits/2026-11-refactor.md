@@ -86,7 +86,8 @@ GStreamer legacy-codec interop 在本机偶发一次失败，重跑通过；属�
 | startup cache Arc | 已完成：cache/FrameBus/startup 共享 Arc<AccessUnit> |
 | mount broadcast ring 字节预算 | 已完成：FrameBus 双预算替换 broadcast |
 | `*_str` 去重 | 已完成：入口统一接受 `IntoRtspUrl` |
-| NACK 线级 e2e | 已完成：`tests/rtsp/nack.rs`（UDP） |
+| NACK 线级 e2e | 已完成：`tests/rtsp/nack.rs`（UDP + RTX） |
+| RTX | 服务端发送/广告完成；客户端 RTX depacketizer 待做 |
 | 完整审计文档重写 | 旧文已标历史；按本文与 architecture 矩阵为准 |
 | CI semver 阻断 | 0.3.0 基线发布后启用 |
 

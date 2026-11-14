@@ -214,7 +214,8 @@ pub(crate) async fn handle_request(
                 status: 200,
                 reason: "OK".into(),
                 headers,
-                body: sdp::encode_with(&d, Some(local_addr.ip()), true).into_bytes(),
+                body: sdp::encode_with_rtx(&d, Some(local_addr.ip()), true, state.config.rtx)
+                    .into_bytes(),
             }
         }
         // SET_PARAMETER is accepted and ignored: RTSP 1.0 leaves the

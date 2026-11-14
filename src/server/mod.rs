@@ -445,6 +445,7 @@ impl RtspServer {
                 connection.ttl.unwrap_or(1),
                 self.state.config.udp_recv_buffer,
                 self.state.config.rtcp_report_interval,
+                self.state.config.rtx,
             )
             .await;
         }
@@ -512,6 +513,7 @@ impl Drop for RtspServer {
 }
 
 #[cfg(feature = "multicast")]
+#[allow(clippy::too_many_arguments)]
 async fn spawn_multicast_senders(
     mount: Arc<Mount>,
     description: &crate::media::MediaDescription,
@@ -520,7 +522,13 @@ async fn spawn_multicast_senders(
     ttl: u8,
     recv_buffer: usize,
     report_interval: std::time::Duration,
+    rtx_enabled: bool,
 ) {
+    let rtx_configs = if rtx_enabled {
+        crate::media::rtx_configs(description)
+    } else {
+        std::collections::HashMap::new()
+    };
     for track in &description.tracks {
         let (receiver, startup) = mount.subscribe_with_startup(track.id);
         let bind_ip = match group {
@@ -557,6 +565,7 @@ async fn spawn_multicast_senders(
             track.clone(),
             None,
             report_interval,
+            rtx_configs.get(&track.id).copied(),
         );
     }
 }

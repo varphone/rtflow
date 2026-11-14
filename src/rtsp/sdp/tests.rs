@@ -233,3 +233,30 @@ fn crypto_track_is_advertised_as_savp() {
     let parsed = parse(encoded.as_bytes()).unwrap();
     assert!(parsed.tracks[0].crypto.is_some());
 }
+
+#[test]
+fn rtx_is_advertised_and_ignored_by_media_selection() {
+    use crate::media::MediaDescription;
+    let description = MediaDescription::new(
+        "rtx",
+        vec![crate::media::TrackDescription::h264_video(
+            0,
+            &[],
+            &[],
+            640,
+            360,
+            30,
+        )],
+    );
+    let encoded = encode_with_rtx(&description, None, false, true);
+    let rtx = crate::media::rtx_configs(&description)
+        .get(&0)
+        .copied()
+        .unwrap();
+    assert!(encoded.contains(&format!("96 {}", rtx.payload_type)));
+    assert!(encoded.contains(&format!("a=rtpmap:{} rtx/90000", rtx.payload_type)));
+    assert!(encoded.contains(&format!("a=fmtp:{} apt=96", rtx.payload_type)));
+    let parsed = parse(encoded.as_bytes()).unwrap();
+    assert_eq!(parsed.tracks.len(), 1);
+    assert_eq!(parsed.tracks[0].payload_type, 96);
+}

@@ -502,3 +502,72 @@ impl MediaDescription {
         self.tracks.iter().find(|t| t.id == id)
     }
 }
+
+/// RTX (RFC 4588) parameters derived for one video track. RTX is advertised
+/// only when the server enables it; the payload type is allocated from the
+/// dynamic range so it never collides with a media PT.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RtxConfig {
+    pub payload_type: u8,
+    pub ssrc: u32,
+    pub apt: u8,
+}
+
+/// Allocate one RTX PT/SSRC per video track without colliding with any media
+/// payload type in the description.
+pub fn rtx_configs(description: &MediaDescription) -> std::collections::HashMap<u8, RtxConfig> {
+    let used = description
+        .tracks
+        .iter()
+        .map(|track| track.payload_type)
+        .collect::<std::collections::HashSet<_>>();
+    let mut assigned = std::collections::HashSet::new();
+    let mut configs = std::collections::HashMap::new();
+    for track in &description.tracks {
+        if track.kind != MediaKind::Video || track.payload_type < 96 {
+            continue;
+        }
+        let mut candidates = (96u8..=127).rev();
+        let payload_type = candidates
+            .find(|pt| !used.contains(pt) && !assigned.contains(pt) && *pt != track.payload_type);
+        let Some(payload_type) = payload_type else {
+            continue;
+        };
+        assigned.insert(payload_type);
+        configs.insert(
+            track.id,
+            RtxConfig {
+                payload_type,
+                ssrc: 0x5254_0000
+                    ^ (u32::from(track.id).wrapping_mul(0x9e37_79b9))
+                    ^ u32::from(track.payload_type),
+                apt: track.payload_type,
+            },
+        );
+    }
+    configs
+}
+
+#[cfg(test)]
+mod rtx_tests {
+    use super::*;
+
+    #[test]
+    fn rtx_payload_types_are_distinct_and_do_not_collide() {
+        let description = MediaDescription::new(
+            "rtx",
+            vec![
+                TrackDescription::h264_video(0, &[], &[], 640, 360, 30),
+                TrackDescription::h264_video(1, &[], &[], 320, 180, 30),
+            ],
+        );
+        let configs = rtx_configs(&description);
+        assert_eq!(configs.len(), 2);
+        let first = configs.get(&0).unwrap();
+        let second = configs.get(&1).unwrap();
+        assert_ne!(first.payload_type, second.payload_type);
+        assert_eq!(first.apt, 96);
+        assert!(first.payload_type >= 96 && first.payload_type <= 127);
+        assert_ne!(first.ssrc, second.ssrc);
+    }
+}

@@ -20,6 +20,8 @@ pub struct ServerConfig {
     pub consumer_queue_capacity: usize,
     /// Interval between RTCP sender/receiver reports on a playing session.
     pub rtcp_report_interval: Duration,
+    /// Advertise and use RFC 4588 RTX for video tracks.
+    pub rtx: bool,
     pub no_subscriber_grace: Duration,
     pub shutdown_grace: Duration,
     pub authenticator: Arc<dyn Authenticator>,
@@ -44,6 +46,7 @@ impl std::fmt::Debug for ServerConfig {
             .field("timeline", &self.timeline)
             .field("consumer_queue_capacity", &self.consumer_queue_capacity)
             .field("rtcp_report_interval", &self.rtcp_report_interval)
+            .field("rtx", &self.rtx)
             .field("no_subscriber_grace", &self.no_subscriber_grace)
             .field("shutdown_grace", &self.shutdown_grace)
             .field("authenticator", &"<authenticator>")
@@ -70,6 +73,7 @@ impl ServerConfig {
             timeline: TimelineMode::Relative,
             consumer_queue_capacity: 256,
             rtcp_report_interval: Duration::from_secs(5),
+            rtx: false,
             no_subscriber_grace: Duration::from_secs(5),
             shutdown_grace: Duration::from_secs(5),
             authenticator: Arc::new(AllowAll),
@@ -267,6 +271,11 @@ impl ServerConfigBuilder {
 
     pub fn rtcp_report_interval(mut self, value: Duration) -> Self {
         self.config.rtcp_report_interval = value;
+        self
+    }
+
+    pub fn rtx(mut self, value: bool) -> Self {
+        self.config.rtx = value;
         self
     }
 
