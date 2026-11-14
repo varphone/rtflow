@@ -66,8 +66,8 @@ experimental 测试；不 push、不运行 CI。
 ## 验证基线
 
 ```text
-cargo test --no-fail-fast                         369 passed / 0 failed
-cargo test --features experimental-protocols      436 passed / 0 failed
+cargo test --no-fail-fast                         370 passed / 0 failed
+cargo test --features experimental-protocols      437 passed / 0 failed
 cargo test --features "srtp,multicast"            此前 351 passed / 0 failed
 cargo clippy --all-targets --features ... -D warnings  通过
 cargo test --all-features                         435 passed / 0 failed
@@ -82,7 +82,7 @@ GStreamer legacy-codec interop 在本机偶发一次失败，重跑通过；属�
 
 | 项 | 原因/建议 |
 |---|---|
-| UDP `sendmmsg` | 需要 Linux `libc`/unsafe，当前 crate 默认 `forbid(unsafe_code)` |
+| UDP `sendmmsg` | 已完成：Linux nix 批量发送 + 逐包回退 |
 | startup cache Arc | 已完成：cache/FrameBus/startup 共享 Arc<AccessUnit> |
 | mount broadcast ring 字节预算 | 已完成：FrameBus 双预算替换 broadcast |
 | `*_str` 去重 | 已完成：入口统一接受 `IntoRtspUrl` |

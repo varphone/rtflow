@@ -16,17 +16,25 @@ async fn retransmit_cached(
     target: SocketAddr,
     sequences: &[u16],
 ) -> (u32, u32) {
-    let mut packets = 0u32;
-    let mut octets = 0u32;
-    for sequence in sequences {
-        if let Some(cached) = cache.get(*sequence)
-            && send_udp(socket, &cached, target).await.is_ok()
-        {
-            packets = packets.wrapping_add(1);
-            octets = octets.wrapping_add(cached.len() as u32);
+    let pending = sequences
+        .iter()
+        .filter_map(|sequence| cache.get(*sequence))
+        .collect::<Vec<_>>();
+    let mut sent = crate::runtime::udp_batch::send_batch(socket, &pending, target)
+        .await
+        .unwrap_or(0)
+        .min(pending.len());
+    let mut octets = pending[..sent]
+        .iter()
+        .map(|packet| packet.len() as u32)
+        .sum::<u32>();
+    for packet in pending.iter().skip(sent) {
+        if send_udp(socket, packet, target).await.is_ok() {
+            sent += 1;
+            octets = octets.wrapping_add(packet.len() as u32);
         }
     }
-    (packets, octets)
+    (sent as u32, octets)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -244,6 +252,8 @@ pub(crate) fn spawn_udp_sender_from(
                         let mut wire = BytesMut::with_capacity(1500);
                         let mut frame_packets = 0u64;
                         let mut frame_octets = 0u64;
+                        let mut batch = Vec::with_capacity(packets.len());
+                        let mut meta = Vec::with_capacity(packets.len());
                         for mut packet in packets {
                             packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
                             packet.encode_into(&mut wire);
@@ -256,12 +266,32 @@ pub(crate) fn spawn_udp_sender_from(
                                     continue;
                                 }
                             };
-                            let cached = retransmit.then(|| protected.clone());
                             let sequence_number = packet.header.sequence;
-                            if send_udp(&pair.rtp, &protected, rtp_target).await.is_err() {
-                                // A persistently unreachable target should not
-                                // keep the sender spinning silently.
-                                consecutive_send_failures = consecutive_send_failures.saturating_add(1);
+                            let payload_len = packet.payload.len() as u32;
+                            let timestamp = packet.header.timestamp;
+                            let cached = retransmit.then(|| protected.clone());
+                            batch.push(protected);
+                            meta.push((sequence_number, payload_len, timestamp, cached));
+                        }
+                        let batched = crate::runtime::udp_batch::send_batch(
+                            &pair.rtp,
+                            &batch,
+                            rtp_target,
+                        )
+                        .await
+                        .unwrap_or(0)
+                        .min(batch.len());
+                        let mut first_report_sent = false;
+                        for (index, (sequence_number, payload_len, timestamp, cached)) in
+                            meta.into_iter().enumerate()
+                        {
+                            if index >= batched
+                                && send_udp(&pair.rtp, &batch[index], rtp_target)
+                                    .await
+                                    .is_err()
+                            {
+                                consecutive_send_failures =
+                                    consecutive_send_failures.saturating_add(1);
                                 if consecutive_send_failures >= 100 {
                                     tracing::warn!(
                                         %rtp_target,
@@ -276,8 +306,8 @@ pub(crate) fn spawn_udp_sender_from(
                                 nack_cache.insert(sequence_number, cached);
                             }
                             sent_packets = sent_packets.wrapping_add(1);
-                            sent_octets = sent_octets.wrapping_add(packet.payload.len() as u32);
-                            last_rtp_timestamp = packet.header.timestamp;
+                            sent_octets = sent_octets.wrapping_add(payload_len);
+                            last_rtp_timestamp = timestamp;
                             if ntp_clock.is_none() {
                                 ntp_clock = RtpNtpClock::new_with_anchor(
                                     last_rtp_timestamp,
@@ -286,8 +316,9 @@ pub(crate) fn spawn_udp_sender_from(
                                 );
                             }
                             frame_packets = frame_packets.saturating_add(1);
-                            frame_octets = frame_octets.saturating_add(packet.payload.len() as u64);
-                            if sent_packets == 1
+                            frame_octets = frame_octets.saturating_add(u64::from(payload_len));
+                            if !first_report_sent
+                                && sent_packets > 0
                                 && let Some(clock) = ntp_clock.as_mut()
                                 && let Ok(report) = encode_sender_report(
                                     ssrc,
@@ -300,6 +331,7 @@ pub(crate) fn spawn_udp_sender_from(
                                 && send_udp(&pair.rtcp, &report, rtcp_target).await.is_ok()
                             {
                                 mount.stats.add_sender_reports(1);
+                                first_report_sent = true;
                             }
                         }
                         mount.stats.add_rtp(frame_packets, frame_octets);
