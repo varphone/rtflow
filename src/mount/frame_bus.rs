@@ -19,7 +19,7 @@ use std::{
 use tokio::sync::Notify;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum FrameRecvError {
+pub enum FrameRecvError {
     /// Number of frames evicted before the receiver could read them.
     Lagged(usize),
     Closed,
@@ -130,14 +130,14 @@ impl FrameBus {
     }
 }
 
-pub(crate) struct FrameReceiver {
+pub struct FrameReceiver {
     bus: Arc<FrameBus>,
     cursor: u64,
     closed: bool,
 }
 
 impl FrameReceiver {
-    pub(crate) async fn recv(&mut self) -> Result<AccessUnit, FrameRecvError> {
+    pub async fn recv(&mut self) -> Result<AccessUnit, FrameRecvError> {
         loop {
             // Register before inspecting state so a send between lock release
             // and await cannot be lost.
@@ -167,7 +167,7 @@ impl FrameReceiver {
         }
     }
 
-    pub(crate) fn try_recv(&mut self) -> Result<AccessUnit, FrameRecvError> {
+    pub fn try_recv(&mut self) -> Result<AccessUnit, FrameRecvError> {
         let state = self.bus.lock();
         if self.cursor < state.front_sequence {
             let dropped = (state.front_sequence - self.cursor) as usize;

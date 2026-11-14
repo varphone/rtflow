@@ -22,7 +22,6 @@ use sha1::{Digest as _, Sha1};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio::sync::broadcast;
 
 use super::handler::h265_vcl_nal_type;
 use super::mux::FlvMuxer;
@@ -233,7 +232,7 @@ async fn handle_connection(
                 unit = rx.recv() => unit,
             } {
                 Ok(unit) => unit,
-                Err(broadcast::error::RecvError::Lagged(n)) => {
+                Err(crate::mount::FrameRecvError::Lagged(n)) => {
                     tracing::debug!("ws-flv lagged {n}; waiting for a keyframe");
                     muxer.reset_after_discontinuity();
                     video_seq_pending = video_codec.is_some();
@@ -242,7 +241,7 @@ async fn handle_connection(
                     dropping_h265_cra_leading_pictures = false;
                     continue;
                 }
-                Err(broadcast::error::RecvError::Closed) => {
+                Err(crate::mount::FrameRecvError::Closed) => {
                     // Mount unloaded: tell the client before closing the
                     // TCP connection (RFC 6455 §5.5.1).
                     send_close = true;

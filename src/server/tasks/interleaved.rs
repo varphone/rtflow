@@ -138,12 +138,12 @@ pub(crate) fn spawn_interleaved_sender_from(
                             }
                             frame
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                            mount.stats.add_dropped(count);
+                        Err(crate::mount::FrameRecvError::Lagged(count)) => {
+                            mount.stats.add_dropped(count as u64);
                             awaiting_key = track.kind == MediaKind::Video;
                             continue;
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(crate::mount::FrameRecvError::Closed) => break,
                     }
                 }
             };

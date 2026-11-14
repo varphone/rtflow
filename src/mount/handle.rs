@@ -10,7 +10,7 @@ pub(crate) struct NackRequest {
 pub(crate) struct Mount {
     pub id: MountId,
     pub config: MountConfig,
-    pub frames: broadcast::Sender<AccessUnit>,
+    pub frames: Arc<frame_bus::FrameBus>,
     pub(crate) consumer_queue_capacity: usize,
     /// PLI/FIR/NACK feedback forwarded to local sources (track id).
     pub keyframe_requests: broadcast::Sender<u8>,
@@ -87,6 +87,13 @@ pub fn startup_dedup_keys(startup: &[AccessUnit]) -> std::collections::HashSet<(
 /// window still starts at the nearest keyframe so decoding is immediate.
 pub const STARTUP_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
 
+impl Drop for Mount {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        self.frames.close();
+    }
+}
+
 impl Mount {
     /// Ask a local source to emit a keyframe on `track_id`.
     pub(crate) fn request_keyframe(&self, track_id: u8) {
@@ -105,9 +112,9 @@ impl Mount {
     pub fn publish_cached(
         &self,
         frame: AccessUnit,
-    ) -> std::result::Result<usize, broadcast::error::SendError<AccessUnit>> {
+    ) -> std::result::Result<usize, crate::mount::FrameRecvError> {
         if frame.data.len() > self.max_queued_bytes_per_session {
-            return Err(broadcast::error::SendError(frame));
+            return Err(crate::mount::FrameRecvError::Lagged(0));
         }
         self.auto_inject_fmtp(&frame);
         // A cancelled mount (unregistered, or its server shutting down) must
@@ -115,7 +122,7 @@ impl Mount {
         // detached mount while new registrations of the same path split the
         // stream.
         if self.cancel.is_cancelled() {
-            return Err(broadcast::error::SendError(frame));
+            return Err(crate::mount::FrameRecvError::Closed);
         }
         #[cfg(feature = "server")]
         {
@@ -127,7 +134,10 @@ impl Mount {
             }
         }
         self.update_bootstrap(&frame);
-        let result = self.frames.send(frame);
+        let result = self
+            .frames
+            .send(frame)
+            .map(|_| self.frames.receiver_count());
         if tracing::enabled!(tracing::Level::DEBUG) && self.frames.receiver_count() == 0 {
             tracing::debug!("mount: frames.send dropped (no receivers)");
         }
@@ -222,7 +232,7 @@ impl Mount {
     pub fn subscribe_with_startup(
         &self,
         track_id: u8,
-    ) -> (broadcast::Receiver<AccessUnit>, Vec<AccessUnit>) {
+    ) -> (crate::mount::FrameReceiver, Vec<AccessUnit>) {
         #[cfg(feature = "server")]
         {
             let cache = self
@@ -288,7 +298,7 @@ impl Mount {
         }
     }
 
-    pub fn subscribe_with_all_startup(&self) -> (broadcast::Receiver<AccessUnit>, Vec<AccessUnit>) {
+    pub fn subscribe_with_all_startup(&self) -> (crate::mount::FrameReceiver, Vec<AccessUnit>) {
         let receiver = self.frames.subscribe();
         #[cfg(feature = "server")]
         {
@@ -374,22 +384,16 @@ impl MountHandle {
         self.inner.request_keyframe(track_id);
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<AccessUnit> {
+    pub fn subscribe(&self) -> crate::mount::FrameReceiver {
         self.inner.frames.subscribe()
     }
 
     /// Subscribe to live frames together with a cached decodable stream start.
     #[allow(dead_code)] // used by RTSP sessions and HLS/HTTP-FLV adapters
-    pub fn subscribe_with_startup(&self) -> (broadcast::Receiver<AccessUnit>, Vec<AccessUnit>) {
+    pub fn subscribe_with_startup(&self) -> (crate::mount::FrameReceiver, Vec<AccessUnit>) {
         self.inner.subscribe_with_all_startup()
     }
 
-    /// Get the broadcast sender for creating per-request subscribers.
-    pub fn frame_sender(&self) -> &broadcast::Sender<AccessUnit> {
-        &self.inner.frames
-    }
-
-    /// Get ANNOUNCE SDP fmtp parameters (snapshot at call time).
     pub fn announce_fmtp(&self) -> HashMap<u8, Arc<str>> {
         self.inner
             .announce_fmtp

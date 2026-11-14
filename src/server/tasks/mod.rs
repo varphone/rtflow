@@ -15,11 +15,7 @@ use std::{
         atomic::{AtomicU16, Ordering},
     },
 };
-use tokio::{
-    io::AsyncWriteExt,
-    sync::{Mutex, broadcast},
-    task::JoinHandle,
-};
+use tokio::{io::AsyncWriteExt, sync::Mutex, task::JoinHandle};
 
 /// Upper bound for a single interleaved (RTSP/TCP) write. A stalled peer
 /// must not hold the per-session write lock indefinitely — that would
@@ -162,7 +158,7 @@ fn sdes_cname(ssrc: u32) -> Bytes {
 }
 
 pub(super) struct SenderInput {
-    pub receiver: broadcast::Receiver<crate::media::AccessUnit>,
+    pub receiver: crate::mount::FrameReceiver,
     pub startup: Vec<crate::media::AccessUnit>,
     pub sequence: Arc<AtomicU16>,
     pub crypto: MediaCrypto,

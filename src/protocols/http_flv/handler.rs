@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 use tokio::io::AsyncWrite;
-use tokio::sync::broadcast;
 
 use super::mux::FlvMuxer;
 use crate::{
@@ -14,7 +13,7 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
     _req: HttpRequest,
     mut writer: ResponseWriter<W>,
     description: MediaDescription,
-    mut receiver: broadcast::Receiver<AccessUnit>,
+    mut receiver: crate::mount::FrameReceiver,
     startup: Vec<AccessUnit>,
     fmtp_source: crate::mount::MountHandle,
 ) -> Result<ResponseWriter<W>> {
@@ -103,7 +102,7 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
             tracing::debug!("flv: startup exhausted, waiting on broadcast");
             match receiver.recv().await {
                 Ok(unit) => unit,
-                Err(broadcast::error::RecvError::Lagged(n)) => {
+                Err(crate::mount::FrameRecvError::Lagged(n)) => {
                     tracing::debug!("http-flv lagged {n}; waiting for a keyframe");
                     muxer.reset_after_discontinuity();
                     video_seq_pending = video_codec.is_some();
@@ -112,7 +111,7 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
                     dropping_h265_cra_leading_pictures = false;
                     continue;
                 }
-                Err(broadcast::error::RecvError::Closed) => break,
+                Err(crate::mount::FrameRecvError::Closed) => break,
             }
         };
         // Skip broadcast replays of frames the startup snapshot already

@@ -264,7 +264,10 @@ impl MountRegistry {
             .consumer_queue_capacity
             .unwrap_or(256)
             .clamp(1, MAX_CONSUMER_QUEUE_CAPACITY);
-        let (tx, _) = broadcast::channel(queue_capacity);
+        let max_bytes = options
+            .max_queued_bytes_per_session
+            .unwrap_or(DEFAULT_MAX_QUEUED_BYTES_PER_SESSION);
+        let frames = FrameBus::new(queue_capacity, max_bytes);
         let (keyframe_requests, _) = broadcast::channel(16);
         let (nack_requests, _) = broadcast::channel(64);
         #[cfg(feature = "server")]
@@ -275,7 +278,7 @@ impl MountRegistry {
         let mount = Arc::new(Mount {
             id: MountId::from(path.clone()),
             config,
-            frames: tx,
+            frames,
             consumer_queue_capacity: queue_capacity,
             keyframe_requests,
             nack_requests,
@@ -308,9 +311,7 @@ impl MountRegistry {
             publishers: AtomicUsize::new(0),
             publisher_claimed: AtomicBool::new(false),
             active_sessions: AtomicUsize::new(0),
-            max_queued_bytes_per_session: options
-                .max_queued_bytes_per_session
-                .unwrap_or(DEFAULT_MAX_QUEUED_BYTES_PER_SESSION),
+            max_queued_bytes_per_session: max_bytes,
             announce_fmtp: Mutex::new(HashMap::new()),
             rtmp_seq_headers: Mutex::new(HashMap::new()),
         });
@@ -454,6 +455,26 @@ mod tests {
         registry.cancel_all();
         assert!(handle.cancellation_token().is_cancelled());
         assert!(registry.is_empty());
+    }
+
+    #[tokio::test]
+    async fn dropping_mount_closes_frame_subscribers() {
+        let registry = MountRegistry::new(1);
+        let handle = registry
+            .register(
+                Arc::from("/close"),
+                MountConfig::Local {
+                    description: local("close"),
+                },
+            )
+            .unwrap();
+        let mut receiver = handle.subscribe();
+        drop(handle);
+        drop(registry);
+        assert!(matches!(
+            receiver.recv().await,
+            Err(crate::mount::FrameRecvError::Closed)
+        ));
     }
 
     #[test]

@@ -12,7 +12,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::sync::{Notify, broadcast, mpsc};
+use tokio::sync::{Notify, mpsc};
 use tokio_util::sync::CancellationToken;
 
 pub(super) struct VodPlayback {
@@ -37,7 +37,7 @@ impl Drop for CancelOnDrop {
 pub(super) fn spawn_vod_playback(
     supervisor: &TaskSupervisor,
     source: Arc<dyn VodSource>,
-    output: broadcast::Sender<crate::AccessUnit>,
+    output: Arc<crate::mount::FrameBus>,
     start: Duration,
     end: Option<Duration>,
     prefetch: usize,

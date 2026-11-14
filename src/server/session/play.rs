@@ -136,9 +136,12 @@ pub(super) async fn handle_play(
         })
         .unwrap_or(*vod_cursor);
     let end = requested_range.and_then(|range| range.end);
-    let vod_output = vod_source
-        .as_ref()
-        .map(|_| tokio::sync::broadcast::channel(state.config.consumer_queue_capacity).0);
+    let vod_output = vod_source.as_ref().map(|_| {
+        crate::mount::FrameBus::new(
+            state.config.consumer_queue_capacity,
+            state.config.resource_limits.max_queued_bytes_per_session,
+        )
+    });
     let mut live_interleaved_inputs = Vec::new();
     let mut live_udp_inputs = Vec::new();
     let mut rtp_info = Vec::new();

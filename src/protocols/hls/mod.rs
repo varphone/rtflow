@@ -9,7 +9,6 @@ use segment_ring::SegmentRing;
 use segmenter::{Segmenter, SegmenterConfig};
 use std::time::Duration;
 use std::{collections::VecDeque, sync::Arc};
-use tokio::sync::broadcast;
 
 /// HLS configuration.
 #[derive(Clone, Debug)]
@@ -115,13 +114,13 @@ pub fn create_hls_handlers(
                     _ = cancel.cancelled() => break,
                     result = receiver.recv() => match result {
                         Ok(unit) => unit,
-                        Err(broadcast::error::RecvError::Lagged(count)) => {
+                        Err(crate::mount::FrameRecvError::Lagged(count)) => {
                             tracing::debug!(count, "HLS input lagged; waiting for a keyframe");
                             segmenter.reset_after_discontinuity();
                             awaiting_keyframe = has_video;
                             continue;
                         }
-                        Err(broadcast::error::RecvError::Closed) => break,
+                        Err(crate::mount::FrameRecvError::Closed) => break,
                     },
                 }
             };

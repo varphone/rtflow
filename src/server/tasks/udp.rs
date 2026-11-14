@@ -208,12 +208,12 @@ pub(crate) fn spawn_udp_sender_from(
                 } => {
                     let (frame, from_broadcast) = match received {
                         Ok(frame) => frame,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                            mount.stats.add_dropped(count);
+                        Err(crate::mount::FrameRecvError::Lagged(count)) => {
+                            mount.stats.add_dropped(count as u64);
                             awaiting_key = track.kind == MediaKind::Video;
                             continue;
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(crate::mount::FrameRecvError::Closed) => break,
                     };
                     // Skip broadcast duplicates of snapshot frames only;
                     // snapshot frames themselves are delivered as replayed.

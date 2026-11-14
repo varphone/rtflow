@@ -36,7 +36,6 @@ use mpd::MpdConfig;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::broadcast;
 
 /// DASH output configuration.
 #[derive(Clone, Debug)]
@@ -157,13 +156,13 @@ pub fn create_dash_handlers(
                     _ = cancel.cancelled() => break,
                     result = receiver.recv() => match result {
                         Ok(unit) => unit,
-                        Err(broadcast::error::RecvError::Lagged(count)) => {
+                        Err(crate::mount::FrameRecvError::Lagged(count)) => {
                             tracing::warn!(count, "DASH input lagged; waiting for keyframe");
                             segmenter.reset_after_discontinuity();
                             awaiting_keyframe = has_video;
                             continue;
                         }
-                        Err(broadcast::error::RecvError::Closed) => break,
+                        Err(crate::mount::FrameRecvError::Closed) => break,
                     },
                 }
             };

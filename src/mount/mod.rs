@@ -7,6 +7,8 @@ mod config;
 #[cfg(feature = "server")]
 pub mod continuity;
 mod frame_bus;
+pub(crate) use frame_bus::FrameBus;
+pub use frame_bus::{FrameReceiver, FrameRecvError};
 mod handle;
 mod publisher;
 mod registry;

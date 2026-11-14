@@ -470,7 +470,7 @@ pub(super) async fn handle_command(
                                         break; // client disconnected
                                     }
                                 }
-                                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                                Err(crate::mount::FrameRecvError::Lagged(_)) => continue,
                                 Err(_) => break,
                             }
                         }
