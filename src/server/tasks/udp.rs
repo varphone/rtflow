@@ -10,6 +10,26 @@ impl Drop for PublisherLease {
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn retransmit_cached(
+    cache: &RetransmitCache,
+    socket: &tokio::net::UdpSocket,
+    target: SocketAddr,
+    sequences: &[u16],
+) -> (u32, u32) {
+    let mut packets = 0u32;
+    let mut octets = 0u32;
+    for sequence in sequences {
+        if let Some(cached) = cache.get(*sequence)
+            && send_udp(socket, &cached, target).await.is_ok()
+        {
+            packets = packets.wrapping_add(1);
+            octets = octets.wrapping_add(cached.len() as u32);
+        }
+    }
+    (packets, octets)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_udp_sender_from(
     mount: Arc<Mount>,
     input: SenderInput,
@@ -144,14 +164,15 @@ pub(crate) fn spawn_udp_sender_from(
                                 let Some(requested) = packet.nack_sequences() else {
                                     continue;
                                 };
-                                for sequence in requested {
-                                    if let Some(cached) = nack_cache.get(sequence)
-                                        && pair.rtp.send_to(&cached, rtp_target).await.is_ok()
-                                    {
-                                        sent_packets = sent_packets.wrapping_add(1);
-                                        sent_octets = sent_octets.wrapping_add(cached.len() as u32);
-                                    }
-                                }
+                                let (packets, octets) = retransmit_cached(
+                                    &nack_cache,
+                                    &pair.rtp,
+                                    rtp_target,
+                                    &requested,
+                                )
+                                .await;
+                                sent_packets = sent_packets.wrapping_add(packets);
+                                sent_octets = sent_octets.wrapping_add(octets);
                             }
                         }
                         if packets.iter().any(|packet| {
@@ -360,7 +381,7 @@ pub(crate) fn spawn_udp_receiver(
 
 #[cfg(test)]
 mod tests {
-    use super::RetransmitCache;
+    use super::{RetransmitCache, retransmit_cached};
     use bytes::Bytes;
 
     #[test]
@@ -373,6 +394,26 @@ mod tests {
         assert!(cache.get(1).is_none());
         assert_eq!(cache.get(2).as_deref(), Some(&b"two"[..]));
         assert_eq!(cache.get(3).as_deref(), Some(&b"three"[..]));
+    }
+
+    #[tokio::test]
+    async fn retransmit_cache_sends_requested_packets() {
+        let receiver = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let target = receiver.local_addr().unwrap();
+        let mut cache = RetransmitCache::new(8);
+        cache.insert(7, Bytes::from_static(b"packet"));
+        let (packets, octets) = retransmit_cached(&cache, &sender, target, &[7, 8]).await;
+        assert_eq!((packets, octets), (1, 6));
+        let mut buffer = [0u8; 32];
+        let (size, _) = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            receiver.recv_from(&mut buffer),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(&buffer[..size], b"packet");
     }
 
     #[test]
