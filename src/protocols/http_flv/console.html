@@ -87,7 +87,7 @@ async function loadMounts() {
       <div>${m.video || "-"} ${m.width > 0 ? m.width + "×" + m.height : ""} ${m.audio || ""}</div>
       <div class="${m.publisher ? "ok" : "bad"}">${m.publisher ? "发布中" : "无发布者"}</div>
       <div class="muted">订阅 ${m.subscribers} · 帧 ${m.accepted} · 丢 ${m.dropped}</div>
-      <div class="muted">推流 rtmp://&lt;host&gt;:1935/${m.path.replace(/^\\//, "")}</div>`;
+      <div class="muted">推流 rtmp://&lt;host&gt;:1935/${m.path.startsWith("/") ? m.path.slice(1) : m.path}</div>`;
     const button = document.createElement("button");
     button.textContent = "播放 HLS";
     button.onclick = () => playHls(m.hls, m.name);
