@@ -321,7 +321,7 @@
           <td class="mono">${num(s.subscribers)}</td>
           ${compact ? "" : `<td class="mono"><span class="ok">${num(s.accepted_frames)}</span> / <span class="bad">${num(s.dropped_frames)}</span></td>
           <td><div class="row-actions">
-            <button class="btn small" data-action="play" data-path="${esc(s.path)}" data-kind="live">${icon("play")} 播放</button>
+            <button class="btn small" data-action="play" data-path="${esc(s.path)}" data-kind="live">${icon("play")} HLS</button>
             <button class="btn small ghost" data-action="copy" data-copy="${esc(s.hls_url)}" title="复制 HLS 地址">${icon("copy")}</button>
             ${state.session.readonly ? "" : `<button class="btn small danger" data-action="kick" data-path="${esc(s.path)}" title="断开并移除流">${icon("power")}</button>`}
           </div></td>`}
