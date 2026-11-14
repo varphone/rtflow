@@ -10,6 +10,7 @@ mod gateway;
 mod gop_alignment;
 mod mount_options;
 mod multitrack;
+mod nack;
 mod protocol_edges;
 mod publish_tcp;
 mod publish_udp;

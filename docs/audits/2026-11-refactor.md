@@ -40,7 +40,8 @@ experimental 测试；不 push、不运行 CI。
 - proxy watcher 让 HLS/HTTP-FLV 订阅也触发按需上游。
 - VOD 自然 EOS：排空广播后关闭会话（RTSP 无 EOS 方法）。
 - UDP/interleaved NACK 512 包缓存（2 MiB 字节预算），SRTP 复用原索引重传；
-  NACK PID+BLP 展开统一到 `Packet::nack_sequences()`。
+  NACK PID+BLP 展开统一到 `Packet::nack_sequences()`；raw RTSP e2e 验证
+  UDP NACK 触发缓存重传。
 
 ## P2 性能
 
@@ -65,8 +66,8 @@ experimental 测试；不 push、不运行 CI。
 ## 验证基线
 
 ```text
-cargo test --no-fail-fast                         363 passed / 0 failed
-cargo test --features experimental-protocols      430 passed / 0 failed
+cargo test --no-fail-fast                         364 passed / 0 failed
+cargo test --features experimental-protocols      431 passed / 0 failed
 cargo test --features "srtp,multicast"            此前 351 passed / 0 failed
 cargo clippy --all-targets --features ... -D warnings  通过
 cargo test --all-features --no-run                通过
@@ -84,6 +85,7 @@ GStreamer legacy-codec interop 在本机偶发一次失败，重跑通过；属�
 | startup cache Arc | 当前 Bytes 克隆已便宜；改 Arc 需改广播/快照类型 |
 | mount broadcast ring 字节预算 | `tokio::broadcast` 无字节视图，需自研 bus |
 | `*_str` 去重 | 已完成：入口统一接受 `IntoRtspUrl` |
+| NACK 线级 e2e | 已完成：`tests/rtsp/nack.rs`（UDP） |
 | 完整审计文档重写 | 旧文已标历史；按本文与 architecture 矩阵为准 |
 | CI semver 阻断 | 0.3.0 基线发布后启用 |
 
