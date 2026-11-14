@@ -104,10 +104,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mounts.clone(),
         HlsConfig {
             segment_duration: Duration::from_secs(1),
-            // 60 fps HLS cuts close to 1 s segments; keep a 10 s live
-            // window so a slow segment request cannot evict the segment
-            // hls.js is about to fetch.
-            segment_count: 10,
+            // 60 fps HLS cuts close to 1 s segments. Keep a 30 s
+            // window: multiple viewers (especially throttled background
+            // tabs) must not lose a segment between playlist reload and
+            // fetch.
+            segment_count: 30,
             live: true,
         },
     ));

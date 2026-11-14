@@ -448,9 +448,9 @@
           // default; high-fps streams produce short segments and can hit
           // the edge before the next segment finishes.
           liveSyncDurationCount: 3,
-          maxBufferLength: 10,
+          maxBufferLength: 30,
           liveMaxLatencyDurationCount: 6,
-          backBufferLength: 10,
+          backBufferLength: 30,
         });
         state.hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data && data.fatal) {
