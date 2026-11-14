@@ -208,6 +208,11 @@ pub(super) async fn connect_multicast(
                 Ok((srtp, srtcp)) => {
                     srtp_contexts.insert(track.payload_type, srtp);
                     srtcp_contexts.insert(track.id, srtcp);
+                    if let Some(rtx) = track.rtx
+                        && let Ok((rtx_srtp, _)) = crate::srtp::from_sdp_crypto(attribute)
+                    {
+                        srtp_contexts.insert(rtx.payload_type, rtx_srtp);
+                    }
                 }
                 Err(error) => {
                     return Err(Box::new(SetupFailure {

@@ -92,7 +92,7 @@ pub(crate) fn spawn_interleaved_sender_from(
                                 {
                                     let payload = build_rtx_packet(&original, rtx, rtx_sequence);
                                     rtx_sequence = rtx_sequence.wrapping_add(1);
-                                    payload
+                                    crypto.protect_rtp(payload.clone()).unwrap_or(payload)
                                 } else {
                                     let Some(payload) = nack_cache.get(sequence) else {
                                         continue;
@@ -182,7 +182,8 @@ pub(crate) fn spawn_interleaved_sender_from(
             for mut packet in packets {
                 packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
                 let payload_len = packet.payload.len() as u32;
-                let payload = match crypto.protect_rtp(packet.encode()) {
+                let plain = packet.encode();
+                let payload = match crypto.protect_rtp(plain.clone()) {
                     Ok(payload) => payload,
                     Err(error) => {
                         mount.stats.add_dropped(1);
@@ -200,7 +201,7 @@ pub(crate) fn spawn_interleaved_sender_from(
                 batch.extend_from_slice(&[b'$', rtp_channel]);
                 batch.extend_from_slice(&length.to_be_bytes());
                 batch.extend_from_slice(&payload);
-                nack_cache.insert(packet.header.sequence, payload);
+                nack_cache.insert(packet.header.sequence, payload, Some(plain));
                 sent_packets = sent_packets.wrapping_add(1);
                 sent_octets = sent_octets.wrapping_add(payload_len);
                 last_rtp_timestamp = packet.header.timestamp;

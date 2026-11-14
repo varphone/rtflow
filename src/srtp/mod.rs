@@ -535,3 +535,32 @@ mod tests {
         assert!(context.protect_rtp(&packet).is_err());
     }
 }
+
+#[cfg(test)]
+mod rtx_stream_tests {
+    use super::*;
+
+    fn rtp(ssrc: u32, sequence: u16, payload: &[u8]) -> Bytes {
+        let mut packet = BytesMut::with_capacity(12 + payload.len());
+        packet.extend_from_slice(&[0x80, 0x60]); // V=2, PT=96
+        packet.extend_from_slice(&sequence.to_be_bytes());
+        packet.extend_from_slice(&9_000u32.to_be_bytes());
+        packet.extend_from_slice(&ssrc.to_be_bytes());
+        packet.extend_from_slice(payload);
+        packet.freeze()
+    }
+
+    #[test]
+    fn one_context_protects_media_and_rtx_ssrc() {
+        let key = [0x11; 16];
+        let salt = [0x22; 14];
+        let mut sender = SrtpContext::new(SrtpProfile::AES_128_CM_HMAC_SHA1_80, &key, &salt);
+        let mut receiver = SrtpContext::new(SrtpProfile::AES_128_CM_HMAC_SHA1_80, &key, &salt);
+        let media = rtp(0x1111_1111, 10, b"media");
+        let rtx = rtp(0x2222_2222, 1, b"\x00\x0artx");
+        let protected_media = sender.protect_rtp(&media).unwrap();
+        let protected_rtx = sender.protect_rtp(&rtx).unwrap();
+        assert_eq!(receiver.unprotect_rtp(&protected_media).unwrap(), media);
+        assert_eq!(receiver.unprotect_rtp(&protected_rtx).unwrap(), rtx);
+    }
+}

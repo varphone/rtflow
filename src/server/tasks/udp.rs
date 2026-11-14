@@ -17,14 +17,17 @@ async fn retransmit_cached(
     sequences: &[u16],
     rtx: Option<crate::media::RtxConfig>,
     rtx_sequence: &mut u16,
+    crypto: &mut MediaCrypto,
 ) -> (u32, u32) {
     let mut pending = Vec::with_capacity(sequences.len());
     for sequence in sequences {
         if let Some(rtx) = rtx
             && let Some(original) = cache.get_rtp(*sequence)
         {
-            pending.push(build_rtx_packet(&original, rtx, *rtx_sequence));
-            *rtx_sequence = rtx_sequence.wrapping_add(1);
+            if let Ok(wire) = crypto.protect_rtp(build_rtx_packet(&original, rtx, *rtx_sequence)) {
+                pending.push(wire);
+                *rtx_sequence = rtx_sequence.wrapping_add(1);
+            }
             continue;
         }
         if let Some(wire) = cache.get(*sequence) {
@@ -192,6 +195,7 @@ pub(crate) fn spawn_udp_sender_from(
                                     &requested,
                                     rtx,
                                     &mut rtx_sequence,
+                                    &mut crypto,
                                 )
                                 .await;
                                 sent_packets = sent_packets.wrapping_add(packets);
@@ -273,6 +277,7 @@ pub(crate) fn spawn_udp_sender_from(
                             packet.header.sequence = sequence.fetch_add(1, Ordering::Relaxed);
                             packet.encode_into(&mut wire);
                             let plain = wire.split().freeze();
+                            let plain_for_cache = retransmit.then(|| plain.clone());
                             let protected = match crypto.protect_rtp(plain) {
                                 Ok(wire) => wire,
                                 Err(error) => {
@@ -286,7 +291,7 @@ pub(crate) fn spawn_udp_sender_from(
                             let timestamp = packet.header.timestamp;
                             let cached = retransmit.then(|| protected.clone());
                             batch.push(protected);
-                            meta.push((sequence_number, payload_len, timestamp, cached));
+                            meta.push((sequence_number, payload_len, timestamp, cached, plain_for_cache));
                         }
                         let batched = crate::runtime::udp_batch::send_batch(
                             &pair.rtp,
@@ -297,7 +302,7 @@ pub(crate) fn spawn_udp_sender_from(
                         .unwrap_or(0)
                         .min(batch.len());
                         let mut first_report_sent = false;
-                        for (index, (sequence_number, payload_len, timestamp, cached)) in
+                        for (index, (sequence_number, payload_len, timestamp, cached, plain)) in
                             meta.into_iter().enumerate()
                         {
                             if index >= batched
@@ -318,7 +323,7 @@ pub(crate) fn spawn_udp_sender_from(
                             }
                             consecutive_send_failures = 0;
                             if let Some(cached) = cached {
-                                nack_cache.insert(sequence_number, cached);
+                                nack_cache.insert(sequence_number, cached, plain);
                             }
                             sent_packets = sent_packets.wrapping_add(1);
                             sent_octets = sent_octets.wrapping_add(payload_len);
@@ -428,16 +433,16 @@ pub(crate) fn spawn_udp_receiver(
 
 #[cfg(test)]
 mod tests {
-    use super::{RetransmitCache, retransmit_cached};
+    use super::{MediaCrypto, RetransmitCache, retransmit_cached};
     use bytes::Bytes;
 
     #[test]
     fn rtp_cache_retains_recent_packets_and_evicts_oldest() {
         let mut cache = RetransmitCache::new(2);
-        cache.insert(1, Bytes::from_static(b"one"));
-        cache.insert(2, Bytes::from_static(b"two"));
+        cache.insert(1, Bytes::from_static(b"one"), None);
+        cache.insert(2, Bytes::from_static(b"two"), None);
         assert_eq!(cache.get(1).as_deref(), Some(&b"one"[..]));
-        cache.insert(3, Bytes::from_static(b"three"));
+        cache.insert(3, Bytes::from_static(b"three"), None);
         assert!(cache.get(1).is_none());
         assert_eq!(cache.get(2).as_deref(), Some(&b"two"[..]));
         assert_eq!(cache.get(3).as_deref(), Some(&b"three"[..]));
@@ -476,9 +481,17 @@ mod tests {
         let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let target = receiver.local_addr().unwrap();
         let mut cache = RetransmitCache::new(8);
-        cache.insert(7, Bytes::from_static(b"packet"));
-        let (packets, octets) =
-            retransmit_cached(&cache, &sender, target, &[7, 8], None, &mut 0).await;
+        cache.insert(7, Bytes::from_static(b"packet"), None);
+        let (packets, octets) = retransmit_cached(
+            &cache,
+            &sender,
+            target,
+            &[7, 8],
+            None,
+            &mut 0,
+            &mut MediaCrypto::default(),
+        )
+        .await;
         assert_eq!((packets, octets), (1, 6));
         let mut buffer = [0u8; 32];
         let (size, _) = tokio::time::timeout(
@@ -495,9 +508,9 @@ mod tests {
     fn rtp_cache_evicts_by_byte_budget() {
         let mut cache = RetransmitCache::new(16);
         let megabyte = Bytes::from(vec![0u8; 1024 * 1024]);
-        cache.insert(1, megabyte.clone());
-        cache.insert(2, megabyte.clone());
-        cache.insert(3, megabyte);
+        cache.insert(1, megabyte.clone(), None);
+        cache.insert(2, megabyte.clone(), None);
+        cache.insert(3, megabyte, None);
         assert!(cache.get(1).is_none());
         assert!(cache.get(2).is_some());
         assert!(cache.get(3).is_some());
@@ -506,7 +519,7 @@ mod tests {
     #[test]
     fn rtp_cache_normalizes_zero_capacity_without_panicking() {
         let mut cache = RetransmitCache::new(0);
-        cache.insert(7, Bytes::from_static(b"packet"));
+        cache.insert(7, Bytes::from_static(b"packet"), None);
         assert!(cache.get(7).is_some());
     }
 }

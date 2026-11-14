@@ -45,7 +45,7 @@ impl RetransmitCache {
         }
     }
 
-    pub(super) fn insert(&mut self, sequence: u16, wire: Bytes) {
+    pub(super) fn insert(&mut self, sequence: u16, wire: Bytes, plain: Option<Bytes>) {
         if wire.len() > self.max_bytes {
             return;
         }
@@ -58,7 +58,7 @@ impl RetransmitCache {
             self.bytes = self.bytes.saturating_sub(removed.wire.len());
         }
         self.bytes = self.bytes.saturating_add(wire.len());
-        let rtp = RtpPacket::parse(wire.clone()).ok();
+        let rtp = plain.and_then(|plain| RtpPacket::parse(plain).ok());
         self.entries.push_back((sequence, CachedRtp { wire, rtp }));
     }
 

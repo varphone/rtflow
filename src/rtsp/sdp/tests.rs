@@ -269,7 +269,7 @@ fn rtx_is_advertised_and_ignored_by_media_selection() {
 
 #[cfg(feature = "srtp")]
 #[test]
-fn rtx_is_not_used_on_srtp_tracks() {
+fn rtx_is_used_on_srtp_tracks() {
     let sdp = "v=0\r\ns=srtp\r\nm=video 0 RTP/SAVP 96 97\r\n\
 a=rtpmap:96 H264/90000\r\n\
 a=rtpmap:97 rtx/90000\r\n\
@@ -278,5 +278,7 @@ a=crypto:1 AES_128_CM_HMAC_SHA1_80 inline:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 a=control:trackID=0\r\n";
     let parsed = parse(sdp.as_bytes()).unwrap();
     assert!(parsed.tracks[0].crypto.is_some());
-    assert!(parsed.tracks[0].rtx.is_none());
+    let rtx = parsed.tracks[0].rtx.expect("RTX mapping");
+    assert_eq!(rtx.payload_type, 97);
+    assert_eq!(rtx.apt, 96);
 }
