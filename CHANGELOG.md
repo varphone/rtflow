@@ -122,6 +122,7 @@
 - HLS/DASH/WebRTC 增加命名 handler struct（HlsHandlers/DashHandlers/WebRtcHandlers）与 create_*_router，避免位置元组。
 - 新增 registry 路径边界、稳定排序与 cancel_all 单测。
 - HLS SegmentRing 窗口硬上限 128，错误配置不会无限保留 segment/keyframe；补充 clamp 单测。
+- HlsConfig/DashConfig/MpdConfig 增加 validate（0 段时长/timescale 拒绝）与单测。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

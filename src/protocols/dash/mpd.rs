@@ -21,6 +21,18 @@ pub struct MpdConfig {
     pub suggested_presentation_delay: Option<Duration>,
 }
 
+impl MpdConfig {
+    pub fn validate(&self) -> crate::Result<()> {
+        if self.segment_duration.is_zero() {
+            return Err(crate::Error::Limit("DASH MPD segment duration"));
+        }
+        if self.timescale == 0 {
+            return Err(crate::Error::Limit("DASH MPD timescale"));
+        }
+        Ok(())
+    }
+}
+
 impl Default for MpdConfig {
     fn default() -> Self {
         Self {

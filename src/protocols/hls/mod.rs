@@ -22,6 +22,17 @@ pub struct HlsConfig {
     pub live: bool,
 }
 
+impl HlsConfig {
+    /// Reject degenerate segment duration; `segment_count` is clamped by
+    /// [`segment_ring::SegmentRing`].
+    pub fn validate(&self) -> crate::Result<()> {
+        if self.segment_duration.is_zero() {
+            return Err(crate::Error::Limit("HLS segment duration"));
+        }
+        Ok(())
+    }
+}
+
 impl Default for HlsConfig {
     fn default() -> Self {
         Self {
@@ -201,4 +212,18 @@ pub fn create_hls_handlers(
     });
 
     (playlist_handler, segment_handler, init_handler)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_segment_duration_is_rejected() {
+        let config = HlsConfig {
+            segment_duration: Duration::ZERO,
+            ..HlsConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
 }

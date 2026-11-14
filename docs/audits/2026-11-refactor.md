@@ -62,9 +62,9 @@ experimental 测试；不 push、不运行 CI。
 ## 验证基线
 
 ```text
-cargo test --no-fail-fast                         359 passed / 0 failed
-cargo test --features experimental-protocols      425 passed / 0 failed
-cargo test --features "srtp,multicast"            359 passed / 0 failed
+cargo test --no-fail-fast                         360 passed / 0 failed
+cargo test --features experimental-protocols      427 passed / 0 failed
+cargo test --features "srtp,multicast"            360 passed / 0 failed
 cargo clippy --all-targets --features ... -D warnings  通过
 cargo test --all-features --no-run                通过
 cargo package --allow-dirty                       通过

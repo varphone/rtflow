@@ -49,6 +49,17 @@ pub struct DashConfig {
     pub mpd: MpdConfig,
 }
 
+impl DashConfig {
+    /// Reject degenerate segment duration; `segment_count` is clamped by
+    /// the HLS `SegmentRing`.
+    pub fn validate(&self) -> crate::Result<()> {
+        if self.segment_duration.is_zero() {
+            return Err(crate::Error::Limit("DASH segment duration"));
+        }
+        self.mpd.validate()
+    }
+}
+
 impl Default for DashConfig {
     fn default() -> Self {
         Self {
@@ -378,5 +389,22 @@ fn extract_video_dimensions(init: &[u8]) -> Option<(u16, u16)> {
         Some((width, height))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_durations_are_rejected() {
+        let config = DashConfig {
+            segment_duration: Duration::ZERO,
+            ..DashConfig::default()
+        };
+        assert!(config.validate().is_err());
+        let mut config = DashConfig::default();
+        config.mpd.timescale = 0;
+        assert!(config.validate().is_err());
     }
 }
