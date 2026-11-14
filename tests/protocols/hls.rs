@@ -817,3 +817,43 @@ fn video_segments_never_start_mid_gop() {
     let segment = segments.try_recv().expect("segment at IDR");
     assert!(segment.starts_with_keyframe);
 }
+
+#[test]
+fn segmenter_can_continue_sequence_after_restart() {
+    let description = h264_description();
+    let mut segmenter = Segmenter::new(
+        SegmenterConfig {
+            segment_duration: Duration::from_millis(100),
+            lookback_count: 5,
+        },
+        &description,
+    );
+    segmenter.set_sequence(114);
+    let mut segments = segmenter.subscribe();
+    for i in 0..3 {
+        segmenter.push(AccessUnit {
+            track_id: 0,
+            codec: Codec::H264,
+            pts: Duration::from_millis(i * 40),
+            dts: None,
+            rtp_timestamp: (i * 3600) as u32,
+            is_keyframe: i == 0,
+            data: if i == 0 {
+                h264_keyframe()
+            } else {
+                h264_interframe()
+            },
+        });
+    }
+    segmenter.push(AccessUnit {
+        track_id: 0,
+        codec: Codec::H264,
+        pts: Duration::from_millis(100),
+        dts: None,
+        rtp_timestamp: 9000,
+        is_keyframe: true,
+        data: h264_keyframe(),
+    });
+    let segment = segments.try_recv().expect("segment");
+    assert_eq!(segment.sequence, 114);
+}

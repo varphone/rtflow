@@ -35,6 +35,10 @@
 - HLS segmenter 在首个视频 IDR 前丢弃音频，segment 不再从音频 PTS
   开始；60 fps 短分段起播不再等待/卡顿。示例 live 窗口增至 10 段，
   hls.js 使用 3 个目标时长同步和 10 秒缓冲。
+- HLS live 每 mount 严格单 segmenter 所有权；worker 退出只清自己的
+  ring，避免两个 sequence 计数器交叉写入产生 114/115/116/115。
+- segment sequence 跨 segmenter 重启保持单调；SegmentRing 拒绝
+  非递增序列，playlist 不会再回退。
 - HLS live playlist 使用相对 URI，并在首个 segment 就绪前最多等待
   3 秒；harness/hls.js 不再因空 playlist 判为 fatal。
 - 管理台播放器在 Chromium/Edge 上优先使用 hls.js，而不是信任

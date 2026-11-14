@@ -165,6 +165,13 @@ impl Segmenter {
     /// Push an AccessUnit into the segmenter. Segments are cut immediately before
     /// the first keyframe at or after the target duration, so every new video
     /// segment begins at a random access point.
+    /// Set the next sequence number before the first push. Used when a
+    /// segmenter is recreated for a long-lived live mount: the playlist's
+    /// EXT-X-MEDIA-SEQUENCE must never go backwards.
+    pub fn set_sequence(&mut self, sequence: u64) {
+        self.sequence = sequence;
+    }
+
     pub fn push(&mut self, unit: AccessUnit) {
         let Some(&track_index) = self.track_indices.get(&unit.track_id) else {
             return;

@@ -29,6 +29,15 @@ impl SegmentRing {
             .segments
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A segmenter restart or a racing producer must never insert an
+        // older sequence after a newer one: the playlist would go
+        // 114,115,116,115 and hls.js would treat it as a seek backwards.
+        if segments
+            .back()
+            .is_some_and(|last| segment.sequence <= last.sequence)
+        {
+            return;
+        }
         if segments.len() >= self.max_segments {
             segments.pop_front();
         }

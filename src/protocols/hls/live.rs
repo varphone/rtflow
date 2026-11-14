@@ -12,16 +12,26 @@ use crate::{
 };
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 struct Channel {
     ring: Arc<SegmentRing>,
-    started: Arc<Mutex<bool>>,
-    /// Cache-busting token for init/segments. A server restart must not
-    /// reuse the previous run's browser-cached init.m4s (same URL, new
-    /// SPS/PPS).
-    generation: String,
+    /// `Some(generation)` while exactly one segmenter owns this channel.
+    /// Never start a second segmenter for the same mount: two segmenters
+    /// have independent sequence counters and interleave 114/115/116/115
+    /// into one playlist.
+    active: Arc<Mutex<Option<u64>>>,
+    next_generation: AtomicU64,
+    /// Next media sequence. Preserved across segmenter restarts so the
+    /// playlist's EXT-X-MEDIA-SEQUENCE never goes backwards.
+    next_sequence: Arc<AtomicU64>,
+    /// Cache-busting token for init/segments. A server restart or segmenter
+    /// restart must not reuse the previous run's browser-cached init.m4s.
+    generation: Mutex<String>,
 }
 
 /// Per-registry HLS live manager. One segmenter/channel per mount.
@@ -49,42 +59,57 @@ impl HlsLiveManager {
             .or_insert_with(|| {
                 Arc::new(Channel {
                     ring: Arc::new(SegmentRing::new(self.config.segment_count)),
-                    started: Arc::new(Mutex::new(false)),
-                    generation: format!(
+                    active: Arc::new(Mutex::new(None)),
+                    next_generation: AtomicU64::new(0),
+                    next_sequence: Arc::new(AtomicU64::new(0)),
+                    generation: Mutex::new(format!(
                         "{:x}",
                         std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_nanos()
-                    ),
+                    )),
                 })
             })
             .clone()
     }
 
     fn ensure_started(&self, mount: &MountHandle, channel: &Arc<Channel>) {
-        let mut started = channel
-            .started
+        let mut active = channel
+            .active
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if *started {
+        if active.is_some() {
             return;
         }
         let description = mount.description();
         if description.tracks.is_empty() {
             return;
         }
-        *started = true;
+        let generation = channel.next_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        *active = Some(generation);
+        *channel
+            .generation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = format!(
+            "{generation}-{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
         let ring = channel.ring.clone();
+        let next_sequence = channel.next_sequence.clone();
+        let channel = channel.clone();
         let mount = mount.clone();
         let cancel = mount.cancellation_token();
         let seg_config = SegmenterConfig {
             segment_duration: self.config.segment_duration,
             lookback_count: self.config.segment_count,
         };
-        let started_flag = channel.started.clone();
         tokio::spawn(async move {
             let mut segmenter = Segmenter::new(seg_config, &description);
+            segmenter.set_sequence(next_sequence.load(Ordering::Acquire));
             let mut segments = segmenter.subscribe();
             let (mut receiver, startup) = mount.subscribe_with_startup();
             let startup_keys = crate::mount::startup_dedup_keys(&startup);
@@ -136,13 +161,18 @@ impl HlsLiveManager {
                     segmenter.push((*unit).clone());
                 }
                 while let Ok(segment) = segments.try_recv() {
+                    next_sequence.store(segment.sequence.saturating_add(1), Ordering::Release);
                     ring.push(segment);
                 }
             }
-            ring.clear();
-            *started_flag
+            let mut active = channel
+                .active
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *active == Some(generation) {
+                channel.ring.clear();
+                *active = None;
+            }
         });
     }
 }
@@ -223,7 +253,12 @@ pub fn create_hls_live_handler(manager: Arc<HlsLiveManager>) -> Handler {
                         return Ok(writer);
                     }
                     let mut req = req;
-                    req.query.insert("v".to_owned(), channel.generation.clone());
+                    let generation = channel
+                        .generation
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone();
+                    req.query.insert("v".to_owned(), generation);
                     handler::serve_playlist(
                         req,
                         writer,
