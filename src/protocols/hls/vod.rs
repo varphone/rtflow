@@ -188,6 +188,18 @@ fn parse(path: &str) -> Option<(&str, &str)> {
     None
 }
 
+fn byte_range(header: Option<&str>, length: usize) -> Option<(usize, usize)> {
+    let value = header?.strip_prefix("bytes=")?;
+    let (start, end) = value.split_once('-')?;
+    let start = start.parse::<usize>().ok()?;
+    let end = if end.is_empty() {
+        length.checked_sub(1)?
+    } else {
+        end.parse::<usize>().ok()?.min(length.checked_sub(1)?)
+    };
+    (start <= end && start < length).then_some((start, end))
+}
+
 /// Handler for `/vod/{id}/index.m3u8`, `/init.m4s`, `/{seq}.m4s`.
 pub fn create_hls_vod_handler(manager: Arc<HlsVodManager>) -> Handler {
     Arc::new(move |req, mut writer| {
@@ -244,20 +256,30 @@ pub fn create_hls_vod_handler(manager: Arc<HlsVodManager>) -> Handler {
                             } else {
                                 "video/iso.segment"
                             };
-                            let length = body.len().to_string();
-                            writer
-                                .write_headers(
-                                    200,
-                                    &[
-                                        ("Content-Type", content_type),
-                                        ("Content-Length", length.as_str()),
-                                        ("Cache-Control", "public, max-age=3600"),
-                                        ("Access-Control-Allow-Origin", "*"),
-                                        ("Connection", "close"),
-                                    ],
-                                )
-                                .await?;
-                            writer.write_raw(&body).await?;
+                            let range = byte_range(req.header("range"), body.len());
+                            let (status, slice_start, slice_end) = match range {
+                                Some((start, end)) => (206, start, end + 1),
+                                None => (200, 0, body.len()),
+                            };
+                            let length = (slice_end - slice_start).to_string();
+                            let content_range = format!(
+                                "bytes {slice_start}-{}/{body_len}",
+                                slice_end - 1,
+                                body_len = body.len()
+                            );
+                            let mut headers = vec![
+                                ("Content-Type", content_type),
+                                ("Content-Length", length.as_str()),
+                                ("Cache-Control", "public, max-age=3600"),
+                                ("Access-Control-Allow-Origin", "*"),
+                                ("Accept-Ranges", "bytes"),
+                                ("Connection", "close"),
+                            ];
+                            if status == 206 {
+                                headers.push(("Content-Range", content_range.as_str()));
+                            }
+                            writer.write_headers(status, &headers).await?;
+                            writer.write_raw(&body[slice_start..slice_end]).await?;
                             writer.flush().await?;
                             Ok(writer)
                         }
