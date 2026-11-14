@@ -433,14 +433,14 @@
     openModal(title, `<video id="admin-video" controls autoplay muted playsinline></video><div class="player-status" id="player-status">正在加载…</div>`);
     const video = document.getElementById("admin-video");
     const status = document.getElementById("player-status");
+    // Chromium/Edge may report a truthy canPlayType("application/vnd.apple.mpegurl")
+    // while its native HLS path cannot decode our fMP4 (or is not enabled).
+    // Prefer MSE/hls.js whenever supported; use native HLS only on Safari/iOS
+    // where MediaSource HLS is unavailable.
     const native = video.canPlayType("application/vnd.apple.mpegurl");
     try {
-      if (native) {
-        video.src = url;
-        status.textContent = "使用浏览器原生 HLS 播放";
-      } else {
-        const Hls = await loadHls();
-        if (!Hls || !Hls.isSupported()) throw new Error("当前浏览器不支持 HLS 播放");
+      const Hls = await loadHls().catch(() => null);
+      if (Hls && Hls.isSupported()) {
         state.hls = new Hls({ liveDurationInfinity: true, enableWorker: false });
         state.hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data && data.fatal) {
@@ -452,6 +452,11 @@
         state.hls.loadSource(url);
         state.hls.attachMedia(video);
         status.textContent = "hls.js 播放";
+      } else if (native) {
+        video.src = url;
+        status.textContent = "使用浏览器原生 HLS 播放";
+      } else {
+        throw new Error("当前浏览器不支持 HLS 播放");
       }
       video.play().catch(() => { status.textContent += "（点击播放开始）"; });
     } catch (error) {

@@ -29,6 +29,9 @@
   关键帧，避免 segment 从 P 帧开始导致 `Missing reference picture`。
 - HLS live playlist 使用相对 URI，并在首个 segment 就绪前最多等待
   3 秒；harness/hls.js 不再因空 playlist 判为 fatal。
+- 管理台播放器在 Chromium/Edge 上优先使用 hls.js，而不是信任
+  `canPlayType("application/vnd.apple.mpegurl")` 的原生 HLS 分支；
+  Firefox 正常而 Edge 黑屏的问题由此修复。
 
 ### Changed
 
