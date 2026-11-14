@@ -66,11 +66,11 @@ experimental 测试；不 push、不运行 CI。
 ## 验证基线
 
 ```text
-cargo test --no-fail-fast                         375 passed / 0 failed
-cargo test --features experimental-protocols      442 passed / 0 failed
+cargo test --no-fail-fast                         381 passed / 0 failed
+cargo test --features experimental-protocols      448 passed / 0 failed
 cargo test --features "srtp,multicast"            此前 351 passed / 0 failed
 cargo clippy --all-targets --features ... -D warnings  通过
-cargo test --all-features                         445 passed / 0 failed
+cargo test --all-features                         451 passed / 0 failed
 cargo test --all-features --no-run                通过
 cargo package --allow-dirty                       通过
 ```
@@ -84,10 +84,10 @@ GStreamer legacy-codec interop 在本机偶发一次失败，重跑通过；属�
 |---|---|
 | UDP `sendmmsg` | 已完成：Linux nix 批量发送 + 逐包回退 |
 | startup cache Arc | 已完成：cache/FrameBus/startup 共享 Arc<AccessUnit> |
-| mount broadcast ring 字节预算 | 已完成：FrameBus 双预算替换 broadcast |
+| mount broadcast ring 字节预算 | 已完成：FrameBus 双预算替换 broadcast；Lagged/Closed 语义有单测 |
 | `*_str` 去重 | 已完成：入口统一接受 `IntoRtspUrl` |
 | NACK 线级 e2e | 已完成：`tests/rtsp/nack.rs`（UDP + RTX） |
-| RTX | 已完成：SDP 协商 + 服务端重传 + 客户端 OSN 解包 |
+| RTX | 已完成：SDP 协商 + 服务端重传 + 客户端 OSN 解包；SRTP 轨不广告 RTX |
 | 完整审计文档重写 | 旧文已标历史；按本文与 architecture 矩阵为准 |
 | CI semver 阻断 | 0.3.0 基线发布后启用 |
 

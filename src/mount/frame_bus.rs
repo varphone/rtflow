@@ -257,6 +257,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn subscriber_starts_at_next_frame() {
+        let bus = FrameBus::new(8, 1024);
+        bus.send(Arc::new(frame(1, 1))).unwrap();
+        let mut receiver = bus.subscribe();
+        bus.send(Arc::new(frame(2, 1))).unwrap();
+        assert_eq!(receiver.recv().await.unwrap().rtp_timestamp, 2);
+    }
+
+    #[tokio::test]
+    async fn lag_reports_evicted_count_and_resumes_at_oldest() {
+        let bus = FrameBus::new(2, 1024);
+        let mut receiver = bus.subscribe();
+        for timestamp in 1..=4 {
+            bus.send(Arc::new(frame(timestamp, 1))).unwrap();
+        }
+        assert!(matches!(
+            receiver.recv().await,
+            Err(FrameRecvError::Lagged(2))
+        ));
+        assert_eq!(receiver.recv().await.unwrap().rtp_timestamp, 3);
+        assert_eq!(receiver.recv().await.unwrap().rtp_timestamp, 4);
+    }
+
+    #[tokio::test]
+    async fn close_drains_buffered_frames_then_closes() {
+        let bus = FrameBus::new(8, 1024);
+        let mut receiver = bus.subscribe();
+        bus.send(Arc::new(frame(1, 1))).unwrap();
+        bus.close();
+        assert_eq!(receiver.recv().await.unwrap().rtp_timestamp, 1);
+        assert!(matches!(receiver.recv().await, Err(FrameRecvError::Closed)));
+    }
+
+    #[tokio::test]
+    async fn receiver_count_tracks_subscription_drop() {
+        let bus = FrameBus::new(8, 1024);
+        assert_eq!(bus.receiver_count(), 0);
+        let first = bus.subscribe();
+        let second = bus.subscribe();
+        assert_eq!(bus.receiver_count(), 2);
+        drop(first);
+        assert_eq!(bus.receiver_count(), 1);
+        drop(second);
+        assert_eq!(bus.receiver_count(), 0);
+    }
+
+    #[tokio::test]
     async fn oversized_frame_is_rejected_without_evicting() {
         let bus = FrameBus::new(4, 8);
         let mut receiver = bus.subscribe();

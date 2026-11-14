@@ -534,6 +534,13 @@ pub fn rtx_configs(description: &MediaDescription) -> std::collections::HashMap<
     let mut assigned = std::collections::HashSet::new();
     let mut configs = std::collections::HashMap::new();
     for track in &description.tracks {
+        #[cfg(feature = "srtp")]
+        if track.crypto.is_some() {
+            // RTX has its own SSRC/SRTP context; without per-RTX key
+            // derivation, keep the original protected packet instead of
+            // advertising a cleartext RTX stream on an SAVP session.
+            continue;
+        }
         if track.kind != MediaKind::Video || track.payload_type < 96 {
             continue;
         }
@@ -579,5 +586,19 @@ mod rtx_tests {
         assert_eq!(first.apt, 96);
         assert!(first.payload_type >= 96 && first.payload_type <= 127);
         assert_ne!(first.ssrc, second.ssrc);
+    }
+
+    #[cfg(feature = "srtp")]
+    #[test]
+    fn srtp_tracks_do_not_get_rtx_config() {
+        let mut track = TrackDescription::h264_video(0, &[], &[], 640, 360, 30);
+        track.crypto = Some(crate::media::crypto::SdpCrypto {
+            tag: 1,
+            crypto_suite: "AES_128_CM_HMAC_SHA1_80".into(),
+            key_params: "inline:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+            session_params: None,
+        });
+        let description = MediaDescription::new("srtp", vec![track]);
+        assert!(rtx_configs(&description).is_empty());
     }
 }

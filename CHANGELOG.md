@@ -137,6 +137,7 @@
 - RTX（RFC 4588）服务端：`ServerConfig.rtx` 开启后 SDP 广告独立 PT/SSRC，NACK 以 RTX 包（OSN+原 payload）重传；SRTP/非 Linux 保持原包重传。客户端 RTX 解包仍未实现。
 - 客户端 RTX：SDP 解析保存 `TrackDescription.rtx`（PT/apt），UDP/interleaved/组播收到 RTX 包后按 OSN 还原原 sequence/PT/payload；新增解析与解包单测。
 - 全 feature 445 passed；RTX 客户端/服务端闭环；all-features clippy 干净。
+- SRTP 轨不再广告 RTX（无独立 SRTP context），NACK 保持加密原包重传；RTMP 播放 lag 后等待下一个视频关键帧；FrameBus 增加订阅起点/Lagged 计数/close 排空/receiver_count 单测。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

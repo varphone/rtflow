@@ -311,6 +311,10 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
                 track.payload_type
             )));
         }
+        #[cfg(feature = "srtp")]
+        if track.crypto.is_some() {
+            track.rtx = None;
+        }
         if let Some(rtx) = track.rtx.as_mut()
             && rtx.apt == 0
         {

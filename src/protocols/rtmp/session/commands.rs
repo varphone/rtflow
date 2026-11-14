@@ -438,6 +438,7 @@ pub(super) async fn handle_command(
                 }
 
                 // Forward live frames
+                let mut awaiting_key = false;
                 loop {
                     tokio::select! {
                         _ = cancel_clone.cancelled() => break,
@@ -446,6 +447,12 @@ pub(super) async fn handle_command(
                                 Ok(unit) => {
                                     if startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
                                         continue;
+                                    }
+                                    if awaiting_key && unit.kind() == MediaKind::Video {
+                                        if !unit.is_keyframe {
+                                            continue;
+                                        }
+                                        awaiting_key = false;
                                     }
                                     let ts = unit.dts.unwrap_or(unit.pts).as_millis() as u32;
                                     let base = *base_ts.get_or_insert(ts);
@@ -470,7 +477,10 @@ pub(super) async fn handle_command(
                                         break; // client disconnected
                                     }
                                 }
-                                Err(crate::mount::FrameRecvError::Lagged(_)) => continue,
+                                Err(crate::mount::FrameRecvError::Lagged(_)) => {
+                                    awaiting_key = true;
+                                    continue;
+                                }
                                 Err(_) => break,
                             }
                         }
