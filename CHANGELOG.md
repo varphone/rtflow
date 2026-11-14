@@ -132,6 +132,7 @@
 - 全 feature 测试 435 passed；默认 368、experimental 435。
 - 新增 FrameBus 基础实现：帧数+字节双预算、Lagged/Closed、可等待接收；单测覆盖淘汰、唤醒与超大帧拒绝（尚未接入 Mount）。
 - Mount 帧通道从 broadcast 切换为 FrameBus：帧数+字节双预算生效，VOD 输出、RTSP/HLS/FLV/RTMP/WebRTC 消费端适配；Mount Drop 关闭 receiver。
+- Startup cache 与 FrameBus 共享 Arc<AccessUnit>：发布只分配一次，cache/broadcast/startup snapshot 复用；HLS/DASH 仅在需要修改时间戳时 clone。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

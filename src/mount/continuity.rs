@@ -5,6 +5,7 @@ use crate::{
 };
 use std::{
     collections::{HashMap, VecDeque},
+    sync::Arc,
     time::Duration,
 };
 
@@ -169,7 +170,7 @@ impl Default for StartupCacheConfig {
 
 struct TrackCache {
     kind: MediaKind,
-    frames: VecDeque<AccessUnit>,
+    frames: VecDeque<Arc<AccessUnit>>,
     bytes: usize,
     starts_with_keyframe: bool,
 }
@@ -208,7 +209,7 @@ impl KeyframeCache {
         })
     }
 
-    pub fn push(&mut self, frame: &AccessUnit) {
+    pub fn push(&mut self, frame: Arc<AccessUnit>) {
         if !self.config.enabled {
             return;
         }
@@ -224,7 +225,7 @@ impl KeyframeCache {
             return;
         }
         track.bytes = track.bytes.saturating_add(frame.data.len());
-        track.frames.push_back(frame.clone());
+        track.frames.push_back(frame);
         while track.frames.len() > self.config.max_frames_per_track {
             pop_front(track);
         }
@@ -286,14 +287,14 @@ impl KeyframeCache {
         }
     }
 
-    pub fn snapshot(&self, track_id: u8) -> Vec<AccessUnit> {
+    pub fn snapshot(&self, track_id: u8) -> Vec<Arc<AccessUnit>> {
         self.tracks
             .get(&track_id)
             .map(|track| track.frames.iter().cloned().collect())
             .unwrap_or_default()
     }
 
-    pub fn snapshot_all(&self) -> Vec<AccessUnit> {
+    pub fn snapshot_all(&self) -> Vec<Arc<AccessUnit>> {
         let mut frames = self
             .tracks
             .values()
@@ -452,13 +453,23 @@ mod tests {
     fn cache_starts_at_keyframe_and_shares_payload_storage() {
         let media = description(Codec::H264);
         let mut cache = KeyframeCache::new(&media, StartupCacheConfig::default()).unwrap();
-        cache.push(&frame(1, 0, false, Bytes::from_static(b"ignored")));
+        cache.push(std::sync::Arc::new(frame(
+            1,
+            0,
+            false,
+            Bytes::from_static(b"ignored"),
+        )));
         assert!(cache.snapshot(0).is_empty());
 
         let key_data = Bytes::from_static(b"key");
         let pointer = key_data.as_ptr();
-        cache.push(&frame(2, 33, true, key_data));
-        cache.push(&frame(3, 66, false, Bytes::from_static(b"delta")));
+        cache.push(std::sync::Arc::new(frame(2, 33, true, key_data)));
+        cache.push(std::sync::Arc::new(frame(
+            3,
+            66,
+            false,
+            Bytes::from_static(b"delta"),
+        )));
         let snapshot = cache.snapshot(0);
         assert_eq!(snapshot.len(), 2);
         assert!(snapshot[0].is_keyframe);

@@ -203,7 +203,7 @@ async fn handle_connection(
         guard.flush().await?;
     }
 
-    let startup: Vec<AccessUnit> = startup_keyframe_pts
+    let startup: Vec<std::sync::Arc<AccessUnit>> = startup_keyframe_pts
         .map(|keyframe_pts| {
             startup
                 .into_iter()

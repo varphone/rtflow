@@ -14,7 +14,7 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
     mut writer: ResponseWriter<W>,
     description: MediaDescription,
     mut receiver: crate::mount::FrameReceiver,
-    startup: Vec<AccessUnit>,
+    startup: Vec<std::sync::Arc<AccessUnit>>,
     fmtp_source: crate::mount::MountHandle,
 ) -> Result<ResponseWriter<W>> {
     let mut muxer = FlvMuxer::new(&description);
@@ -69,7 +69,7 @@ pub async fn serve_flv_stream<W: AsyncWrite + Unpin>(
     writer.flush().await?;
     tracing::debug!("flv: header flushed");
 
-    let startup: Vec<AccessUnit> = startup_keyframe_pts
+    let startup: Vec<std::sync::Arc<AccessUnit>> = startup_keyframe_pts
         .map(|keyframe_pts| {
             startup
                 .into_iter()

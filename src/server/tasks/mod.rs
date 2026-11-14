@@ -159,7 +159,7 @@ fn sdes_cname(ssrc: u32) -> Bytes {
 
 pub(super) struct SenderInput {
     pub receiver: crate::mount::FrameReceiver,
-    pub startup: Vec<crate::media::AccessUnit>,
+    pub startup: Vec<Arc<crate::media::AccessUnit>>,
     pub sequence: Arc<AtomicU16>,
     pub crypto: MediaCrypto,
 }

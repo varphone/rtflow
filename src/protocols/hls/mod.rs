@@ -140,7 +140,7 @@ pub fn create_hls_handlers(
             if startup_keys.contains(&(unit.track_id, unit.rtp_timestamp)) {
                 continue;
             }
-            segmenter.push(unit);
+            segmenter.push((*unit).clone());
             while let Ok(segment) = segments.try_recv() {
                 ring_clone.push(segment);
             }

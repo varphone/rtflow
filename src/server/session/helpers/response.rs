@@ -12,11 +12,15 @@ pub(crate) fn rtp_info_entry(
     // keyframe the publisher pushed — the NPT offset is then a fraction
     // of a second instead of missing entirely (VLC shows no progress bar
     // without RTP-Info).
-    let first = input.startup.iter().find(|unit| {
-        unit.track_id == track.id
-            && unit.codec == track.codec
-            && (track.kind != crate::media::MediaKind::Video || unit.is_keyframe)
-    });
+    let first = input
+        .startup
+        .iter()
+        .find(|unit| {
+            unit.track_id == track.id
+                && unit.codec == track.codec
+                && (track.kind != crate::media::MediaKind::Video || unit.is_keyframe)
+        })
+        .map(|unit| &**unit);
     let bootstrap_frame = mount
         .bootstrap
         .lock()

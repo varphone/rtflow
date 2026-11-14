@@ -83,7 +83,7 @@ GStreamer legacy-codec interop 在本机偶发一次失败，重跑通过；属�
 | 项 | 原因/建议 |
 |---|---|
 | UDP `sendmmsg` | 需要 Linux `libc`/unsafe，当前 crate 默认 `forbid(unsafe_code)` |
-| startup cache Arc | 当前 Bytes 克隆已便宜；改 Arc 需改广播/快照类型 |
+| startup cache Arc | 已完成：cache/FrameBus/startup 共享 Arc<AccessUnit> |
 | mount broadcast ring 字节预算 | 已完成：FrameBus 双预算替换 broadcast |
 | `*_str` 去重 | 已完成：入口统一接受 `IntoRtspUrl` |
 | NACK 线级 e2e | 已完成：`tests/rtsp/nack.rs`（UDP） |

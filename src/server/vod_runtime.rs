@@ -78,7 +78,7 @@ pub(super) fn spawn_vod_playback(
                     .ok_or(Error::Limit("VOD playback deadline"))?;
                 tokio::time::sleep_until(deadline).await;
                 task_position.store(duration_us(position).saturating_add(1), Ordering::Release);
-                if output.send(sample.unit).is_err() {
+                if output.send(Arc::new(sample.unit)).is_err() {
                     break;
                 }
             }

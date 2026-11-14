@@ -37,7 +37,7 @@ impl std::fmt::Display for FrameRecvError {
 impl std::error::Error for FrameRecvError {}
 
 struct State {
-    frames: VecDeque<AccessUnit>,
+    frames: VecDeque<Arc<AccessUnit>>,
     bytes: usize,
     front_sequence: u64,
     next_sequence: u64,
@@ -97,7 +97,7 @@ impl FrameBus {
 
     /// Publish one frame, evicting the oldest entries until both budgets fit.
     /// Returns the number of receivers that were notified (0 is valid).
-    pub(crate) fn send(&self, frame: AccessUnit) -> Result<(), FrameRecvError> {
+    pub(crate) fn send(&self, frame: Arc<AccessUnit>) -> Result<(), FrameRecvError> {
         if self.is_closed() {
             return Err(FrameRecvError::Closed);
         }
@@ -137,7 +137,7 @@ pub struct FrameReceiver {
 }
 
 impl FrameReceiver {
-    pub async fn recv(&mut self) -> Result<AccessUnit, FrameRecvError> {
+    pub async fn recv(&mut self) -> Result<Arc<AccessUnit>, FrameRecvError> {
         loop {
             // Register before inspecting state so a send between lock release
             // and await cannot be lost.
@@ -167,7 +167,7 @@ impl FrameReceiver {
         }
     }
 
-    pub fn try_recv(&mut self) -> Result<AccessUnit, FrameRecvError> {
+    pub fn try_recv(&mut self) -> Result<Arc<AccessUnit>, FrameRecvError> {
         let state = self.bus.lock();
         if self.cursor < state.front_sequence {
             let dropped = (state.front_sequence - self.cursor) as usize;
@@ -217,8 +217,8 @@ mod tests {
     async fn byte_budget_evicts_oldest_and_reports_lag() {
         let bus = FrameBus::new(16, 10);
         let mut receiver = bus.subscribe();
-        bus.send(frame(1, 6)).unwrap();
-        bus.send(frame(2, 6)).unwrap();
+        bus.send(Arc::new(frame(1, 6))).unwrap();
+        bus.send(Arc::new(frame(2, 6))).unwrap();
         assert!(matches!(
             receiver.recv().await,
             Err(FrameRecvError::Lagged(1))
@@ -234,7 +234,7 @@ mod tests {
         let sender = bus.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(10)).await;
-            sender.send(frame(7, 1)).unwrap();
+            sender.send(Arc::new(frame(7, 1))).unwrap();
         });
         let delivered = tokio::time::timeout(Duration::from_secs(1), receiver.recv())
             .await
@@ -260,8 +260,8 @@ mod tests {
     async fn oversized_frame_is_rejected_without_evicting() {
         let bus = FrameBus::new(4, 8);
         let mut receiver = bus.subscribe();
-        assert!(bus.send(frame(1, 16)).is_err());
-        bus.send(frame(2, 4)).unwrap();
+        assert!(bus.send(Arc::new(frame(1, 16))).is_err());
+        bus.send(Arc::new(frame(2, 4))).unwrap();
         assert_eq!(receiver.recv().await.unwrap().rtp_timestamp, 2);
     }
 }

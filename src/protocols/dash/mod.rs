@@ -236,6 +236,7 @@ pub fn create_dash_handlers(
                     continue;
                 }
             }
+            let mut unit = (*unit).clone();
             let base = *base_pts.get_or_insert(unit.pts);
             unit.pts = unit.pts.saturating_sub(base);
             if let Some(dts) = unit.dts {

@@ -69,7 +69,7 @@ pub(crate) fn codec_lookup_table(description: &MediaDescription) -> [Option<Code
 /// will receive the same frames twice: the broadcast ring replays frames
 /// that were sent before subscription. Skip any receiver frame whose
 /// `(track_id, rtp_timestamp)` matches one of these keys.
-pub fn startup_dedup_keys(startup: &[AccessUnit]) -> std::collections::HashSet<(u8, u32)> {
+pub fn startup_dedup_keys(startup: &[Arc<AccessUnit>]) -> std::collections::HashSet<(u8, u32)> {
     startup
         .iter()
         .map(|unit| (unit.track_id, unit.rtp_timestamp))
@@ -117,6 +117,7 @@ impl Mount {
             return Err(crate::mount::FrameRecvError::Lagged(0));
         }
         self.auto_inject_fmtp(&frame);
+        let frame = Arc::new(frame);
         // A cancelled mount (unregistered, or its server shutting down) must
         // not keep accepting data: publishers would silently write into a
         // detached mount while new registrations of the same path split the
@@ -130,7 +131,7 @@ impl Mount {
             // the lock must not block the publisher hot path, and dropping
             // one frame from the cache is harmless.
             if let Ok(mut cache) = self.startup_cache.try_lock() {
-                cache.push(&frame);
+                cache.push(frame.clone());
             }
         }
         self.update_bootstrap(&frame);
@@ -232,7 +233,7 @@ impl Mount {
     pub fn subscribe_with_startup(
         &self,
         track_id: u8,
-    ) -> (crate::mount::FrameReceiver, Vec<AccessUnit>) {
+    ) -> (crate::mount::FrameReceiver, Vec<Arc<AccessUnit>>) {
         #[cfg(feature = "server")]
         {
             let cache = self
@@ -298,7 +299,9 @@ impl Mount {
         }
     }
 
-    pub fn subscribe_with_all_startup(&self) -> (crate::mount::FrameReceiver, Vec<AccessUnit>) {
+    pub fn subscribe_with_all_startup(
+        &self,
+    ) -> (crate::mount::FrameReceiver, Vec<Arc<AccessUnit>>) {
         let receiver = self.frames.subscribe();
         #[cfg(feature = "server")]
         {
@@ -390,7 +393,7 @@ impl MountHandle {
 
     /// Subscribe to live frames together with a cached decodable stream start.
     #[allow(dead_code)] // used by RTSP sessions and HLS/HTTP-FLV adapters
-    pub fn subscribe_with_startup(&self) -> (crate::mount::FrameReceiver, Vec<AccessUnit>) {
+    pub fn subscribe_with_startup(&self) -> (crate::mount::FrameReceiver, Vec<Arc<AccessUnit>>) {
         self.inner.subscribe_with_all_startup()
     }
 

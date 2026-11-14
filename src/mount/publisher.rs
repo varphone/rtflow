@@ -45,11 +45,11 @@ impl LocalPublisher {
             // disconnect — replaying it jumps straight from stale frames
             // to the live edge, which stalls VLC for seconds.
             self.inner.auto_inject_fmtp(&frame);
+            self.inner.update_bootstrap(&frame);
             #[cfg(feature = "server")]
             if let Ok(mut cache) = self.inner.startup_cache.try_lock() {
-                cache.push(&frame);
+                cache.push(std::sync::Arc::new(frame));
             }
-            self.inner.update_bootstrap(&frame);
             return Ok(PushResult::DroppedNoSubscribers);
         }
         match self.inner.publish_cached(frame) {
@@ -91,11 +91,11 @@ impl LocalPublisher {
             // disconnect — replaying it jumps straight from stale frames
             // to the live edge, which stalls VLC for seconds.
             self.inner.auto_inject_fmtp(&frame);
+            self.inner.update_bootstrap(&frame);
             #[cfg(feature = "server")]
             if let Ok(mut cache) = self.inner.startup_cache.try_lock() {
-                cache.push(&frame);
+                cache.push(std::sync::Arc::new(frame));
             }
-            self.inner.update_bootstrap(&frame);
             return Ok(PushResult::DroppedNoSubscribers);
         }
         match self.inner.publish_cached(frame) {
