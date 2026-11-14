@@ -81,6 +81,12 @@ impl Gateway {
         Ok(())
     }
 
+    /// Local address of the HTTP server, when started.
+    #[cfg(feature = "http")]
+    pub fn http_addr(&self) -> Option<std::net::SocketAddr> {
+        self.http.as_ref().map(HttpServer::local_addr)
+    }
+
     /// Start an RTMP server sharing this gateway's mount registry.
     #[cfg(feature = "rtmp")]
     pub async fn start_rtmp(

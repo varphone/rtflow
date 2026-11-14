@@ -43,3 +43,23 @@ async fn gateway_mount_is_visible_to_rtsp() {
     session.teardown().await.unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(2), gateway.shutdown()).await;
 }
+
+#[cfg(feature = "http")]
+#[tokio::test]
+async fn dropping_gateway_stops_http_accept_loop() {
+    use rtflow::http::HttpConfig;
+    let mut gateway = Gateway::new(8);
+    gateway
+        .start_http(HttpConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let addr = gateway.http_addr().expect("HTTP address");
+    drop(gateway);
+    for _ in 0..40 {
+        if tokio::net::TcpStream::connect(addr).await.is_err() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("HTTP accept loop kept the port after Gateway drop");
+}
