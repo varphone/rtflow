@@ -450,6 +450,34 @@ mod tests {
     }
 
     #[test]
+    fn oversized_frame_is_dropped_before_broadcast() {
+        let registry = MountRegistry::new(1);
+        let handle = registry
+            .register_with(
+                Arc::from("/oversized"),
+                MountConfig::Local {
+                    description: local("oversized"),
+                },
+                MountOptions::builder()
+                    .max_queued_bytes_per_session(4)
+                    .build(),
+            )
+            .unwrap();
+        let publisher = handle.publisher().unwrap();
+        let frame = crate::AccessUnit {
+            track_id: 0,
+            codec: crate::Codec::H264,
+            pts: std::time::Duration::ZERO,
+            dts: None,
+            rtp_timestamp: 0,
+            is_keyframe: true,
+            data: bytes::Bytes::from_static(b"12345"),
+        };
+        assert_eq!(publisher.try_push(frame).unwrap(), PushResult::Dropped);
+        assert_eq!(handle.snapshot().stats.dropped_frames, 1);
+    }
+
+    #[test]
     fn mount_options_builder_sets_values() {
         let options = MountOptions::builder()
             .consumer_queue_capacity(32)
