@@ -70,6 +70,7 @@ cargo test --no-fail-fast                         365 passed / 0 failed
 cargo test --features experimental-protocols      432 passed / 0 failed
 cargo test --features "srtp,multicast"            此前 351 passed / 0 failed
 cargo clippy --all-targets --features ... -D warnings  通过
+cargo test --all-features                         435 passed / 0 failed
 cargo test --all-features --no-run                通过
 cargo package --allow-dirty                       通过
 ```

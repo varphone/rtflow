@@ -129,6 +129,7 @@
 - `RtspClient` 入口统一接受 `IntoRtspUrl`（Url/&str/&String/String），删除 `options_str`/`describe_str`/`connect_str`/`publish_str` 重复 API。
 - 新增 raw RTSP + 真实 UDP socket 的 NACK 端到端测试，验证重传缓存生效。
 - broadcast ring 容量 clamp 到 4096，并在 MountSnapshot 暴露生效值；避免错误配置分配无界队列。
+- 全 feature 测试 435 passed；默认 365、experimental 432。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、
