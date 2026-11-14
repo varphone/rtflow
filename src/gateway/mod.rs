@@ -230,6 +230,10 @@ impl Drop for Gateway {
         if let Some(task) = self.srt_task.take() {
             task.abort();
         }
+        #[cfg(feature = "http")]
+        if let Some(http) = self.http.take() {
+            http.shutdown();
+        }
         self.mounts.cancel_all();
     }
 }
