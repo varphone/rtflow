@@ -11,6 +11,23 @@ fn gcd(mut left: u32, mut right: u32) -> u32 {
 }
 
 #[allow(clippy::too_many_arguments)]
+fn video_fmtp(codec: Codec, config: Option<&[u8]>) -> Option<String> {
+    if codec != Codec::H264 {
+        return None;
+    }
+    let params = crate::rtmp::flv::extract_sps_pps_from_avcc_config(config?)?;
+    if params.len() < 2 {
+        return None;
+    }
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    Some(format!(
+        "profile-level-id=42e01e;sprop-parameter-sets={},{}",
+        STANDARD.encode(&params[0]),
+        STANDARD.encode(&params[1])
+    ))
+}
+
+#[allow(clippy::too_many_arguments)] // protocol metadata fields stay explicit
 pub(super) fn sync_description(
     mount_handle: &MountHandle,
     stream_name: &str,
@@ -22,6 +39,7 @@ pub(super) fn sync_description(
     frame_rate: Option<(u32, u32)>,
     audio_sample_rate: Option<u32>,
     audio_channels: Option<u8>,
+    video_config: Option<&[u8]>,
 ) -> crate::Result<()> {
     if !has_video && !has_audio {
         return Ok(());
@@ -37,7 +55,7 @@ pub(super) fn sync_description(
             clock_rate: 90_000,
             channels: None,
             payload_type: 96,
-            fmtp: None,
+            fmtp: video_fmtp(video_codec.unwrap_or(Codec::H264), video_config).map(Arc::from),
             control: Arc::from("trackID=0"),
             width,
             height,
@@ -118,6 +136,7 @@ pub(crate) fn apply_metadata(state: &mut SessionState, data: &AmfValue) {
         frame_rate,
         audio_sample_rate,
         audio_channels,
+        video_seq_header,
         stream_name,
         ..
     } = state
@@ -156,6 +175,7 @@ pub(crate) fn apply_metadata(state: &mut SessionState, data: &AmfValue) {
         *frame_rate,
         *audio_sample_rate,
         *audio_channels,
+        video_seq_header.as_deref(),
     );
 }
 

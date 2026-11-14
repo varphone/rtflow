@@ -238,7 +238,7 @@ pub fn create_hls_vod_handler(manager: Arc<HlsVodManager>) -> Handler {
                                 &[
                                     ("Content-Type", "application/vnd.apple.mpegurl"),
                                     ("Content-Length", length.as_str()),
-                                    ("Cache-Control", "public, max-age=60"),
+                                    ("Cache-Control", "no-store"),
                                     ("Access-Control-Allow-Origin", "*"),
                                     ("Connection", "close"),
                                 ],
@@ -283,7 +283,7 @@ pub fn create_hls_vod_handler(manager: Arc<HlsVodManager>) -> Handler {
                             let mut headers = vec![
                                 ("Content-Type", content_type),
                                 ("Content-Length", length.as_str()),
-                                ("Cache-Control", "public, max-age=3600"),
+                                ("Cache-Control", "no-store"),
                                 ("Access-Control-Allow-Origin", "*"),
                                 ("Accept-Ranges", "bytes"),
                                 ("Connection", "close"),

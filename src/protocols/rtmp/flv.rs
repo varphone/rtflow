@@ -250,7 +250,7 @@ pub fn avcc_to_annexb(data: &[u8], sps_pps: Option<&[u8]>) -> Bytes {
 }
 
 /// Extract SPS and PPS NALUs from an AVCC decoder configuration record.
-fn extract_sps_pps_from_avcc_config(config: &[u8]) -> Option<Vec<Bytes>> {
+pub(crate) fn extract_sps_pps_from_avcc_config(config: &[u8]) -> Option<Vec<Bytes>> {
     if config.len() < 7 {
         return None;
     }

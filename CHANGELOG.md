@@ -27,6 +27,11 @@
   SPS/PPS + 首个 IDR 能进入 init/segment。
 - HLS 视频不再在 2×target duration 处硬切；没有 IDR 时等待下一个
   关键帧，避免 segment 从 P 帧开始导致 `Missing reference picture`。
+- RTMP sequence header 生成 H.264 `fmtp`（sprop-parameter-sets），HLS
+  init segment 立即携带 avcC；修复 Edge 中 `resetInitSegment` 抛
+  `Cannot read properties of undefined (reading 'toString')`。
+- HLS init/segment 改为 `no-store`，live playlist 内嵌 URI 带每次
+  启动唯一的 `?v=` 令牌，避免浏览器磁盘缓存复用旧 init。
 - HLS live playlist 使用相对 URI，并在首个 segment 就绪前最多等待
   3 秒；harness/hls.js 不再因空 playlist 判为 fatal。
 - 管理台播放器在 Chromium/Edge 上优先使用 hls.js，而不是信任

@@ -124,7 +124,7 @@ pub async fn serve_segment<W: AsyncWrite + Unpin>(
     let headers = [
         ("Content-Type", "video/iso.segment"),
         ("Content-Length", content_length.as_str()),
-        ("Cache-Control", "public, max-age=3600"),
+        ("Cache-Control", "no-store"),
         ("Access-Control-Allow-Origin", "*"),
         ("Connection", "keep-alive"),
     ];
@@ -154,7 +154,7 @@ pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
     let headers = [
         ("Content-Type", "video/mp4"),
         ("Content-Length", content_length.as_str()),
-        ("Cache-Control", "public, max-age=3600"),
+        ("Cache-Control", "no-store"),
         ("Access-Control-Allow-Origin", "*"),
         ("Connection", "keep-alive"),
     ];

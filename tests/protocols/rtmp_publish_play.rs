@@ -303,6 +303,11 @@ async fn rtmp_publish_delivers_video_to_mount() {
     assert_eq!(description.tracks[0].width, Some(640));
     assert_eq!(description.tracks[0].height, Some(360));
     assert_eq!(description.tracks[0].frame_rate, Some((30, 1)));
+    let fmtp = description.tracks[0].fmtp.as_deref().unwrap_or_default();
+    assert!(
+        fmtp.contains("sprop-parameter-sets="),
+        "RTMP sequence header must seed HLS fmtp/codec config: {fmtp}"
+    );
     let (mut rx, _startup) = handle.subscribe_with_startup();
 
     // Send another frame to verify live delivery

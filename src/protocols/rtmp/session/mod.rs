@@ -396,6 +396,7 @@ pub async fn serve_rtmp_session(
                                     *frame_rate,
                                     *audio_sample_rate,
                                     *audio_channels,
+                                    video_seq_header.as_deref(),
                                 );
                             }
                             VideoData::HevcSequenceHeader(data) => {
@@ -417,6 +418,7 @@ pub async fn serve_rtmp_session(
                                     *frame_rate,
                                     *audio_sample_rate,
                                     *audio_channels,
+                                    video_seq_header.as_deref(),
                                 );
                             }
                             VideoData::AvcNalu {
@@ -486,6 +488,7 @@ pub async fn serve_rtmp_session(
                         frame_rate,
                         audio_sample_rate,
                         audio_channels,
+                        video_seq_header,
                         base_timestamp,
                         ..
                     } = &mut state
@@ -515,6 +518,7 @@ pub async fn serve_rtmp_session(
                                     *frame_rate,
                                     *audio_sample_rate,
                                     *audio_channels,
+                                    video_seq_header.as_deref(),
                                 );
                             }
                             AudioData::AacRaw(data) => {

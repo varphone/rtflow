@@ -18,6 +18,10 @@ use std::{
 struct Channel {
     ring: Arc<SegmentRing>,
     started: Arc<Mutex<bool>>,
+    /// Cache-busting token for init/segments. A server restart must not
+    /// reuse the previous run's browser-cached init.m4s (same URL, new
+    /// SPS/PPS).
+    generation: String,
 }
 
 /// Per-registry HLS live manager. One segmenter/channel per mount.
@@ -46,6 +50,13 @@ impl HlsLiveManager {
                 Arc::new(Channel {
                     ring: Arc::new(SegmentRing::new(self.config.segment_count)),
                     started: Arc::new(Mutex::new(false)),
+                    generation: format!(
+                        "{:x}",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_nanos()
+                    ),
                 })
             })
             .clone()
@@ -204,6 +215,8 @@ pub fn create_hls_live_handler(manager: Arc<HlsLiveManager>) -> Handler {
                             .await?;
                         return Ok(writer);
                     }
+                    let mut req = req;
+                    req.query.insert("v".to_owned(), channel.generation.clone());
                     handler::serve_playlist(
                         req,
                         writer,
