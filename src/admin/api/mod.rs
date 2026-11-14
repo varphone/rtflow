@@ -165,7 +165,11 @@ fn index_handler(state: Arc<AdminState>) -> Handler {
     })
 }
 
-fn asset_handler(asset: &'static str, content_type: &'static str) -> Handler {
+fn asset_handler(
+    asset: &'static str,
+    content_type: &'static str,
+    cache_control: &'static str,
+) -> Handler {
     Arc::new(move |_req, mut writer: ResponseWriter<_>| {
         Box::pin(async move {
             let length = asset.len().to_string();
@@ -175,7 +179,7 @@ fn asset_handler(asset: &'static str, content_type: &'static str) -> Handler {
                     &[
                         ("Content-Type", content_type),
                         ("Content-Length", length.as_str()),
-                        ("Cache-Control", "public, max-age=300"),
+                        ("Cache-Control", cache_control),
                         ("Connection", "close"),
                     ],
                 )
@@ -418,19 +422,23 @@ pub(super) async fn register(http: &HttpServer, state: Arc<AdminState>) {
     http.add_route(
         Method::Get,
         &format!("{base}/assets/app.css"),
-        asset_handler(APP_CSS, "text/css; charset=utf-8"),
+        asset_handler(APP_CSS, "text/css; charset=utf-8", "no-cache"),
     )
     .await;
     http.add_route(
         Method::Get,
         &format!("{base}/assets/app.js"),
-        asset_handler(APP_JS, "text/javascript; charset=utf-8"),
+        asset_handler(APP_JS, "text/javascript; charset=utf-8", "no-cache"),
     )
     .await;
     http.add_route(
         Method::Get,
         &format!("{base}/assets/hls.min.js"),
-        asset_handler(HLS_JS, "text/javascript; charset=utf-8"),
+        asset_handler(
+            HLS_JS,
+            "text/javascript; charset=utf-8",
+            "public, max-age=86400",
+        ),
     )
     .await;
 
