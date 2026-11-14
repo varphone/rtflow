@@ -77,6 +77,12 @@ pub struct RtmpServer {
     cancel: CancellationToken,
 }
 
+impl Drop for RtmpServer {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
+}
+
 impl RtmpServer {
     /// Bind an RTMP server to the given address.
     pub async fn bind(
