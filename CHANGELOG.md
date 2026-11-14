@@ -115,6 +115,7 @@
 - `MountOptions::builder()` 提供与 ClientOptions/ServerConfig 一致的构造方式，并覆盖新增单测。
 - `Gateway` Drop 取消 HTTP server，避免 drop 后 accept loop 继续持有端口。
 - RTCP `nack_sequences()` 统一 PID+BLP 展开，UDP/interleaved 共用并补充单测。
+- RTP 重传缓存增加 2 MiB 字节预算，避免大帧 × 512 包导致每 sender 内存膨胀。
 ## [0.2.0] — 2026-08
 
 WebRTC（WHIP/WHEP）、客户端事件与指标、传输自动回退、存储/VOD、HLS/DASH、

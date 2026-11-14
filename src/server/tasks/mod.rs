@@ -29,6 +29,8 @@ const INTERLEAVED_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from
 /// Bounded RTP retransmission cache shared by UDP and interleaved senders.
 pub(super) struct RetransmitCache {
     max: usize,
+    max_bytes: usize,
+    bytes: usize,
     entries: VecDeque<(u16, Bytes)>,
 }
 
@@ -36,14 +38,25 @@ impl RetransmitCache {
     pub(super) fn new(max: usize) -> Self {
         Self {
             max: max.max(1),
+            max_bytes: 2 * 1024 * 1024,
+            bytes: 0,
             entries: VecDeque::new(),
         }
     }
 
     pub(super) fn insert(&mut self, sequence: u16, packet: Bytes) {
-        if self.entries.len() >= self.max {
-            self.entries.pop_front();
+        if packet.len() > self.max_bytes {
+            return;
         }
+        while self.entries.len() >= self.max
+            || self.bytes.saturating_add(packet.len()) > self.max_bytes
+        {
+            let Some((_, removed)) = self.entries.pop_front() else {
+                break;
+            };
+            self.bytes = self.bytes.saturating_sub(removed.len());
+        }
+        self.bytes = self.bytes.saturating_add(packet.len());
         self.entries.push_back((sequence, packet));
     }
 

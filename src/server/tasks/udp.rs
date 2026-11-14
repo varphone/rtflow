@@ -376,6 +376,18 @@ mod tests {
     }
 
     #[test]
+    fn rtp_cache_evicts_by_byte_budget() {
+        let mut cache = RetransmitCache::new(16);
+        let megabyte = Bytes::from(vec![0u8; 1024 * 1024]);
+        cache.insert(1, megabyte.clone());
+        cache.insert(2, megabyte.clone());
+        cache.insert(3, megabyte);
+        assert!(cache.get(1).is_none());
+        assert!(cache.get(2).is_some());
+        assert!(cache.get(3).is_some());
+    }
+
+    #[test]
     fn rtp_cache_normalizes_zero_capacity_without_panicking() {
         let mut cache = RetransmitCache::new(0);
         cache.insert(7, Bytes::from_static(b"packet"));
