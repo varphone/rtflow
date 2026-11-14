@@ -767,3 +767,53 @@ async fn vod_handler_generates_playlist_and_segments_from_file() {
     assert!(segment.contains("200 OK"), "{segment}");
     let _ = std::fs::remove_dir_all(cache);
 }
+
+#[test]
+fn video_segments_never_start_mid_gop() {
+    let mut segmenter = Segmenter::new(
+        SegmenterConfig {
+            segment_duration: Duration::from_millis(100),
+            lookback_count: 5,
+        },
+        &h264_description(),
+    );
+    let mut segments = segmenter.subscribe();
+    // One IDR, then P frames well past the old 2×target hard cut. A
+    // mid-GOP segment starts without a reference picture and hls.js shows
+    // a black screen even though ffprobe accepts the container.
+    segmenter.push(AccessUnit {
+        track_id: 0,
+        codec: Codec::H264,
+        pts: Duration::ZERO,
+        dts: None,
+        rtp_timestamp: 0,
+        is_keyframe: true,
+        data: h264_keyframe(),
+    });
+    for i in 1..10 {
+        segmenter.push(AccessUnit {
+            track_id: 0,
+            codec: Codec::H264,
+            pts: Duration::from_millis(i * 40),
+            dts: None,
+            rtp_timestamp: (i * 3600) as u32,
+            is_keyframe: false,
+            data: h264_interframe(),
+        });
+    }
+    assert!(
+        segments.try_recv().is_err(),
+        "video must wait for the next IDR instead of cutting mid-GOP"
+    );
+    segmenter.push(AccessUnit {
+        track_id: 0,
+        codec: Codec::H264,
+        pts: Duration::from_millis(400),
+        dts: None,
+        rtp_timestamp: 36_000,
+        is_keyframe: true,
+        data: h264_keyframe(),
+    });
+    let segment = segments.try_recv().expect("segment at IDR");
+    assert!(segment.starts_with_keyframe);
+}

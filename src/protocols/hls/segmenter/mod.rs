@@ -170,10 +170,15 @@ impl Segmenter {
             return;
         };
         let pts = unit.pts;
+        let has_video = self
+            .tracks
+            .iter()
+            .any(|track| track.kind == MediaKind::Video);
         // Timestamps can stall (broken encoder/ingest). A pure PTS-based cut
         // then never fires and `samples` grows without bound; force a cut at
-        // the hard sample cap and let the ring/segment duration handle it.
-        if self.tracks[track_index].samples.len() >= MAX_SAMPLES_PER_SEGMENT {
+        // the hard sample cap for audio-only streams. Video must never be cut
+        // mid-GOP: a segment that does not start at an IDR is undecodable.
+        if self.tracks[track_index].samples.len() >= MAX_SAMPLES_PER_SEGMENT && !has_video {
             self.finalize_segment(pts);
         }
         // A reset of this track's own timeline (timestamp wrap / source
@@ -209,10 +214,11 @@ impl Segmenter {
                     .segment_duration
                     .saturating_mul(2)
                     .max(Duration::from_millis(1));
-                if elapsed >= hard_limit {
-                    // Hard time-based cut: audio-only streams never produce a
-                    // video keyframe, and a video stream without IDR frames must
-                    // not accumulate samples forever.
+                if elapsed >= hard_limit && !has_video {
+                    // Hard time-based cut is only valid for audio-only
+                    // streams. Cutting a video segment before an IDR makes
+                    // every following segment undecodable (HLS.js black
+                    // screen, ffprobe "missing reference picture").
                     return true;
                 }
                 // Regular cut: align with a video random-access point.

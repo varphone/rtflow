@@ -25,6 +25,8 @@
   `missing picture` / `data partitioning` / hls.js `internalException`。
 - HLS 新 segmenter 首帧来自 startup cache 时不再被去重逻辑跳过，
   SPS/PPS + 首个 IDR 能进入 init/segment。
+- HLS 视频不再在 2×target duration 处硬切；没有 IDR 时等待下一个
+  关键帧，避免 segment 从 P 帧开始导致 `Missing reference picture`。
 - HLS live playlist 使用相对 URI，并在首个 segment 就绪前最多等待
   3 秒；harness/hls.js 不再因空 playlist 判为 fatal。
 
