@@ -75,6 +75,7 @@ impl Default for DashConfig {
 /// 1. MPD manifest handler (`/manifest.mpd`)
 /// 2. Media segment handler (`/segment_$Number$.m4s`)
 /// 3. Init segment handler (`/init.mp4`)
+///
 /// Named DASH handler set. Prefer this over positional tuples.
 pub struct DashHandlers {
     pub manifest: Handler,
@@ -215,7 +216,6 @@ pub fn create_dash_handlers(
             }
 
             // Normalize timestamps relative to first frame (so tfdt starts near 0)
-            let mut unit = unit;
             // Detect publisher reconnection: large backward PTS jump means a new
             // timestamp epoch.  Reset normalization base and DASH timeline state.
             if let Some(base) = base_pts

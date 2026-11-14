@@ -69,6 +69,7 @@ impl Default for WebRtcConfig {
 /// Returns two handlers:
 /// 1. WHIP handler (for `/whip/*` routes)
 /// 2. WHEP handler (for `/whep/*` routes)
+///
 /// Named WHIP/WHEP handler set. Prefer this over positional tuples.
 pub struct WebRtcHandlers {
     pub whip: Handler,
