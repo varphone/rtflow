@@ -141,7 +141,10 @@ pub mod prelude {
     };
 
     #[cfg(feature = "client")]
-    pub use crate::client::{ClientOptions, RtspClient};
+    pub use crate::client::{
+        ClientOptions, ClientQualitySnapshot, PlaySession, ReconnectingPlaySession, RecordSession,
+        RtspClient, UpstreamTransport,
+    };
     #[cfg(feature = "server")]
     pub use crate::server::{RtspServer, ServerConfig, TimelineMode};
 }
