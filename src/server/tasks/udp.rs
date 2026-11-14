@@ -141,23 +141,15 @@ pub(crate) fn spawn_udp_sender_from(
                         mount.stats.add_receiver_reports(reports);
                         if retransmit {
                             for packet in &packets {
-                                let Some(entries) = packet.nack_entries() else {
+                                let Some(requested) = packet.nack_sequences() else {
                                     continue;
                                 };
-                                for entry in entries {
-                                    let requested = std::iter::once(entry.packet_id).chain(
-                                        (0..16)
-                                            .filter(|bit| entry.lost & (1 << bit) != 0)
-                                            .map(|bit| entry.packet_id.wrapping_add(1 + bit as u16)),
-                                    );
-                                    for sequence in requested {
-                                        if let Some(cached) = nack_cache.get(sequence)
-                                            && pair.rtp.send_to(&cached, rtp_target).await.is_ok()
-                                        {
-                                            sent_packets = sent_packets.wrapping_add(1);
-                                            sent_octets =
-                                                sent_octets.wrapping_add(cached.len() as u32);
-                                        }
+                                for sequence in requested {
+                                    if let Some(cached) = nack_cache.get(sequence)
+                                        && pair.rtp.send_to(&cached, rtp_target).await.is_ok()
+                                    {
+                                        sent_packets = sent_packets.wrapping_add(1);
+                                        sent_octets = sent_octets.wrapping_add(cached.len() as u32);
                                     }
                                 }
                             }

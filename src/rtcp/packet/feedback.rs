@@ -142,6 +142,21 @@ impl Packet {
         )
     }
 
+    /// Expand NACK PID+BLP into the requested sequence numbers.
+    pub fn nack_sequences(&self) -> Option<Vec<u16>> {
+        let entries = self.nack_entries()?;
+        let mut sequences = Vec::new();
+        for entry in entries {
+            sequences.push(entry.packet_id);
+            sequences.extend(
+                (0..16)
+                    .filter(|bit| entry.lost & (1 << bit) != 0)
+                    .map(|bit| entry.packet_id.wrapping_add(1 + bit as u16)),
+            );
+        }
+        Some(sequences)
+    }
+
     /// Decode the bitrate from a REMB (PSFB FMT 15) packet.
     pub fn remb_bitrate(&self) -> Option<u64> {
         let Self::PayloadFeedback { fmt: 15, fci, .. } = self else {

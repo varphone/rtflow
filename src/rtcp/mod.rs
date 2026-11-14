@@ -295,6 +295,20 @@ mod tests {
     }
 
     #[test]
+    fn nack_sequences_expand_pid_and_blp() {
+        let packet = Packet::nack(
+            1,
+            2,
+            &[NackEntry {
+                packet_id: 100,
+                lost: 0b101,
+            }],
+        )
+        .unwrap();
+        assert_eq!(packet.nack_sequences().unwrap(), vec![100, 101, 103]);
+    }
+
+    #[test]
     fn session_uses_dynamic_interval_after_first_report() {
         let now = Instant::now();
         let mut session = RtcpSession::new(
