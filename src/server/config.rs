@@ -311,3 +311,25 @@ impl ServerConfigBuilder {
         Ok(self.config)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builder_rejects_zero_rtcp_report_interval() {
+        let config = ServerConfig::builder("127.0.0.1:0".parse().unwrap())
+            .rtcp_report_interval(Duration::ZERO)
+            .build();
+        assert!(config.is_err());
+    }
+
+    #[test]
+    fn builder_sets_rtcp_report_interval() {
+        let config = ServerConfig::builder("127.0.0.1:0".parse().unwrap())
+            .rtcp_report_interval(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        assert_eq!(config.rtcp_report_interval, Duration::from_secs(2));
+    }
+}
