@@ -15,6 +15,12 @@ pub(crate) async fn authorize_request(
     let publisher_mount = registered
         .as_ref()
         .is_some_and(|(_, mount)| matches!(mount.config, MountConfig::Publisher { .. }));
+    // Keep the query string for token authentication (`?key=` / `?token=`)
+    // without letting it become part of the mount name.
+    let auth_path = match req.uri.split_once('?') {
+        Some((_, query)) => format!("{path}?{query}"),
+        None => path.clone(),
+    };
     let role = if matches!(req.method, Method::Announce | Method::Record)
         || (req.method == Method::Setup && publisher_mount)
     {
@@ -27,13 +33,19 @@ pub(crate) async fn authorize_request(
         .authenticator
         .authorize(AuthRequest {
             method: req.method,
-            path: &path,
+            path: &auth_path,
             peer_addr: peer,
             role,
             authorization: req.headers.get("authorization").map(String::as_str),
         })
         .await;
     if !matches!(decision, AuthDecision::Allow) {
+        tracing::warn!(
+            method = ?req.method,
+            path = %auth_path,
+            role = ?role,
+            "RTSP authorization denied"
+        );
         emit(
             &state.config.event_sink,
             FrameworkEvent::Security(SecurityEvent::AuthenticationFailed {

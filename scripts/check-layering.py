@@ -56,7 +56,8 @@ LAYERS: dict[str, int] = {
     "rtflow-admin": 10,
     "rtflow-gateway": 10,
     "rtflow": 11,
-    "rtflow-testkit": 12,
+    "rtflow-server": 12,
+    "rtflow-testkit": 13,
 }
 
 # Internal crates may be declared as `name =` or as a workspace dependency

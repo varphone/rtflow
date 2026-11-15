@@ -355,13 +355,19 @@ pub(super) async fn handle_command(
                 }]);
             }
 
-            let mount_path = format!("/{app}/{stream_name}");
+            // Query parameters carry credentials/tokens; they must never
+            // become part of the mount name or show up in discovery/HLS.
+            let stream_base = stream_name
+                .split_once('?')
+                .map(|(name, _)| name)
+                .unwrap_or(stream_name);
+            let mount_path = format!("/{app}/{stream_base}");
             info!("RTMP: publish {mount_path}");
 
             // Create a publisher mount with a placeholder description.
             // The actual tracks will be determined from sequence headers.
             let description = MediaDescription {
-                session_name: stream_name.into(),
+                session_name: stream_base.into(),
                 tracks: Vec::new(),
                 connection: None,
             };
@@ -499,7 +505,11 @@ pub(super) async fn handle_command(
                     payload: error_payload,
                 }]);
             }
-            let mount_path = format!("/{app}/{stream_name}");
+            let stream_base = stream_name
+                .split_once('?')
+                .map(|(name, _)| name)
+                .unwrap_or(stream_name);
+            let mount_path = format!("/{app}/{stream_base}");
             info!("RTMP: play {mount_path}");
 
             // Authenticate play (same policy as publish by default)

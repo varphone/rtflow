@@ -59,6 +59,7 @@ md-5 = "0.11"
 mp4box = { version = "0.12", default-features = false }
 nix = { version = "0.31", features = ["socket", "net", "uio"] }
 rcgen = "0.14"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rtc = { version = "0.20" }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = { version = "2.2" }
@@ -80,6 +81,9 @@ url = "2.5"
 webrtc = { version = "0.20" }
 argon2 = { version = "0.5" }
 clap = { version = "4.5", features = ["derive"] }
+humantime-serde = "1"
+toml = "0.9"
+zeroize = "1"
 
 # ---------------------------------------------------------------------------
 # Embedded IPC release profile (see docs/audits/embedded-resource.md §3 P0-1):

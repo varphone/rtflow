@@ -26,6 +26,19 @@
 - 连接生命周期防护：HTTP 响应每写 60 s 超时（慢读/冻结客户端自动断开，`HttpConfig::response_timeout`）、RTMP 播放写路径 30 s 超时、WS-FLV 心跳回收——无界连接槽与僵尸写任务不会累积。帧指标 `frames_accepted/dropped` 对 RTSP/RTMP/SRT/gateway 全注册路径汇入全局 `/metrics`。
 - 错误分类：`Error` 按域区分（`Rtsp`/`Media`/`Http`/`InvalidConfig`/`Unsupported`/…），`code()`/`retry_class()`/`rtsp_status()` 稳定映射（Http/InvalidConfig→500，Unsupported→501），供重试策略与遥测使用。
 
+## 开箱即用的服务端
+
+官方应用 `rtflow-server` 把各协议、录制、点播和管理能力组装成单进程服务：
+
+```bash
+cargo run -p rtflow-server -- --init-config
+cargo run -p rtflow-server -- --config rtflow.toml
+```
+
+默认 RTSP `8554`、RTMP `1935`、SRT `9000/udp`、HTTP `8080`、WS-FLV `8088`。
+推流认证、路径注册/发现、录制/VOD、管理 API 与部署说明见
+[docs/guides/server.md](docs/guides/server.md)。
+
 ## 日志与调试
 
 框架使用 `tracing` 输出结构化日志，应用只需安装 subscriber。门面 crate 提供

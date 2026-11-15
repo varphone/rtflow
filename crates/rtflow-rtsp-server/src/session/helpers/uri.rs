@@ -18,6 +18,11 @@ pub(crate) fn track_for_uri(
                 || requested_path.ends_with(&format!("/{control}"))
         })
         .cloned()
+        .or_else(|| {
+            // Some clients (notably FFmpeg for a single-track publisher) send
+            // SETUP on the aggregate URL instead of the track control URL.
+            (description.tracks.len() == 1).then(|| description.tracks[0].clone())
+        })
         .ok_or_else(|| Error::Rtsp(format!("no track matches SETUP URI {uri}")))
 }
 

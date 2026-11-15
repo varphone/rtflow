@@ -8,7 +8,7 @@ use rtflow_media::vod::VodSource;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, RwLock},
     time::Duration,
 };
 use tokio::sync::Mutex;
@@ -31,7 +31,7 @@ pub struct HlsVodConfig {
 
 /// Caches generated fMP4 files on disk and serializes generation per id.
 pub struct HlsVodManager {
-    entries: HashMap<String, HlsVodEntry>,
+    entries: RwLock<HashMap<String, HlsVodEntry>>,
     config: HlsVodConfig,
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
@@ -39,10 +39,12 @@ pub struct HlsVodManager {
 impl HlsVodManager {
     pub fn new(entries: Vec<HlsVodEntry>, config: HlsVodConfig) -> Self {
         Self {
-            entries: entries
-                .into_iter()
-                .map(|entry| (entry.id.clone(), entry))
-                .collect(),
+            entries: RwLock::new(
+                entries
+                    .into_iter()
+                    .map(|entry| (entry.id.clone(), entry))
+                    .collect(),
+            ),
             config,
             locks: Mutex::new(HashMap::new()),
         }
@@ -51,7 +53,12 @@ impl HlsVodManager {
     /// Remove a generated cache entry so the next request regenerates it
     /// from the (possibly changed) source.
     pub fn invalidate(&self, id: &str) -> rtflow_core::error::Result<bool> {
-        if !self.entries.contains_key(id) {
+        if !self
+            .entries
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(id)
+        {
             return Ok(false);
         }
         let directory = self.config.cache_dir.join(id);
@@ -61,12 +68,47 @@ impl HlsVodManager {
         Ok(true)
     }
 
-    pub fn entries(&self) -> impl Iterator<Item = &HlsVodEntry> {
-        self.entries.values()
+    /// Snapshot of the current catalog, ordered by id.
+    pub fn entries(&self) -> Vec<HlsVodEntry> {
+        let mut entries: Vec<HlsVodEntry> = self
+            .entries
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect();
+        entries.sort_by(|left, right| left.id.cmp(&right.id));
+        entries
     }
 
-    pub fn entry(&self, id: &str) -> Option<&HlsVodEntry> {
-        self.entries.get(id)
+    pub fn entry(&self, id: &str) -> Option<HlsVodEntry> {
+        self.entries
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(id)
+            .cloned()
+    }
+
+    /// Add or replace an entry. Used by the recording/VOD catalog when new
+    /// recordings finish while the server is running.
+    pub fn upsert_entry(&self, entry: HlsVodEntry) {
+        self.entries
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(entry.id.clone(), entry);
+    }
+
+    pub fn remove_entry(&self, id: &str) -> bool {
+        let removed = self
+            .entries
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(id)
+            .is_some();
+        if removed {
+            let _ = std::fs::remove_dir_all(self.config.cache_dir.join(id));
+        }
+        removed
     }
 
     async fn lock_for(&self, id: &str) -> Arc<Mutex<()>> {
@@ -80,12 +122,11 @@ impl HlsVodManager {
 
     async fn ensure(&self, id: &str) -> rtflow_core::error::Result<PathBuf> {
         let entry = self
-            .entries
-            .get(id)
+            .entry(id)
             .ok_or_else(|| rtflow_core::error::Error::Rtsp("VOD id not found".into()))?;
         let valid = id
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'));
         if !valid || id == "." || id == ".." || id.starts_with('.') {
             return Err(rtflow_core::error::Error::InvalidConfig(
                 "invalid VOD id".into(),

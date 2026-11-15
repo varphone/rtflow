@@ -15,3 +15,7 @@ reasonix.toml
 
 # Python bytecode from layout scripts
 __pycache__/
+
+# rtflow-server runtime state (recordings, path/key registry, VOD cache)
+/state/
+/recordings/

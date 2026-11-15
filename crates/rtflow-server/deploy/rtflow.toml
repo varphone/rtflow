@@ -1,0 +1,119 @@
+# rtflow-server example configuration.
+# Start: rtflow-server --config rtflow.toml
+# Check: rtflow-server --config rtflow.toml --check-config
+
+[server]
+name = "rtflow"
+shutdown_grace = "10s"
+state_dir = "./state"
+# Public URLs used by the discovery API. Set these when behind NAT/reverse proxy.
+public_rtsp = "rtsp://127.0.0.1:8554"
+public_rtmp = "rtmp://127.0.0.1:1935"
+public_srt = "srt://127.0.0.1:9000"
+public_http = "http://127.0.0.1:8080"
+
+[log]
+level = "info"
+format = "text"          # text | json
+access_log = false
+
+[rtsp]
+enabled = true
+listen = "0.0.0.0:8554"
+session_timeout = "60s"
+max_sessions = 256
+dynamic_publishers = true
+
+[rtmp]
+enabled = true
+listen = "0.0.0.0:1935"
+
+[srt]
+enabled = true
+listen = "0.0.0.0:9000"
+allowed_stream_ids = []  # empty = open; list exact stream ids to restrict
+
+[webrtc]
+enabled = true
+
+[http]
+listen = "0.0.0.0:8080"
+admin = true
+metrics = true
+health = true
+admin_username = "admin"
+# Prefer RTFLOW_ADMIN_PASSWORD in production; empty disables the console.
+admin_password = ""
+
+[hls]
+enabled = true
+segment_duration = "1s"
+window = 7
+low_latency = true
+
+[dash]
+enabled = true
+
+[flv]
+enabled = true
+ws_listen = "0.0.0.0:8088"
+
+[recording]
+enabled = true
+root = "./recordings"
+segment_duration = "10s"
+retention = "7d"
+max_disk_bytes = 53687091200
+auto_start = true
+
+[auth]
+# none | basic | digest | token
+mode = "none"
+realm = "rtflow"
+enforce_path_rules = true
+# token_secrets = ["${RTFLOW_TOKEN_SECRET}"]
+
+# [[auth.users]]
+# username = "publisher"
+# password = "$argon2id$v=19$m=19456,t=2,p=1$..."
+# roles = ["publish", "read"]
+
+[keys]
+default_ttl = "24h"
+max_per_path = 10
+
+[hooks]
+# timeout = "2s"
+# fail_closed = true
+# secret = "${RTFLOW_HOOK_SECRET}"
+# on_publish_auth = "https://api.example.com/rtflow/publish"
+# on_play_auth = "https://api.example.com/rtflow/play"
+# on_publish_done = "https://api.example.com/rtflow/publish-done"
+# on_play_done = "https://api.example.com/rtflow/play-done"
+# on_record_done = "https://api.example.com/rtflow/record-done"
+
+[discovery]
+public = false
+# token = "${RTFLOW_DISCOVERY_TOKEN}"
+compat_mediamtx = false
+
+[paths."live/*"]
+enabled = true
+publish = true
+read = true
+record = true
+hls = true
+dash = true
+flv = true
+webrtc = true
+max_readers = 100
+
+[paths."private/**"]
+enabled = true
+publish = true
+read = false
+record = true
+hls = false
+dash = false
+flv = false
+webrtc = false

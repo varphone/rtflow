@@ -18,6 +18,9 @@
 
 ### Added
 
+- 新增官方应用 `rtflow-server`：TOML 配置、RTSP/RTMP/SRT/WebRTC/HLS/LL-HLS/DASH/FLV、
+  自动录制、VOD catalog、路径注册/发现、API 流密钥与 HTTP 钩子，以及
+  systemd/Docker 部署资产。
 - 统一结构化日志：新增 `rtflow::logging`（可选 `logging` feature，`full`
   默认包含）、`DEBUG_FILTER` 与 `docs/guides/logging.md`；覆盖 RTSP
   服务端/客户端、mount、HLS、HTTP、RTMP、WebRTC、admin 与会话 span。

@@ -215,6 +215,12 @@ impl HttpServer {
     pub fn shutdown(&self) {
         self.cancel.cancel();
     }
+
+    /// Cancellation token shared with the accept loop, for supervisors that
+    /// need to stop HTTP together with other protocol servers.
+    pub fn cancellation_token(&self) -> tokio_util::sync::CancellationToken {
+        self.cancel.clone()
+    }
 }
 
 async fn handle_connection(

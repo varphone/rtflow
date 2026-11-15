@@ -138,8 +138,8 @@ pub use rtflow_file::{
 };
 pub use rtflow_media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription, TrackId};
 pub use rtflow_mount::{
-    LocalPublisher, MountConfig, MountHandle, MountOptions, MountRegistry, MountSnapshot,
-    PushResult, StreamStats,
+    FrameReceiver, FrameRecvError, LocalPublisher, MountConfig, MountHandle, MountOptions,
+    MountRegistry, MountSnapshot, PushResult, StreamStats,
 };
 #[cfg(feature = "multicast")]
 pub use rtflow_multicast as multicast;

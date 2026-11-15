@@ -139,8 +139,7 @@ pub(super) struct VodView {
 pub(super) fn vods(state: &AdminState) -> Vec<VodView> {
     {
         if let Some(vod) = state.config.vod.as_ref() {
-            let mut entries = vod.entries().collect::<Vec<_>>();
-            entries.sort_by(|left, right| left.id.cmp(&right.id));
+            let entries = vod.entries();
             return entries
                 .into_iter()
                 .map(|entry| VodView {

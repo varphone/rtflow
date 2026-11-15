@@ -1,0 +1,21 @@
+services:
+  rtflow:
+    build:
+      context: ../../../..
+      dockerfile: crates/rtflow-server/deploy/docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8554:8554/tcp"
+      - "1935:1935/tcp"
+      - "9000:9000/udp"
+      - "8080:8080/tcp"
+      - "8088:8088/tcp"
+    environment:
+      RTFLOW_ADMIN_PASSWORD: ${RTFLOW_ADMIN_PASSWORD:?set RTFLOW_ADMIN_PASSWORD}
+    volumes:
+      - ./rtflow.toml:/etc/rtflow/rtflow.toml:ro
+      - rtflow-state:/var/lib/rtflow/state
+      - rtflow-recordings:/var/lib/rtflow/recordings
+volumes:
+  rtflow-state:
+  rtflow-recordings:

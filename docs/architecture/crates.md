@@ -39,7 +39,8 @@
 | 10 | `rtflow-admin` | 管理控制台（API + SPA） | — |
 | 10 | `rtflow-gateway` | 多协议编排 | — |
 | 11 | `rtflow` | 门面：re-export 全部公开路径与 feature 开关 | 见下表 |
-| 12 | `rtflow-testkit` | dev-only 测试线束（不发布） | — |
+| 12 | `rtflow-server` | 官方应用：协议编排、录制/VOD、路径控制面、部署资产 | — |
+| 13 | `rtflow-testkit` | dev-only 测试线束（不发布） | — |
 
 ## 门面 feature 与子 crate 的对应
 
