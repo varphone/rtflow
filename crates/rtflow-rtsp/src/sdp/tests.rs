@@ -122,7 +122,6 @@ fn mp3_and_g726_names_round_trip() {
         let description = MediaDescription {
             session_name: Arc::from("audio"),
             tracks: vec![track],
-            #[cfg(feature = "multicast")]
             connection: None,
         };
         let encoded = encode(&description);
@@ -162,7 +161,6 @@ fn legacy_and_av1_video_names_round_trip() {
         let description = MediaDescription {
             session_name: Arc::from("video"),
             tracks: vec![track],
-            #[cfg(feature = "multicast")]
             connection: None,
         };
         let encoded = encode(&description);
@@ -223,7 +221,6 @@ fn crypto_track_is_advertised_as_savp() {
     let description = MediaDescription {
         session_name: Arc::from("srtp"),
         tracks: vec![track],
-        #[cfg(feature = "multicast")]
         connection: None,
     };
     let encoded = encode(&description);

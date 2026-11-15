@@ -17,9 +17,7 @@ pub enum ErrorCode {
     Io,
     Closed,
     Internal,
-    #[cfg(feature = "srtp")]
     SrtpAuthenticationFailed,
-    #[cfg(feature = "srtp")]
     SrtpReplayDetected,
 }
 
@@ -48,9 +46,7 @@ pub enum Operation {
     ProxyConnect,
     PipelineProcess,
     Shutdown,
-    #[cfg(feature = "srtp")]
     SrtpProtect,
-    #[cfg(feature = "srtp")]
     SrtpUnprotect,
 }
 
@@ -91,16 +87,12 @@ pub enum Error {
     /// Non-2xx response to an RTSP control request.
     #[error("{method} returned {status}")]
     RtspStatus { method: &'static str, status: u16 },
-    #[cfg(feature = "srtp")]
     #[error("SRTP error: {0}")]
     Srtp(String),
-    #[cfg(feature = "rtmp")]
     #[error("RTMP error: {0}")]
     Rtmp(String),
-    #[cfg(feature = "srt")]
     #[error("SRT error: {0}")]
     Srt(String),
-    #[cfg(feature = "webrtc")]
     #[error("WebRTC error: {0}")]
     Webrtc(String),
 }
@@ -130,13 +122,9 @@ impl Error {
                 status: 500..=599, ..
             } => ErrorCode::UpstreamUnavailable,
             Self::RtspStatus { .. } => ErrorCode::InvalidProtocol,
-            #[cfg(feature = "srtp")]
             Self::Srtp(_) => ErrorCode::InvalidMedia,
-            #[cfg(feature = "rtmp")]
             Self::Rtmp(_) => ErrorCode::InvalidProtocol,
-            #[cfg(feature = "srt")]
             Self::Srt(_) => ErrorCode::InvalidProtocol,
-            #[cfg(feature = "webrtc")]
             Self::Webrtc(_) => ErrorCode::InvalidProtocol,
         }
     }
@@ -162,7 +150,6 @@ impl Error {
                 ..
             } => RetryClass::Backoff,
             Self::RtspStatus { .. } => RetryClass::Never,
-            #[cfg(feature = "srtp")]
             Self::Srtp(_) => RetryClass::Never,
             _ => RetryClass::Never,
         }
@@ -180,13 +167,9 @@ impl Error {
             Self::Rtsp(_) | Self::Media(_) => 400,
             Self::Http(_) | Self::InvalidConfig(_) => 500,
             Self::Unsupported(_) => 501,
-            #[cfg(feature = "srtp")]
             Self::Srtp(_) => 400,
-            #[cfg(feature = "rtmp")]
             Self::Rtmp(_) => 400,
-            #[cfg(feature = "srt")]
             Self::Srt(_) => 400,
-            #[cfg(feature = "webrtc")]
             Self::Webrtc(_) => 400,
             Self::Closed | Self::Io(_) | Self::Tls(_) => 500,
         }

@@ -1,0 +1,30 @@
+[package]
+name = "rtflow-webrtc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "WHIP/WHEP endpoints for rtflow"
+readme = false
+publish = true
+
+[features]
+default = []
+metrics = []
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+rtflow-rtp.workspace = true
+rtflow-mount.workspace = true
+rtflow-http.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+rtc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+webrtc.workspace = true

@@ -455,7 +455,6 @@ impl MountHandle {
     ///
     /// Unlike `announce_fmtp()` which returns a snapshot, this allows
     /// long-lived tasks to poll for updates as publishers ANNOUNCE.
-    #[cfg(feature = "dash")]
     #[doc(hidden)]
     pub fn announce_fmtp_source(&self) -> Arc<Mount> {
         self.inner.clone()

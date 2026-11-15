@@ -5,13 +5,9 @@ use rtflow_media::{
 use std::{collections::HashSet, sync::Arc};
 
 /// SDP connection information (RFC 4566 §5.7).
-#[cfg(feature = "multicast")]
-#[cfg(feature = "multicast")]
 pub use rtflow_media::connection::SdpConnection;
 
 /// SDP crypto attribute (RFC 4568).
-#[cfg(feature = "srtp")]
-#[cfg(feature = "srtp")]
 pub use rtflow_media::crypto::SdpCrypto;
 
 /// Bounds applied while parsing an SDP description.
@@ -41,7 +37,6 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
     // Session-level a=control (RFC 2326) seen before any m= line; media
     // controls are resolved relative to it.
     let mut session_control: Option<String> = None;
-    #[cfg(feature = "multicast")]
     let mut connection: Option<SdpConnection> = None;
     let mut tracks = Vec::new();
     let mut current: Option<TrackDescription> = None;
@@ -51,10 +46,7 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
         if let Some(value) = line.strip_prefix("s=") {
             name = Arc::from(value)
         } else if let Some(_value) = line.strip_prefix("c=") {
-            #[cfg(feature = "multicast")]
-            {
-                connection = Some(parse_connection(_value)?);
-            }
+            connection = Some(parse_connection(_value)?);
         } else if let Some(value) = line.strip_prefix("b=AS:") {
             if let Some(track) = current.as_mut()
                 && let Ok(bandwidth) = value.trim().parse::<u32>()
@@ -91,7 +83,6 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
             let Some(&payload_type) = payloads.first() else {
                 continue;
             };
-            #[cfg(feature = "multicast")]
             if let Some(connection) = connection.as_mut()
                 && connection.address.is_multicast()
                 && connection.port.is_none()
@@ -252,7 +243,6 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
             {
                 session_control = Some(control.to_string());
             }
-            #[cfg(feature = "srtp")]
             if let Some(crypto) = value.strip_prefix("crypto:")
                 && let Some(track) = current.as_mut()
             {
@@ -304,12 +294,10 @@ pub fn parse_with_limits(data: &[u8], limits: SdpLimits) -> Result<MediaDescript
     Ok(MediaDescription {
         session_name: name,
         tracks,
-        #[cfg(feature = "multicast")]
         connection,
     })
 }
 
-#[cfg(feature = "multicast")]
 fn parse_connection(value: &str) -> Result<SdpConnection> {
     let parts: Vec<_> = value.split_whitespace().collect();
     if parts.len() < 3 {
@@ -417,7 +405,6 @@ fn encode_with_options(
     );
     // RFC 2326 §C.1: a unicast SDP should carry a c= line too (0.0.0.0
     // means "this host"); multicast uses the explicit connection.
-    #[cfg(feature = "multicast")]
     let connection = description.connection.as_ref().map(|conn| {
         let ttl_str = conn.ttl.map(|t| format!("/{t}")).unwrap_or_default();
         format!("c=IN {} {}{}\r\n", conn.addr_type, conn.address, ttl_str)
@@ -458,7 +445,6 @@ fn encode_with_options(
             // dynamic payload name so the SDP stays parseable.
             _ => "unknown",
         };
-        #[cfg(feature = "multicast")]
         let media_port = description
             .connection
             .as_ref()
@@ -467,7 +453,6 @@ fn encode_with_options(
             .unwrap_or(0);
         #[cfg(not(feature = "multicast"))]
         let media_port = 0;
-        #[cfg(feature = "srtp")]
         let profile = if track.crypto.is_some() {
             "RTP/SAVP"
         } else {
@@ -553,7 +538,6 @@ fn encode_with_options(
             }
             output.push_str(&format!("a=framerate:{rate}\r\n"));
         }
-        #[cfg(feature = "srtp")]
         if let Some(crypto) = &track.crypto {
             output.push_str(&format!(
                 "a=crypto:{} {} {}",

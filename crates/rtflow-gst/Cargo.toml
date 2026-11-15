@@ -1,0 +1,22 @@
+[package]
+name = "rtflow-gst"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GStreamer source/sink adapters for rtflow"
+readme = false
+publish = true
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+rtflow-mount.workspace = true
+rtflow-rtsp-server.workspace = true
+gstreamer.workspace = true
+gstreamer-app.workspace = true
+bytes.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true

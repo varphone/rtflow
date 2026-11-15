@@ -58,7 +58,6 @@ pub(super) async fn handle_play(
             return Ok(());
         }
     }
-    #[cfg(feature = "file-storage")]
     let vod_source = interleaved
         .iter()
         .map(|(mount, ..)| mount)

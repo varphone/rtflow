@@ -1,5 +1,4 @@
 //! Per-connection RTSP state machine and media task ownership.
-#[cfg(feature = "file-storage")]
 use super::vod_runtime::{VodPlayback, spawn_vod_playback};
 use super::{
     ConnectionPhase, State,

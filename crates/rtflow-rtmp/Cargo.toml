@@ -1,0 +1,25 @@
+[package]
+name = "rtflow-rtmp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RTMP publish/play server for rtflow"
+readme = false
+publish = true
+
+[features]
+default = []
+metrics = []
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+rtflow-mount.workspace = true
+rtflow-rtsp.workspace = true
+base64.workspace = true
+bytes.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true

@@ -8,8 +8,7 @@ pub use request::{HttpRequest, Method};
 #[allow(unused_imports)] // used by the WS-FLV handshake when that feature is enabled
 pub(crate) use request::{ParseError, parse_request};
 pub use response::ResponseWriter;
-#[cfg(feature = "webrtc")]
-pub(crate) use router::ConnWriter;
+pub use router::ConnWriter;
 pub use router::{Handler, Router};
 
 use rtflow_core::error::{Error, Result};
@@ -38,7 +37,6 @@ pub struct HttpConfig {
     pub response_timeout: Duration,
     pub security: SecurityConfig,
     /// Optional global metrics registry for request counting.
-    #[cfg(feature = "metrics")]
     pub metrics: Option<Arc<rtflow_core::metrics::MetricsRegistry>>,
 }
 
@@ -53,7 +51,6 @@ impl HttpConfig {
             max_body_bytes: 256 * 1024,
             response_timeout: Duration::from_secs(60),
             security: SecurityConfig::default(),
-            #[cfg(feature = "metrics")]
             metrics: None,
         }
     }
@@ -75,7 +72,6 @@ impl HttpConfig {
     }
 
     /// Attach a global metrics registry (request/segment counters).
-    #[cfg(feature = "metrics")]
     pub fn with_metrics(mut self, metrics: Arc<rtflow_core::metrics::MetricsRegistry>) -> Self {
         self.metrics = Some(metrics);
         self
@@ -122,7 +118,6 @@ impl HttpServer {
         let router = self.router.clone();
         let cancel = self.cancel.clone();
         let security = self.config.security.clone();
-        #[cfg(feature = "metrics")]
         let metrics = self.config.metrics.clone();
         let read_timeout = self.config.read_timeout;
         let shutdown_timeout = self.config.shutdown_timeout;
@@ -179,11 +174,9 @@ impl HttpServer {
                         };
                         let router = router.clone();
                         let security = security.clone();
-                        #[cfg(feature = "metrics")]
                         let metrics = metrics.clone();
                         tasks.spawn(async move {
                             let _permit = permit;
-                            #[cfg(feature = "metrics")]
                             if let Some(metrics) = &metrics {
                                 use std::sync::atomic::Ordering;
                                 metrics.http_requests_total.fetch_add(1, Ordering::Relaxed);

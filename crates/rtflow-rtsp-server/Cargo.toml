@@ -28,7 +28,7 @@ multicast = [
     "rtflow-rtsp-client/multicast",
     "rtflow-mount/multicast",
 ]
-file-storage = ["dep:rtflow-storage"]
+file-storage = []
 metrics = []
 
 [dependencies]
@@ -43,7 +43,7 @@ rtflow-security.workspace = true
 rtflow-runtime.workspace = true
 rtflow-framing.workspace = true
 tokio-rustls = { workspace = true, optional = true }
-rtflow-storage = { workspace = true, optional = true }
+rtflow-storage.workspace = true
 bytes.workspace = true
 getrandom.workspace = true
 rtflow-srtp = { workspace = true, optional = true }

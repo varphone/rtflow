@@ -6,7 +6,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::tcp::OwnedWriteHalf;
 
-pub(crate) type ConnWriter = OwnedWriteHalf;
+/// Shared write half of an accepted HTTP connection.
+pub type ConnWriter = OwnedWriteHalf;
 
 pub type Handler = Arc<
     dyn Fn(

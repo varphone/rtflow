@@ -171,7 +171,6 @@ fn error_code_index(code: ErrorCode) -> usize {
         ErrorCode::Io => 9,
         ErrorCode::Closed => 10,
         ErrorCode::Internal => 11,
-        #[cfg(feature = "srtp")]
         ErrorCode::SrtpAuthenticationFailed | ErrorCode::SrtpReplayDetected => 11,
     }
 }

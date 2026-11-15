@@ -346,7 +346,6 @@ impl MountRegistry {
             description: description_for(&removed.config).unwrap_or_else(|_| MediaDescription {
                 session_name: path.into(),
                 tracks: Vec::new(),
-                #[cfg(feature = "multicast")]
                 connection: None,
             }),
             inner: removed,
@@ -366,7 +365,6 @@ impl MountRegistry {
                     description: MediaDescription {
                         session_name: path.as_str().into(),
                         tracks: Vec::new(),
-                        #[cfg(feature = "multicast")]
                         connection: None,
                     },
                     inner: mount.clone(),

@@ -13,7 +13,6 @@ pub struct SdpConnection {
     pub port: Option<u16>,
 }
 
-#[cfg(feature = "multicast")]
 impl SdpConnection {
     pub fn is_multicast(&self) -> bool {
         rtflow_multicast::MulticastConfig::is_multicast(&self.address)

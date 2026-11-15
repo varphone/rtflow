@@ -2,7 +2,6 @@ mod proxy_runtime;
 mod session;
 mod tasks;
 mod timed_writer;
-#[cfg(feature = "file-storage")]
 mod vod_runtime;
 use session::serve_connection;
 #[cfg(feature = "multicast")]

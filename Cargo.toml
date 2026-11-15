@@ -28,6 +28,16 @@ rtflow-file = { path = "crates/rtflow-file", version = "0.3.0" }
 rtflow-storage = { path = "crates/rtflow-storage", version = "0.3.0" }
 rtflow-rtsp-client = { path = "crates/rtflow-rtsp-client", version = "0.3.0" }
 rtflow-rtsp-server = { path = "crates/rtflow-rtsp-server", version = "0.3.0" }
+rtflow-hls = { path = "crates/rtflow-hls", version = "0.3.0" }
+rtflow-dash = { path = "crates/rtflow-dash", version = "0.3.0" }
+rtflow-http-flv = { path = "crates/rtflow-http-flv", version = "0.3.0" }
+rtflow-rtmp = { path = "crates/rtflow-rtmp", version = "0.3.0" }
+rtflow-srt = { path = "crates/rtflow-srt", version = "0.3.0" }
+rtflow-webrtc = { path = "crates/rtflow-webrtc", version = "0.3.0" }
+rtflow-gst = { path = "crates/rtflow-gst", version = "0.3.0" }
+rtflow-gateway = { path = "crates/rtflow-gateway", version = "0.3.0" }
+rtflow-admin = { path = "crates/rtflow-admin", version = "0.3.0" }
+rtflow-testkit = { path = "crates/rtflow-testkit" }
 
 # Third-party
 aes = { version = "0.9" }

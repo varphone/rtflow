@@ -11,13 +11,13 @@ publish = true
 
 [features]
 default = []
-multicast = ["dep:rtflow-multicast"]
+multicast = []
 mp4 = ["dep:mp4box"]
 mkv = ["dep:matroska-demuxer"]
 
 [dependencies]
 rtflow-core.workspace = true
-rtflow-multicast = { workspace = true, optional = true }
+rtflow-multicast.workspace = true
 base64.workspace = true
 bytes.workspace = true
 mp4box = { workspace = true, optional = true }

@@ -7,14 +7,12 @@
 
 pub mod bitstream;
 pub mod clock;
-#[cfg(feature = "multicast")]
 pub mod connection;
 pub mod crypto;
 pub mod demux;
 pub mod flv;
 pub mod vod;
 
-#[cfg(feature = "multicast")]
 pub use connection::SdpConnection;
 pub use crypto::SdpCrypto;
 pub use demux::{DemuxedSample, Demuxer};
@@ -247,7 +245,7 @@ impl TrackDescription {
             rtcp: None,
             bandwidth_as: None,
             rtx: None,
-                    crypto: None,
+            crypto: None,
         }
     }
 
@@ -284,7 +282,7 @@ impl TrackDescription {
             rtcp: None,
             bandwidth_as: None,
             rtx: None,
-                    crypto: None,
+            crypto: None,
         }
     }
 
@@ -310,7 +308,7 @@ impl TrackDescription {
             rtcp: None,
             bandwidth_as: None,
             rtx: None,
-                    crypto: None,
+            crypto: None,
         }
     }
 
@@ -333,7 +331,7 @@ impl TrackDescription {
             rtcp: None,
             bandwidth_as: None,
             rtx: None,
-                    crypto: None,
+            crypto: None,
         }
     }
 
@@ -356,7 +354,7 @@ impl TrackDescription {
             rtcp: None,
             bandwidth_as: None,
             rtx: None,
-                    crypto: None,
+            crypto: None,
         }
     }
 
@@ -379,7 +377,7 @@ impl TrackDescription {
             rtcp: None,
             bandwidth_as: None,
             rtx: None,
-                    crypto: None,
+            crypto: None,
         }
     }
 
@@ -437,7 +435,7 @@ impl TrackDescription {
             rtcp: None,
             bandwidth_as: None,
             rtx: None,
-                    crypto: None,
+            crypto: None,
         }
     }
 
@@ -460,7 +458,7 @@ impl TrackDescription {
             rtcp: None,
             bandwidth_as: None,
             rtx: None,
-                    crypto: None,
+            crypto: None,
         }
     }
 }
@@ -471,7 +469,6 @@ impl MediaDescription {
         Self {
             session_name: session_name.into(),
             tracks,
-            #[cfg(feature = "multicast")]
             connection: None,
         }
     }
@@ -482,7 +479,6 @@ pub struct MediaDescription {
     pub session_name: Arc<str>,
     pub tracks: Vec<TrackDescription>,
     /// SDP connection information (`c=` line). None if not present.
-    #[cfg(feature = "multicast")]
     pub connection: Option<crate::connection::SdpConnection>,
 }
 impl MediaDescription {
@@ -492,7 +488,6 @@ impl MediaDescription {
         Self {
             session_name: session_name.into(),
             tracks,
-            #[cfg(feature = "multicast")]
             connection: None,
         }
     }
