@@ -59,6 +59,8 @@ pub struct AppAuth {
     nonces: DigestNonceManager,
     replay: Mutex<HashMap<String, u64>>,
     mounts: Arc<MountRegistry>,
+    /// Active RTSP leases per API key, for `max_connections`.
+    key_leases: Mutex<HashMap<String, HashMap<String, std::time::Instant>>>,
     hooks: Option<Arc<HookClient>>,
     audit: Option<Arc<AuditLog>>,
     counters: Option<Arc<crate::metrics::ServerCounters>>,
@@ -110,6 +112,7 @@ impl AppAuth {
             nonces: DigestNonceManager::new(nonce_secret, Duration::from_secs(300), 16_384)?,
             replay: Mutex::new(HashMap::new()),
             mounts,
+            key_leases: Mutex::new(HashMap::new()),
             hooks: None,
             audit: None,
             counters: None,
@@ -241,10 +244,51 @@ impl AppAuth {
         })
     }
 
-    fn key_allowed(&self, token: &str, path: &str, role: AccessRole, protocol: &str) -> bool {
-        self.keys
-            .verify(token, path, role_name(role), protocol)
-            .is_some()
+    fn key_allowed(
+        &self,
+        token: &str,
+        path: &str,
+        role: AccessRole,
+        protocol: &str,
+        principal: Option<&str>,
+    ) -> bool {
+        let Some(record) = self.keys.verify(token, path, role_name(role), protocol) else {
+            return false;
+        };
+        if record.max_connections == 0 {
+            return true;
+        }
+        // Enforced per distinct principal (RTSP peer address). Leases expire
+        // when a client stops sending requests, which for RTSP means the
+        // session is gone or already closed by the idle timeout.
+        const LEASE_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+        let Some(principal) = principal else {
+            return true;
+        };
+        let now = std::time::Instant::now();
+        let mut leases = self
+            .key_leases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        leases.retain(|_, map| {
+            map.retain(|_, seen| now.duration_since(*seen) < LEASE_TTL);
+            !map.is_empty()
+        });
+        let entry = leases.entry(record.kid.clone()).or_default();
+        if let Some(seen) = entry.get_mut(principal) {
+            *seen = now;
+            return true;
+        }
+        if entry.len() >= record.max_connections {
+            tracing::warn!(
+                kid = %record.kid,
+                limit = record.max_connections,
+                "stream key connection limit reached"
+            );
+            return false;
+        }
+        entry.insert(principal.to_owned(), now);
+        true
     }
 
     /// HMAC token verification, usable by HTTP/WebRTC adapters.
@@ -348,7 +392,13 @@ impl AppAuth {
         if let Some(token) = self.bearer_or_query_token(request) {
             if (token.starts_with("rk_")
                 && token.contains('.')
-                && self.key_allowed(token, path, request.role, "rtsp"))
+                && self.key_allowed(
+                    token,
+                    path,
+                    request.role,
+                    "rtsp",
+                    Some(&request.peer_addr.to_string()),
+                ))
                 || self.verify_signed_token(token, path, request.role)
             {
                 return AuthDecision::Allow;
@@ -496,7 +546,7 @@ impl AppAuth {
         if let Some(token) = token {
             if (token.starts_with("rk_")
                 && token.contains('.')
-                && self.key_allowed(token, &path, AccessRole::Publish, "rtmp"))
+                && self.key_allowed(token, &path, AccessRole::Publish, "rtmp", None))
                 || self.verify_signed_token(token, &path, AccessRole::Publish)
             {
                 return true;
@@ -519,7 +569,7 @@ impl AppAuth {
         if let Some(token) = token {
             if (token.starts_with("rk_")
                 && token.contains('.')
-                && self.key_allowed(token, &path, AccessRole::Read, "rtmp"))
+                && self.key_allowed(token, &path, AccessRole::Read, "rtmp", None))
                 || self.verify_signed_token(token, &path, AccessRole::Read)
             {
                 return true;
@@ -716,7 +766,7 @@ impl AppAuth {
             return self.path_allowed(path, role);
         }
         if token.starts_with("rk_") && token.contains('.') {
-            return self.key_allowed(token, path, role, protocol);
+            return self.key_allowed(token, path, role, protocol, None);
         }
         self.verify_signed_token(token, path, role)
     }
@@ -777,5 +827,60 @@ mod tests {
         assert!(auth.verify_signed_token(&token, "live/cam", AccessRole::Read));
         assert!(!auth.verify_signed_token(&token, "live/cam", AccessRole::Read));
         assert!(!auth.verify_signed_token(&token, "private/cam", AccessRole::Read));
+    }
+}
+
+#[cfg(test)]
+mod key_limit_tests {
+    use super::*;
+    use rtflow::rtsp::Method;
+
+    fn auth_with_key(max_connections: usize) -> (AppAuth, String) {
+        let mut config = Config::default();
+        config.server.state_dir = std::env::temp_dir().join(format!(
+            "rtflow-keylimit-{}-{max_connections}",
+            std::process::id()
+        ));
+        config.auth.mode = AuthMode::Token;
+        config.auth.enforce_path_rules = true;
+        let keys = Arc::new(KeyStore::new(&config).unwrap());
+        let issued = keys
+            .issue(crate::keys::KeySpec {
+                roles: vec!["publish".into()],
+                max_connections,
+                ..crate::keys::KeySpec::default()
+            })
+            .unwrap();
+        let token = format!("{}.{}", issued.status.kid, issued.secret);
+        let paths = Arc::new(PathStore::new(&config, false).unwrap());
+        let mounts = Arc::new(MountRegistry::new(16));
+        let auth = AppAuth::new(&config, keys, paths, mounts).unwrap();
+        (auth, token)
+    }
+
+    #[test]
+    fn max_connections_is_enforced_per_peer() {
+        let (auth, token) = auth_with_key(1);
+        let header = format!("Bearer {token}");
+        let request = |peer: &'static str| AuthRequest {
+            method: Method::Announce,
+            path: "/live/cam",
+            peer_addr: peer.parse().unwrap(),
+            role: AccessRole::Publish,
+            authorization: Some(&header),
+        };
+        assert!(matches!(
+            auth.authorize_sync(&request("127.0.0.1:1000")),
+            AuthDecision::Allow
+        ));
+        assert!(matches!(
+            auth.authorize_sync(&request("127.0.0.1:2000")),
+            AuthDecision::Deny
+        ));
+        // The same peer may reconnect.
+        assert!(matches!(
+            auth.authorize_sync(&request("127.0.0.1:1000")),
+            AuthDecision::Allow
+        ));
     }
 }

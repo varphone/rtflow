@@ -236,7 +236,7 @@ POST                /admin/api/recordings/start|stop
 ## 当前限制
 
 - SRT 认证只支持 stream id 白名单，不支持按 key 的 HMAC 签名；
-- 密钥的 `max_connections` 字段已保留但尚未强制；
+- 密钥的 `max_connections` 对 RTSP 按 peer 租约（120s 刷新）强制执行，HTTP 需反向代理注入 `X-Forwarded-For`，RTMP 暂不限制；
 - `on_play_done` 与 SRT/WebRTC 的认证钩子尚未接入；
 - HLS 播放 token 需客户端在请求中携带，播放列表内的分片不会自动附加 token；
 - DASH/HLS 在首个发布 keyframe 前返回 404/503 属于正常冷启动；
