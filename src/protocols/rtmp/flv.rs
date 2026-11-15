@@ -24,15 +24,9 @@ const ENHANCED_PACKET_CODED_FRAMES: u8 = 1;
 const ENHANCED_PACKET_SEQUENCE_END: u8 = 2;
 const ENHANCED_PACKET_CODED_FRAMES_X: u8 = 3; // no composition time
 
-/// Enhanced RTMP FourCC codes
+/// Enhanced RTMP FourCC codes (AV1/VP9 are not muxed yet).
 const FOURCC_HEVC: &[u8; 4] = b"hvc1";
-// AV1/VP9 FourCCs documented for the enhanced-RTMP mapping; HEVC is the
-// only codec actually muxed today.
-#[allow(dead_code)]
 const FOURCC_AVC: &[u8; 4] = b"avc1";
-const FOURCC_AV1: &[u8; 4] = b"av01";
-#[allow(dead_code)]
-const FOURCC_VP9: &[u8; 4] = b"vp09";
 
 /// FLV audio codec IDs
 const FLV_AUDIO_AAC: u8 = 10;
