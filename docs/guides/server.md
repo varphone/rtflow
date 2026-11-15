@@ -146,6 +146,7 @@ POST   /admin/api/v1/vods/refresh
 GET    /admin/api/v1/recordings
 POST   /admin/api/v1/recordings/start?path=<path>
 POST   /admin/api/v1/recordings/stop?path=<path>
+POST   /admin/api/v1/kick?path=<path>
 ```
 
 `/admin` 仍提供原有直播/点播/系统信息控制台；管理 API 适合脚本、CI 和外部业务系统。
