@@ -157,6 +157,16 @@ async fn interleaved_record_is_forwarded_to_a_player() {
 
 async fn open_record_session(address: std::net::SocketAddr, base: &str) -> (TcpStream, Response) {
     let mut stream = TcpStream::connect(address).await.unwrap();
+    let announce = request(
+        &mut stream,
+        &format!(
+            "ANNOUNCE {base} RTSP/1.0\r\nCSeq: 1\r\nContent-Type: application/sdp\r\nContent-Length: {}\r\n\r\n{}",
+            announced_sdp().len(),
+            announced_sdp()
+        ),
+    )
+    .await;
+    assert_eq!(announce.status, 200);
     let setup = request(
         &mut stream,
         &format!(
@@ -245,5 +255,98 @@ async fn announce_requires_sdp_content_type_and_compatible_tracks() {
     .await;
     assert_eq!(response.status, 400);
 
+    server.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn interleaved_publisher_receives_receiver_report() {
+    use rtflow::rtcp::Packet as RtcpPacket;
+    use rtflow::transport::InterleavedFrame;
+
+    let mut config = ServerConfig::new("127.0.0.1:0".parse().unwrap());
+    config.rtcp_report_interval = Duration::from_millis(100);
+    let server = RtspServer::bind(config).await.unwrap();
+    server
+        .register_mount(
+            Arc::from("/rr"),
+            MountConfig::Publisher {
+                description: description(),
+                allow_replace_after_disconnect: true,
+            },
+        )
+        .await
+        .unwrap();
+    let base = format!("rtsp://{}/rr", server.local_addr());
+    let mut stream = TcpStream::connect(server.local_addr()).await.unwrap();
+    let announce = request(
+        &mut stream,
+        &format!(
+            "ANNOUNCE {base} RTSP/1.0\r\nCSeq: 1\r\nContent-Type: application/sdp\r\nContent-Length: {}\r\n\r\n{}",
+            announced_sdp().len(),
+            announced_sdp()
+        ),
+    )
+    .await;
+    assert_eq!(announce.status, 200);
+    let setup = request(
+        &mut stream,
+        &format!(
+            "SETUP {base}/trackID=0 RTSP/1.0\r\nCSeq: 2\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1;mode=record\r\n\r\n"
+        ),
+    )
+    .await;
+    assert_eq!(setup.status, 200);
+    let session = setup.headers.get("session").unwrap();
+    let record = request(
+        &mut stream,
+        &format!("RECORD {base} RTSP/1.0\r\nCSeq: 3\r\nSession: {session}\r\n\r\n"),
+    )
+    .await;
+    assert_eq!(record.status, 200);
+
+    let packet = RtpPacket {
+        header: RtpHeader {
+            marker: true,
+            payload_type: 96,
+            sequence: 1,
+            timestamp: 90_000,
+            ssrc: 77,
+        },
+        payload: Bytes::from_static(&[0x65, 1, 2, 3]),
+    };
+    let frame = InterleavedFrame {
+        channel: 0,
+        payload: packet.encode(),
+    }
+    .try_encode()
+    .unwrap();
+    stream.write_all(&frame).await.unwrap();
+
+    let mut input = BytesMut::new();
+    let mut buffer = [0u8; 2048];
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(frame) = InterleavedFrame::parse(&mut input, 65536).unwrap()
+            && frame.channel == 1
+        {
+            let packets = RtcpPacket::parse(frame.payload).unwrap();
+            assert!(
+                packets.iter().any(|packet| matches!(
+                    packet,
+                    RtcpPacket::ReceiverReport { .. }
+                        | RtcpPacket::ReceiverReportWithReports { .. }
+                )),
+                "no ReceiverReport in {packets:?}"
+            );
+            break;
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let size = tokio::time::timeout(remaining, stream.read(&mut buffer))
+            .await
+            .expect("interleaved RR timeout")
+            .unwrap();
+        assert!(size > 0);
+        input.extend_from_slice(&buffer[..size]);
+    }
     server.shutdown().await.unwrap();
 }

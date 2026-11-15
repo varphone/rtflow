@@ -3,6 +3,7 @@ use crate::media::TrackDescription;
 use crate::transport::InterleavedFrame;
 
 /// Handle one interleaved RTP/RTCP frame (publishing direction).
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_incoming_interleaved(
     frame: InterleavedFrame,
     phase: ConnectionPhase,
@@ -10,6 +11,8 @@ pub(super) async fn handle_incoming_interleaved(
     depacketizers: &mut HashMap<u8, Depacketizer>,
     ssrcs: &mut HashMap<u8, u32>,
     crypto: &mut HashMap<u8, MediaCrypto>,
+    rtcp_sessions: &mut HashMap<u8, RtcpSession>,
+    report_interval: std::time::Duration,
 ) -> Result<()> {
     // `rtcp-mux` puts RTCP on the RTP channel: classify by payload type
     // (RTCP PT 192..=223) before treating the frame as RTP.
@@ -41,6 +44,25 @@ pub(super) async fn handle_incoming_interleaved(
                 })
                 .count() as u64;
             mount.stats.add_receiver_reports(reports);
+            let sender_reports = packets
+                .iter()
+                .filter(|packet| {
+                    matches!(
+                        packet,
+                        RtcpPacket::SenderReport { .. }
+                            | RtcpPacket::SenderReportWithReports { .. }
+                    )
+                })
+                .count() as u64;
+            if sender_reports > 0 {
+                mount.stats.add_publisher_sender_reports(sender_reports);
+            }
+            if let Some(session) = rtcp_sessions.get_mut(rtp_channel) {
+                let now = tokio::time::Instant::now();
+                for packet in &packets {
+                    session.on_rtcp(packet, now);
+                }
+            }
             let nack_sequences = packets
                 .iter()
                 .filter_map(RtcpPacket::nack_sequences)
@@ -126,6 +148,22 @@ pub(super) async fn handle_incoming_interleaved(
         } else {
             ssrcs.insert(frame.channel, packet.header.ssrc);
         }
+        let now = tokio::time::Instant::now();
+        if let Some(session) = rtcp_sessions.get_mut(&frame.channel) {
+            if session.on_rtp(&packet, now).is_err() {
+                return Ok(());
+            }
+        } else if let Ok(mut session) = RtcpSession::new(
+            0x5254_0000 | u32::from(track.id),
+            packet.header.ssrc,
+            track.clock_rate,
+            format!("rtflow-{}-{}", mount.id, track.id),
+            report_interval,
+            now,
+        ) && session.on_rtp(&packet, now).is_ok()
+        {
+            rtcp_sessions.insert(frame.channel, session);
+        }
         match depacketizer.push(packet) {
             Ok(units) => {
                 for unit in units {
@@ -140,6 +178,51 @@ pub(super) async fn handle_incoming_interleaved(
                 tracing::warn!(channel=frame.channel, error=%e, "depacketizer error");
             }
         }
+    }
+    Ok(())
+}
+
+/// Send one RR + SDES compound report on every publisher track's RTCP
+/// interleaved channel. Called from the session loop's report tick.
+pub(super) async fn send_interleaved_receiver_reports(
+    interleaved: &[(Arc<Mount>, u8, u8, TrackDescription)],
+    sessions: &mut HashMap<u8, RtcpSession>,
+    crypto: &mut HashMap<u8, MediaCrypto>,
+    writer: &ConnWriter,
+) -> Result<()> {
+    let now = tokio::time::Instant::now();
+    for (mount, rtp_channel, rtcp_channel, track) in interleaved {
+        let Some(session) = sessions.get_mut(rtp_channel) else {
+            continue;
+        };
+        if session.snapshot().packets_received == 0 {
+            continue;
+        }
+        let Ok(Some(compound)) = session.poll_report(now) else {
+            continue;
+        };
+        let Ok(wire) = compound.try_encode() else {
+            continue;
+        };
+        let wire = match crypto.get_mut(rtp_channel) {
+            Some(crypto) => match crypto.protect_rtcp(wire) {
+                Ok(wire) => wire,
+                Err(_) => continue,
+            },
+            None => wire,
+        };
+        let _ = track;
+        let Ok(frame) = InterleavedFrame {
+            channel: *rtcp_channel,
+            payload: wire,
+        }
+        .try_encode() else {
+            continue;
+        };
+        let mut guard = writer.lock().await;
+        guard.write_all(&frame).await?;
+        drop(guard);
+        mount.stats.add_receiver_reports(1);
     }
     Ok(())
 }
@@ -194,6 +277,7 @@ mod tests {
         let mut depacketizers = HashMap::new();
         let mut ssrcs = HashMap::new();
         let mut crypto = HashMap::new();
+        let mut sessions = HashMap::new();
         handle_incoming_interleaved(
             frame,
             ConnectionPhase::Playing,
@@ -201,6 +285,8 @@ mod tests {
             &mut depacketizers,
             &mut ssrcs,
             &mut crypto,
+            &mut sessions,
+            std::time::Duration::from_secs(5),
         )
         .await
         .unwrap();

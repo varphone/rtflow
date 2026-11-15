@@ -50,14 +50,16 @@ pub(super) async fn handle_record(
     if let Some(position) = resources.stop_vod() {
         *vod_cursor = position;
     }
-    for (mount, socket, _rtp_target, _rtcp_target, track) in setups.iter().cloned() {
+    for (mount, socket, rtp_target, rtcp_target, track) in setups.iter().cloned() {
         if matches!(mount.config, MountConfig::Publisher { .. }) {
             resources.senders.push(spawn_udp_receiver(
                 mount,
                 socket,
-                _rtp_target,
+                rtp_target,
+                rtcp_target,
                 track.clone(),
                 MediaCrypto::from_track(&track)?,
+                state.config.rtcp_report_interval,
             ));
         }
     }

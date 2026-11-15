@@ -12,6 +12,7 @@ mod mount_options;
 mod multitrack;
 mod nack;
 mod protocol_edges;
+mod publish_dynamic;
 mod publish_tcp;
 mod publish_udp;
 mod resource_exhaustion;

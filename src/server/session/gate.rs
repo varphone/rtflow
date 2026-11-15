@@ -94,7 +94,7 @@ pub(super) async fn gate_request(
             ConnectionPhase::Ready | ConnectionPhase::Paused | ConnectionPhase::Playing
         ),
         Method::Pause => phase == ConnectionPhase::Playing,
-        Method::Record => phase == ConnectionPhase::Ready,
+        Method::Record => phase == ConnectionPhase::Ready && has_announced,
         _ => true,
     };
     if !valid_phase {

@@ -66,7 +66,26 @@ ffmpeg -re -i input.mp4 -c copy \
   -rtsp_transport tcp -f rtsp rtsp://127.0.0.1:8554/ingest
 ```
 
-其他客户端可以同时拉取同一 `/ingest`。框架本期只提供 RECORD 接收服务，不提供 Rust ANNOUNCE/RECORD 客户端 API。
+其他客户端可以同时拉取同一 `/ingest`。Rust 也可以直接发布：
+
+```rust
+let publisher = RtspClient::publish(
+    "rtsp://127.0.0.1:8554/ingest",
+    media,
+    ClientOptions::builder().transport(UpstreamTransport::Udp).build()?,
+).await?;
+publisher.push(frame).await?;
+```
+
+`live_vod_gateway` 开启 `ServerConfig::dynamic_publishers` 后，无需预注册
+Publisher mount，可直接：
+
+```bash
+ffmpeg -re -i input.mp4 -c copy -rtsp_transport udp \
+  -f rtsp rtsp://127.0.0.1:8554/live/cam
+```
+
+HLS 可在 `/hls/live/cam/index.m3u8` 拉取。
 
 ## RTMP 推流 + HLS 直播/点播 + 控制台
 

@@ -525,7 +525,7 @@ async fn setup_echoes_destination_source_and_mode() {
     let setup = request(
         &mut stream,
         &format!(
-            "SETUP {control} RTSP/1.0\r\nCSeq: 2\r\nTransport: RTP/AVP;unicast;client_port=33000-33001;destination=203.0.113.5;source=192.0.2.10;mode=record\r\n\r\n"
+            "SETUP {control} RTSP/1.0\r\nCSeq: 2\r\nTransport: RTP/AVP;unicast;client_port=33000-33001;destination=203.0.113.5;source=192.0.2.10;mode=play\r\n\r\n"
         ),
     )
     .await;
@@ -533,6 +533,6 @@ async fn setup_echoes_destination_source_and_mode() {
     let transport = setup.headers.get("transport").unwrap();
     assert!(transport.contains("destination=203.0.113.5"), "{transport}");
     assert!(transport.contains("source=192.0.2.10"), "{transport}");
-    assert!(transport.contains("mode=record"), "{transport}");
+    assert!(transport.contains("mode=play"), "{transport}");
     server.shutdown().await.unwrap();
 }

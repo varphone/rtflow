@@ -31,6 +31,9 @@ Scope: RFC 3550 RTCP plus RFC 4585/5104/5506 feedback in `src/rtcp/`.
   NACK entries, PLI, FIR, APP and records the latest REMB bitrate. Server
   sender reports use `ServerConfig::rtcp_report_interval` (default 5 s).
 - Publisher emits periodic SR (+SDES) over UDP/interleaved; SRTP uses SRTCP.
+- Server receives publisher SR and emits periodic RR (+SDES) on UDP,
+  `rtcp-mux`, and interleaved publisher sessions; `rtcp_publisher_sender_reports`
+  exposes the received SR count.
 
 ## Optional / application-level follow-ups
 

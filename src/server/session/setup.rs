@@ -163,6 +163,32 @@ pub(super) async fn handle_setup(
             .await?;
         return Ok(());
     };
+    // A Publisher mount only accepts mode=record, while a Local/Proxy/VOD
+    // mount only accepts mode=play. Clients commonly omit mode; keep that
+    // valid for both roles.
+    let publisher_mount = matches!(mount.config, MountConfig::Publisher { .. });
+    let requested_mode = match &transport {
+        TransportSpec::Udp { mode, .. }
+        | TransportSpec::TcpInterleaved { mode, .. }
+        | TransportSpec::Multicast { mode, .. } => *mode,
+    };
+    let mode_allowed = match requested_mode {
+        None => true,
+        Some(crate::rtsp::transport::TransportMode::Record) => publisher_mount,
+        Some(crate::rtsp::transport::TransportMode::Play) => !publisher_mount,
+    };
+    if !mode_allowed {
+        writer
+            .lock()
+            .await
+            .write_all(&rtsp::encode_response(&simple_response(
+                461,
+                "Unsupported Transport",
+                cseq,
+            )))
+            .await?;
+        return Ok(());
+    }
     #[allow(unused_variables)]
     if let TransportSpec::Multicast {
         source,

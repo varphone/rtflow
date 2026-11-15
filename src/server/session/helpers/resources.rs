@@ -5,6 +5,8 @@ pub(crate) struct ConnectionResources {
     pub(crate) senders: Vec<tokio::task::JoinHandle<()>>,
     pub(crate) recording_mounts: Vec<Arc<Mount>>,
     pub(crate) claims: Vec<Arc<Mount>>,
+    /// Publisher mounts created by this session's ANNOUNCE (dynamic paths).
+    pub(crate) dynamic_mounts: Vec<crate::mount::MountHandle>,
     pub(crate) vod: Option<VodPlayback>,
     /// Mounts with an active PLAY in this session (deduplicated), for the
     /// unique-client counter.

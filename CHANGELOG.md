@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- RTSP 发布增强：`ServerConfig::dynamic_publishers`（opt-in）允许 ANNOUNCE
+  为未知路径创建 Publisher mount，断线且无订阅者时自动清理；
+- UDP 发布端接收 RTCP SR 并回送 RR/SDES，支持独立端口与 `rtcp-mux`；
+  发布端 SR 统计新增 `rtcp_publisher_sender_reports`；
+- TCP interleaved 发布端同样回送 RR/SDES；
+- SETUP 校验 transport mode 与 mount 角色；RECORD 必须先 ANNOUNCE；
+- UDP 发布来源按 Peer IP 锁定、首个合法包学习源端口，容忍 NAT 端口变化；
+- `live_vod_gateway` 开启动态 RTSP Publisher，ffmpeg 可直接推流。
+
 ### Fixed
 
 - HLS 直播改为 MPEG-TS（`transmux::StreamingTsHlsSegmenter`）：按关键帧

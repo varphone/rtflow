@@ -90,7 +90,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     ));
 
-    let rtsp = RtspServer::bind_with(ServerConfig::new(args.rtsp), mounts.clone()).await?;
+    let mut rtsp_config = ServerConfig::new(args.rtsp);
+    rtsp_config.dynamic_publishers = true;
+    let rtsp = RtspServer::bind_with(rtsp_config, mounts.clone()).await?;
     let mut rtmp_config = RtmpConfig {
         bind_addr: args.rtmp,
         ..RtmpConfig::default()

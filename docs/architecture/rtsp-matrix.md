@@ -9,11 +9,11 @@
 |---|---|---|---|
 | OPTIONS | 200 | 400/401 | 任意 URI（含 `*`）；返回 `Public` |
 | DESCRIBE | 200 + SDP | 404/503 | 绝对 `Content-Base`；支持 IPv4/IPv6 `c=` 与 multicast |
-| ANNOUNCE | 200 | 400/409/455 | 校验 SDP 与 mount 描述一致；支持 `a=crypto` |
+| ANNOUNCE | 200 | 400/405/409/453/455 | 校验 SDP 与 mount 描述一致；`dynamic_publishers` 开启时可为未知路径创建 Publisher mount；支持 `a=crypto` |
 | SETUP | 200 + Session/Transport | 404/453/454/455/459/461 | UDP、TCP interleaved、`rtcp-mux`、multicast、`RTP/SAVP` |
 | PLAY | 200 + RTP-Info | 454/455/457/551 | `Range: npt=`；Scale/Speed 仅 1.0，其他 551 |
 | PAUSE | 200 | 454/455 | 保留 NPT 游标 |
-| RECORD | 200 | 409/454/455 | 发布者认领与接收任务 |
+| RECORD | 200 | 409/454/455 | 必须先 ANNOUNCE；发布者认领与接收任务 |
 | TEARDOWN | 200 | 454 | 释放全部会话资源并关闭连接 |
 | GET_PARAMETER | 200 | 454 | 保活；允许无 Session 的能力查询 |
 | SET_PARAMETER | 200 | 400 | 接受并忽略参数（未知方法仍 501） |
@@ -27,12 +27,12 @@
 
 | Transport | 状态 | 备注 |
 |---|---|---|
-| `RTP/AVP;unicast;client_port=a-b` | 支持 | UDP 独立 RTP/RTCP 端口 |
-| `RTP/AVP;unicast;client_port=a;rtcp-mux` | 支持 | 单端口，RTP/RTCP 按 PT 192..=223 分流 |
+| `RTP/AVP;unicast;client_port=a-b` | 支持 | UDP 独立 RTP/RTCP；发布方向服务端回 RR |
+| `RTP/AVP;unicast;client_port=a;rtcp-mux` | 支持 | 单端口，RTP/RTCP 按 PT 192..=223 分流；发布方向同样回 RR |
 | `RTP/AVP/TCP;interleaved=a-b` | 支持 | TCP interleaved |
 | `RTP/AVP/TCP;interleaved=a;rtcp-mux` | 支持 | 单 channel |
 | `RTP/AVP;multicast` | 支持（IPv4） | SDP `c=` + `m=` 端口；mount 级共享 sender |
-| `RTP/SAVP;unicast` + `a=crypto` | 支持 | AES_128_CM_HMAC_SHA1_80；SRTP + SRTCP |
+| `RTP/SAVP;unicast` + `a=crypto` | 支持 | AES_128_CM_HMAC_SHA1_80；SRTP + SRTCP；发布端 SRTCP RR/SR |
 | `RTP/SAVP/TCP` | 支持 | TCP interleaved 上的 SRTP/SRTCP |
 | 组播 + `RTP/SAVP` | 支持 | 组播 SRTP，客户端解密 |
 | RTSPS | 支持 | TLS（`tls` feature） |

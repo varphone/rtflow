@@ -362,12 +362,224 @@ pub(crate) fn spawn_udp_sender_from(
     })
 }
 
+pub(crate) struct PublisherUdpReceiver {
+    mount: Arc<Mount>,
+    track: TrackDescription,
+    crypto: MediaCrypto,
+    depacketizer: Depacketizer,
+    session: Option<RtcpSession>,
+    pending_sender_report: Option<u64>,
+    accepted_rtp: Option<SocketAddr>,
+    accepted_rtcp: Option<SocketAddr>,
+    expected_ip: std::net::IpAddr,
+    report_interval: std::time::Duration,
+    local_ssrc: u32,
+}
+
+impl PublisherUdpReceiver {
+    fn new(
+        mount: Arc<Mount>,
+        track: TrackDescription,
+        crypto: MediaCrypto,
+        expected_rtp: SocketAddr,
+        report_interval: std::time::Duration,
+    ) -> Self {
+        let local_ssrc = 0x5254_0000 | u32::from(track.id);
+        Self {
+            mount,
+            depacketizer: Depacketizer::new(track.codec, track.id, track.clock_rate),
+            track,
+            crypto,
+            session: None,
+            pending_sender_report: None,
+            accepted_rtp: None,
+            accepted_rtcp: None,
+            expected_ip: expected_rtp.ip(),
+            report_interval,
+            local_ssrc,
+        }
+    }
+
+    fn admit_rtp(&mut self, source: SocketAddr) -> bool {
+        if source.ip() != self.expected_ip {
+            return false;
+        }
+        match self.accepted_rtp {
+            Some(expected) => expected == source,
+            None => {
+                self.accepted_rtp = Some(source);
+                true
+            }
+        }
+    }
+
+    fn admit_rtcp(&mut self, source: SocketAddr) -> bool {
+        if source.ip() != self.expected_ip {
+            return false;
+        }
+        match self.accepted_rtcp {
+            Some(expected) => expected == source,
+            None => {
+                self.accepted_rtcp = Some(source);
+                true
+            }
+        }
+    }
+
+    fn on_rtp(&mut self, source: SocketAddr, wire: Bytes, now: tokio::time::Instant) {
+        if !self.admit_rtp(source) {
+            self.mount.stats.add_dropped(1);
+            return;
+        }
+        let payload = match self.crypto.unprotect_rtp(wire) {
+            Ok(payload) => payload,
+            Err(_) => {
+                self.mount.stats.add_dropped(1);
+                return;
+            }
+        };
+        let packet = match RtpPacket::parse(payload) {
+            Ok(packet) => packet,
+            Err(_) => {
+                self.mount.stats.add_dropped(1);
+                return;
+            }
+        };
+        if packet.header.payload_type != self.track.payload_type
+            && !(packet.header.payload_type >= 96 && self.track.payload_type >= 96)
+            && !matches!(
+                self.track.codec,
+                crate::media::Codec::H263 | crate::media::Codec::Jpeg
+            )
+        {
+            self.mount.stats.add_dropped(1);
+            return;
+        }
+        if let Some(session) = self.session.as_mut() {
+            if session.on_rtp(&packet, now).is_err() {
+                self.mount.stats.add_dropped(1);
+                return;
+            }
+        } else {
+            let cname = format!("rtflow-{}", self.mount.id);
+            let mut session = match RtcpSession::new(
+                self.local_ssrc,
+                packet.header.ssrc,
+                self.track.clock_rate,
+                cname,
+                self.report_interval,
+                now,
+            ) {
+                Ok(session) => session,
+                Err(_) => {
+                    self.mount.stats.add_dropped(1);
+                    return;
+                }
+            };
+            if let Some(ntp) = self.pending_sender_report.take() {
+                session.on_rtcp(
+                    &crate::rtcp::Packet::SenderReport {
+                        ssrc: packet.header.ssrc,
+                        ntp,
+                        rtp_timestamp: packet.header.timestamp,
+                        packets: 0,
+                        octets: 0,
+                    },
+                    now,
+                );
+            }
+            if session.on_rtp(&packet, now).is_err() {
+                self.mount.stats.add_dropped(1);
+                return;
+            }
+            self.session = Some(session);
+        }
+        // RTP is already parsed once; the depacketizer needs the original
+        // packet. Re-parsing would copy, so feed the parsed packet directly.
+        match self.depacketizer.push(packet) {
+            Ok(frames) => {
+                for frame in frames {
+                    if self.mount.publish_cached(frame).is_ok() {
+                        self.mount.stats.add_accepted(1);
+                    } else {
+                        self.mount.stats.add_dropped(1);
+                    }
+                }
+            }
+            Err(_) => {
+                self.mount.stats.add_dropped(1);
+            }
+        }
+    }
+
+    fn on_rtcp(&mut self, source: SocketAddr, wire: Bytes, now: tokio::time::Instant) {
+        if !self.admit_rtcp(source) {
+            self.mount.stats.add_dropped(1);
+            return;
+        }
+        let payload = match self.crypto.unprotect_rtcp(wire) {
+            Ok(payload) => payload,
+            Err(_) => {
+                self.mount.stats.add_dropped(1);
+                return;
+            }
+        };
+        let Ok(packets) = RtcpPacket::parse(payload) else {
+            self.mount.stats.add_dropped(1);
+            return;
+        };
+        let sender_reports = packets
+            .iter()
+            .filter(|packet| {
+                matches!(
+                    packet,
+                    RtcpPacket::SenderReport { .. } | RtcpPacket::SenderReportWithReports { .. }
+                )
+            })
+            .count() as u64;
+        if sender_reports > 0 {
+            self.mount
+                .stats
+                .add_publisher_sender_reports(sender_reports);
+        }
+        if let Some(session) = self.session.as_mut() {
+            for packet in &packets {
+                session.on_rtcp(packet, now);
+            }
+        } else if let Some(ntp) = packets.iter().find_map(|packet| match packet {
+            RtcpPacket::SenderReport { ntp, .. }
+            | RtcpPacket::SenderReportWithReports { ntp, .. } => Some(*ntp),
+            _ => None,
+        }) {
+            self.pending_sender_report = Some(ntp);
+        }
+        if packets.iter().any(|packet| {
+            matches!(
+                packet,
+                RtcpPacket::RtpFeedback { fmt: 1, .. }
+                    | RtcpPacket::PayloadFeedback { fmt: 1 | 4, .. }
+            )
+        }) {
+            self.mount.request_keyframe(self.track.id);
+        }
+    }
+
+    fn report(&mut self, now: tokio::time::Instant) -> Option<Bytes> {
+        let session = self.session.as_mut()?;
+        let packet = session.poll_report(now).ok().flatten()?;
+        let wire = packet.try_encode().ok()?;
+        self.crypto.protect_rtcp(wire).ok()
+    }
+}
+
 pub(crate) fn spawn_udp_receiver(
     mount: Arc<Mount>,
     pair: UdpPair,
     expected_rtp_source: SocketAddr,
+    rtcp_target: SocketAddr,
     track: TrackDescription,
-    mut crypto: MediaCrypto,
+    crypto: MediaCrypto,
+    report_interval: std::time::Duration,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         if !matches!(mount.config, MountConfig::Publisher { .. }) {
@@ -377,53 +589,62 @@ pub(crate) fn spawn_udp_receiver(
             .publishers
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         let _lease = PublisherLease(mount.clone());
-        let mut depacketizer = Depacketizer::new(track.codec, track.id, track.clock_rate);
-        let mut buffer = BytesMut::zeroed(65_536);
-        let mut expected_ssrc = None;
-        while let Ok((size, source)) = pair.rtp.recv_from(&mut buffer).await {
-            if source != expected_rtp_source {
-                mount.stats.add_dropped(1);
-                continue;
-            }
-            let payload = bytes::Bytes::copy_from_slice(&buffer[..size]);
-            let payload = match crypto.unprotect_rtp(payload) {
-                Ok(payload) => payload,
-                Err(_) => {
-                    mount.stats.add_dropped(1);
-                    continue;
-                }
-            };
-            let packet = match RtpPacket::parse(payload) {
-                Ok(packet) => packet,
-                Err(_) => {
-                    mount.stats.add_dropped(1);
-                    continue;
-                }
-            };
-            if packet.header.payload_type != track.payload_type
-                && !(packet.header.payload_type >= 96 && track.payload_type >= 96)
-                && !matches!(
-                    track.codec,
-                    crate::media::Codec::H263 | crate::media::Codec::Jpeg
-                )
-            {
-                mount.stats.add_dropped(1);
-                continue;
-            }
-            if let Some(ssrc) = expected_ssrc {
-                if packet.header.ssrc != ssrc {
-                    mount.stats.add_dropped(1);
-                    continue;
+        let mux = Arc::ptr_eq(&pair.rtp, &pair.rtcp);
+        let mut receiver = PublisherUdpReceiver::new(
+            mount.clone(),
+            track,
+            crypto,
+            expected_rtp_source,
+            report_interval,
+        );
+        let mut rtp_buffer = BytesMut::zeroed(65_536);
+        let mut rtcp_buffer = BytesMut::zeroed(2_048);
+        let mut report_tick = tokio::time::interval(report_interval);
+        report_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        report_tick.tick().await;
+        let socket = if mux {
+            pair.rtp.clone()
+        } else {
+            pair.rtcp.clone()
+        };
+        loop {
+            if mux {
+                tokio::select! {
+                    biased;
+                    _ = report_tick.tick() => {
+                        if let Some(report) = receiver.report(tokio::time::Instant::now())
+                            && send_udp(&socket, &report, rtcp_target).await.is_ok()
+                        {
+                            mount.stats.add_receiver_reports(1);
+                        }
+                    }
+                    result = pair.rtp.recv_from(&mut rtp_buffer) => {
+                        let Ok((size, source)) = result else { break; };
+                        let wire = Bytes::copy_from_slice(&rtp_buffer[..size]);
+                        if wire.get(1).is_some_and(|byte| (192..=223).contains(byte)) {
+                            receiver.on_rtcp(source, wire, tokio::time::Instant::now());
+                        } else {
+                            receiver.on_rtp(source, wire, tokio::time::Instant::now());
+                        }
+                    }
                 }
             } else {
-                expected_ssrc = Some(packet.header.ssrc);
-            }
-            if let Ok(frames) = depacketizer.push(packet) {
-                for frame in frames {
-                    if mount.publish_cached(frame).is_ok() {
-                        mount.stats.add_accepted(1);
-                    } else {
-                        mount.stats.add_dropped(1);
+                tokio::select! {
+                    biased;
+                    _ = report_tick.tick() => {
+                        if let Some(report) = receiver.report(tokio::time::Instant::now())
+                            && send_udp(&pair.rtcp, &report, rtcp_target).await.is_ok()
+                        {
+                            mount.stats.add_receiver_reports(1);
+                        }
+                    }
+                    result = pair.rtp.recv_from(&mut rtp_buffer) => {
+                        let Ok((size, source)) = result else { break; };
+                        receiver.on_rtp(source, Bytes::copy_from_slice(&rtp_buffer[..size]), tokio::time::Instant::now());
+                    }
+                    result = pair.rtcp.recv_from(&mut rtcp_buffer) => {
+                        let Ok((size, source)) = result else { break; };
+                        receiver.on_rtcp(source, Bytes::copy_from_slice(&rtcp_buffer[..size]), tokio::time::Instant::now());
                     }
                 }
             }

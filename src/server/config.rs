@@ -24,6 +24,9 @@ pub struct ServerConfig {
     pub rtx: bool,
     pub no_subscriber_grace: Duration,
     pub shutdown_grace: Duration,
+    /// Allow ANNOUNCE to create a Publisher mount for an unregistered path.
+    /// Off by default so existing deployments keep a closed path allowlist.
+    pub dynamic_publishers: bool,
     pub authenticator: Arc<dyn Authenticator>,
     pub resource_limits: ResourceLimits,
     pub event_sink: Arc<dyn EventSink>,
@@ -49,6 +52,7 @@ impl std::fmt::Debug for ServerConfig {
             .field("rtx", &self.rtx)
             .field("no_subscriber_grace", &self.no_subscriber_grace)
             .field("shutdown_grace", &self.shutdown_grace)
+            .field("dynamic_publishers", &self.dynamic_publishers)
             .field("authenticator", &"<authenticator>")
             .field("resource_limits", &self.resource_limits)
             .field("event_sink", &"<sink>")
@@ -76,6 +80,7 @@ impl ServerConfig {
             rtx: false,
             no_subscriber_grace: Duration::from_secs(5),
             shutdown_grace: Duration::from_secs(5),
+            dynamic_publishers: false,
             authenticator: Arc::new(AllowAll),
             resource_limits: ResourceLimits::default(),
             event_sink: Arc::new(NoopEventSink),
@@ -289,6 +294,12 @@ impl ServerConfigBuilder {
         self
     }
 
+    /// Allow ANNOUNCE to register a Publisher mount for an unknown path.
+    pub fn dynamic_publishers(mut self, value: bool) -> Self {
+        self.config.dynamic_publishers = value;
+        self
+    }
+
     pub fn authenticator(mut self, value: Arc<dyn Authenticator>) -> Self {
         self.config.authenticator = value;
         self
@@ -331,6 +342,15 @@ mod tests {
             .rtcp_report_interval(Duration::ZERO)
             .build();
         assert!(config.is_err());
+    }
+
+    #[test]
+    fn builder_sets_dynamic_publishers() {
+        let config = ServerConfig::builder("127.0.0.1:0".parse().unwrap())
+            .dynamic_publishers(true)
+            .build()
+            .unwrap();
+        assert!(config.dynamic_publishers);
     }
 
     #[test]

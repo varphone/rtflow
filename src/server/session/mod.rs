@@ -16,7 +16,7 @@ use crate::{
     identity::MountId,
     media::MediaDescription,
     observe::{FrameworkEvent, SecurityEvent, emit},
-    rtcp::Packet as RtcpPacket,
+    rtcp::{Packet as RtcpPacket, RtcpSession},
     rtp::{Depacketizer, RtpPacket},
     rtsp::range::{NptPosition, NptRange},
     rtsp::sdp,
@@ -51,7 +51,7 @@ mod setup;
 mod teardown;
 
 use self::announce::handle_announce;
-use self::frames::handle_incoming_interleaved;
+use self::frames::{handle_incoming_interleaved, send_interleaved_receiver_reports};
 use self::gate::gate_request;
 use self::helpers::*;
 use self::pause::handle_pause;
@@ -126,14 +126,44 @@ pub(super) async fn serve_connection(
     let mut selected_mount: Option<String> = None;
     let mut interleaved_depacketizers: HashMap<u8, Depacketizer> = HashMap::new();
     let mut interleaved_ssrcs: HashMap<u8, u32> = HashMap::new();
+    let mut interleaved_rtcp_sessions: HashMap<u8, RtcpSession> = HashMap::new();
     let mut vod_cursor = std::time::Duration::ZERO;
     let vod_end = Arc::new(Notify::new());
     let mut rtp_sequences: HashMap<u8, Arc<AtomicU16>> = HashMap::new();
+    let mut rtcp_tick = tokio::time::interval(state.config.rtcp_report_interval);
+    rtcp_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    rtcp_tick.tick().await;
+    let mut last_activity = tokio::time::Instant::now();
     loop {
-        let n = tokio::select! { _ = state.cancel.cancelled() => break, result = tokio::time::timeout(state.config.session_timeout, reader.read(&mut scratch)) => result.map_err(|_| Error::Closed)?? };
+        let n = if phase == ConnectionPhase::Recording {
+            tokio::select! {
+                _ = state.cancel.cancelled() => break,
+                _ = rtcp_tick.tick() => {
+                    // The RTCP tick must not keep a stalled publisher's
+                    // control connection alive forever.
+                    if last_activity.elapsed() >= state.config.session_timeout {
+                        break;
+                    }
+                    send_interleaved_receiver_reports(
+                        &interleaved,
+                        &mut interleaved_rtcp_sessions,
+                        &mut interleaved_crypto,
+                        &writer,
+                    ).await?;
+                    continue;
+                }
+                result = tokio::time::timeout(state.config.session_timeout, reader.read(&mut scratch)) => result.map_err(|_| Error::Closed)??,
+            }
+        } else {
+            tokio::select! {
+                _ = state.cancel.cancelled() => break,
+                result = tokio::time::timeout(state.config.session_timeout, reader.read(&mut scratch)) => result.map_err(|_| Error::Closed)??,
+            }
+        };
         if n == 0 {
             break;
         }
+        last_activity = tokio::time::Instant::now();
         framer.push(&scratch[..n]);
         while let Some(frame) = framer.next_frame()? {
             let msg = match frame {
@@ -146,6 +176,8 @@ pub(super) async fn serve_connection(
                         &mut interleaved_depacketizers,
                         &mut interleaved_ssrcs,
                         &mut interleaved_crypto,
+                        &mut interleaved_rtcp_sessions,
+                        state.config.rtcp_report_interval,
                     )
                     .await?;
                     continue;
@@ -186,7 +218,15 @@ pub(super) async fn serve_connection(
                 continue;
             }
             if req.method == Method::Announce {
-                handle_announce(&req, &state, &writer, &mut has_announced, cseq.clone()).await?;
+                handle_announce(
+                    &req,
+                    &state,
+                    &writer,
+                    &mut has_announced,
+                    &mut resources,
+                    cseq.clone(),
+                )
+                .await?;
                 continue;
             }
             if req.method == Method::Setup {
@@ -256,6 +296,7 @@ pub(super) async fn serve_connection(
                     &mut interleaved_depacketizers,
                 )
                 .await?;
+                cleanup_session(&state, &mut resources).await;
                 return Ok(());
             } else {
                 let response = handle_request(req, &state, local_addr, scheme).await;
@@ -267,6 +308,34 @@ pub(super) async fn serve_connection(
             }
         }
     }
-    resources.cleanup();
+    cleanup_session(&state, &mut resources).await;
     Ok(())
+}
+
+/// Release session resources and remove idle dynamic publisher mounts.
+async fn cleanup_session(state: &Arc<State>, resources: &mut ConnectionResources) {
+    resources.cleanup();
+    for handle in resources.dynamic_mounts.drain(..) {
+        // Aborted receive tasks release their publisher lease asynchronously;
+        // give them a short grace period before deciding the mount is idle.
+        for _ in 0..50 {
+            if !handle.snapshot().publisher_connected {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let snapshot = handle.snapshot();
+        if !snapshot.publisher_connected
+            && snapshot.subscriber_count == 0
+            && snapshot.broadcast_receivers == 0
+            && state.mounts.unregister(handle.path.as_str()).is_some()
+        {
+            emit(
+                &state.config.event_sink,
+                FrameworkEvent::Mount(crate::observe::MountEvent::Unregistered {
+                    id: MountId::from(handle.path.as_str()),
+                }),
+            );
+        }
+    }
 }

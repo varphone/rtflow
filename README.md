@@ -5,9 +5,9 @@
 ## 已实现能力
 
 - RTSP 客户端：OPTIONS、DESCRIBE、多轨 SETUP、PLAY、PAUSE、TEARDOWN、GET_PARAMETER 自动保活。
-- RTSP 服务端：本地源、外部发布源、自动 SDP 探测的按需拉流代理；会话状态和超时、连接数上限、鉴权、UDP 端口范围。
+- RTSP 服务端：本地源、外部发布源、自动 SDP 探测的按需拉流代理；会话状态和超时、连接数上限、鉴权、UDP 端口范围。`ServerConfig::dynamic_publishers` 显式开启后，ANNOUNCE 可为未预注册路径自动创建 Publisher mount。
 - 传输：RTP/RTCP over UDP、TCP interleaved、`rtcp-mux`（单端口/单 channel）、
-  组播与 `RTP/SAVP`（SRTP/SRTCP）；Transport 的 destination/source/mode 会解析并回显；客户端默认仅在传输能力/网络失败时从 UDP 回退 TCP interleaved；服务端发布端严格校验来源地址、Payload Type 和 SSRC，并按时间调度 compound RTCP SR/SDES。
+  组播与 `RTP/SAVP`（SRTP/SRTCP）；Transport 的 destination/source/mode 会解析并回显；客户端默认仅在传输能力/网络失败时从 UDP 回退 TCP interleaved；服务端发布端按 Peer IP 锁定来源、校验 Payload Type/SSRC，UDP/TCP 发布方向均调度 compound RTCP RR/SDES；发布端 SR 计入统计。
 - 客户端重连：`RtspClient::connect_reconnecting` 配合 `ClientReconnectPolicy` 提供显式启用的断线退避重连；普通 `connect` 保持一次性连接和直接报错语义。
 - 编码载荷：H.264 RFC 6184、H.265 RFC 7798、AAC MPEG4-GENERIC、G.711 PCMA/PCMU、Opus、VP8/VP9、MP3（MPA）、G.726 16/24/32/40，以及 AV1、JPEG、H.263、MPEG-4 Part 2 的基础 RTP 支持。
 - 组播（`multicast` feature，需显式启用）：RTSP `RTP/AVP;multicast` 发布/接收；SDP `c=`/`m=` 组地址与端口。
