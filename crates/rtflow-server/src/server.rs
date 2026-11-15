@@ -418,13 +418,10 @@ impl ServerApp {
             http.add_route(
                 Method::Get,
                 "/vod/*",
-                crate::media::auth_guard(
+                crate::media::vod_auth_guard(
                     create_hls_vod_handler(vod_manager.clone()),
                     auth.clone(),
-                    mounts.clone(),
-                    "/vod/",
-                    rtflow::auth::AccessRole::Read,
-                    "vod",
+                    vod.clone(),
                 ),
             )
             .await;

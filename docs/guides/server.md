@@ -174,7 +174,7 @@ auto_start = true
 
 ```bash
 curl -u admin:password http://127.0.0.1:8080/admin/api/v1/vods
-# 播放 /vod/<id>/index.m3u8
+# 播放 /vod/<id>/index.m3u8（按该录像来源路径的 read 权限鉴权）
 ```
 
 手动开始/停止（需在线 mount）：

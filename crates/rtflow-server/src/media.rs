@@ -1,5 +1,5 @@
 //! Media HTTP handlers: auth guard, HTTP-FLV, DASH and health probes.
-use crate::{auth::AppAuth, config::Config};
+use crate::{auth::AppAuth, config::Config, vod::VodCatalog};
 use rtflow::{
     MountRegistry,
     dash::{DashConfig, DashHandlers, create_dash_router},
@@ -71,6 +71,34 @@ pub(crate) fn auth_guard(
                 "media auth check"
             );
             if !auth.verify_http_request(&mount_path, &req, role, protocol) {
+                let mut writer = writer;
+                writer
+                    .write_body(401, "text/plain", b"unauthorized")
+                    .await?;
+                return Ok(writer);
+            }
+            inner(req, writer).await
+        })
+    })
+}
+
+/// VOD ids are not mount paths: map an id back to the recording's mount path
+/// and authorize against that path's read policy.
+pub(crate) fn vod_auth_guard(inner: Handler, auth: Arc<AppAuth>, vod: Arc<VodCatalog>) -> Handler {
+    Arc::new(move |req, writer| {
+        let auth = auth.clone();
+        let vod = vod.clone();
+        let inner = inner.clone();
+        Box::pin(async move {
+            let id = req
+                .path
+                .trim_start_matches("/vod/")
+                .split('/')
+                .next()
+                .unwrap_or("")
+                .to_owned();
+            let mount_path = vod.source_path(&id).unwrap_or_else(|| id.clone());
+            if !auth.verify_http_request(&mount_path, &req, rtflow::auth::AccessRole::Read, "vod") {
                 let mut writer = writer;
                 writer
                     .write_body(401, "text/plain", b"unauthorized")

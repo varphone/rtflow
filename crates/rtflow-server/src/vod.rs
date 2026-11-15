@@ -40,6 +40,24 @@ impl VodCatalog {
         &self.manager
     }
 
+    /// Original mount path for a VOD id, so playback can be authorized
+    /// against the path's read policy instead of a synthetic `vod` namespace.
+    pub fn source_path(&self, id: &str) -> Option<String> {
+        let directory = self
+            .known
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(id)
+            .cloned()?;
+        let relative = directory.strip_prefix(&self.root).ok()?;
+        let parts: Vec<String> = relative
+            .parent()?
+            .components()
+            .filter_map(|component| component.as_os_str().to_str().map(str::to_owned))
+            .collect();
+        (!parts.is_empty()).then(|| parts.join("/"))
+    }
+
     pub fn list(&self) -> Vec<VodStatus> {
         self.manager
             .entries()
