@@ -54,6 +54,7 @@ pub fn write_live_playlist_at_q(
 
     playlist.push_str("#EXTM3U\n");
     playlist.push_str("#EXT-X-VERSION:7\n");
+    playlist.push_str("#EXT-X-INDEPENDENT-SEGMENTS\n");
     playlist.push_str(&format!("#EXT-X-TARGETDURATION:{}\n", target_secs));
 
     // Media sequence is the sequence number of the first segment
@@ -125,6 +126,7 @@ pub fn write_vod_playlist_at_q(segments: &[Segment], asset_prefix: &str, query: 
 
     playlist.push_str("#EXTM3U\n");
     playlist.push_str("#EXT-X-VERSION:7\n");
+    playlist.push_str("#EXT-X-INDEPENDENT-SEGMENTS\n");
     playlist.push_str(&format!("#EXT-X-TARGETDURATION:{}\n", max_duration));
     playlist.push_str("#EXT-X-MEDIA-SEQUENCE:0\n");
     playlist.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");

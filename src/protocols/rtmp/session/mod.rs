@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::media::{AccessUnit, Codec, MediaDescription, MediaKind};
-use crate::mount::{LocalPublisher, MountConfig, MountHandle, MountRegistry};
+use crate::mount::{LocalPublisher, MountConfig, MountHandle, MountRegistry, PushResult};
 use crate::{Error, Result};
 
 /// Trait for RTMP publish authentication.
@@ -444,7 +444,9 @@ pub async fn serve_rtmp_session(
                                     is_keyframe,
                                     data,
                                 };
-                                let _ = publisher.push(unit);
+                                if matches!(publisher.push(unit), Ok(PushResult::Dropped)) {
+                                    debug!("RTMP: publisher queue dropped a frame");
+                                }
                             }
                             VideoData::HevcNalu {
                                 data,
@@ -469,7 +471,9 @@ pub async fn serve_rtmp_session(
                                     is_keyframe,
                                     data,
                                 };
-                                let _ = publisher.push(unit);
+                                if matches!(publisher.push(unit), Ok(PushResult::Dropped)) {
+                                    debug!("RTMP: publisher queue dropped a frame");
+                                }
                             }
                         }
                     }
@@ -541,7 +545,9 @@ pub async fn serve_rtmp_session(
                                     is_keyframe: true,
                                     data,
                                 };
-                                let _ = publisher.push(unit);
+                                if matches!(publisher.push(unit), Ok(PushResult::Dropped)) {
+                                    debug!("RTMP: publisher queue dropped a frame");
+                                }
                             }
                         }
                     }

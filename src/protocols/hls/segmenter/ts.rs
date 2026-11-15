@@ -11,6 +11,7 @@ use crate::media::{Codec, MediaDescription, MediaKind};
 use bytes::Bytes;
 use std::time::Duration;
 use transmux::avc_config::AVCConfigurationBox;
+use transmux::hevc_config::HEVCConfigurationBox;
 use transmux::mp4esds::{
     DecoderConfigDescriptor, DecoderSpecificInfo, ESDescriptor, EsdsBox, SLConfigDescriptor,
 };
@@ -106,6 +107,35 @@ fn track_spec(track: &crate::media::TrackDescription) -> Option<TrackSpec> {
                 },
             ))
         }
+        Codec::H265 => {
+            let fmtp = track.fmtp.as_deref()?;
+            let value = |key: &str| {
+                fmtp.split(';')
+                    .find(|part| part.trim().starts_with(key))
+                    .and_then(|part| part.split_once('='))
+                    .and_then(|(_, value)| {
+                        use base64::Engine;
+                        base64::engine::general_purpose::STANDARD
+                            .decode(value.trim())
+                            .ok()
+                    })
+            };
+            let config = crate::media::bitstream::build_hevc_config_record(
+                &value("sprop-vps")?,
+                &value("sprop-sps")?,
+                &value("sprop-pps")?,
+            )?;
+            let hvcc = HEVCConfigurationBox::parse_body(&config).ok()?;
+            Some(TrackSpec::new(
+                TrackId::new(u32::from(track.id) + 1),
+                track.clock_rate,
+                CodecConfig::Hevc {
+                    config: hvcc,
+                    width: track.width.unwrap_or(0) as u16,
+                    height: track.height.unwrap_or(0) as u16,
+                },
+            ))
+        }
         Codec::Aac => Some(TrackSpec::new(
             TrackId::new(u32::from(track.id) + 1),
             track.clock_rate,
@@ -147,9 +177,12 @@ impl TsPipeline {
             }
         }
         if specs.is_empty()
-            || !specs
-                .iter()
-                .any(|spec| matches!(spec.config, CodecConfig::Avc { .. }))
+            || !specs.iter().any(|spec| {
+                matches!(
+                    spec.config,
+                    CodecConfig::Avc { .. } | CodecConfig::Hevc { .. }
+                )
+            })
         {
             return None;
         }
