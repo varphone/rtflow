@@ -27,6 +27,7 @@ pub(super) struct StreamView {
     pub rtp_packets: u64,
     pub rtp_octets: u64,
     pub hls_url: String,
+    pub ll_hls_url: String,
     pub rtmp_url: String,
     pub protocols: Vec<&'static str>,
 }
@@ -72,6 +73,11 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
         state.config.hls_prefix.trim_end_matches('/'),
         path
     );
+    let ll_hls_url = format!(
+        "{}{}/index.m3u8",
+        state.config.ll_hls_prefix.trim_end_matches('/'),
+        path
+    );
     let rtmp_url = format!(
         "{}{}",
         state
@@ -94,6 +100,7 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
         rtp_packets: snapshot.stats.rtp_packets,
         rtp_octets: snapshot.stats.rtp_octets,
         hls_url,
+        ll_hls_url,
         rtmp_url,
         protocols: vec!["HLS", "RTSP"],
     })

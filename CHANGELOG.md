@@ -32,6 +32,7 @@
 - HLS live segment/init 支持 HEAD 与 Range（含 suffix `bytes=-N`）。
 - 新增 `/llhls/{mount}/index.m3u8` LL-HLS 端点：CMAF parts、PART-INF、
   PRELOAD-HINT、200ms part target；与经典 TS HLS 并存。
+- 管理台直播列表增加 “LL” 按钮，播放 LL-HLS；API `ll_hls_url`。
 
 ### Added
 

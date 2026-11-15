@@ -322,6 +322,7 @@
           ${compact ? "" : `<td class="mono"><span class="ok">${num(s.accepted_frames)}</span> / <span class="bad">${num(s.dropped_frames)}</span></td>
           <td><div class="row-actions">
             <button class="btn small" data-action="play" data-path="${esc(s.path)}" data-kind="live">${icon("play")} HLS</button>
+            <button class="btn small ghost" data-action="play-ll" data-path="${esc(s.path)}" title="低延迟 LL-HLS">LL</button>
             <button class="btn small ghost" data-action="copy" data-copy="${esc(s.hls_url)}" title="复制 HLS 地址">${icon("copy")}</button>
             ${state.session.readonly ? "" : `<button class="btn small danger" data-action="kick" data-path="${esc(s.path)}" title="断开并移除流">${icon("power")}</button>`}
           </div></td>`}
@@ -444,6 +445,7 @@
         state.hls = new Hls({
           liveDurationInfinity: true,
           enableWorker: false,
+          lowLatencyMode: true,
           startPosition: -1,
           // Keep more of the live window buffered than hls.js's 3-target
           // default; high-fps streams produce short segments and can hit
@@ -542,6 +544,11 @@
         const vod = state.vods.find((v) => v.id === actionEl.dataset.id);
         if (vod) await playUrl(vod.playlist, vod.title + " · 点播");
       }
+      return;
+    }
+    if (action === "play-ll") {
+      const stream = state.streams.find((s) => s.path === actionEl.dataset.path);
+      if (stream) await playUrl(stream.ll_hls_url, stream.name + " · LL-HLS");
       return;
     }
     if (action === "copy") return copyText(actionEl.dataset.copy || "");

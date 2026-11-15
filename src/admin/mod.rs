@@ -35,6 +35,8 @@ pub struct AdminConfig {
     pub readonly: bool,
     /// Prefix where HLS live playlists are served, e.g. `/hls`.
     pub hls_prefix: String,
+    /// Prefix where LL-HLS live playlists are served, e.g. `/llhls`.
+    pub ll_hls_prefix: String,
     /// Public RTMP base used for ingest hints, e.g. `rtmp://host:1935`.
     pub rtmp_base: Option<String>,
     #[cfg(feature = "hls")]
@@ -55,6 +57,7 @@ impl AdminConfig {
             secure_cookies: false,
             readonly: false,
             hls_prefix: "/hls".to_owned(),
+            ll_hls_prefix: "/llhls".to_owned(),
             rtmp_base: None,
             #[cfg(feature = "hls")]
             vod: None,
@@ -86,6 +89,11 @@ impl AdminConfig {
 
     pub fn with_hls_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.hls_prefix = prefix.into();
+        self
+    }
+
+    pub fn with_ll_hls_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.ll_hls_prefix = prefix.into();
         self
     }
 

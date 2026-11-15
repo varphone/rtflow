@@ -133,6 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let admin_config = AdminConfig::new(&args.admin_user, &args.admin_password)?
         .with_title("rtflow 流媒体控制台")
         .with_hls_prefix("/hls")
+        .with_ll_hls_prefix("/llhls")
         .with_rtmp_base(format!("rtmp://{rtmp_addr}"))
         .with_vod(vod);
     let admin = Admin::new(admin_config, mounts.clone())?;
