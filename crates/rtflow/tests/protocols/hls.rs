@@ -21,7 +21,6 @@ fn h264_description() -> MediaDescription {
             payload_type: 96,
             fmtp: None,
             control: Arc::from("trackID=0"),
-            #[cfg(feature = "srtp")]
             crypto: None,
             width: None,
             height: None,
@@ -32,7 +31,6 @@ fn h264_description() -> MediaDescription {
             bandwidth_as: None,
             rtx: None,
         }],
-        #[cfg(feature = "multicast")]
         connection: None,
     }
 }
@@ -379,7 +377,6 @@ fn segmenter_rotates_audio_only_stream_by_time() {
             payload_type: 97,
             fmtp: Some(Arc::from("config=1210")),
             control: Arc::from("trackID=0"),
-            #[cfg(feature = "srtp")]
             crypto: None,
             width: None,
             height: None,
@@ -390,7 +387,6 @@ fn segmenter_rotates_audio_only_stream_by_time() {
             bandwidth_as: None,
             rtx: None,
         }],
-        #[cfg(feature = "multicast")]
         connection: None,
     };
     let config = SegmenterConfig {
@@ -628,7 +624,6 @@ async fn registry_live_handler_serves_dynamic_mount() {
     let empty = MediaDescription {
         session_name: Arc::from("cam"),
         tracks: Vec::new(),
-        #[cfg(feature = "multicast")]
         connection: None,
     };
     let mount = registry

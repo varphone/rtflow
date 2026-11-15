@@ -15,7 +15,6 @@ use url::Url;
 fn description() -> MediaDescription {
     MediaDescription {
         session_name: "gop-alignment".into(),
-        #[cfg(feature = "multicast")]
         connection: None,
         tracks: vec![TrackDescription {
             id: 0,
@@ -29,7 +28,6 @@ fn description() -> MediaDescription {
             width: Some(320),
             height: Some(240),
             frame_rate: Some((30, 1)),
-            #[cfg(feature = "srtp")]
             crypto: None,
             direction: None,
             ptime: None,

@@ -15,7 +15,7 @@ pub(super) async fn handle_announce(
         .get("content-type")
         .map(|value| value.split(';').next().unwrap_or(value).trim());
     if !content_type.is_some_and(|value| value.eq_ignore_ascii_case("application/sdp")) {
-        tracing::warn!(uri = %req.uri, content_type = ?content_type, "RTSP ANNOUNCE rejected: unsupported content type");
+        tracing::warn!(uri = %req.uri.split('?').next().unwrap_or(&req.uri), content_type = ?content_type, "RTSP ANNOUNCE rejected: unsupported content type");
         writer
             .lock()
             .await
@@ -30,7 +30,7 @@ pub(super) async fn handle_announce(
     let announced = match sdp::parse(&req.body) {
         Ok(description) => description,
         Err(error) => {
-            tracing::warn!(uri = %req.uri, %error, "RTSP ANNOUNCE rejected: invalid SDP");
+            tracing::warn!(uri = %req.uri.split('?').next().unwrap_or(&req.uri), %error, "RTSP ANNOUNCE rejected: invalid SDP");
             writer
                 .lock()
                 .await
@@ -154,7 +154,7 @@ pub(super) async fn handle_announce(
     let fmtp = match announced_fmtp(&expected, &announced) {
         Ok(fmtp) => fmtp,
         Err(error) => {
-            tracing::warn!(path = %req.uri, %error, "RTSP ANNOUNCE rejected: SDP does not match mount");
+            tracing::warn!(path = %req.uri.split('?').next().unwrap_or(&req.uri), %error, "RTSP ANNOUNCE rejected: SDP does not match mount");
             writer
                 .lock()
                 .await
@@ -173,7 +173,7 @@ pub(super) async fn handle_announce(
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clear();
     tracing::info!(
-        path = %req.uri,
+        path = %req.uri.split('?').next().unwrap_or(&req.uri),
         tracks = expected.tracks.len(),
         fmtp_tracks = fmtp.len(),
         "RTSP ANNOUNCE accepted"

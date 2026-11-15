@@ -409,8 +409,6 @@ fn encode_with_options(
         let ttl_str = conn.ttl.map(|t| format!("/{t}")).unwrap_or_default();
         format!("c=IN {} {}{}\r\n", conn.addr_type, conn.address, ttl_str)
     });
-    #[cfg(not(feature = "multicast"))]
-    let connection: Option<String> = None;
     if let Some(connection) = connection {
         output.push_str(&connection);
     } else if matches!(local_ip, Some(std::net::IpAddr::V6(_))) {
@@ -451,15 +449,11 @@ fn encode_with_options(
             .filter(|connection| connection.address.is_multicast())
             .and_then(|connection| connection.port)
             .unwrap_or(0);
-        #[cfg(not(feature = "multicast"))]
-        let media_port = 0;
         let profile = if track.crypto.is_some() {
             "RTP/SAVP"
         } else {
             "RTP/AVP"
         };
-        #[cfg(not(feature = "srtp"))]
-        let profile = "RTP/AVP";
         if let Some(rtx) = rtx_configs.get(&track.id) {
             output.push_str(&format!(
                 "m={media} {media_port} {profile} {} {}\r\n",

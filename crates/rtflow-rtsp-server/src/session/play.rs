@@ -186,7 +186,7 @@ pub(super) async fn handle_play(
         *phase = ConnectionPhase::Playing;
         tracing::info!(
             session = %session_id,
-            uri = %req.uri,
+            uri = %req.uri.split('?').next().unwrap_or(&req.uri),
             udp_tracks = setups.len(),
             interleaved_tracks = interleaved.len(),
             multicast_tracks = multicast_tracks.len(),

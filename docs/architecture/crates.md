@@ -64,7 +64,7 @@
 | `gstreamer` | `rtflow-gst` |
 | `admin` | `rtflow-admin`（并启用 `http`、`server`、`hls`） |
 | `logging` | `tracing-subscriber` + `rtflow::logging`（`full` 默认包含） |
-| `full`（默认） | 生产常用集合 |
+| `full`（默认） | 生产常用集合（`srtp`/`multicast` 仍为显式 opt-in） |
 | `embedded-gateway` | RTSP + TLS + metrics + HTTP-FLV + HLS |
 | `experimental-protocols` | DASH、RTMP、SRT、WebRTC |
 

@@ -23,7 +23,7 @@ features = ["rtmp", "srt", "dash", "webrtc", "srtp", "tls"]
 default = ["full"]
 full = [
     "tls", "mp4", "mkv", "client", "server", "file-storage",
-    "metrics", "http", "http-flv", "hls", "ws-flv", "srtp", "multicast", "logging",
+    "metrics", "http", "http-flv", "hls", "ws-flv", "logging",
 ]
 embedded-gateway = ["client", "server", "tls", "metrics", "http", "http-flv", "hls", "ws-flv"]
 experimental-protocols = ["dash", "rtmp", "srt", "webrtc"]
@@ -135,6 +135,7 @@ harness = false
 [[bench]]
 name = "throughput"
 harness = false
+required-features = ["srtp"]
 
 [dependencies]
 rtflow-core.workspace = true

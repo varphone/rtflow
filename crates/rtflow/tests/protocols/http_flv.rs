@@ -22,7 +22,6 @@ fn h264_description() -> MediaDescription {
             payload_type: 96,
             fmtp: None,
             control: Arc::from("trackID=0"),
-            #[cfg(feature = "srtp")]
             crypto: None,
             width: None,
             height: None,
@@ -33,7 +32,6 @@ fn h264_description() -> MediaDescription {
             bandwidth_as: None,
             rtx: None,
         }],
-        #[cfg(feature = "multicast")]
         connection: None,
     }
 }
