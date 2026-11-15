@@ -83,7 +83,7 @@ PTS: 0.100000, 0.133333, 0.166667, 0.200000, ...
 | L-07 | P1 | RTMP 收流 | `publisher.push` 的返回值被忽略；FrameBus 满时丢帧只增加统计，不反馈给发布端，也不在日志/指标中突出。SRS/MediaMTX 有明确的队列/丢帧策略。 | **未修** |
 | L-08 | P1 | RTMP 编码 | enhanced-RTMP 的 HEVC/H.264 已接入；AV1/VP9 尚未接入（HLS/TS 也尚无对应 sample entry）。 | 部分完成 |
 | L-09 | P2 | HLS live | 未输出 `EXT-X-PROGRAM-DATE-TIME`；MediaMTX 输出，便于绝对时间对齐、广告/DRM/时移。 | 未做 |
-| L-10 | P2 | HLS live | playlist 窗口 30 段、保留 90 段；SRS/MediaMTX 默认 3–7 段。内存和切台延迟更高，但可用。 | 可配置 |
+| L-10 | P2 | HLS live | 示例默认窗口降为 7 段，并提供 `--hls-segments` / `--hls-segment-seconds` 配置；ring 仍保留 3× 窗口。 | 已完成 |
 | L-11 | P2 | HLS live | 无低延迟 HLS（LL-HLS part/blocking reload）；MediaMTX 默认 lowLatency。当前 1 s 分段属于经典 HLS。 | 已知限制 |
 | L-12 | P2 | HLS VOD | segment 支持普通 Range 和 suffix `bytes=-N`；playlist/init/segment 支持 HEAD。 | 已完成 |
 | L-13 | P2 | HLS VOD | 源文件/录制目录提供 fingerprint（路径+mtime+size），HLS 缓存自动重建。 | 已完成 |

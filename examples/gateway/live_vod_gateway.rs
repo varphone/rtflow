@@ -43,6 +43,12 @@ struct Args {
     admin_user: String,
     #[arg(long, default_value = "rtflow-admin")]
     admin_password: String,
+    /// HLS live playlist window in segments (SRS/MediaMTX default 3–7).
+    #[arg(long, default_value_t = 7)]
+    hls_segments: usize,
+    /// HLS target segment duration in seconds.
+    #[arg(long, default_value_t = 1)]
+    hls_segment_seconds: u64,
 }
 
 #[tokio::main]
@@ -103,12 +109,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let live = Arc::new(HlsLiveManager::new(
         mounts.clone(),
         HlsConfig {
-            segment_duration: Duration::from_secs(1),
-            // 60 fps HLS cuts close to 1 s segments. Keep a 30 s
-            // window: multiple viewers (especially throttled background
-            // tabs) must not lose a segment between playlist reload and
-            // fetch.
-            segment_count: 30,
+            segment_duration: Duration::from_secs(args.hls_segment_seconds.max(1)),
+            // 7 segments matches SRS/MediaMTX defaults and keeps the live
+            // JSON/HTTP window small; operators can raise it for heavily
+            // throttled viewers.
+            segment_count: args.hls_segments.max(1),
             live: true,
         },
     ));

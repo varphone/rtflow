@@ -22,6 +22,8 @@
   VOD 临时目录、拒绝 `.`/`..` VOD id、处理 RTMP fmt3 extended timestamp；
   详细对照见 `docs/audits/2026-11-live-vod-srs-mediamtx.md`。
 - H.265 live TS、enhanced-RTMP H.264、VOD fingerprint/HEAD/suffix Range。
+- `live_vod_gateway` 新增 `--hls-segments`（默认 7）和
+  `--hls-segment-seconds`（默认 1）。
 
 ### Added
 
