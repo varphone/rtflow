@@ -21,7 +21,7 @@ use rtflow::{
     },
     http::{HttpConfig, HttpServer, Method},
     http_flv::ws::{WsFlvConfig, WsFlvServer},
-    metrics::{MetricsRegistry, create_metrics_handler},
+    metrics::MetricsRegistry,
     rtmp::{RtmpConfig, RtmpServer, session::RtmpSessionConfig},
     srt::{SrtConfig, SrtServer},
     webrtc::{WebRtcConfig, create_webrtc_handlers},
@@ -266,10 +266,12 @@ impl ServerApp {
                 config.audit.max_files,
             ))
         });
+        let counters = Arc::new(crate::metrics::ServerCounters::default());
         let auth = Arc::new(
             AppAuth::new(&config, keys.clone(), paths.clone(), mounts.clone())?
                 .with_hooks(hooks.clone())
-                .with_audit(audit.clone()),
+                .with_audit(audit.clone())
+                .with_counters(counters.clone()),
         );
         let recording =
             RecordingSupervisor::new(config.clone(), paths.clone(), mounts.clone(), hooks.clone());
@@ -496,7 +498,13 @@ impl ServerApp {
             http.add_route(
                 Method::Get,
                 "/metrics",
-                create_metrics_handler(metrics.clone()),
+                crate::metrics::metrics_handler(
+                    metrics.clone(),
+                    mounts.clone(),
+                    recording.clone(),
+                    counters.clone(),
+                    hooks.clone(),
+                ),
             )
             .await;
         }

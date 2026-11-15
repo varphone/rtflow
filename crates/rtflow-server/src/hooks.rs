@@ -49,6 +49,7 @@ pub struct HookClient {
     config: HooksSection,
     client: reqwest::Client,
     queue: mpsc::Sender<HookRequest>,
+    failures: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl HookClient {
@@ -67,7 +68,18 @@ impl HookClient {
             config,
             client,
             queue,
+            failures: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }))
+    }
+
+    /// Authorization hook failures (timeouts, non-2xx, transport errors).
+    pub fn failures(&self) -> u64 {
+        self.failures.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn record_failure(&self) {
+        self.failures
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn enabled(&self) -> bool {
@@ -101,8 +113,12 @@ impl HookClient {
         let response = self.post(url, &request).await;
         match response {
             Ok(decision) => Ok(decision),
-            Err(error) if self.config.fail_closed => Err(error),
+            Err(error) if self.config.fail_closed => {
+                self.record_failure();
+                Err(error)
+            }
             Err(error) => {
+                self.record_failure();
                 tracing::warn!(%error, path = %request.path, "hook failed; allowing (fail_closed=false)");
                 Ok(HookDecision {
                     allow: true,

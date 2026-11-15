@@ -19,7 +19,8 @@
 ### Added
 
 - `rtflow-server` 增加审计日志（JSONL 轮转）、SIGHUP 热加载、RTSP TLS、
-  路径观看配额、RTMP 异步认证钩子，以及管理台“路径与密钥”控制页。
+  路径观看配额、RTMP 异步认证钩子、应用级 Prometheus 指标，以及管理台
+  “路径与密钥”控制页。
 - 新增官方应用 `rtflow-server`：TOML 配置、RTSP/RTMP/SRT/WebRTC/HLS/LL-HLS/DASH/FLV、
   自动录制、VOD catalog、路径注册/发现、API 流密钥与 HTTP 钩子，以及
   systemd/Docker 部署资产。

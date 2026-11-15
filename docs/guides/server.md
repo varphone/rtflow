@@ -108,6 +108,21 @@ curl -u admin:password -X DELETE http://127.0.0.1:8080/admin/api/v1/keys/<kid>
 - `paths.<rule>.max_readers`：观看人数上限。鉴权时按 mount 当前订阅数检查，属于准入控制（并发鉴权可能短暂超出）。
 - `rtsp.max_sessions`、`[security]` 的连接限流仍是硬上限。
 
+## 指标
+
+`/metrics` 输出 Prometheus 文本：框架连接/会话/协议计数之外，还有应用级指标：
+
+| 指标 | 含义 |
+|---|---|
+| `rtflow_paths_total` | 已注册路径数 |
+| `rtflow_paths_online` | 有活跃发布者的路径数 |
+| `rtflow_recordings_active` | 活跃录制会话数 |
+| `rtflow_recording_bytes_total` | 活跃录制已写字节 |
+| `rtflow_auth_failures_total` | 被拒绝的认证决策 |
+| `rtflow_hook_failures_total` | 认证钩子失败次数 |
+
+`/stats` 保留 JSON 形式，供管理台与脚本使用。
+
 ## 审计日志
 
 ```toml

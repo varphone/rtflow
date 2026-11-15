@@ -8,6 +8,7 @@ pub mod discovery;
 pub mod hooks;
 pub mod keys;
 pub mod media;
+pub mod metrics;
 pub mod paths;
 pub mod recording;
 pub mod server;

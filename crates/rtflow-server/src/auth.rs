@@ -61,6 +61,7 @@ pub struct AppAuth {
     mounts: Arc<MountRegistry>,
     hooks: Option<Arc<HookClient>>,
     audit: Option<Arc<AuditLog>>,
+    counters: Option<Arc<crate::metrics::ServerCounters>>,
 }
 
 impl AppAuth {
@@ -111,6 +112,7 @@ impl AppAuth {
             mounts,
             hooks: None,
             audit: None,
+            counters: None,
         })
     }
 
@@ -144,6 +146,12 @@ impl AppAuth {
                 false
             }
         }
+    }
+
+    /// Attach application counters (auth failures).
+    pub fn with_counters(mut self, counters: Arc<crate::metrics::ServerCounters>) -> Self {
+        self.counters = Some(counters);
+        self
     }
 
     /// Attach the audit log for authentication decisions.
@@ -316,7 +324,11 @@ impl AppAuth {
         // OPTIONS is capability discovery and carries no media/path state;
         // it is intentionally not audited.
         if request.method != rtflow::rtsp::Method::Options {
-            self.audit_decision(request, matches!(decision, AuthDecision::Allow), "rtsp");
+            let allowed = matches!(decision, AuthDecision::Allow);
+            self.audit_decision(request, allowed, "rtsp");
+            if !allowed && let Some(counters) = &self.counters {
+                counters.auth_failure();
+            }
         }
         decision
     }
@@ -441,9 +453,45 @@ impl Authenticator for AppAuth {
     }
 }
 
+impl AppAuth {
+    fn rtmp_audit(&self, allowed: bool, path: &str, role: &str) {
+        if let Some(counters) = &self.counters
+            && !allowed
+        {
+            counters.auth_failure();
+        }
+        if let Some(audit) = &self.audit {
+            audit.record(
+                &AuditEvent::new(
+                    if allowed { "auth.allow" } else { "auth.deny" },
+                    if allowed { "ok" } else { "denied" },
+                )
+                .path(path)
+                .protocol("rtmp")
+                .role(role),
+            );
+        }
+    }
+}
+
 impl PublishAuthenticator for AppAuth {
     fn authorize_publish(&self, app: &str, stream_name: &str) -> bool {
         let (stream, token) = split_rtmp_stream(stream_name);
+        let allowed = self.authorize_publish_inner(app, stream, token);
+        self.rtmp_audit(allowed, &format!("{app}/{stream}"), "publish");
+        allowed
+    }
+
+    fn authorize_play(&self, app: &str, stream_name: &str) -> bool {
+        let (stream, token) = split_rtmp_stream(stream_name);
+        let allowed = self.authorize_play_inner(app, stream, token);
+        self.rtmp_audit(allowed, &format!("{app}/{stream}"), "read");
+        allowed
+    }
+}
+
+impl AppAuth {
+    fn authorize_publish_inner(&self, app: &str, stream: &str, token: Option<&str>) -> bool {
         let path = format!("{app}/{stream}");
         if let Some(token) = token {
             if (token.starts_with("rk_")
@@ -466,8 +514,7 @@ impl PublishAuthenticator for AppAuth {
         false
     }
 
-    fn authorize_play(&self, app: &str, stream_name: &str) -> bool {
-        let (stream, token) = split_rtmp_stream(stream_name);
+    fn authorize_play_inner(&self, app: &str, stream: &str, token: Option<&str>) -> bool {
         let path = format!("{app}/{stream}");
         if let Some(token) = token {
             if (token.starts_with("rk_")
@@ -608,6 +655,30 @@ impl AppAuth {
     /// Verify an HTTP request using a Bearer token, `?token=` query, or
     /// Basic credentials. Used by HLS/DASH/FLV/VOD/WebRTC routes.
     pub fn verify_http_request(
+        &self,
+        path: &str,
+        request: &rtflow::http::HttpRequest,
+        role: AccessRole,
+        protocol: &str,
+    ) -> bool {
+        let allowed = self.verify_http_request_inner(path, request, role, protocol);
+        if !allowed && let Some(counters) = &self.counters {
+            counters.auth_failure();
+        }
+        // Media endpoints are hit per segment/request: audit denials only, so
+        // the log stays about security events rather than playlist polling.
+        if !allowed && let Some(audit) = &self.audit {
+            audit.record(
+                &AuditEvent::new("auth.deny", "denied")
+                    .path(path.trim_start_matches('/'))
+                    .protocol(protocol)
+                    .role(role_name(role)),
+            );
+        }
+        allowed
+    }
+
+    fn verify_http_request_inner(
         &self,
         path: &str,
         request: &rtflow::http::HttpRequest,
