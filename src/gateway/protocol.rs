@@ -2,7 +2,7 @@
 //!
 //! Each streaming protocol (RTMP, SRT, WebRTC, etc.) implements one or both of
 //! these traits to plug into the shared mount infrastructure.
-use crate::Result;
+use crate::core_reexport::error::Result;
 use crate::mount::MountHandle;
 use tokio_util::sync::CancellationToken;
 

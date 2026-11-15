@@ -1,0 +1,36 @@
+[package]
+name = "rtflow-rtsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RTSP message codec, SDP, ranges, authentication and transport for rtflow"
+readme = false
+publish = true
+
+[features]
+default = []
+srtp = []
+# Multicast shares the `rtflow-mount/multicast` flag: the umbrella crate
+# ties them together so the media types stay consistent.
+multicast = ["rtflow-media/multicast", "dep:rtflow-multicast"]
+tls = []
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+rtflow-multicast = { workspace = true, optional = true }
+base64.workspace = true
+bytes.workspace = true
+futures.workspace = true
+getrandom.workspace = true
+hmac.workspace = true
+md-5.workspace = true
+sha2.workspace = true
+socket2.workspace = true
+subtle.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+url.workspace = true

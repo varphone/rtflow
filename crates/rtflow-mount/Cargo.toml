@@ -1,0 +1,29 @@
+[package]
+name = "rtflow-mount"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Stream mount registry, publisher handles and broadcast bus for rtflow"
+readme = false
+publish = true
+
+[features]
+default = []
+tls = ["rtflow-security/tls"]
+multicast = ["rtflow-media/multicast", "rtflow-rtsp/multicast"]
+metrics = []
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+rtflow-rtp.workspace = true
+rtflow-rtsp.workspace = true
+rtflow-security.workspace = true
+bytes.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+getrandom.workspace = true
+url.workspace = true

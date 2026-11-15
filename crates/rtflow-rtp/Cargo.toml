@@ -1,0 +1,19 @@
+[package]
+name = "rtflow-rtp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RTP packetization, depacketization and jitter buffering for rtflow"
+readme = false
+publish = true
+
+[features]
+default = []
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+bytes.workspace = true
+tracing.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "rtflow-rtcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RTCP compound packets, reception statistics and RTT estimation for rtflow"
+readme = false
+publish = true
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-rtp.workspace = true
+bytes.workspace = true
+tokio.workspace = true

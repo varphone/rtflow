@@ -1,207 +1,73 @@
 [workspace]
-members = ["support"]
+resolver = "3"
+members = ["crates/*"]
 
-[package]
-name = "rtflow"
+[workspace.package]
 version = "0.3.0"
 edition = "2024"
 rust-version = "1.88"
-autobins = false
-autoexamples = false
-description = "Async RTSP/RTP client, server and on-demand proxy framework for embedded media"
-documentation = "https://docs.rs/rtflow"
-readme = "README.md"
 license = "MIT OR Apache-2.0"
-categories = ["network-programming", "asynchronous", "multimedia"]
-keywords = ["rtsp", "rtp", "streaming", "media", "embedded"]
-publish = ["crates-io"]
-# dev-only tooling stays out of the published tarball.
-exclude = ["support", "fuzz", "scripts", ".github", "docs/archive", "examples"]
+repository = "https://github.com/varphone/rtflow"
 
-[package.metadata.docs.rs]
-# docs.rs 默认只开 default features；这里叠加实验协议，但排除 gstreamer
-# （需要系统 GStreamer 开发库，docs.rs 构建机不提供）。
-features = ["rtmp", "srt", "dash", "webrtc", "srtp", "multicast"]
+[workspace.dependencies]
+# Internal crates (path + version so `cargo publish` rewrites them correctly).
+rtflow-core = { path = "crates/rtflow-core", version = "0.3.0" }
+rtflow-media = { path = "crates/rtflow-media", version = "0.3.0" }
+rtflow-rtp = { path = "crates/rtflow-rtp", version = "0.3.0" }
+rtflow-rtcp = { path = "crates/rtflow-rtcp", version = "0.3.0" }
+rtflow-srtp = { path = "crates/rtflow-srtp", version = "0.3.0" }
+rtflow-rtsp = { path = "crates/rtflow-rtsp", version = "0.3.0" }
+rtflow-security = { path = "crates/rtflow-security", version = "0.3.0" }
+rtflow-multicast = { path = "crates/rtflow-multicast", version = "0.3.0" }
+rtflow-runtime = { path = "crates/rtflow-runtime", version = "0.3.0" }
+rtflow-framing = { path = "crates/rtflow-framing", version = "0.3.0" }
+rtflow-mount = { path = "crates/rtflow-mount", version = "0.3.0" }
+rtflow-pipeline = { path = "crates/rtflow-pipeline", version = "0.3.0" }
+rtflow-http = { path = "crates/rtflow-http", version = "0.3.0" }
+rtflow-file = { path = "crates/rtflow-file", version = "0.3.0" }
+rtflow-storage = { path = "crates/rtflow-storage", version = "0.3.0" }
+rtflow-rtsp-client = { path = "crates/rtflow-rtsp-client", version = "0.3.0" }
+rtflow-rtsp-server = { path = "crates/rtflow-rtsp-server", version = "0.3.0" }
 
-[features]
-default = ["full"]
-# `full` is the common production set. Security extensions (`srtp`) and
-# `multicast` stay opt-in so embedded builds do not pay for them by default.
-full = [
-    "tls", "mp4", "mkv", "client", "server", "file-storage",
-    "metrics", "http", "http-flv", "hls", "ws-flv",
-]
-embedded-gateway = ["client", "server", "tls", "metrics", "http", "http-flv", "hls", "ws-flv"]
-experimental-protocols = ["dash", "rtmp", "srt", "webrtc"]
-srtp = ["dep:aes", "dep:cipher", "dep:sha1"]
-tls = ["dep:rustls", "dep:rustls-pemfile", "dep:tokio-rustls"]
-mp4 = ["dep:mp4box"]
-mkv = ["dep:matroska-demuxer"]
-client = []
-server = ["client", "file-storage"]
-file-storage = []
-metrics = []
-multicast = []
-test-source = []
-gstreamer = ["dep:gstreamer", "dep:gstreamer-app"]
-http = ["dep:http-crate"]
-http-flv = ["http"]
-# Optional commercial admin SPA; never pulled in by `full`.
-admin = ["http", "server", "dep:serde", "dep:serde_json", "dep:argon2"]
-ws-flv = ["http-flv", "dep:sha1"]
-hls = ["http", "mp4", "dep:transmux"]
-dash = ["hls"]
-rtmp = []
-srt = []
-webrtc = ["http", "dep:webrtc", "dep:rtc", "dep:async-trait"]
-
-# Examples are grouped by area; autodiscovery is disabled.
-[[example]]
-name = "authenticated_server"
-path = "examples/server/authenticated_server.rs"
-
-[[example]]
-name = "file_server"
-path = "examples/server/file_server.rs"
-
-[[example]]
-name = "hls_server"
-path = "examples/server/hls_server.rs"
-
-[[example]]
-name = "http_flv_server"
-path = "examples/server/http_flv_server.rs"
-
-[[example]]
-name = "live_stream_demo"
-path = "examples/server/live_stream_demo.rs"
-
-[[example]]
-name = "local_source"
-path = "examples/server/local_source.rs"
-required-features = ["test-source", "server"]
-
-[[example]]
-name = "pipeline_server"
-path = "examples/server/pipeline_server.rs"
-
-[[example]]
-name = "proxy_server"
-path = "examples/server/proxy_server.rs"
-
-[[example]]
-name = "publisher_server"
-path = "examples/server/publisher_server.rs"
-
-[[example]]
-name = "recording_vod_server"
-path = "examples/server/recording_vod_server.rs"
-
-[[example]]
-name = "mem_probe"
-path = "examples/client/mem_probe.rs"
-
-[[example]]
-name = "play_client"
-path = "examples/client/play_client.rs"
-
-[[example]]
-name = "dash_server"
-path = "examples/protocols/dash_server.rs"
-required-features = ["dash", "server"]
-
-[[example]]
-name = "gstreamer_live_play"
-path = "examples/protocols/gstreamer_live_play.rs"
-
-[[example]]
-name = "rtmp_server"
-path = "examples/protocols/rtmp_server.rs"
-required-features = ["rtmp", "server"]
-
-[[example]]
-name = "srt_server"
-path = "examples/protocols/srt_server.rs"
-required-features = ["srt", "server"]
-
-[[example]]
-name = "webrtc_server"
-path = "examples/protocols/webrtc_server.rs"
-required-features = ["webrtc", "http", "server"]
-
-[[example]]
-name = "live_vod_gateway"
-path = "examples/gateway/live_vod_gateway.rs"
-required-features = ["server", "rtmp", "hls", "admin", "file-storage", "mp4", "mkv"]
-
-[[example]]
-name = "multi_protocol_gateway"
-path = "examples/gateway/multi_protocol_gateway.rs"
-required-features = ["rtmp", "srt", "dash", "webrtc", "server", "hls", "http-flv"]
-
-[[example]]
-name = "ffmpeg_live_publish"
-path = "examples/embedded/ffmpeg_live_publish.rs"
-
-[[example]]
-name = "ipc_camera"
-path = "examples/embedded/ipc_camera.rs"
-
-[[bench]]
-name = "hot_path"
-harness = false
-
-[[bench]]
-name = "throughput"
-harness = false
-
-[dependencies]
-aes = { version = "0.9", optional = true }
+# Third-party
+aes = { version = "0.9" }
+async-trait = { version = "0.1" }
 base64 = "0.23"
-transmux = { version = "0.31", optional = true, default-features = false, features = ["std"] }
 bytes = "1.10"
-cipher = { version = "0.5", optional = true }
+cipher = { version = "0.5" }
+criterion = { version = "0.8", features = ["html_reports"] }
 futures = "0.3"
 getrandom = "0.2"
+gstreamer = { version = "0.25" }
+gstreamer-app = { version = "0.25" }
 hmac = "0.13"
+http = { version = "1" }
+matroska-demuxer = { version = "0.8" }
 md-5 = "0.11"
-sha1 = { version = "0.11", optional = true }  # srtp + ws-flv（RFC 6455 握手）
+mp4box = { version = "0.12", default-features = false }
+nix = { version = "0.31", features = ["socket", "net", "uio"] }
+rcgen = "0.14"
+rtc = { version = "0.20" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = { version = "2.2" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = { version = "0.11" }
 sha2 = "0.11"
 socket2 = "0.6"
 subtle = "2.6"
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
-rustls-pemfile = { version = "2.2", optional = true }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"], optional = true }
-matroska-demuxer = { version = "0.8", optional = true }
-mp4box = { version = "0.12", default-features = false, optional = true }
 thiserror = "2"
 tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util", "process", "signal", "fs"] }
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { version = "0.7", features = ["rt"] }
-url = "2.5"
-gstreamer = { version = "0.25", optional = true }
-gstreamer-app = { version = "0.25", optional = true }
-http-crate = { package = "http", version = "1", optional = true }
-webrtc = { version = "0.20", optional = true }
-rtc = { version = "0.20", optional = true }
-async-trait = { version = "0.1", optional = true }
-serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", optional = true }
-argon2 = { version = "0.5", optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.31", features = ["socket", "net", "uio"] }
-
-[dev-dependencies]
-clap = { version = "4.5", features = ["derive"] }
-rtflow-testkit = { path = "support" }
-criterion = { version = "0.8", features = ["html_reports"] }
-tokio = { version = "1.43", features = ["test-util"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-log = "0.2"
-rcgen = "0.14"
-socket2 = "0.6"
-base64 = "0.23"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+transmux = { version = "0.31", default-features = false, features = ["std"] }
+url = "2.5"
+webrtc = { version = "0.20" }
+argon2 = { version = "0.5" }
+clap = { version = "4.5", features = ["derive"] }
 
 # ---------------------------------------------------------------------------
 # Embedded IPC release profile (see docs/audits/embedded-resource.md §3 P0-1):

@@ -1,0 +1,18 @@
+[package]
+name = "rtflow-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Errors, identifiers, events and metric counters shared by the rtflow crates"
+readme = false
+publish = true
+
+[features]
+default = []
+
+[dependencies]
+thiserror.workspace = true
+bytes.workspace = true
+tracing.workspace = true

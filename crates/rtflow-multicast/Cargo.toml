@@ -1,0 +1,15 @@
+[package]
+name = "rtflow-multicast"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "IPv4/IPv6 multicast socket configuration for rtflow"
+readme = false
+publish = true
+
+[dependencies]
+rtflow-core.workspace = true
+socket2.workspace = true
+tokio.workspace = true

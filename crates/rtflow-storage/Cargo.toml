@@ -1,0 +1,18 @@
+[package]
+name = "rtflow-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Crash-safe recording, recovery index and VOD sources for rtflow"
+readme = false
+publish = true
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+rtflow-file = { workspace = true, features = ["mp4"] }
+bytes.workspace = true
+tokio.workspace = true
+tracing.workspace = true

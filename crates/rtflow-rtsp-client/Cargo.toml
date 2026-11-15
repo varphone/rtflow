@@ -1,0 +1,36 @@
+[package]
+name = "rtflow-rtsp-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RTSP play/publish client with automatic transport fallback for rtflow"
+readme = false
+publish = true
+
+[features]
+default = []
+tls = ["rtflow-security/tls", "dep:rustls", "dep:tokio-rustls"]
+srtp = ["dep:rtflow-srtp", "rtflow-rtsp/srtp"]
+multicast = ["rtflow-rtsp/multicast", "rtflow-media/multicast"]
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+rtflow-rtp.workspace = true
+rtflow-rtcp.workspace = true
+rtflow-rtsp.workspace = true
+rtflow-security.workspace = true
+rtflow-runtime.workspace = true
+rtflow-framing.workspace = true
+rtflow-srtp = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
+bytes.workspace = true
+futures.workspace = true
+getrandom.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+url.workspace = true

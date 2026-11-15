@@ -1,0 +1,21 @@
+[package]
+name = "rtflow-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Task supervision, control connections and UDP batching for rtflow"
+readme = false
+publish = true
+
+[dependencies]
+rtflow-core.workspace = true
+bytes.workspace = true
+futures.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix.workspace = true

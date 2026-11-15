@@ -61,6 +61,19 @@ pub mod rtcp;
 pub mod rtp;
 /// RTSP control plane: message codec, SDP, ranges, authentication, transport.
 pub mod rtsp;
+/// Internal alias of the error/identity/observe primitives this crate was
+/// built on; the workspace split moves them to `rtflow-core`.
+#[doc(hidden)]
+pub mod core_reexport {
+    pub use crate::error::*;
+    pub use crate::identity;
+    pub use crate::observe;
+
+    /// The error module itself (`Error`, `Result`, codes).
+    pub mod error {
+        pub use crate::error::*;
+    }
+}
 pub mod runtime;
 pub mod security;
 #[cfg(feature = "server")]

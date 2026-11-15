@@ -1,0 +1,15 @@
+[package]
+name = "rtflow-framing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RTSP control-connection framing (messages and interleaved frames) for rtflow"
+readme = false
+publish = true
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-rtsp.workspace = true
+bytes.workspace = true

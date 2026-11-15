@@ -1,0 +1,20 @@
+[package]
+name = "rtflow-pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Bounded element graph and frame bus for rtflow media pipelines"
+readme = false
+publish = true
+
+[dependencies]
+bytes.workspace = true
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+rtflow-runtime.workspace = true
+futures.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
