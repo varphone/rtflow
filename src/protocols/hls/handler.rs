@@ -3,7 +3,7 @@ use super::segment_ring::SegmentRing;
 use super::segmenter::Segment;
 use crate::{
     Result,
-    http::{HttpRequest, ResponseWriter},
+    http::{HttpRequest, Method, ResponseWriter},
 };
 use std::time::Duration;
 use tokio::io::AsyncWrite;
@@ -110,9 +110,26 @@ pub async fn serve_playlist<W: AsyncWrite + Unpin>(
     Ok(writer)
 }
 
-/// Serve an HLS media segment (.m4s).
+fn byte_range(header: Option<&str>, length: usize) -> Option<(usize, usize)> {
+    let value = header?.strip_prefix("bytes=")?;
+    let (start, end) = value.split_once('-')?;
+    if start.is_empty() {
+        let suffix = end.parse::<usize>().ok()?.min(length);
+        let start = length.checked_sub(suffix)?;
+        return (suffix > 0).then_some((start, length - 1));
+    }
+    let start = start.parse::<usize>().ok()?;
+    let end = if end.is_empty() {
+        length.checked_sub(1)?
+    } else {
+        end.parse::<usize>().ok()?.min(length.checked_sub(1)?)
+    };
+    (start <= end && start < length).then_some((start, end))
+}
+
+/// Serve an HLS media segment (.m4s / .ts), optionally a byte range.
 pub async fn serve_segment<W: AsyncWrite + Unpin>(
-    _req: HttpRequest,
+    req: HttpRequest,
     mut writer: ResponseWriter<W>,
     ring: &SegmentRing,
     sequence: u64,
@@ -127,28 +144,39 @@ pub async fn serve_segment<W: AsyncWrite + Unpin>(
         }
     };
 
-    let content_length = segment.data.len().to_string();
     let content_type = if segment.format == super::segmenter::SegmentFormat::MpegTs {
         "video/mp2t"
     } else {
         "video/iso.segment"
     };
-    let headers = [
+    let (status, start, end) = match byte_range(req.header("range"), segment.data.len()) {
+        Some((start, end)) => (206, start, end + 1),
+        None => (200, 0, segment.data.len()),
+    };
+    let content_length = (end - start).to_string();
+    let content_range = format!("bytes {start}-{}/{len}", end - 1, len = segment.data.len());
+    let mut headers = vec![
         ("Content-Type", content_type),
         ("Content-Length", content_length.as_str()),
         ("Cache-Control", "no-store"),
         ("Access-Control-Allow-Origin", "*"),
+        ("Accept-Ranges", "bytes"),
         ("Connection", "keep-alive"),
     ];
-    writer.write_headers(200, &headers).await?;
-    writer.write_raw(&segment.data).await?;
-    writer.flush().await?;
+    if status == 206 {
+        headers.push(("Content-Range", content_range.as_str()));
+    }
+    writer.write_headers(status, &headers).await?;
+    if req.method != Method::Head {
+        writer.write_raw(&segment.data[start..end]).await?;
+        writer.flush().await?;
+    }
     Ok(writer)
 }
 
 /// Serve the HLS init segment.
 pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
-    _req: HttpRequest,
+    req: HttpRequest,
     mut writer: ResponseWriter<W>,
     ring: &SegmentRing,
 ) -> Result<ResponseWriter<W>> {
@@ -168,10 +196,13 @@ pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
         ("Content-Length", content_length.as_str()),
         ("Cache-Control", "no-store"),
         ("Access-Control-Allow-Origin", "*"),
+        ("Accept-Ranges", "bytes"),
         ("Connection", "keep-alive"),
     ];
     writer.write_headers(200, &headers).await?;
-    writer.write_raw(&init).await?;
+    if req.method != Method::Head {
+        writer.write_raw(&init).await?;
+    }
     writer.flush().await?;
     Ok(writer)
 }
@@ -294,5 +325,30 @@ mod tests {
         let text = String::from_utf8_lossy(&out);
         assert!(text.starts_with("HTTP/1.1 200"), "stale etag: {text}");
         assert!(text.contains("#EXTM3U"));
+    }
+    #[tokio::test]
+    async fn segment_serves_byte_range() {
+        let ring = SegmentRing::new(3);
+        let mut seg = segment(0);
+        seg.data = Bytes::from_static(b"0123456789");
+        ring.push(seg);
+        let writer = ResponseWriter::new(Vec::new());
+        let writer = serve_segment(
+            request(vec![("Range".into(), "bytes=2-4".into())]),
+            writer,
+            &ring,
+            0,
+        )
+        .await
+        .unwrap();
+        let out = writer.into_inner();
+        let header_end = out.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        assert!(out.starts_with(b"HTTP/1.1 206 Partial Content\r\n"));
+        assert!(
+            String::from_utf8_lossy(&out[..header_end])
+                .to_ascii_lowercase()
+                .contains("content-range: bytes 2-4/10")
+        );
+        assert_eq!(&out[header_end..], b"234");
     }
 }
