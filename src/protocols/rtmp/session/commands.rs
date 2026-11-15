@@ -811,3 +811,22 @@ pub(super) async fn handle_command(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::h265_parameter_sets_from_hvcc;
+
+    #[test]
+    fn h265_hvcc_parameters_round_trip() {
+        let vps = [0x40u8, 0x01, 0x0c];
+        let sps = [0x42u8; 20];
+        let pps = [0x44u8, 0x01];
+        let hvcc = crate::media::bitstream::build_hevc_config_record(&vps, &sps, &pps)
+            .expect("valid hvcC");
+        let (parsed_vps, parsed_sps, parsed_pps) =
+            h265_parameter_sets_from_hvcc(&hvcc).expect("parameters");
+        assert_eq!(parsed_vps, vps);
+        assert_eq!(parsed_sps, sps);
+        assert_eq!(parsed_pps, pps);
+    }
+}
