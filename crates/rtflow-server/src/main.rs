@@ -64,7 +64,7 @@ async fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     if args.print_config {
-        match config.to_toml() {
+        match config.redacted().to_toml() {
             Ok(text) => print!("{text}"),
             Err(error) => {
                 eprintln!("configuration error: {error}");

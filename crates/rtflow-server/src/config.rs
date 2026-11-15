@@ -445,6 +445,28 @@ impl Config {
         Ok(config)
     }
 
+    /// Copy safe to print: secrets are replaced with a placeholder so
+    /// `--print-config` never leaks credentials into logs or tickets.
+    pub fn redacted(&self) -> Self {
+        let mut copy = self.clone();
+        if !copy.http.admin_password.is_empty() {
+            copy.http.admin_password = "<redacted>".into();
+        }
+        for secret in &mut copy.auth.token_secrets {
+            *secret = "<redacted>".into();
+        }
+        for user in &mut copy.auth.users {
+            user.password = "<redacted>".into();
+        }
+        if copy.hooks.secret.is_some() {
+            copy.hooks.secret = Some("<redacted>".into());
+        }
+        if copy.discovery.token.is_some() {
+            copy.discovery.token = Some("<redacted>".into());
+        }
+        copy
+    }
+
     pub fn to_toml(&self) -> Result<String, ConfigError> {
         toml::to_string_pretty(self).map_err(|error| ConfigError::Serialize(error.to_string()))
     }
@@ -712,6 +734,20 @@ mod tests {
         let (pattern, rule) = config.path_rule("private/cam");
         assert_eq!(pattern, "private/**");
         assert!(!rule.read);
+    }
+
+    #[test]
+    fn printed_config_redacts_secrets() {
+        let mut config = Config::default();
+        config.http.admin_password = "secret".into();
+        config.auth.token_secrets = vec!["token-secret".into()];
+        config.hooks.secret = Some("hook-secret".into());
+        let text = config.redacted().to_toml().unwrap();
+        assert!(!text.contains("token-secret"));
+        assert!(!text.contains("hook-secret"));
+        assert!(text.contains("<redacted>"));
+        // The original config keeps the real values.
+        assert_eq!(config.http.admin_password, "secret");
     }
 
     #[test]
