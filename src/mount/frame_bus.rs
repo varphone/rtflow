@@ -43,7 +43,7 @@ struct State {
     next_sequence: u64,
 }
 
-pub(crate) struct FrameBus {
+pub struct FrameBus {
     state: Mutex<State>,
     notify: Notify,
     receivers: AtomicUsize,
@@ -53,7 +53,7 @@ pub(crate) struct FrameBus {
 }
 
 impl FrameBus {
-    pub(crate) fn new(max_frames: usize, max_bytes: usize) -> Arc<Self> {
+    pub fn new(max_frames: usize, max_bytes: usize) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(State {
                 frames: VecDeque::new(),
@@ -69,7 +69,7 @@ impl FrameBus {
         })
     }
 
-    pub(crate) fn subscribe(self: &Arc<Self>) -> FrameReceiver {
+    pub fn subscribe(self: &Arc<Self>) -> FrameReceiver {
         self.receivers.fetch_add(1, Ordering::AcqRel);
         let cursor = {
             let state = self.lock();
@@ -82,22 +82,22 @@ impl FrameBus {
         }
     }
 
-    pub(crate) fn receiver_count(&self) -> usize {
+    pub fn receiver_count(&self) -> usize {
         self.receivers.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn close(&self) {
+    pub fn close(&self) {
         self.closed.store(true, Ordering::Release);
         self.notify.notify_waiters();
     }
 
-    pub(crate) fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }
 
     /// Publish one frame, evicting the oldest entries until both budgets fit.
     /// Returns the number of receivers that were notified (0 is valid).
-    pub(crate) fn send(&self, frame: Arc<AccessUnit>) -> Result<(), FrameRecvError> {
+    pub fn send(&self, frame: Arc<AccessUnit>) -> Result<(), FrameRecvError> {
         if self.is_closed() {
             return Err(FrameRecvError::Closed);
         }

@@ -37,7 +37,7 @@ pub struct MountSnapshot {
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
-pub(crate) struct StreamCounters {
+pub struct StreamCounters {
     pub accepted_frames: AtomicU64,
     pub dropped_frames: AtomicU64,
     pub rtp_packets: AtomicU64,

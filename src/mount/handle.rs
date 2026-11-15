@@ -1,13 +1,16 @@
 use super::*;
 
 /// One RFC 4585 NACK request forwarded to the sender for `track_id`.
+#[doc(hidden)]
 #[derive(Clone, Debug)]
-pub(crate) struct NackRequest {
+pub struct NackRequest {
     pub track_id: u8,
     pub sequences: Vec<u16>,
 }
 
-pub(crate) struct Mount {
+/// Shared per-mount state (data plane, counters, lifecycle).
+#[doc(hidden)]
+pub struct Mount {
     pub id: MountId,
     pub config: MountConfig,
     pub frames: Arc<frame_bus::FrameBus>,
@@ -60,7 +63,8 @@ pub(crate) struct Mount {
 }
 
 /// Build the fixed codec lookup table from a media description.
-pub(crate) fn codec_lookup_table(description: &MediaDescription) -> [Option<Codec>; 256] {
+#[doc(hidden)]
+pub fn codec_lookup_table(description: &MediaDescription) -> [Option<Codec>; 256] {
     let mut table = [None; 256];
     for track in &description.tracks {
         table[track.id as usize] = Some(track.codec);
@@ -102,14 +106,17 @@ impl Drop for Mount {
 
 impl Mount {
     /// Ask a local source to emit a keyframe on `track_id`.
-    pub(crate) fn request_keyframe(&self, track_id: u8) {
+    /// Ask local sources to produce a keyframe on `track_id`.
+    #[doc(hidden)]
+    pub fn request_keyframe(&self, track_id: u8) {
         let _ = self.keyframe_requests.send(track_id);
     }
 
     /// Cancellation token for this mount's data plane (cancelled on
     /// unregister or server shutdown).
     #[allow(dead_code)] // used by the RTSP server session layer
-    pub(crate) fn cancel_token(&self) -> CancellationToken {
+    /// Mount-scoped cancellation token (children of the server token).
+    pub fn cancel_token(&self) -> CancellationToken {
         self.cancel.clone()
     }
 
@@ -462,7 +469,8 @@ impl MountHandle {
     /// Unlike `announce_fmtp()` which returns a snapshot, this allows
     /// long-lived tasks to poll for updates as publishers ANNOUNCE.
     #[cfg(feature = "dash")]
-    pub(crate) fn announce_fmtp_source(&self) -> Arc<Mount> {
+    #[doc(hidden)]
+    pub fn announce_fmtp_source(&self) -> Arc<Mount> {
         self.inner.clone()
     }
 

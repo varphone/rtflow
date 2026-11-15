@@ -140,7 +140,8 @@ impl MountRegistry {
     }
 
     /// Insert a pre-built mount. Returns error on conflict or limit.
-    pub(crate) fn insert(&self, path: Arc<str>, mount: Arc<Mount>) -> Result<()> {
+    #[doc(hidden)]
+    pub fn insert(&self, path: Arc<str>, mount: Arc<Mount>) -> Result<()> {
         let id = MountId::from(path);
         let mut mounts = self
             .mounts
@@ -156,14 +157,17 @@ impl MountRegistry {
         Ok(())
     }
 
-    pub(crate) fn remove(&self, path: &str) -> Option<Arc<Mount>> {
+    #[doc(hidden)]
+    pub fn remove(&self, path: &str) -> Option<Arc<Mount>> {
         self.mounts
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&MountId::new(path))
     }
 
-    pub(crate) fn get(&self, path: &str) -> Option<Arc<Mount>> {
+    /// Shared mount state for `path` (control-plane access).
+    #[doc(hidden)]
+    pub fn get(&self, path: &str) -> Option<Arc<Mount>> {
         self.mounts
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -213,7 +217,9 @@ impl MountRegistry {
 
     /// Find the mount whose path is the longest prefix of `requested`.
     #[allow(dead_code)] // used by the RTSP server
-    pub(crate) fn find_longest_prefix(&self, requested: &str) -> Option<(MountId, Arc<Mount>)> {
+    /// Longest registered path that prefixes `requested`.
+    #[doc(hidden)]
+    pub fn find_longest_prefix(&self, requested: &str) -> Option<(MountId, Arc<Mount>)> {
         let mounts = self
             .mounts
             .read()

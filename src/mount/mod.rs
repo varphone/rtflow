@@ -7,8 +7,7 @@ mod config;
 #[cfg(feature = "server")]
 pub mod continuity;
 mod frame_bus;
-pub(crate) use frame_bus::FrameBus;
-pub use frame_bus::{FrameReceiver, FrameRecvError};
+pub use frame_bus::{FrameBus, FrameReceiver, FrameRecvError};
 mod handle;
 mod publisher;
 mod registry;
@@ -16,10 +15,11 @@ mod stats;
 #[cfg(feature = "server")]
 pub mod upstream;
 
-pub(crate) use config::description_for;
+#[doc(hidden)]
+pub use config::description_for;
 pub use config::{MountConfig, PushResult};
-#[allow(unused_imports)] // NackRequest is only read by the RTSP sender feature
-pub(crate) use handle::{Mount, NackRequest, codec_lookup_table};
+#[doc(hidden)]
+pub use handle::{Mount, NackRequest, codec_lookup_table};
 pub use handle::{MountHandle, STARTUP_WINDOW, startup_dedup_keys};
 pub use publisher::LocalPublisher;
 pub use registry::{
@@ -27,7 +27,8 @@ pub use registry::{
 };
 pub use stats::{MountSnapshot, StreamStats};
 
-pub(crate) use stats::StreamCounters;
+#[doc(hidden)]
+pub use stats::StreamCounters;
 
 #[cfg(feature = "server")]
 use self::{

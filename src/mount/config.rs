@@ -41,7 +41,8 @@ pub enum PushResult {
 // description_for helper
 // ---------------------------------------------------------------------------
 
-pub(crate) fn description_for(config: &MountConfig) -> Result<MediaDescription> {
+#[doc(hidden)]
+pub fn description_for(config: &MountConfig) -> Result<MediaDescription> {
     match config {
         MountConfig::Local { description } | MountConfig::Publisher { description, .. } => {
             Ok(description.clone())
