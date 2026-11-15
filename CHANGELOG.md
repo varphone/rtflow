@@ -30,6 +30,8 @@
 - HLS live 支持 LL-HLS blocking playlist reload：`_HLS_msn` 等待目标
   media sequence，playlist 输出 `CAN-BLOCK-RELOAD=YES`（尚无 parts）。
 - HLS live segment/init 支持 HEAD 与 Range（含 suffix `bytes=-N`）。
+- 新增 `/llhls/{mount}/index.m3u8` LL-HLS 端点：CMAF parts、PART-INF、
+  PRELOAD-HINT、200ms part target；与经典 TS HLS 并存。
 
 ### Added
 

@@ -84,7 +84,7 @@ PTS: 0.100000, 0.133333, 0.166667, 0.200000, ...
 | L-08 | P1 | RTMP 编码 | enhanced-RTMP 的 HEVC/H.264/VP9/AV1 已解析；HLS fMP4 增加 vp09/av01 sample entry（TS 仍只支持 H.264/H.265）。 | 已完成（fMP4 路径） |
 | L-09 | P2 | HLS live | 已按 segmenter 启动时间 + segment timestamp 输出 `EXT-X-PROGRAM-DATE-TIME`（UTC 毫秒）。 | 已完成 |
 | L-10 | P2 | HLS live | 示例默认窗口降为 7 段，并提供 `--hls-segments` / `--hls-segment-seconds` 配置；ring 仍保留 3× 窗口。 | 已完成 |
-| L-11 | P2 | HLS live | 已支持 LL-HLS blocking playlist reload（`_HLS_msn` + `CAN-BLOCK-RELOAD`）；仍无 `EXT-X-PART`/part segmenter。 | 部分完成 |
+| L-11 | P2 | HLS live | 经典路径支持 blocking reload；新增独立 `/llhls/` 端点，使用 transmux::LlHlsSegmenter 输出 `EXT-X-PART`/`PART-INF`/`PRELOAD-HINT`（200ms parts / 2s segments）。 | 已完成（独立端点） |
 | L-12 | P2 | HLS VOD/live | VOD 与 live segment 均支持 Range（含 suffix）和 HEAD；live init 也支持 HEAD。 | 已完成 |
 | L-13 | P2 | HLS VOD | 源文件/录制目录提供 fingerprint（路径+mtime+size），HLS 缓存自动重建。 | 已完成 |
 | L-14 | P2 | HLS live | `/init.m4s` 对 TS 版本不再返回空 200（已改 404），但路由仍保留；不影响播放器。 | 已修 |
