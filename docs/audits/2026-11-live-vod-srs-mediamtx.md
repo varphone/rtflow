@@ -74,7 +74,7 @@ PTS: 0.100000, 0.133333, 0.166667, 0.200000, ...
 
 | ID | 级别 | 区域 | 结论 | 状态 |
 |---|---|---|---|---|
-| L-01 | P0 | RTMP 推流 | RTMP 消息时间戳相对墙钟被放大；同一 30 fps 源，本仓库 HLS 曾生成 1.7 s/30 帧，MediaMTX 为 1.0 s/30 帧。HLS 已用码流帧率兜底，但 RTSP、HTTP-FLV、录制仍使用被放大的 `AccessUnit.pts/dts/rtp_timestamp`。 | **未根修** |
+| L-01 | P0 | RTMP 推流 | 已用 tcpdump/代理抓取客户端→服务端原始 RTMP 字节，并用 `Dechunker` 重放：69 个视频消息 / 约 2.3 s，时间戳为 21/54/88/121/154/188/221/254…，与 ffmpeg 源一致；RTMP 时间戳本身没有放大。此前的 1.7 s/30 帧来自 TS mux 的 `Sample.duration` 处理，已用码流帧率修正。 | 已排除 |
 | L-02 | P0 | HLS live | TS 路径仅接受 H.264 + AAC；H.265 live 会退回 fMP4，Firefox/Shaka 对长 fMP4 的 MSE 路径不稳定。SRS/MediaMTX 均输出 H.265 TS（PMT stream_type 0x24）。 | 已知限制 |
 | L-03 | P1 | HLS live | TS segment 的 `discontinuity_sequence` 之前恒为 `None`，`EXT-X-DISCONTINUITY-SEQUENCE` 永远为 0。 | 已修 |
 | L-04 | P1 | HLS VOD | 生成失败时 `.tmp-<id>` 不清理；下次生成可能复用残留目录。 | 已修 |
@@ -92,38 +92,20 @@ PTS: 0.100000, 0.133333, 0.166667, 0.200000, ...
 
 ## 重点问题说明
 
-### L-01 RTMP 时间戳
+### L-01 RTMP 时间戳：已排除
 
-代码位置：`src/protocols/rtmp/session/mod.rs:429-443`
-
-```rust
-let base = *base_timestamp.get_or_insert(msg.timestamp);
-let ts_ms = msg.timestamp.wrapping_sub(base);
-...
-pts: Duration::from_millis(pts_ms as u64),
-dts: Some(Duration::from_millis(ts_ms as u64)),
-rtp_timestamp: ts_ms.wrapping_mul(90),
-```
-
-实测 RTMP 视频消息时间戳：
+之前用会话日志的过滤输出（只打印关键帧和部分时间戳）误判为时间戳放大。后来通过本地 TCP 代理抓取客户端→服务端原始 RTMP 字节，把 3073 字节握手之后的数据直接喂给 `Dechunker`：
 
 ```text
-21, 87, 121, 154, 220, 288, 321, 387, ...
-```
-
-同一源写入 FLV 文件的时间戳：
-
-```text
+69 个视频消息 / 约 2.3 s
 21, 54, 88, 121, 154, 188, 221, 254, 288, 321, ...
 ```
 
-前者出现 66 ms 间隔，后者是稳定的 33 ms。MediaMTX 用 gortmplib 接收同一源，HLS 输出 30 帧/1.000 s，说明不是 ffmpeg 源的问题。
+与 ffmpeg 写入 FLV 的时间戳一致，说明 RTMP 收流时间戳是正确的。
 
-影响：
+HLS 之前出现 1.7 s/30 帧的真正原因在 TS mux：`Sample.duration` 为空/处理不当，导致 PES 时间轴不按 33 ms 推进；现在用码流帧率（30 fps）写 duration，MediaMTX 对照为 1.000 s/30 帧。
 
-- HLS 已通过按帧率生成 TS duration 规避；
-- RTSP 的 RTP 时间戳（`ts_ms*90`）、HTTP-FLV/WS-FLV tag 时间戳、录制文件时间轴仍受影响；
-- 需要按 gortmplib/SRS 的 chunk timestamp 状态机逐项对齐，并加一个“30 fps 源 -> 每段 30 帧/1 s”的集成测试。
+结论：RTSP/FLV/录制使用的 `ts_ms*90` 也来自正确时间戳；不需要重写 RTMP chunk 状态机。仍建议保留“30 fps 源 → 30 帧/1 s”的集成测试，防止回归。
 
 ### L-03 discontinuity sequence
 
@@ -143,14 +125,11 @@ TS 路径的 `Segment` 由 `transmux` 返回，原先只带 `discontinuous`，�
 
 ## 推荐后续
 
-1. **P0：根修 RTMP 时间戳**（影响 RTSP/FLV/录制，不只是 HLS）。
-   - 对照 `gortmplib/pkg/rawmessage/reader.go` 的 `readerChunkStream` 状态机；
-   - 增加真实 ffmpeg RTMP 集成测试，断言 30 fps 源的 PTS 步进约 33 ms、HLS 每段 30 帧/1 s；
-   - 在 RTMP 入口记录 timestamp 异常指标。
-2. **P1：H.265 live TS**，EMIT PMT stream_type 0x24，覆盖 Firefox/Edge。
-3. **P1：发布端背压/丢帧**：把 `PushResult::Dropped` 聚合到日志/指标，必要时断开慢发布端；不要让 HLS 订阅者静默拖垮推流。
-4. **P2：HLS live 增加 `EXT-X-PROGRAM-DATE-TIME`、可配置窗口、LL-HLS**。
-5. **P2：VOD 增加源变更检测（mtime/size）和 HEAD/Range**。
+1. **已完成：RTMP 时间戳验证**（原始字节回放，时间戳 21/54/88…；无需重写状态机）。
+2. **已完成：H.265 live TS**（hvcC/PMT stream_type 0x24；无参数集回退 fMP4）。
+3. **已完成：发布端丢帧日志 + 独立分段标记 + VOD 临时目录/路径校验**。
+4. **待做：HLS live `EXT-X-PROGRAM-DATE-TIME`、可配置窗口、LL-HLS**。
+5. **待做：VOD 源变更检测（mtime/size）、HEAD/Range；enhanced-RTMP AV1/VP9。**
 
 ## 验证命令
 
