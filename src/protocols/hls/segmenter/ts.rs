@@ -7,7 +7,7 @@
 //! its IR (`TrackSpec` + `Sample`) and expose the result as an HLS `Segment`.
 
 use super::{Segment, SegmentFormat, SegmenterConfig};
-use crate::media::{Codec, MediaDescription};
+use crate::media::{Codec, MediaDescription, MediaKind};
 use bytes::Bytes;
 use std::time::Duration;
 use transmux::avc_config::AVCConfigurationBox;
@@ -23,11 +23,11 @@ pub(super) struct TsPipeline {
     timestamp: Duration,
     track_ids: std::collections::HashMap<u8, TrackId>,
     timescales: std::collections::HashMap<u8, u32>,
-    /// One sample per track is held back until the next sample arrives so
-    /// its duration (the DTS delta) can be stamped. `transmux` derives TS
-    /// PES timestamps from `Sample.duration` for continuing segments; all
-    /// durations zero collapses every PES onto the same timestamp.
-    pending: std::collections::HashMap<u8, (TrackId, Sample, u32)>,
+    /// Nominal per-sample duration in track timescale ticks. RTMP ingest
+    /// timestamps are not reliable enough to drive HLS segment duration
+    /// (ffmpeg publishers can arrive with 1.5–1.8× inflated deltas); the
+    /// codec frame rate / AAC frame size is the stable clock.
+    durations: std::collections::HashMap<u8, u32>,
 }
 
 fn aac_esds(sample_rate: u32, channels: u16) -> EsdsBox {
@@ -124,10 +124,24 @@ impl TsPipeline {
         let mut specs = Vec::new();
         let mut track_ids = std::collections::HashMap::new();
         let mut timescales = std::collections::HashMap::new();
+        let mut durations = std::collections::HashMap::new();
         for track in &description.tracks {
             if let Some(spec) = track_spec(track) {
                 track_ids.insert(track.id, spec.track_id);
                 timescales.insert(track.id, track.clock_rate);
+                let duration = match track.kind {
+                    MediaKind::Video => track
+                        .frame_rate
+                        .map(|(num, den)| {
+                            (u64::from(track.clock_rate) * u64::from(den) / u64::from(num).max(1))
+                                as u32
+                        })
+                        .unwrap_or(3_000),
+                    // AAC frame = 1024 samples; the track timescale is the
+                    // sample rate, so its duration is exactly 1024 ticks.
+                    MediaKind::Audio => 1024,
+                };
+                durations.insert(track.id, duration.max(1));
                 specs.push(spec);
             }
         }
@@ -147,7 +161,7 @@ impl TsPipeline {
             timestamp: Duration::ZERO,
             track_ids,
             timescales,
-            pending: std::collections::HashMap::new(),
+            durations,
         })
     }
 
@@ -186,35 +200,16 @@ impl TsPipeline {
             )
         };
 
-        // Complete the previous sample on this track now that its DTS delta is
-        // known, then hold this one until the next sample arrives.
-        if let Some((previous_id, mut previous, _)) = self.pending.remove(&unit.track_id) {
-            let delta = sample
-                .dts
-                .unwrap_or(0)
-                .saturating_sub(previous.dts.unwrap_or(0))
-                .max(1);
-            previous.duration = Some(u32::try_from(delta).unwrap_or(u32::MAX));
-            if let Err(error) = self.segmenter.push(previous_id, previous) {
-                tracing::warn!(?error, "transmux TS-HLS push failed");
-            }
+        let duration = self.durations.get(&unit.track_id).copied().unwrap_or(3_000);
+        let mut sample = sample;
+        sample.duration = Some(duration);
+        if let Err(error) = self.segmenter.push(track_id, sample) {
+            tracing::warn!(?error, "transmux TS-HLS push failed");
         }
-        self.pending
-            .insert(unit.track_id, (track_id, sample, timescale as u32));
         self.drain()
     }
 
     pub(super) fn flush(&mut self) -> Vec<Segment> {
-        let fallback = Duration::from_millis(20);
-        for (_, (track_id, mut sample, timescale)) in self.pending.drain() {
-            sample.duration = Some(
-                u32::try_from((fallback.as_secs_f64() * f64::from(timescale)) as u64)
-                    .unwrap_or(u32::MAX),
-            );
-            if let Err(error) = self.segmenter.push(track_id, sample) {
-                tracing::warn!(?error, "transmux TS-HLS flush push failed");
-            }
-        }
         if self.segmenter.finish().is_err() {
             return Vec::new();
         }
