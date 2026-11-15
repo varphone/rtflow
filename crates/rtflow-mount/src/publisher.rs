@@ -122,6 +122,11 @@ impl LocalPublisher {
         if self.active {
             self.inner.publishers.fetch_sub(1, Ordering::AcqRel);
             self.active = false;
+            tracing::debug!(
+                mount = %self.inner.id,
+                publishers = self.inner.publishers.load(Ordering::Relaxed),
+                "publisher detached"
+            );
         }
     }
 }

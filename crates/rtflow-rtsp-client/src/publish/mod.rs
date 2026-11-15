@@ -159,6 +159,7 @@ impl RecordSession {
             task.abort();
             let _ = task.await;
         }
+        tracing::debug!(session = %self.id, "RTSP publisher TEARDOWN");
         let result = self.control.request("TEARDOWN", None, None).await;
         self.cancel.cancel();
         if let Some(reader) = self.reader.take() {

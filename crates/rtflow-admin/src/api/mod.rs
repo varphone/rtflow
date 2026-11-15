@@ -183,6 +183,7 @@ async fn login<W: tokio::io::AsyncWrite + Unpin>(
     writer: ResponseWriter<W>,
 ) -> rtflow_core::error::Result<ResponseWriter<W>> {
     let Ok(body) = serde_json::from_slice::<LoginRequest>(&req.body) else {
+        tracing::warn!("admin login rejected: malformed JSON body");
         return respond_json(
             writer,
             400,
@@ -194,6 +195,7 @@ async fn login<W: tokio::io::AsyncWrite + Unpin>(
     if !constant_time_eq(&body.username, &state.config.username)
         || !state.config.password.verify(&body.password)
     {
+        tracing::warn!(username = %body.username, "admin login rejected: invalid credentials");
         return respond_json(
             writer,
             401,
@@ -202,6 +204,7 @@ async fn login<W: tokio::io::AsyncWrite + Unpin>(
         )
         .await;
     }
+    tracing::info!(username = %body.username, "admin login succeeded");
     let (token, csrf) = state.sessions.create()?;
     let cookie = cookie_header(
         COOKIE,

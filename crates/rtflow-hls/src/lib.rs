@@ -100,6 +100,12 @@ pub fn create_hls_handlers(
         segment_duration: config.segment_duration,
         lookback_count: config.segment_count,
     };
+    tracing::info!(
+        mount = %mount.path(),
+        tracks = description.tracks.len(),
+        segment_ms = seg_config.segment_duration.as_millis() as u64,
+        "HLS segmenter started"
+    );
     tokio::spawn(async move {
         let mut segmenter = Segmenter::new(seg_config, &description);
         let mut segments = segmenter.subscribe();
@@ -167,7 +173,7 @@ pub fn create_hls_handlers(
         // still served from the sliding window ring and get evicted (404).
         // Refuse honestly instead of advertising an unusable VOD mode.
         tracing::warn!(
-            "HLS VOD mode (HlsConfig.live=false) is not implemented;              segments would be evicted from the sliding window.              Use live mode (default)."
+            "HLS VOD mode (HlsConfig.live=false) is not implemented; segments would be evicted from the sliding window. Use live mode (default)."
         );
         let reject: Handler = Arc::new(|_req, mut writer| {
             Box::pin(async move {

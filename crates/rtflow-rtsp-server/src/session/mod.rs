@@ -187,6 +187,7 @@ pub(super) async fn serve_connection(
             let Message::Request(req) = msg else {
                 return Err(Error::Rtsp("client sent response".into()));
             };
+            tracing::debug!(session = %session_id, method = ?req.method, uri = %req.uri, "RTSP request");
             let Some(cseq) = req
                 .headers
                 .get("cseq")

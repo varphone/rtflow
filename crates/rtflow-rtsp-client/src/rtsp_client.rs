@@ -46,6 +46,7 @@ impl RtspClient {
         options: ClientOptions,
     ) -> Result<MediaDescription> {
         let url = url.into_rtsp_url()?;
+        tracing::debug!(url = %url, "RTSP client DESCRIBE");
         validate_options(&options)?;
         let (_, _, _, description, _, _) = open_and_describe(&url, &options).await?;
         Ok(description)
@@ -92,7 +93,10 @@ impl RtspClient {
                     }
                     current = next;
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    tracing::warn!(url = %current, %error, "RTSP client connect failed");
+                    return Err(error);
+                }
             }
         }
         Err(Error::Rtsp("too many RTSP REDIRECTs".into()))
@@ -100,6 +104,7 @@ impl RtspClient {
 
     async fn connect_once(url: url::Url, options: ClientOptions) -> Result<PlaySession> {
         validate_options(&options)?;
+        tracing::debug!(url = %url, transport = ?options.transport, "RTSP client connecting");
         let sink = options.event_sink.clone();
         if options.transport != UpstreamTransport::Auto {
             let (stream, uri, setup_base, description, sdp_mux, capabilities) =

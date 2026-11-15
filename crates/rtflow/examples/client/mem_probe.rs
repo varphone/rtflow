@@ -116,6 +116,8 @@ async fn attach_clients(count: usize, url: &str, udp: bool) -> Vec<rtflow::clien
 
 #[tokio::main]
 async fn main() -> rtflow::Result<()> {
+    #[cfg(feature = "logging")]
+    rtflow::logging::init();
     let args = <Args as clap::Parser>::parse();
     let (base_rss, _) = vm_stat();
     let config = if args.embedded {

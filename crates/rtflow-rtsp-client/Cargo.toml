@@ -11,7 +11,7 @@ publish = true
 
 [features]
 default = []
-tls = ["rtflow-security/tls", "dep:rustls", "dep:tokio-rustls"]
+tls = ["dep:rtflow-security", "rtflow-security/tls", "dep:rustls", "dep:tokio-rustls"]
 srtp = ["dep:rtflow-srtp", "rtflow-rtsp/srtp"]
 multicast = ["rtflow-rtsp/multicast", "rtflow-media/multicast"]
 
@@ -21,7 +21,7 @@ rtflow-media.workspace = true
 rtflow-rtp.workspace = true
 rtflow-rtcp.workspace = true
 rtflow-rtsp.workspace = true
-rtflow-security.workspace = true
+rtflow-security = { workspace = true, optional = true }
 rtflow-runtime.workspace = true
 rtflow-framing.workspace = true
 rtflow-srtp = { workspace = true, optional = true }

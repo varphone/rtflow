@@ -406,29 +406,40 @@ impl MountHandle {
         match &self.inner.config {
             MountConfig::Local { .. } => {
                 self.inner.publishers.fetch_add(1, Ordering::AcqRel);
-                Ok(LocalPublisher {
-                    inner: self.inner.clone(),
-                    active: true,
-                })
             }
             MountConfig::Publisher { .. } => {
                 // A claimed Publisher mount is exclusively owned by the
                 // RTSP RECORD session: refuse extra publishers instead of
                 // silently creating a second, interleaved stream.
                 if self.inner.publisher_claimed.load(Ordering::Acquire) {
+                    tracing::warn!(
+                        mount = %self.inner.id,
+                        "publisher attach refused: mount is claimed by an RTSP session"
+                    );
                     return Err(Error::Conflict(
                         "publisher is already claimed by an RTSP session".into(),
                     ));
                 }
                 self.inner.publishers.fetch_add(1, Ordering::AcqRel);
-                Ok(LocalPublisher {
-                    inner: self.inner.clone(),
-                    active: true,
-                })
             }
             #[allow(unreachable_patterns)] // only reachable with proxy/VOD mounts
-            _ => Err(Error::Conflict("mount does not accept publishers".into())),
+            _ => {
+                tracing::warn!(
+                    mount = %self.inner.id,
+                    "publisher attach refused: mount type does not accept publishers"
+                );
+                return Err(Error::Conflict("mount does not accept publishers".into()));
+            }
         }
+        tracing::info!(
+            mount = %self.inner.id,
+            publishers = self.inner.publishers.load(Ordering::Relaxed),
+            "publisher attached"
+        );
+        Ok(LocalPublisher {
+            inner: self.inner.clone(),
+            active: true,
+        })
     }
 
     /// Request a keyframe from a local source (RTCP PLI/FIR/NACK action).

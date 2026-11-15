@@ -148,9 +148,11 @@ impl HttpServer {
                         // (tokio defaults to true, but be explicit).
                         let _ = stream.set_nodelay(true);
                         if !security.ip_acl.permits(addr.ip()) {
+                            tracing::warn!(peer = %addr, "HTTP connection rejected by IP ACL");
                             continue;
                         }
                         if !rate_limiter.admit(addr.ip(), std::time::Instant::now()) {
+                            tracing::warn!(peer = %addr, "HTTP connection rejected by rate limit");
                             // Reply 429 so clients can distinguish rate
                             // limiting from a network failure.
                             tokio::spawn(async move {
@@ -281,10 +283,13 @@ async fn handle_connection(
             }
         };
 
+        tracing::trace!(peer = ?peer, method = ?req.method, path = %req.path, "HTTP request");
         let keep_alive = !req
             .header("connection")
             .is_some_and(|value| value.eq_ignore_ascii_case("close"));
 
+        let req_method = req.method.clone();
+        let req_path = req.path.clone();
         let mut w = writer.take().expect("writer should be available");
         // Keep-alive: the same writer serves multiple requests; clear the
         // previous response's state (headers_written/connection_close)
@@ -306,7 +311,7 @@ async fn handle_connection(
                 }
             }
             Err(e) => {
-                tracing::debug!("http handler error: {e}");
+                tracing::warn!(peer = ?peer, method = ?req_method, path = %req_path, %e, "HTTP handler error");
                 break;
             }
         }

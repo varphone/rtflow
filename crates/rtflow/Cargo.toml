@@ -23,7 +23,7 @@ features = ["rtmp", "srt", "dash", "webrtc", "srtp", "tls"]
 default = ["full"]
 full = [
     "tls", "mp4", "mkv", "client", "server", "file-storage",
-    "metrics", "http", "http-flv", "hls", "ws-flv", "srtp", "multicast",
+    "metrics", "http", "http-flv", "hls", "ws-flv", "srtp", "multicast", "logging",
 ]
 embedded-gateway = ["client", "server", "tls", "metrics", "http", "http-flv", "hls", "ws-flv"]
 experimental-protocols = ["dash", "rtmp", "srt", "webrtc"]
@@ -55,6 +55,9 @@ multicast = [
 test-source = ["dep:rtflow-source"]
 gstreamer = ["dep:rtflow-gst"]
 admin = ["http", "server", "hls", "dep:rtflow-admin"]
+# Optional logging initializer (`rtflow::logging`). Applications that install
+# their own tracing subscriber can leave it off.
+logging = ["dep:tracing-subscriber"]
 
 [[example]]
 name = "authenticated_server"
@@ -163,6 +166,8 @@ rtflow-admin = { workspace = true, optional = true }
 rtflow-source = { workspace = true, optional = true }
 rtflow-gst = { workspace = true, optional = true }
 tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
 base64.workspace = true

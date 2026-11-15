@@ -117,6 +117,7 @@ impl LlHlsLiveManager {
         if specs.is_empty() {
             return;
         }
+        let track_count = specs.len();
         let Ok(mut segmenter) = LlHlsSegmenter::with_part_target(
             specs,
             90_000,
@@ -125,6 +126,13 @@ impl LlHlsLiveManager {
         ) else {
             return;
         };
+        tracing::info!(
+            mount = %mount.path(),
+            tracks = track_count,
+            segment_ms = (self.config.segment_duration * 1000.0) as u64,
+            part_ms = self.config.part_target_ms,
+            "LL-HLS segmenter started"
+        );
         let init = segmenter.init_segment().unwrap_or_default();
         if let Ok(mut state) = channel.state.lock() {
             state.init = Bytes::from(init);

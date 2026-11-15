@@ -54,6 +54,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "logging")]
+    rtflow::logging::init();
     let args = Args::parse();
     let mounts = Arc::new(MountRegistry::new(1024));
 

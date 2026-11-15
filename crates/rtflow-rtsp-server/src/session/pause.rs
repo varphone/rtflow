@@ -11,6 +11,7 @@ pub(super) async fn handle_pause(
     phase: &mut ConnectionPhase,
 ) -> Result<()> {
     *phase = ConnectionPhase::Paused;
+    tracing::debug!("RTSP PAUSE");
     release_recording_mounts(&mut resources.recording_mounts);
     // Release publisher claims too: a paused session is not
     // publishing, and keeping the claim would make a later

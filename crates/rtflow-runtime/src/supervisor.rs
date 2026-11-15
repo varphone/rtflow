@@ -241,6 +241,13 @@ fn finish_task(
         }
         Ok(Some(Err(error))) => {
             inner.counters.failed.fetch_add(1, Ordering::Relaxed);
+            tracing::warn!(
+                task = %id,
+                name = %name,
+                operation = ?operation,
+                %error,
+                "background task failed"
+            );
             emit(
                 &inner.sink,
                 FrameworkEvent::Runtime(RuntimeEvent::TaskFailed {
@@ -253,6 +260,7 @@ fn finish_task(
         }
         Err(_) => {
             inner.counters.panicked.fetch_add(1, Ordering::Relaxed);
+            tracing::error!(task = %id, name = %name, "background task panicked");
             emit(
                 &inner.sink,
                 FrameworkEvent::Runtime(RuntimeEvent::TaskPanicked { id, name }),

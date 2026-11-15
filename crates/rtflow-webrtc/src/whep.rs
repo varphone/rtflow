@@ -255,6 +255,7 @@ pub async fn handle_whep_post(
             ],
         )
         .await?;
+    tracing::info!(mount = %path, "WHEP session established");
     writer.write_raw(answer_sdp.as_bytes()).await?;
     writer.flush().await?;
     Ok(writer)

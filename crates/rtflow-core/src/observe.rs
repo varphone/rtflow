@@ -194,7 +194,7 @@ impl EventSink for NoopEventSink {
 pub struct TracingEventSink;
 impl EventSink for TracingEventSink {
     fn record(&self, event: &FrameworkEvent) {
-        tracing::info!(target: "rtsp::event", event = ?event, "framework event");
+        tracing::info!(target: "rtflow::event", event = ?event, "framework event");
     }
     fn as_any(&self) -> &dyn Any {
         self

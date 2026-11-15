@@ -44,6 +44,8 @@ struct Args {
 /// Embedded WHEP player HTML page.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "logging")]
+    rtflow::logging::init();
     init_tracing();
     let args = Args::parse();
     if args.codecs.is_empty() {

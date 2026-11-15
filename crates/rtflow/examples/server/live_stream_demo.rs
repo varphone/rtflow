@@ -110,6 +110,8 @@ async fn wait_for_state(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "logging")]
+    rtflow::logging::init();
     init_tracing();
     let args = Args::parse();
     if args.play_audio && !args.audio {

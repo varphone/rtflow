@@ -117,6 +117,8 @@ impl Consumer {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "logging")]
+    rtflow::logging::init();
     init_tracing();
     let args = Args::parse();
     let mut builder = ClientOptions::builder().transport(args.transport.into());

@@ -47,6 +47,7 @@ use std::{
 };
 use tokio::{net::TcpListener, sync::Semaphore, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 mod config;
 
@@ -142,6 +143,14 @@ impl RtspServer {
         config.validate()?;
         let listener = TcpListener::bind(config.listen).await?;
         let local_addr = listener.local_addr()?;
+        tracing::info!(
+            %local_addr,
+            max_sessions = config.max_sessions,
+            max_mounts = config.resource_limits.max_mounts,
+            dynamic_publishers = config.dynamic_publishers,
+            idle_timeout_secs = config.session_timeout.as_secs(),
+            "RTSP server listening"
+        );
         let supervisor = TaskSupervisor::new(config.event_sink.clone());
         let connection_rate_limiter =
             ConnectionRateLimiter::new(config.security.connection_rate_limit)?;
@@ -181,7 +190,9 @@ impl RtspServer {
                     _ = task_state.cancel.cancelled() => break,
                     accepted = listener.accept() => match accepted {
                         Ok((stream, peer)) => {
+                            tracing::debug!(%peer, "RTSP connection accepted");
                             if !task_state.config.security.ip_acl.permits(peer.ip()) {
+                                tracing::warn!(%peer, "RTSP connection rejected by IP ACL");
                                 emit(
                                     &task_state.config.event_sink,
                                     FrameworkEvent::Session(SessionEvent::Rejected {
@@ -196,6 +207,7 @@ impl RtspServer {
                                 .connection_rate_limiter
                                 .admit(peer.ip(), std::time::Instant::now())
                             {
+                                tracing::warn!(%peer, "RTSP connection rejected by rate limit");
                                 emit(
                                     &task_state.config.event_sink,
                                     FrameworkEvent::Security(SecurityEvent::RateLimited { peer }),
@@ -211,6 +223,7 @@ impl RtspServer {
                                 continue;
                             }
                             let Ok(slot) = task_state.session_slots.clone().try_acquire_owned() else {
+                                tracing::warn!(%peer, "RTSP connection rejected: global session limit");
                                 emit(
                                     &task_state.config.event_sink,
                                     FrameworkEvent::Session(SessionEvent::Rejected {
@@ -222,6 +235,7 @@ impl RtspServer {
                                 continue;
                             };
                             let Some(peer_lease) = task_state.try_acquire_peer(peer.ip()) else {
+                                tracing::warn!(%peer, "RTSP connection rejected: per-IP session limit");
                                 emit(
                                     &task_state.config.event_sink,
                                     FrameworkEvent::Session(SessionEvent::Rejected {
@@ -287,7 +301,26 @@ impl RtspServer {
                                     &sink,
                                     FrameworkEvent::Session(SessionEvent::Accepted { id, peer }),
                                 );
-                                let result = serve_connection(connection, peer, state).await;
+                                let session_span =
+                                    tracing::info_span!("rtsp_session", session = %id, %peer);
+                                let result = serve_connection(connection, peer, state)
+                                    .instrument(session_span)
+                                    .await;
+                                match &result {
+                                    Ok(()) => tracing::debug!(
+                                        session = %id,
+                                        %peer,
+                                        elapsed_ms = started.elapsed().as_millis() as u64,
+                                        "RTSP session closed"
+                                    ),
+                                    Err(error) => tracing::warn!(
+                                        session = %id,
+                                        %peer,
+                                        elapsed_ms = started.elapsed().as_millis() as u64,
+                                        %error,
+                                        "RTSP session failed"
+                                    ),
+                                }
                                 emit(
                                     &sink,
                                     FrameworkEvent::Session(SessionEvent::Closed {
@@ -301,6 +334,7 @@ impl RtspServer {
                             });
                         }
                         Err(error) => {
+                            tracing::warn!(%error, "RTSP accept failed");
                             emit(
                                 &task_state.config.event_sink,
                                 FrameworkEvent::Server(ServerEvent::AcceptFailed {
@@ -437,6 +471,11 @@ impl RtspServer {
         let mount = handle.mount().clone();
         #[cfg(feature = "multicast")]
         let description = handle.description();
+        tracing::info!(
+            path = %path,
+            tracks = handle.description().tracks.len(),
+            "RTSP mount registered"
+        );
         emit(
             &self.state.config.event_sink,
             FrameworkEvent::Mount(MountEvent::Registered {
@@ -468,6 +507,7 @@ impl RtspServer {
             .remove(path)
             .ok_or_else(|| Error::NotFound(path.into()))?;
         mount.cancel.cancel();
+        tracing::info!(path, "RTSP mount unregistered");
         emit(
             &self.state.config.event_sink,
             FrameworkEvent::Mount(MountEvent::Unregistered {
@@ -481,6 +521,7 @@ impl RtspServer {
     }
 
     pub async fn shutdown_with_report(&mut self) -> Result<ShutdownReport> {
+        tracing::info!("RTSP server shutting down");
         emit(
             &self.state.config.event_sink,
             FrameworkEvent::Server(ServerEvent::Stopping),

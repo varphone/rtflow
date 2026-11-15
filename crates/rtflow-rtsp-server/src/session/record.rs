@@ -97,6 +97,12 @@ pub(super) async fn handle_record(
             .await?;
     } else {
         *phase = ConnectionPhase::Recording;
+        tracing::info!(
+            session = %session_id,
+            udp_tracks = setups.len(),
+            interleaved_tracks = interleaved.len(),
+            "RTSP RECORD started"
+        );
         let mut response = simple_response(200, "OK", cseq);
         response.headers.insert(
             "session".into(),

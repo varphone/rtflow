@@ -113,6 +113,7 @@ impl PlaySession {
         let headers = request.headers()?;
         self.send_request("PLAY", headers, None).await?;
         self.playing = true;
+        tracing::info!(session = %self.id, range = ?request.range, "RTSP client PLAY");
         Ok(())
     }
 
@@ -125,6 +126,7 @@ impl PlaySession {
         let headers = range.map(|range| format!("Range: {}\r\n", range.render()));
         self.send_request("PAUSE", headers, None).await?;
         self.playing = false;
+        tracing::debug!(session = %self.id, "RTSP client PAUSE");
         Ok(())
     }
 
@@ -194,6 +196,7 @@ impl PlaySession {
     }
 
     pub async fn teardown(mut self) -> Result<()> {
+        tracing::debug!(session = %self.id, "RTSP client TEARDOWN");
         self.send_request("TEARDOWN", None, None).await?;
         Ok(())
     }

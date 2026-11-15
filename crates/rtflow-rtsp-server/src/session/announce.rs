@@ -15,6 +15,7 @@ pub(super) async fn handle_announce(
         .get("content-type")
         .map(|value| value.split(';').next().unwrap_or(value).trim());
     if !content_type.is_some_and(|value| value.eq_ignore_ascii_case("application/sdp")) {
+        tracing::warn!(uri = %req.uri, content_type = ?content_type, "RTSP ANNOUNCE rejected: unsupported content type");
         writer
             .lock()
             .await
@@ -28,7 +29,8 @@ pub(super) async fn handle_announce(
     }
     let announced = match sdp::parse(&req.body) {
         Ok(description) => description,
-        Err(_) => {
+        Err(error) => {
+            tracing::warn!(uri = %req.uri, %error, "RTSP ANNOUNCE rejected: invalid SDP");
             writer
                 .lock()
                 .await
@@ -87,6 +89,11 @@ pub(super) async fn handle_announce(
             options,
         ) {
             Ok(handle) => {
+                tracing::info!(
+                    path = %path,
+                    tracks = handle.description().tracks.len(),
+                    "RTSP dynamic Publisher mount created"
+                );
                 resources.dynamic_mounts.push(handle.clone());
                 (path, handle.mount().clone())
             }
@@ -146,7 +153,8 @@ pub(super) async fn handle_announce(
     let expected = mount.description_snapshot();
     let fmtp = match announced_fmtp(&expected, &announced) {
         Ok(fmtp) => fmtp,
-        Err(_) => {
+        Err(error) => {
+            tracing::warn!(path = %req.uri, %error, "RTSP ANNOUNCE rejected: SDP does not match mount");
             writer
                 .lock()
                 .await
@@ -164,6 +172,12 @@ pub(super) async fn handle_announce(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clear();
+    tracing::info!(
+        path = %req.uri,
+        tracks = expected.tracks.len(),
+        fmtp_tracks = fmtp.len(),
+        "RTSP ANNOUNCE accepted"
+    );
     *has_announced = true;
     *mount
         .announce_fmtp

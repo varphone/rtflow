@@ -353,6 +353,16 @@ pub(super) async fn handle_setup(
         if secure {
             interleaved_crypto.insert(rtp_channel, MediaCrypto::from_track(&track)?);
         }
+        tracing::debug!(
+            session = %session_id,
+            path = %path,
+            track = track.id,
+            codec = ?track.codec,
+            rtp_channel,
+            rtcp_channel,
+            rtcp_mux,
+            "RTSP SETUP interleaved"
+        );
         let proxy_mount = mount.clone();
         interleaved.push((mount, rtp_channel, rtcp_channel, track));
         selected_mount.get_or_insert(path.clone());
@@ -497,6 +507,17 @@ pub(super) async fn handle_setup(
             mode,
         }
         .render(),
+    );
+    tracing::debug!(
+        session = %session_id,
+        path = %path,
+        track = track.id,
+        codec = ?track.codec,
+        %server_rtp,
+        %server_rtcp,
+        %rtp_target,
+        rtcp_mux,
+        "RTSP SETUP udp"
     );
     let proxy_mount = mount.clone();
     setups.push((mount, pair, rtp_target, rtcp_target, track));

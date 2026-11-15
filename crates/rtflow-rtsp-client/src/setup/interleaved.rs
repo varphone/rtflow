@@ -584,7 +584,7 @@ pub(super) async fn connect_interleaved(
             peer,
         },
     );
-    tracing::debug!(session_id = %id, %peer, transport = "tcp-interleaved", "RTSP client session established");
+    tracing::info!(session_id = %id, %peer, transport = "tcp-interleaved", "RTSP client session established");
     Ok(PlaySession::new(SessionParts {
         description,
         capabilities,

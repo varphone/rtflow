@@ -338,6 +338,7 @@ impl MountRegistry {
     pub fn unregister(&self, path: &str) -> Option<MountHandle> {
         let removed = self.remove(path)?;
         removed.cancel.cancel();
+        tracing::info!(path, "mount unregistered");
         Some(MountHandle {
             path: removed.id.clone(),
             description: description_for(&removed.config).unwrap_or_else(|_| MediaDescription {

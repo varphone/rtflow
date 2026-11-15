@@ -409,6 +409,7 @@ pub async fn serve_rtmp_session(
                     {
                         match video_data {
                             VideoData::AvcSequenceHeader(data) => {
+                                tracing::info!(stream = %stream_name, codec = "h264", "RTMP video sequence header");
                                 *video_seq_header = Some(data.clone());
                                 if let Ok(mut headers) =
                                     mount_handle.mount().rtmp_seq_headers.lock()
@@ -432,6 +433,7 @@ pub async fn serve_rtmp_session(
                                 );
                             }
                             VideoData::HevcSequenceHeader(data) => {
+                                tracing::info!(stream = %stream_name, codec = "h265", "RTMP video sequence header");
                                 *video_seq_header = Some(data.clone());
                                 if let Ok(mut headers) =
                                     mount_handle.mount().rtmp_seq_headers.lock()
@@ -511,6 +513,7 @@ pub async fn serve_rtmp_session(
                                 }
                             }
                             VideoData::Vp9SequenceHeader(data) => {
+                                tracing::info!(stream = %stream_name, codec = "vp9", "RTMP video sequence header");
                                 let codec = Codec::Vp9;
                                 *video_seq_header = Some(data.clone());
                                 if let Ok(mut headers) =
@@ -535,6 +538,7 @@ pub async fn serve_rtmp_session(
                                 );
                             }
                             VideoData::Av1SequenceHeader(data) => {
+                                tracing::info!(stream = %stream_name, codec = "av1", "RTMP video sequence header");
                                 let codec = Codec::Av1;
                                 *video_seq_header = Some(data.clone());
                                 if let Ok(mut headers) =
@@ -630,6 +634,7 @@ pub async fn serve_rtmp_session(
                     {
                         match audio_data {
                             AudioData::AacSequenceHeader(data) => {
+                                tracing::info!(stream = %stream_name, codec = "aac", "RTMP audio sequence header");
                                 *audio_seq_header = Some(data.clone());
                                 if let Some((rate, channels)) = aac_audio_config(&data) {
                                     *audio_sample_rate = Some(rate);

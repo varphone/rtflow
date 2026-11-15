@@ -159,6 +159,7 @@ pub async fn handle_whip_post(
             ],
         )
         .await?;
+    tracing::info!(mount = %path, "WHIP session established");
     writer.write_raw(answer_sdp.as_bytes()).await?;
     writer.flush().await?;
     Ok(writer)

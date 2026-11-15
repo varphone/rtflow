@@ -7,6 +7,11 @@ pub(super) async fn handle_teardown(
     resources: &mut ConnectionResources,
     depacketizers: &mut HashMap<u8, Depacketizer>,
 ) -> Result<()> {
+    tracing::debug!(
+        udp_tracks = resources.senders.len(),
+        publisher_claims = resources.claims.len(),
+        "RTSP TEARDOWN"
+    );
     release_recording_mounts(&mut resources.recording_mounts);
     release_remote_publishers(&mut resources.claims, true);
     depacketizers.clear();

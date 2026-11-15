@@ -18,6 +18,9 @@
 
 ### Added
 
+- 统一结构化日志：新增 `rtflow::logging`（可选 `logging` feature，`full`
+  默认包含）、`DEBUG_FILTER` 与 `docs/guides/logging.md`；覆盖 RTSP
+  服务端/客户端、mount、HLS、HTTP、RTMP、WebRTC、admin 与会话 span。
 - RTSP 发布增强：`ServerConfig::dynamic_publishers`（opt-in）允许 ANNOUNCE
   为未知路径创建 Publisher mount，断线且无订阅者时自动清理；
 - UDP 发布端接收 RTCP SR 并回送 RR/SDES，支持独立端口与 `rtcp-mux`；

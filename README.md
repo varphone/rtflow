@@ -26,6 +26,27 @@
 - 连接生命周期防护：HTTP 响应每写 60 s 超时（慢读/冻结客户端自动断开，`HttpConfig::response_timeout`）、RTMP 播放写路径 30 s 超时、WS-FLV 心跳回收——无界连接槽与僵尸写任务不会累积。帧指标 `frames_accepted/dropped` 对 RTSP/RTMP/SRT/gateway 全注册路径汇入全局 `/metrics`。
 - 错误分类：`Error` 按域区分（`Rtsp`/`Media`/`Http`/`InvalidConfig`/`Unsupported`/…），`code()`/`retry_class()`/`rtsp_status()` 稳定映射（Http/InvalidConfig→500，Unsupported→501），供重试策略与遥测使用。
 
+## 日志与调试
+
+框架使用 `tracing` 输出结构化日志，应用只需安装 subscriber。门面 crate 提供
+可选的一行初始化：
+
+```rust
+fn main() {
+    rtflow::logging::init();
+    // ...
+}
+```
+
+或使用环境变量：
+
+```bash
+RUST_LOG=info,rtflow_rtsp_server=debug,rtflow_rtsp_client=debug,rtflow_hls=debug   cargo run --example live_vod_gateway -- ...
+```
+
+生命周期事件在 `info`，协议/session 细节在 `debug`，逐请求/逐帧在 `trace`。
+完整 target、级别约定和常见故障排查见 [docs/guides/logging.md](docs/guides/logging.md)。
+
 ## 分发能力边界
 
 HTTP-FLV、WS-FLV 与 HLS 是当前优先维护的 RTSP 输出协议。WS-FLV 走独立 TCP 端口（RFC 6455 服务端握手，路径与 HTTP-FLV 一致：mount `/live/stream` ↔ `/live/stream.flv`），延迟最低，配合 mpegts.js/flv.js 在浏览器播放；HLS 仍是兼容性基线：live 使用 MPEG-TS，实际分段长度取决于下一个视频随机访问点，因此要达到 1–3 秒端到端延迟，编码器 GOP/关键帧间隔必须不大于目标分段时长。

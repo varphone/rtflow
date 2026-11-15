@@ -38,6 +38,8 @@ pub use rtflow_core as core;
 #[cfg(feature = "file-storage")]
 pub use rtflow_file as file;
 pub use rtflow_gateway as gateway;
+#[cfg(feature = "logging")]
+pub mod logging;
 pub use rtflow_http as http;
 pub use rtflow_media as media;
 #[cfg(feature = "metrics")]

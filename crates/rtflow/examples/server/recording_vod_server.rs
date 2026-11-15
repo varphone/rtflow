@@ -17,6 +17,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "logging")]
+    rtflow::logging::init();
     init_tracing();
     let args = Args::parse();
     let source = Arc::new(RecordingVodSource::open(

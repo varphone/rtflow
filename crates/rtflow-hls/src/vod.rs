@@ -165,6 +165,12 @@ fn generate(
 ) -> rtflow_core::error::Result<()> {
     std::fs::create_dir_all(directory)?;
     let description = source.description().clone();
+    tracing::info!(
+        title,
+        tracks = description.tracks.len(),
+        segment_ms = config.segment_duration.as_millis() as u64,
+        "HLS VOD generation started"
+    );
     let mut demuxer = source.open()?;
     let mut segmenter = Segmenter::new(
         SegmenterConfig {
@@ -185,6 +191,11 @@ fn generate(
     while let Ok(segment) = segments.try_recv() {
         completed.push(segment);
     }
+    tracing::info!(
+        title,
+        segments = completed.len(),
+        "HLS VOD generation finished"
+    );
     if completed.is_empty() {
         return Err(rtflow_core::error::Error::Media(format!(
             "VOD {title} produced no segments"

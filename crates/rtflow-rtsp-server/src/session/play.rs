@@ -184,6 +184,15 @@ pub(super) async fn handle_play(
             .await?;
     } else {
         *phase = ConnectionPhase::Playing;
+        tracing::info!(
+            session = %session_id,
+            uri = %req.uri,
+            udp_tracks = setups.len(),
+            interleaved_tracks = interleaved.len(),
+            multicast_tracks = multicast_tracks.len(),
+            vod = vod_source.is_some(),
+            "RTSP PLAY started"
+        );
         resources.register_play(
             interleaved
                 .iter()

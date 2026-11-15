@@ -21,6 +21,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "logging")]
+    rtflow::logging::init();
     init_tracing();
     let args = Args::parse();
     if args.fps == 0 || args.fps > 1_000 || args.codecs.is_empty() {

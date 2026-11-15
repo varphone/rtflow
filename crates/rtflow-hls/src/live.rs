@@ -106,6 +106,14 @@ impl HlsLiveManager {
                 .unwrap_or_default()
                 .as_nanos()
         );
+        tracing::info!(
+            mount = %mount.path(),
+            tracks = description.tracks.len(),
+            segment_ms = self.config.segment_duration.as_millis() as u64,
+            window = self.config.segment_count,
+            generation,
+            "HLS live segmenter started"
+        );
         let ring = channel.ring.clone();
         let next_sequence = channel.next_sequence.clone();
         let channel = channel.clone();

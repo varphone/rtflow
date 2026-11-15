@@ -564,7 +564,7 @@ pub(super) async fn connect_udp(
             peer,
         },
     );
-    tracing::debug!(session_id = %id, %peer, transport = "udp", "RTSP client session established");
+    tracing::info!(session_id = %id, %peer, transport = "udp", "RTSP client session established");
     Ok(PlaySession::new(SessionParts {
         description,
         capabilities,
