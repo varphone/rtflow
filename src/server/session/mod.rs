@@ -32,7 +32,7 @@ use std::{
     net::SocketAddr,
     sync::{
         Arc,
-        atomic::{AtomicU16, Ordering},
+        atomic::{AtomicU16, AtomicU64, Ordering},
     },
 };
 use tokio::{
@@ -134,6 +134,7 @@ pub(super) async fn serve_connection(
     rtcp_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     rtcp_tick.tick().await;
     let mut last_activity = tokio::time::Instant::now();
+    let publisher_activity = Arc::new(AtomicU64::new(epoch_millis()));
     loop {
         let n = if phase == ConnectionPhase::Recording {
             tokio::select! {
@@ -141,7 +142,11 @@ pub(super) async fn serve_connection(
                 _ = rtcp_tick.tick() => {
                     // The RTCP tick must not keep a stalled publisher's
                     // control connection alive forever.
-                    if last_activity.elapsed() >= state.config.session_timeout {
+                    let timeout_ms = state.config.session_timeout.as_millis() as u64;
+                    let publisher_idle =
+                        epoch_millis().saturating_sub(publisher_activity.load(Ordering::Relaxed))
+                            >= timeout_ms;
+                    if last_activity.elapsed() >= state.config.session_timeout && publisher_idle {
                         break;
                     }
                     send_interleaved_receiver_reports(
@@ -164,6 +169,7 @@ pub(super) async fn serve_connection(
             break;
         }
         last_activity = tokio::time::Instant::now();
+        publisher_activity.store(epoch_millis(), Ordering::Relaxed);
         framer.push(&scratch[..n]);
         while let Some(frame) = framer.next_frame()? {
             let msg = match frame {
@@ -276,6 +282,7 @@ pub(super) async fn serve_connection(
                     &mut interleaved_ssrcs,
                     &mut vod_cursor,
                     &mut phase,
+                    &publisher_activity,
                 )
                 .await?;
             } else if req.method == Method::Pause {
@@ -310,6 +317,13 @@ pub(super) async fn serve_connection(
     }
     cleanup_session(&state, &mut resources).await;
     Ok(())
+}
+
+fn epoch_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 /// Release session resources and remove idle dynamic publisher mounts.

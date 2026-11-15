@@ -374,6 +374,7 @@ pub(crate) struct PublisherUdpReceiver {
     expected_ip: std::net::IpAddr,
     report_interval: std::time::Duration,
     local_ssrc: u32,
+    activity: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl PublisherUdpReceiver {
@@ -383,6 +384,7 @@ impl PublisherUdpReceiver {
         crypto: MediaCrypto,
         expected_rtp: SocketAddr,
         report_interval: std::time::Duration,
+        activity: Arc<std::sync::atomic::AtomicU64>,
     ) -> Self {
         let local_ssrc = 0x5254_0000 | u32::from(track.id);
         Self {
@@ -397,7 +399,18 @@ impl PublisherUdpReceiver {
             expected_ip: expected_rtp.ip(),
             report_interval,
             local_ssrc,
+            activity,
         }
+    }
+
+    fn mark_activity(&self) {
+        self.activity.store(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 
     fn admit_rtp(&mut self, source: SocketAddr) -> bool {
@@ -431,6 +444,7 @@ impl PublisherUdpReceiver {
             self.mount.stats.add_dropped(1);
             return;
         }
+        self.mark_activity();
         let payload = match self.crypto.unprotect_rtp(wire) {
             Ok(payload) => payload,
             Err(_) => {
@@ -517,6 +531,7 @@ impl PublisherUdpReceiver {
             self.mount.stats.add_dropped(1);
             return;
         }
+        self.mark_activity();
         let payload = match self.crypto.unprotect_rtcp(wire) {
             Ok(payload) => payload,
             Err(_) => {
@@ -572,6 +587,7 @@ impl PublisherUdpReceiver {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_udp_receiver(
     mount: Arc<Mount>,
     pair: UdpPair,
@@ -580,6 +596,7 @@ pub(crate) fn spawn_udp_receiver(
     track: TrackDescription,
     crypto: MediaCrypto,
     report_interval: std::time::Duration,
+    activity: Arc<std::sync::atomic::AtomicU64>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         if !matches!(mount.config, MountConfig::Publisher { .. }) {
@@ -596,6 +613,7 @@ pub(crate) fn spawn_udp_receiver(
             crypto,
             expected_rtp_source,
             report_interval,
+            activity,
         );
         let mut rtp_buffer = BytesMut::zeroed(65_536);
         let mut rtcp_buffer = BytesMut::zeroed(2_048);

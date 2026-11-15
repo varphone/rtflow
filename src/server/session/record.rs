@@ -22,6 +22,7 @@ pub(super) async fn handle_record(
     ssrcs: &mut HashMap<u8, u32>,
     vod_cursor: &mut std::time::Duration,
     phase: &mut ConnectionPhase,
+    publisher_activity: &Arc<std::sync::atomic::AtomicU64>,
 ) -> Result<()> {
     let candidates = setups
         .iter()
@@ -60,6 +61,7 @@ pub(super) async fn handle_record(
                 track.clone(),
                 MediaCrypto::from_track(&track)?,
                 state.config.rtcp_report_interval,
+                publisher_activity.clone(),
             ));
         }
     }

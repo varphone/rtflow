@@ -121,3 +121,41 @@ async fn setup_mode_must_match_mount_role() {
     assert_eq!(setup.status, 461, "publisher must reject mode=play");
     server.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn udp_publish_activity_keeps_idle_control_session_alive() {
+    let mut config = ServerConfig::new("127.0.0.1:0".parse().unwrap());
+    config.dynamic_publishers = true;
+    config.session_timeout = Duration::from_millis(200);
+    config.rtcp_report_interval = Duration::from_millis(50);
+    let server = RtspServer::bind(config).await.unwrap();
+    let media = description("keepalive", &[Codec::H264]);
+    let url = format!("rtsp://{}/live/keepalive", server.local_addr());
+    let mut publisher = RtspClient::publish(
+        &url,
+        media,
+        ClientOptions::builder()
+            .transport(UpstreamTransport::Udp)
+            .build()
+            .unwrap(),
+    )
+    .await
+    .expect("publish");
+    for sequence in 0..20u32 {
+        publisher
+            .push(rtflow_testkit::unit(0, Codec::H264, sequence))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let mount = server
+        .registry()
+        .get_handle("/live/keepalive")
+        .expect("dynamic mount");
+    assert!(
+        mount.snapshot().publisher_connected,
+        "RTP activity must keep the control session alive"
+    );
+    publisher.teardown().await.unwrap();
+    server.shutdown().await.unwrap();
+}
