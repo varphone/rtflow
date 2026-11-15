@@ -11,6 +11,7 @@ use rtflow::{
     hls::{
         HlsConfig,
         live::{HlsLiveManager, create_hls_live_handler},
+        ll::{LlHlsConfig, LlHlsLiveManager, create_ll_hls_handler},
         vod::{HlsVodConfig, HlsVodEntry, HlsVodManager, create_hls_vod_handler},
     },
     http::{HttpConfig, HttpServer, Method},
@@ -120,6 +121,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // live.start();
     let mut http = HttpServer::bind(HttpConfig::new(args.http)).await?;
     http.add_route(Method::Get, "/hls/*", create_hls_live_handler(live))
+        .await;
+    let ll_hls = Arc::new(LlHlsLiveManager::new(
+        mounts.clone(),
+        LlHlsConfig::default(),
+    ));
+    http.add_route(Method::Get, "/llhls/*", create_ll_hls_handler(ll_hls))
         .await;
     http.add_route(Method::Get, "/vod/*", create_hls_vod_handler(vod.clone()))
         .await;

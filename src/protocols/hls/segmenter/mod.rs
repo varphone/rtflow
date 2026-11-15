@@ -8,8 +8,8 @@ mod entries;
 mod init;
 mod media;
 mod sps;
-mod ts;
-mod util;
+pub(crate) mod ts;
+pub(crate) mod util;
 
 use self::init::build_init_segment;
 use self::media::build_media_segment;
