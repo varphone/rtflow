@@ -26,6 +26,7 @@
   `--hls-segment-seconds`（默认 1）。
 - HLS live 输出 `EXT-X-PROGRAM-DATE-TIME`（UTC 毫秒，按 segmenter
   启动时间锚定）。
+- RTMP 发布端连续丢帧 90 次后主动断开，避免慢订阅者拖垮 mount 队列。
 
 ### Added
 

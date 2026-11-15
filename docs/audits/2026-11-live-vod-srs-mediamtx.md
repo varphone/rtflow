@@ -80,7 +80,7 @@ PTS: 0.100000, 0.133333, 0.166667, 0.200000, ...
 | L-04 | P1 | HLS VOD | 生成失败时 `.tmp-<id>` 不清理；下次生成可能复用残留目录。 | 已修 |
 | L-05 | P1 | HLS VOD | VOD id 允许 `.`/`..`（虽然只能来自本地配置），存在路径穿越风险。 | 已修 |
 | L-06 | P1 | RTMP 收流 | fmt3 续包未读取 extended timestamp，长会话/使用 extended timestamp 的发布端会错位。SRS `srs_protocol_rtmp_stack.cpp` 明确处理了该分支。 | 已修 |
-| L-07 | P1 | RTMP 收流 | `publisher.push` 的返回值被忽略；FrameBus 满时丢帧只增加统计，不反馈给发布端，也不在日志/指标中突出。SRS/MediaMTX 有明确的队列/丢帧策略。 | **未修** |
+| L-07 | P1 | RTMP 收流 | 连续丢帧 90 次后主动关闭发布连接，并每 30 次记录 debug；统计仍在 mount stats。 | 已完成 |
 | L-08 | P1 | RTMP 编码 | enhanced-RTMP 的 HEVC/H.264 已接入；AV1/VP9 尚未接入（HLS/TS 也尚无对应 sample entry）。 | 部分完成 |
 | L-09 | P2 | HLS live | 已按 segmenter 启动时间 + segment timestamp 输出 `EXT-X-PROGRAM-DATE-TIME`（UTC 毫秒）。 | 已完成 |
 | L-10 | P2 | HLS live | 示例默认窗口降为 7 段，并提供 `--hls-segments` / `--hls-segment-seconds` 配置；ring 仍保留 3× 窗口。 | 已完成 |

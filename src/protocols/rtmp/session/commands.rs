@@ -446,6 +446,7 @@ pub(super) async fn handle_command(
                 audio_sample_rate: None,
                 audio_channels: None,
                 base_timestamp: None,
+                drop_streak: 0,
             };
 
             // StreamBegin user control

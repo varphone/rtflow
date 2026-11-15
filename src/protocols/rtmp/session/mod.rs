@@ -134,6 +134,9 @@ enum SessionState {
         audio_sample_rate: Option<u32>,
         audio_channels: Option<u8>,
         base_timestamp: Option<u32>,
+        /// Consecutive publisher-queue drops; a persistently slow
+        /// subscriber must not grow the mount buffer forever.
+        drop_streak: u32,
     },
     /// Playing from a mount.
     Playing {
@@ -141,6 +144,32 @@ enum SessionState {
         stream_name: String,
         mount_handle: MountHandle,
     },
+}
+
+/// Push one frame to the mount. Returns false once the publisher has been
+/// continuously dropping for `MAX_DROP_STREAK` frames; continuing would only
+/// grow latency for every subscriber.
+fn publish_frame(publisher: &LocalPublisher, unit: AccessUnit, drop_streak: &mut u32) -> bool {
+    match publisher.push(unit) {
+        Ok(PushResult::Dropped) => {
+            *drop_streak = drop_streak.saturating_add(1);
+            if *drop_streak == 1 || drop_streak.is_multiple_of(30) {
+                debug!(
+                    streak = *drop_streak,
+                    "RTMP: publisher queue dropping frames"
+                );
+            }
+            *drop_streak < 90
+        }
+        Ok(_) => {
+            *drop_streak = 0;
+            true
+        }
+        Err(error) => {
+            debug!(?error, "RTMP: publisher push failed");
+            false
+        }
+    }
 }
 
 /// Serve a single RTMP connection.
@@ -302,6 +331,7 @@ pub async fn serve_rtmp_session(
 
         // Process all complete messages
         let messages = dechunker.poll_messages();
+        let mut overloaded = false;
         for msg in messages {
             // Handle protocol control messages
             if msg.msg_type == MessageType::SetChunkSize as u8 {
@@ -372,6 +402,7 @@ pub async fn serve_rtmp_session(
                         audio_sample_rate,
                         audio_channels,
                         base_timestamp,
+                        drop_streak,
                         ..
                     } = &mut state
                         && let Some(video_data) = flv::parse_video_tag(&msg.payload)
@@ -444,8 +475,9 @@ pub async fn serve_rtmp_session(
                                     is_keyframe,
                                     data,
                                 };
-                                if matches!(publisher.push(unit), Ok(PushResult::Dropped)) {
-                                    debug!("RTMP: publisher queue dropped a frame");
+                                if !publish_frame(publisher, unit, drop_streak) {
+                                    overloaded = true;
+                                    break;
                                 }
                             }
                             VideoData::HevcNalu {
@@ -471,8 +503,9 @@ pub async fn serve_rtmp_session(
                                     is_keyframe,
                                     data,
                                 };
-                                if matches!(publisher.push(unit), Ok(PushResult::Dropped)) {
-                                    debug!("RTMP: publisher queue dropped a frame");
+                                if !publish_frame(publisher, unit, drop_streak) {
+                                    overloaded = true;
+                                    break;
                                 }
                             }
                         }
@@ -494,6 +527,7 @@ pub async fn serve_rtmp_session(
                         audio_channels,
                         video_seq_header,
                         base_timestamp,
+                        drop_streak,
                         ..
                     } = &mut state
                         && let Some(audio_data) = flv::parse_audio_tag(&msg.payload)
@@ -545,8 +579,9 @@ pub async fn serve_rtmp_session(
                                     is_keyframe: true,
                                     data,
                                 };
-                                if matches!(publisher.push(unit), Ok(PushResult::Dropped)) {
-                                    debug!("RTMP: publisher queue dropped a frame");
+                                if !publish_frame(publisher, unit, drop_streak) {
+                                    overloaded = true;
+                                    break;
                                 }
                             }
                         }
@@ -567,6 +602,10 @@ pub async fn serve_rtmp_session(
                 }
                 _ => {}
             }
+        }
+        if overloaded {
+            warn!("RTMP: publisher persistently overloaded, closing session");
+            break;
         }
     }
 
