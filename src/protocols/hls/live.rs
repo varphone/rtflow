@@ -264,6 +264,31 @@ pub fn create_hls_live_handler(manager: Arc<HlsLiveManager>) -> Handler {
                         return Ok(writer);
                     }
                     let mut req = req;
+                    // LL-HLS blocking playlist reload: hold the request until
+                    // the requested media sequence exists (bounded).
+                    if let Some(msn) = req
+                        .query
+                        .get("_HLS_msn")
+                        .and_then(|value| value.parse::<u64>().ok())
+                    {
+                        let deadline =
+                            tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+                        loop {
+                            let latest = channel
+                                .ring
+                                .snapshot()
+                                .last()
+                                .map(|segment| segment.sequence);
+                            if latest.is_some_and(|latest| latest >= msn)
+                                || tokio::time::Instant::now() >= deadline
+                            {
+                                break;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        }
+                        req.query.remove("_HLS_msn");
+                        req.query.remove("_HLS_part");
+                    }
                     let generation = channel
                         .generation
                         .lock()

@@ -27,6 +27,8 @@
 - HLS live 输出 `EXT-X-PROGRAM-DATE-TIME`（UTC 毫秒，按 segmenter
   启动时间锚定）。
 - RTMP 发布端连续丢帧 90 次后主动断开，避免慢订阅者拖垮 mount 队列。
+- HLS live 支持 LL-HLS blocking playlist reload：`_HLS_msn` 等待目标
+  media sequence，playlist 输出 `CAN-BLOCK-RELOAD=YES`（尚无 parts）。
 
 ### Added
 

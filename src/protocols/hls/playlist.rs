@@ -68,6 +68,7 @@ pub fn write_live_playlist_at_q_pdt(
     playlist.push_str("#EXT-X-VERSION:7\n");
     playlist.push_str("#EXT-X-INDEPENDENT-SEGMENTS\n");
     playlist.push_str(&format!("#EXT-X-TARGETDURATION:{}\n", target_secs));
+    playlist.push_str("#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES\n");
 
     // Media sequence is the sequence number of the first segment
     if let Some(first) = segments.first() {
