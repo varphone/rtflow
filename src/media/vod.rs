@@ -11,4 +11,11 @@ use crate::Result;
 pub trait VodSource: Send + Sync + 'static {
     fn description(&self) -> &MediaDescription;
     fn open(&self) -> Result<Box<dyn Demuxer>>;
+
+    /// Stable fingerprint of the source contents (mtime/size, catalog
+    /// generation). `None` keeps the existing cache forever; sources that can
+    /// change should return a value so the HLS cache is regenerated.
+    fn fingerprint(&self) -> Option<String> {
+        None
+    }
 }

@@ -42,6 +42,29 @@ impl VodSource for RecordingVodSource {
             self.max_sample_size,
         )?))
     }
+
+    fn fingerprint(&self) -> Option<String> {
+        let mut entries: Vec<(String, u64, u128)> = std::fs::read_dir(&self.directory)
+            .ok()?
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let metadata = entry.metadata().ok()?;
+                let modified = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_nanos())
+                    .unwrap_or_default();
+                Some((
+                    entry.file_name().to_string_lossy().into_owned(),
+                    metadata.len(),
+                    modified,
+                ))
+            })
+            .collect();
+        entries.sort();
+        Some(format!("{}:{entries:?}", self.directory.display()))
+    }
 }
 
 impl std::fmt::Debug for dyn VodSource {

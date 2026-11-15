@@ -4,7 +4,7 @@ use super::{
     segmenter::{Segment, Segmenter, SegmenterConfig},
 };
 use crate::{
-    http::{Handler, ResponseWriter},
+    http::{Handler, Method, ResponseWriter},
     media::vod::VodSource,
 };
 use std::{
@@ -92,13 +92,27 @@ impl HlsVodManager {
             return Err(crate::Error::InvalidConfig("invalid VOD id".into()));
         }
         let directory = self.config.cache_dir.join(id);
-        if directory.join("index.m3u8").is_file() {
+        let fingerprint = entry.source.fingerprint();
+        let cache_valid = |directory: &Path| {
+            if !directory.join("index.m3u8").is_file() {
+                return false;
+            }
+            match fingerprint.as_deref() {
+                Some(expected) => std::fs::read_to_string(directory.join(".fingerprint"))
+                    .is_ok_and(|stored| stored == expected),
+                None => true,
+            }
+        };
+        if cache_valid(&directory) {
             return Ok(directory);
         }
         let lock = self.lock_for(id).await;
         let _guard = lock.lock().await;
-        if directory.join("index.m3u8").is_file() {
+        if cache_valid(&directory) {
             return Ok(directory);
+        }
+        if directory.exists() {
+            std::fs::remove_dir_all(&directory)?;
         }
         let temporary = self.config.cache_dir.join(format!(".tmp-{id}"));
         let source = entry.source.clone();
@@ -111,6 +125,9 @@ impl HlsVodManager {
             if let Err(error) = generate(source, &label, &config, &temporary_for_cleanup) {
                 let _ = std::fs::remove_dir_all(&temporary_for_cleanup);
                 return Err(error);
+            }
+            if let Some(fingerprint) = fingerprint {
+                let _ = std::fs::write(temporary_for_cleanup.join(".fingerprint"), fingerprint);
             }
             if let Err(error) = std::fs::rename(&temporary_for_cleanup, &target) {
                 let _ = std::fs::remove_dir_all(&temporary_for_cleanup);
@@ -212,6 +229,12 @@ fn parse(path: &str) -> Option<(&str, &str)> {
 fn byte_range(header: Option<&str>, length: usize) -> Option<(usize, usize)> {
     let value = header?.strip_prefix("bytes=")?;
     let (start, end) = value.split_once('-')?;
+    if start.is_empty() {
+        // Suffix form: bytes=-N asks for the last N bytes.
+        let suffix = end.parse::<usize>().ok()?.min(length);
+        let start = length.checked_sub(suffix)?;
+        return (suffix > 0).then_some((start, length - 1));
+    }
     let start = start.parse::<usize>().ok()?;
     let end = if end.is_empty() {
         length.checked_sub(1)?
@@ -236,6 +259,7 @@ pub fn create_hls_vod_handler(manager: Arc<HlsVodManager>) -> Handler {
                     .await?;
                 return Ok(writer);
             }
+            let head = req.method == Method::Head;
             match kind {
                 "playlist" => match manager.playlist(&id).await {
                     Ok(body) => {
@@ -252,8 +276,10 @@ pub fn create_hls_vod_handler(manager: Arc<HlsVodManager>) -> Handler {
                                 ],
                             )
                             .await?;
-                        writer.write_raw(body.as_bytes()).await?;
-                        writer.flush().await?;
+                        if !head {
+                            writer.write_raw(body.as_bytes()).await?;
+                            writer.flush().await?;
+                        }
                         Ok(writer)
                     }
                     Err(error) => {
@@ -300,7 +326,9 @@ pub fn create_hls_vod_handler(manager: Arc<HlsVodManager>) -> Handler {
                                 headers.push(("Content-Range", content_range.as_str()));
                             }
                             writer.write_headers(status, &headers).await?;
-                            writer.write_raw(&body[slice_start..slice_end]).await?;
+                            if !head {
+                                writer.write_raw(&body[slice_start..slice_end]).await?;
+                            }
                             writer.flush().await?;
                             Ok(writer)
                         }

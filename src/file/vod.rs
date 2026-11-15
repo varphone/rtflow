@@ -40,4 +40,20 @@ impl VodSource for FileVodSource {
     fn open(&self) -> Result<Box<dyn Demuxer>> {
         Ok(FileSource::open(&self.path, self.options.clone())?.into_demuxer())
     }
+
+    fn fingerprint(&self) -> Option<String> {
+        let metadata = std::fs::metadata(&self.path).ok()?;
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        Some(format!(
+            "{}:{}:{}",
+            self.path.display(),
+            metadata.len(),
+            modified
+        ))
+    }
 }

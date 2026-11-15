@@ -75,7 +75,7 @@ PTS: 0.100000, 0.133333, 0.166667, 0.200000, ...
 | ID | 级别 | 区域 | 结论 | 状态 |
 |---|---|---|---|---|
 | L-01 | P0 | RTMP 推流 | 已用 tcpdump/代理抓取客户端→服务端原始 RTMP 字节，并用 `Dechunker` 重放：69 个视频消息 / 约 2.3 s，时间戳为 21/54/88/121/154/188/221/254…，与 ffmpeg 源一致；RTMP 时间戳本身没有放大。此前的 1.7 s/30 帧来自 TS mux 的 `Sample.duration` 处理，已用码流帧率修正。 | 已排除 |
-| L-02 | P1 | HLS live | TS 路径已接入 H.265（hvcC + PMT stream_type 0x24），但 RTMP H.265 目前没有生成 sprop-vps/sps/pps fmtp，实际仍会回退 fMP4。 | 部分完成 |
+| L-02 | P1 | HLS live | H.265 TS 已从 RTMP HEVC sequence header 生成 `sprop-vps/sps/pps`，ffmpeg + libx265 实测输出 `hevc 640x360` 的 `.ts`。 | 已完成 |
 | L-03 | P1 | HLS live | TS segment 的 `discontinuity_sequence` 之前恒为 `None`，`EXT-X-DISCONTINUITY-SEQUENCE` 永远为 0。 | 已修 |
 | L-04 | P1 | HLS VOD | 生成失败时 `.tmp-<id>` 不清理；下次生成可能复用残留目录。 | 已修 |
 | L-05 | P1 | HLS VOD | VOD id 允许 `.`/`..`（虽然只能来自本地配置），存在路径穿越风险。 | 已修 |
@@ -85,8 +85,8 @@ PTS: 0.100000, 0.133333, 0.166667, 0.200000, ...
 | L-09 | P2 | HLS live | 未输出 `EXT-X-PROGRAM-DATE-TIME`；MediaMTX 输出，便于绝对时间对齐、广告/DRM/时移。 | 未做 |
 | L-10 | P2 | HLS live | playlist 窗口 30 段、保留 90 段；SRS/MediaMTX 默认 3–7 段。内存和切台延迟更高，但可用。 | 可配置 |
 | L-11 | P2 | HLS live | 无低延迟 HLS（LL-HLS part/blocking reload）；MediaMTX 默认 lowLatency。当前 1 s 分段属于经典 HLS。 | 已知限制 |
-| L-12 | P2 | HLS VOD | 仅对 segment 支持 Range；playlist/init 没有 HEAD/Range。不是协议错误，缓存代理场景可改进。 | 未做 |
-| L-13 | P2 | HLS VOD | 仅按显式 `invalidate` 失效，不检测源文件 mtime/大小变化。 | 未做 |
+| L-12 | P2 | HLS VOD | segment 支持普通 Range 和 suffix `bytes=-N`；playlist/init/segment 支持 HEAD。 | 已完成 |
+| L-13 | P2 | HLS VOD | 源文件/录制目录提供 fingerprint（路径+mtime+size），HLS 缓存自动重建。 | 已完成 |
 | L-14 | P2 | HLS live | `/init.m4s` 对 TS 版本不再返回空 200（已改 404），但路由仍保留；不影响播放器。 | 已修 |
 | L-15 | P2 | HLS live | 无 `EXT-X-INDEPENDENT-SEGMENTS`；不影响当前 hls.js，但部分播放器/下载器会利用。 | 未做 |
 
@@ -126,10 +126,10 @@ TS 路径的 `Segment` 由 `transmux` 返回，原先只带 `discontinuous`，�
 ## 推荐后续
 
 1. **已完成：RTMP 时间戳验证**（原始字节回放，时间戳 21/54/88…；无需重写状态机）。
-2. **部分完成：H.265 live TS**（hvcC/PMT 已接入；RTMP H.265 尚未生成 sprop fmtp，实际仍回退 fMP4）。
+2. **已完成：H.265 live TS**（hvcC/PMT + RTMP H.265 sprop fmtp；ffmpeg libx265 实测输出 hevc TS）。
 3. **已完成：发布端丢帧日志 + 独立分段标记 + VOD 临时目录/路径校验**。
 4. **待做：HLS live `EXT-X-PROGRAM-DATE-TIME`、可配置窗口、LL-HLS**。
-5. **待做：VOD 源变更检测（mtime/size）、HEAD/Range；enhanced-RTMP AV1/VP9。**
+5. **已完成：VOD 源变更检测（fingerprint）、HEAD/Range。** 仍待做：enhanced-RTMP AV1/VP9、HLS PDT/LL-HLS。
 
 ## 验证命令
 

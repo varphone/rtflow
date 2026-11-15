@@ -12,19 +12,66 @@ fn gcd(mut left: u32, mut right: u32) -> u32 {
 
 #[allow(clippy::too_many_arguments)]
 fn video_fmtp(codec: Codec, config: Option<&[u8]>) -> Option<String> {
-    if codec != Codec::H264 {
+    let config = config?;
+    match codec {
+        Codec::H264 => {
+            let params = crate::rtmp::flv::extract_sps_pps_from_avcc_config(config)?;
+            if params.len() < 2 {
+                return None;
+            }
+            use base64::{Engine, engine::general_purpose::STANDARD};
+            Some(format!(
+                "profile-level-id=42e01e;sprop-parameter-sets={},{}",
+                STANDARD.encode(&params[0]),
+                STANDARD.encode(&params[1])
+            ))
+        }
+        Codec::H265 => {
+            let (vps, sps, pps) = h265_parameter_sets_from_hvcc(config)?;
+            Some(crate::media::bitstream::h265_fmtp(&vps, &sps, &pps))
+        }
+        _ => None,
+    }
+}
+
+/// Extract VPS/SPS/PPS from a HEVCDecoderConfigurationRecord (`hvcC`).
+fn h265_parameter_sets_from_hvcc(config: &[u8]) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>)> {
+    if config.len() < 23 || config[0] != 1 {
         return None;
     }
-    let params = crate::rtmp::flv::extract_sps_pps_from_avcc_config(config?)?;
-    if params.len() < 2 {
-        return None;
+    let num_arrays = config[22] as usize;
+    let mut pos = 23usize;
+    let mut vps = None;
+    let mut sps = None;
+    let mut pps = None;
+    for _ in 0..num_arrays {
+        if pos + 3 > config.len() {
+            return None;
+        }
+        let nal_type = config[pos] & 0x3f;
+        pos += 1;
+        let count = u16::from_be_bytes([config[pos], config[pos + 1]]) as usize;
+        pos += 2;
+        for _ in 0..count {
+            if pos + 2 > config.len() {
+                return None;
+            }
+            let len = u16::from_be_bytes([config[pos], config[pos + 1]]) as usize;
+            pos += 2;
+            if pos + len > config.len() {
+                return None;
+            }
+            let nal = config[pos..pos + len].to_vec();
+            pos += len;
+            match nal_type {
+                32 => vps = Some(nal),
+                33 => sps = Some(nal),
+                34 => pps = Some(nal),
+                _ => {}
+            }
+        }
     }
-    use base64::{Engine, engine::general_purpose::STANDARD};
-    Some(format!(
-        "profile-level-id=42e01e;sprop-parameter-sets={},{}",
-        STANDARD.encode(&params[0]),
-        STANDARD.encode(&params[1])
-    ))
+    Some((vps?, sps?, pps?))
 }
 
 #[allow(clippy::too_many_arguments)] // protocol metadata fields stay explicit
