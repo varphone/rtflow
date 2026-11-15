@@ -87,7 +87,9 @@ impl HlsVodManager {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
         if !valid || id == "." || id == ".." || id.starts_with('.') {
-            return Err(rtflow_core::error::Error::InvalidConfig("invalid VOD id".into()));
+            return Err(rtflow_core::error::Error::InvalidConfig(
+                "invalid VOD id".into(),
+            ));
         }
         let directory = self.config.cache_dir.join(id);
         let fingerprint = entry.source.fingerprint();
@@ -134,7 +136,9 @@ impl HlsVodManager {
             Ok::<(), rtflow_core::error::Error>(())
         })
         .await
-        .map_err(|error| rtflow_core::error::Error::Media(format!("VOD worker failed: {error}")))??;
+        .map_err(|error| {
+            rtflow_core::error::Error::Media(format!("VOD worker failed: {error}"))
+        })??;
         Ok(directory)
     }
 

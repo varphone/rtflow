@@ -7,12 +7,12 @@ pub use super::continuity::{
     ContinuityPolicy, KeyframeCache, StartupCacheConfig, TimelineNormalizer, TimelineSnapshot,
     TrackCompatibility,
 };
-#[cfg(feature = "tls")]
-use rtflow_security::TlsClientConfig;
-pub use rtflow_rtsp::transport::UpstreamTransport;
 use rtflow_media::MediaDescription;
 use rtflow_rtp::JitterBufferConfig;
 use rtflow_rtsp::auth::Credentials;
+pub use rtflow_rtsp::transport::UpstreamTransport;
+#[cfg(feature = "tls")]
+use rtflow_security::TlsClientConfig;
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},

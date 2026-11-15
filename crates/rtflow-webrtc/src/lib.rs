@@ -14,8 +14,8 @@
 //! # Example
 //!
 //! ```no_run
-//! use rtflow::webrtc::{WebRtcConfig, create_webrtc_handlers};
-//! use rtflow::mount::MountRegistry;
+//! use rtflow_webrtc::{WebRtcConfig, create_webrtc_handlers};
+//! use rtflow_mount::MountRegistry;
 //! use std::sync::Arc;
 //!
 //! # async fn example() {

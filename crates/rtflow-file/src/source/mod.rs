@@ -3,11 +3,10 @@ use super::matroska::MatroskaDemuxer;
 #[cfg(feature = "mp4")]
 use super::mp4::Mp4Demuxer;
 use super::{mpeg_ts::MpegTsDemuxer, raw};
-pub use rtflow_media::demux::{DemuxedSample, Demuxer};
-#[cfg(feature = "server")]
-use crate::mount::{LocalPublisher, PushResult};
 use rtflow_core::error::{Error, Result};
+pub use rtflow_media::demux::{DemuxedSample, Demuxer};
 use rtflow_media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription};
+use rtflow_mount::{LocalPublisher, PushResult};
 use rtflow_pipeline::{ElementId, IngressOutcome, PipelineIngress};
 use std::{
     path::{Path, PathBuf},
@@ -182,8 +181,6 @@ impl FileSource {
     pub fn into_demuxer(self) -> Box<dyn Demuxer> {
         self.demuxer
     }
-
-    #[cfg(feature = "server")]
     pub fn play(self, publisher: LocalPublisher) -> FilePlayback {
         self.play_target(PlaybackTarget::Publisher(publisher))
     }
@@ -294,7 +291,6 @@ impl FileSource {
 }
 
 enum PlaybackTarget {
-    #[cfg(feature = "server")]
     Publisher(LocalPublisher),
     Pipeline {
         ingress: PipelineIngress,
@@ -305,7 +301,6 @@ enum PlaybackTarget {
 impl PlaybackTarget {
     fn consumer_count(&self) -> usize {
         match self {
-            #[cfg(feature = "server")]
             Self::Publisher(publisher) => publisher.subscriber_count(),
             Self::Pipeline { .. } => 1,
         }
@@ -313,7 +308,6 @@ impl PlaybackTarget {
 
     fn is_closed(&self) -> bool {
         match self {
-            #[cfg(feature = "server")]
             Self::Publisher(publisher) => publisher.is_closed(),
             Self::Pipeline { .. } => false,
         }
@@ -321,7 +315,6 @@ impl PlaybackTarget {
 
     fn try_push(&self, unit: AccessUnit) -> Result<bool> {
         match self {
-            #[cfg(feature = "server")]
             Self::Publisher(publisher) => {
                 Ok(matches!(publisher.try_push(unit)?, PushResult::Accepted))
             }

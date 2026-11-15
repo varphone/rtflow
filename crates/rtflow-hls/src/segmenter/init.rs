@@ -1,8 +1,8 @@
 use super::TrackState;
 use super::entries::{write_audio_entry, write_video_entry};
 use super::sps::{h264_dimensions_from_avcc, h265_dimensions_from_hvcc};
-use rtflow_media::{Codec, MediaDescription, MediaKind};
 use bytes::{BufMut, Bytes, BytesMut};
+use rtflow_media::{Codec, MediaDescription, MediaKind};
 
 /// Build fMP4 init segment (ftyp + moov).
 pub(super) fn build_init_segment(description: &MediaDescription, tracks: &[TrackState]) -> Bytes {

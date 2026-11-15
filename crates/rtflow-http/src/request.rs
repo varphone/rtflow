@@ -50,13 +50,13 @@ impl HttpRequest {
     }
 }
 
-pub(crate) enum ParseError {
+pub enum ParseError {
     Incomplete,
     TooLarge,
     Invalid,
 }
 
-pub(crate) fn parse_request(
+pub fn parse_request(
     buf: &[u8],
     max_header_bytes: usize,
     max_body_bytes: usize,

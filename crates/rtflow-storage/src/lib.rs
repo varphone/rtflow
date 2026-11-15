@@ -64,5 +64,3 @@ impl VodSource for RecordingVodSource {
         Some(format!("{}:{entries:?}", self.directory.display()))
     }
 }
-
-

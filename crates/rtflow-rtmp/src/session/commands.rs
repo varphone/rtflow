@@ -363,7 +363,7 @@ pub(super) async fn handle_command(
             let description = MediaDescription {
                 session_name: stream_name.into(),
                 tracks: Vec::new(),
-                                connection: None,
+                connection: None,
             };
 
             let mount_config = MountConfig::Publisher {

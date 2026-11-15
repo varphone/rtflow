@@ -95,10 +95,7 @@ impl MountOptionsBuilder {
         self
     }
 
-    pub fn startup_cache_config(
-        mut self,
-        value: crate::continuity::StartupCacheConfig,
-    ) -> Self {
+    pub fn startup_cache_config(mut self, value: crate::continuity::StartupCacheConfig) -> Self {
         self.options.startup_cache_config = Some(value);
         self
     }
@@ -285,7 +282,7 @@ impl MountRegistry {
             stats: {
                 #[cfg_attr(not(feature = "metrics"), allow(unused_mut))]
                 let mut counters = StreamCounters::default();
-                                if let Some(global) = &self.global {
+                if let Some(global) = &self.global {
                     counters.attach_global(global.clone());
                 } else if let Some(sink) = &options.event_sink {
                     // Gateway-style registries carry metrics through the
@@ -297,15 +294,15 @@ impl MountRegistry {
                 counters
             },
             description: std::sync::RwLock::new(description.clone()),
-                startup_cache: Mutex::new(startup_cache),
-                startup_cache_config: options.startup_cache_config.unwrap_or_default(),
+            startup_cache: Mutex::new(startup_cache),
+            startup_cache_config: options.startup_cache_config.unwrap_or_default(),
             bootstrap: Mutex::new(std::array::from_fn(|_| None)),
             codec_by_track: std::sync::RwLock::new(codec_lookup_table(&description)),
             event_sink: options
                 .event_sink
                 .unwrap_or_else(|| Arc::new(rtflow_core::observe::NoopEventSink)),
             cancel: options.cancel.unwrap_or_default(),
-                proxy_running: AtomicBool::new(false),
+            proxy_running: AtomicBool::new(false),
             publishers: AtomicUsize::new(0),
             publisher_claimed: AtomicBool::new(false),
             active_sessions: AtomicUsize::new(0),

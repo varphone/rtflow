@@ -1,8 +1,8 @@
 use super::TrackState;
 use super::init::write_styp;
 use super::util::{composition_offset_ticks, duration_to_ticks};
-use rtflow_media::MediaKind;
 use bytes::{BufMut, Bytes, BytesMut};
+use rtflow_media::MediaKind;
 
 /// Build fMP4 media segment (styp + moof + mdat).
 pub(super) fn build_media_segment(tracks: &mut [TrackState], sequence: u64) -> Bytes {

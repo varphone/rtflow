@@ -105,7 +105,7 @@ impl TsStreamDemuxer {
         Some(MediaDescription {
             session_name: "srt-stream".into(),
             tracks: track_descriptions,
-                        connection: None,
+            connection: None,
         })
     }
 

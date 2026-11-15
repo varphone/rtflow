@@ -46,7 +46,6 @@ impl LocalPublisher {
             // to the live edge, which stalls VLC for seconds.
             self.inner.auto_inject_fmtp(&frame);
             self.inner.update_bootstrap(&frame);
-            #[cfg(feature = "server")]
             if let Ok(mut cache) = self.inner.startup_cache.try_lock() {
                 cache.push(std::sync::Arc::new(frame));
             }
@@ -97,7 +96,6 @@ impl LocalPublisher {
             // to the live edge, which stalls VLC for seconds.
             self.inner.auto_inject_fmtp(&frame);
             self.inner.update_bootstrap(&frame);
-            #[cfg(feature = "server")]
             if let Ok(mut cache) = self.inner.startup_cache.try_lock() {
                 cache.push(std::sync::Arc::new(frame));
             }

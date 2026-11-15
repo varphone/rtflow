@@ -18,9 +18,9 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
+use rtflow_core::error::{Error, Result};
 use rtflow_media::{AccessUnit, Codec, MediaDescription, MediaKind};
 use rtflow_mount::{LocalPublisher, MountConfig, MountHandle, MountRegistry, PushResult};
-use rtflow_core::error::{Error, Result};
 
 /// Trait for RTMP publish authentication.
 ///
@@ -410,7 +410,8 @@ pub async fn serve_rtmp_session(
                         match video_data {
                             VideoData::AvcSequenceHeader(data) => {
                                 *video_seq_header = Some(data.clone());
-                                if let Ok(mut headers) = mount_handle.mount().rtmp_seq_headers.lock()
+                                if let Ok(mut headers) =
+                                    mount_handle.mount().rtmp_seq_headers.lock()
                                 {
                                     headers.insert(0, data);
                                 }
@@ -432,7 +433,8 @@ pub async fn serve_rtmp_session(
                             }
                             VideoData::HevcSequenceHeader(data) => {
                                 *video_seq_header = Some(data.clone());
-                                if let Ok(mut headers) = mount_handle.mount().rtmp_seq_headers.lock()
+                                if let Ok(mut headers) =
+                                    mount_handle.mount().rtmp_seq_headers.lock()
                                 {
                                     headers.insert(0, data);
                                 }
@@ -511,7 +513,8 @@ pub async fn serve_rtmp_session(
                             VideoData::Vp9SequenceHeader(data) => {
                                 let codec = Codec::Vp9;
                                 *video_seq_header = Some(data.clone());
-                                if let Ok(mut headers) = mount_handle.mount().rtmp_seq_headers.lock()
+                                if let Ok(mut headers) =
+                                    mount_handle.mount().rtmp_seq_headers.lock()
                                 {
                                     headers.insert(0, data);
                                 }
@@ -534,7 +537,8 @@ pub async fn serve_rtmp_session(
                             VideoData::Av1SequenceHeader(data) => {
                                 let codec = Codec::Av1;
                                 *video_seq_header = Some(data.clone());
-                                if let Ok(mut headers) = mount_handle.mount().rtmp_seq_headers.lock()
+                                if let Ok(mut headers) =
+                                    mount_handle.mount().rtmp_seq_headers.lock()
                                 {
                                     headers.insert(0, data);
                                 }
@@ -632,7 +636,8 @@ pub async fn serve_rtmp_session(
                                     *audio_channels = Some(channels);
                                 }
                                 let track_id: u8 = if *has_video { 1 } else { 0 };
-                                if let Ok(mut headers) = mount_handle.mount().rtmp_seq_headers.lock()
+                                if let Ok(mut headers) =
+                                    mount_handle.mount().rtmp_seq_headers.lock()
                                 {
                                     headers.insert(track_id, data);
                                 }

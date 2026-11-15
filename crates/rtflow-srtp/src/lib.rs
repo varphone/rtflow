@@ -20,8 +20,8 @@ mod key_derive;
 mod replay;
 mod srtcp;
 
-use rtflow_core::error::{Error, Result};
 use bytes::{Bytes, BytesMut};
+use rtflow_core::error::{Error, Result};
 use std::collections::HashMap;
 
 pub use key_derive::SessionKeys;
@@ -379,7 +379,9 @@ pub fn from_sdp_crypto(
         .decode(encoded.trim())
         .map_err(|_| rtflow_core::error::Error::Media("invalid SRTP inline key".into()))?;
     if decoded.len() < 30 {
-        return Err(rtflow_core::error::Error::Media("SRTP master key is too short".into()));
+        return Err(rtflow_core::error::Error::Media(
+            "SRTP master key is too short".into(),
+        ));
     }
     let mut master_key = [0u8; 16];
     master_key.copy_from_slice(&decoded[..16]);
@@ -398,8 +400,8 @@ mod tests {
 
     #[test]
     fn sdp_crypto_builds_contexts() {
-        use rtflow_media::crypto::SdpCrypto;
         use base64::Engine as _;
+        use rtflow_media::crypto::SdpCrypto;
         let crypto = SdpCrypto {
             tag: 1,
             crypto_suite: "AES_128_CM_HMAC_SHA1_80".into(),

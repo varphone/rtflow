@@ -130,9 +130,9 @@ where
     // negotiate H.264/VP8/VP9 video and Opus audio, so register the
     // standard set (profile-level-id 42e01f, packetization-mode 1, etc.).
     let mut media_engine = MediaEngine::default();
-    media_engine
-        .register_default_codecs()
-        .map_err(|e| rtflow_core::error::Error::Media(format!("WebRTC media engine init failed: {e}")))?;
+    media_engine.register_default_codecs().map_err(|e| {
+        rtflow_core::error::Error::Media(format!("WebRTC media engine init failed: {e}"))
+    })?;
     // AAC-LC (MPEG4-GENERIC) is not part of the default set but is
     // supported by Chrome/Safari WebRTC (not Firefox) — the common audio
     // codec of IP cameras alongside Opus and G.711 (PCMA/PCMU, which the
@@ -151,7 +151,9 @@ where
             },
             rtc::rtp_transceiver::rtp_sender::RtpCodecKind::Audio,
         )
-        .map_err(|e| rtflow_core::error::Error::Media(format!("WebRTC AAC registration failed: {e}")))?;
+        .map_err(|e| {
+            rtflow_core::error::Error::Media(format!("WebRTC AAC registration failed: {e}"))
+        })?;
 
     let config = RTCConfigurationBuilder::default().build();
     let builder = PeerConnectionBuilder::new()
@@ -160,10 +162,9 @@ where
         .with_handler(handler)
         .with_udp_addrs(udp_addrs);
 
-    let pc: Arc<dyn PeerConnection> =
-        Arc::new(builder.build().await.map_err(|e| {
-            rtflow_core::error::Error::Media(format!("WebRTC peer connection build failed: {e}"))
-        })?);
+    let pc: Arc<dyn PeerConnection> = Arc::new(builder.build().await.map_err(|e| {
+        rtflow_core::error::Error::Media(format!("WebRTC peer connection build failed: {e}"))
+    })?);
     Ok(pc)
 }
 

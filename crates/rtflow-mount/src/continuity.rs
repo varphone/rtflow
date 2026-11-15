@@ -389,8 +389,8 @@ fn apply_time_offset(value: Duration, offset_ns: i128) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rtflow_media::{Codec, MediaKind, TrackDescription};
     use bytes::Bytes;
+    use rtflow_media::{Codec, MediaKind, TrackDescription};
     use std::sync::Arc;
 
     fn description(codec: Codec) -> MediaDescription {

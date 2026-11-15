@@ -1,6 +1,6 @@
-use rtflow_media::Codec;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bytes::{BufMut, Bytes, BytesMut};
+use rtflow_media::Codec;
 use std::time::Duration;
 
 pub(super) fn duration_to_ticks(duration: Duration, timescale: u32) -> u64 {

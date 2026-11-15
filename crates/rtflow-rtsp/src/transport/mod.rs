@@ -1,6 +1,6 @@
 //! Transport-independent RTP delivery primitives shared by client and server.
-use rtflow_core::error::{Error, Result};
 use bytes::{Buf, Bytes, BytesMut};
+use rtflow_core::error::{Error, Result};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     net::{IpAddr, SocketAddr},

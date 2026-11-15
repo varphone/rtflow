@@ -1,9 +1,9 @@
 use super::packetizer::annex_b_nals;
 use super::{Depacketizer, Packetizer};
 use crate::{RtpHeader, RtpPacket};
+use bytes::Bytes;
 use rtflow_core::error::Error;
 use rtflow_media::Codec;
-use bytes::Bytes;
 
 use crate::{JitterBuffer, JitterBufferConfig};
 use rtflow_media::AccessUnit;

@@ -5,8 +5,8 @@
 //! - A 32-bit SRTCP index with an E (encryption) flag in the MSB.
 //! - The authentication tag covers the entire SRTCP packet including the index.
 
-use rtflow_core::error::{Error, Result};
 use bytes::{BufMut, Bytes, BytesMut};
+use rtflow_core::error::{Error, Result};
 
 use super::auth::HmacSha1_80;
 use super::cipher::Aes128Cm;

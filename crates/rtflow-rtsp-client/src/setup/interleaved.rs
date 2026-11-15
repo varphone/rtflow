@@ -244,10 +244,8 @@ pub(super) async fn connect_interleaved(
     let (mut reader, writer) = tokio::io::split(stream);
     let writer = Arc::new(Mutex::new(writer));
     let rtcp_writer = writer.clone();
-    let (tx, rx) = crate::queue::FrameReceiver::new(
-        options.output_queue_capacity,
-        options.max_output_bytes,
-    );
+    let (tx, rx) =
+        crate::queue::FrameReceiver::new(options.output_queue_capacity, options.max_output_bytes);
     let (response_tx, response_rx) = mpsc::channel(8);
     let cancel = CancellationToken::new();
     let reader_cancel = cancel.clone();

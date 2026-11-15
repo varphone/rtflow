@@ -2,8 +2,8 @@ use super::super::wire::{
     candidate_headers_cseq, encode_request_body, request_with_body, unsupported_error,
 };
 use rtflow_core::error::{Error, Result};
-use rtflow_rtsp::transport::InterleavedFrame;
 use rtflow_rtsp::auth::{authorization_from_challenge, basic_authorization};
+use rtflow_rtsp::transport::InterleavedFrame;
 use rtflow_rtsp::{Method, Response};
 use rtflow_runtime::io::{ControlConnection, ControlWriteHalf};
 use std::{

@@ -209,10 +209,10 @@ pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
 mod tests {
     use super::super::segmenter::Segment;
     use super::*;
+    use bytes::Bytes;
     use rtflow_http::HttpRequest;
     use rtflow_http::Method;
     use rtflow_http::ResponseWriter;
-    use bytes::Bytes;
     use std::collections::HashMap;
 
     fn segment(seq: u64) -> Segment {

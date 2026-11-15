@@ -1,6 +1,6 @@
 //! Bounded RTSP/1.0 framing primitives.
-use rtflow_core::error::{Error, Result};
 use bytes::{Buf, BytesMut};
+use rtflow_core::error::{Error, Result};
 use std::{collections::BTreeMap, str::FromStr};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Method {

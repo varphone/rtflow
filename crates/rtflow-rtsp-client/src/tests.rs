@@ -330,7 +330,7 @@ fn rtp_info_pairs_tracks_by_control_url_and_order() {
             rtflow_media::TrackDescription::h264_video(0, &[], &[], 176, 144, 25),
             rtflow_media::TrackDescription::aac_audio(1, 48_000, 2),
         ],
-                connection: None,
+        connection: None,
     };
     let response = response_with_headers(
         200,

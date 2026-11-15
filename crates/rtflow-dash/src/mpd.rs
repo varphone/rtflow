@@ -24,7 +24,9 @@ pub struct MpdConfig {
 impl MpdConfig {
     pub fn validate(&self) -> rtflow_core::error::Result<()> {
         if self.segment_duration.is_zero() {
-            return Err(rtflow_core::error::Error::Limit("DASH MPD segment duration"));
+            return Err(rtflow_core::error::Error::Limit(
+                "DASH MPD segment duration",
+            ));
         }
         if self.timescale == 0 {
             return Err(rtflow_core::error::Error::Limit("DASH MPD timescale"));
@@ -382,8 +384,8 @@ fn audio_codec_string(codec: rtflow_media::Codec) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rtflow_media::{Codec, TrackDescription};
     use bytes::Bytes;
+    use rtflow_media::{Codec, TrackDescription};
 
     fn test_description() -> MediaDescription {
         MediaDescription {
@@ -428,7 +430,7 @@ mod tests {
                     rtx: None,
                 },
             ],
-                        connection: None,
+            connection: None,
         }
     }
 

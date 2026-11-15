@@ -8,12 +8,12 @@ use rtflow_core::{
     error::{Error, Result},
     identity::SessionId,
 };
+use rtflow_framing::{ConnectionFramer, InboundFrame};
 use rtflow_media::{AccessUnit, MediaDescription, TrackDescription};
 use rtflow_rtcp::{CompoundPacket, Packet as RtcpPacket, SdesChunk, SdesItem};
 use rtflow_rtp::Packetizer;
 use rtflow_rtsp::sdp;
 use rtflow_rtsp::transport::{TransportSpec, UdpPair};
-use rtflow_framing::{ConnectionFramer, InboundFrame};
 use rtflow_runtime::io::ControlConnection;
 use std::{
     collections::HashMap,
@@ -285,9 +285,8 @@ pub(super) async fn connect(
     }
     let interleaved = match options.transport {
         rtflow_rtsp::transport::UpstreamTransport::TcpInterleaved => true,
-        rtflow_rtsp::transport::UpstreamTransport::Udp | rtflow_rtsp::transport::UpstreamTransport::Auto => {
-            false
-        }
+        rtflow_rtsp::transport::UpstreamTransport::Udp
+        | rtflow_rtsp::transport::UpstreamTransport::Auto => false,
     };
     let (stream, uri) = super::rtsp_client::open_control(url, options).await?;
     let mut stream = stream;

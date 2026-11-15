@@ -16,5 +16,5 @@ pub use rtflow_multicast as multicast;
 #[doc(inline)]
 pub use message::*;
 pub use range::{NptPosition, NptRange, TimelineMode};
-pub use transport::{InterleavedFrame, TransportMode, TransportSpec, UdpPair};
 pub use transport::UpstreamTransport;
+pub use transport::{InterleavedFrame, TransportMode, TransportSpec, UdpPair};

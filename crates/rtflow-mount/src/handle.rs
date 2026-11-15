@@ -20,14 +20,13 @@ pub struct Mount {
     /// NACK sequence lists for the interleaved sender's retransmission cache.
     pub nack_requests: broadcast::Sender<NackRequest>,
     /// Optional per-mount live NPT timeline override.
-    #[cfg_attr(not(feature = "server"), allow(dead_code))]
     pub timeline: Option<rtflow_rtsp::range::TimelineMode>,
     pub stats: StreamCounters,
     /// Live media description. RTMP/SRT publishers update this from
     /// sequence headers/metadata after the mount was created.
     pub description: std::sync::RwLock<MediaDescription>,
-        pub startup_cache: Mutex<KeyframeCache>,
-        #[allow(dead_code)] // read by update_description from protocol crates
+    pub startup_cache: Mutex<KeyframeCache>,
+    #[allow(dead_code)] // read by update_description from protocol crates
     pub startup_cache_config: crate::continuity::StartupCacheConfig,
     /// Per-track bootstrap frame: fixed slots indexed by track_id (avoids
     /// hashing + allocating on every pushed frame).
@@ -39,7 +38,7 @@ pub struct Mount {
     #[allow(dead_code)]
     pub event_sink: Arc<dyn EventSink>,
     pub cancel: CancellationToken,
-        pub proxy_running: AtomicBool,
+    pub proxy_running: AtomicBool,
     pub publishers: AtomicUsize,
     pub publisher_claimed: AtomicBool,
     /// Unique active play sessions (clients) on this mount. Tracked by the
@@ -135,7 +134,7 @@ impl Mount {
         if self.cancel.is_cancelled() {
             return Err(crate::FrameRecvError::Closed);
         }
-                {
+        {
             // Cache updates are best-effort: a concurrent subscriber holding
             // the lock must not block the publisher hot path, and dropping
             // one frame from the cache is harmless.
@@ -167,7 +166,10 @@ impl Mount {
     /// take a snapshot per session/request, so this must happen before the
     /// first PLAY/segmenter subscription.
     #[allow(dead_code)] // called by RTMP/SRT ingest when those features are enabled
-    pub fn update_description(&self, description: MediaDescription) -> rtflow_core::error::Result<()> {
+    pub fn update_description(
+        &self,
+        description: MediaDescription,
+    ) -> rtflow_core::error::Result<()> {
         let mut current = self
             .description
             .write()
@@ -177,7 +179,7 @@ impl Mount {
             .codec_by_track
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = codec_lookup_table(&description);
-                {
+        {
             let cache = KeyframeCache::new(&description, self.startup_cache_config)?;
             *self
                 .startup_cache
@@ -278,7 +280,7 @@ impl Mount {
         &self,
         track_id: u8,
     ) -> (crate::FrameReceiver, Vec<Arc<AccessUnit>>) {
-                {
+        {
             let cache = self
                 .startup_cache
                 .lock()
@@ -335,11 +337,9 @@ impl Mount {
         }
     }
 
-    pub fn subscribe_with_all_startup(
-        &self,
-    ) -> (crate::FrameReceiver, Vec<Arc<AccessUnit>>) {
+    pub fn subscribe_with_all_startup(&self) -> (crate::FrameReceiver, Vec<Arc<AccessUnit>>) {
         let receiver = self.frames.subscribe();
-                {
+        {
             let cache = self
                 .startup_cache
                 .lock()
@@ -395,7 +395,10 @@ impl MountHandle {
     }
 
     /// Replace the media description for an ingest-created mount.
-    pub fn update_description(&self, description: MediaDescription) -> rtflow_core::error::Result<()> {
+    pub fn update_description(
+        &self,
+        description: MediaDescription,
+    ) -> rtflow_core::error::Result<()> {
         self.inner.update_description(description)
     }
 
@@ -486,7 +489,7 @@ impl MountHandle {
         // snapshot. RTSP track subscriptions are included here too.
         let broadcast_receivers = self.inner.frames.receiver_count();
         let s = self.inner.stats.snapshot(subscribers);
-                let (startup_cache_frames, startup_cache_bytes) = self
+        let (startup_cache_frames, startup_cache_bytes) = self
             .inner
             .startup_cache
             .lock()
@@ -496,7 +499,7 @@ impl MountHandle {
             subscriber_count: s.subscribers,
             broadcast_receivers,
             publisher_connected: self.inner.publishers.load(Ordering::Relaxed) > 0,
-                        proxy_state: match &self.inner.config {
+            proxy_state: match &self.inner.config {
                 MountConfig::Proxy { upstream } => Some(upstream.state()),
                 _ => None,
             },

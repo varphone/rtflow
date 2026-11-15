@@ -5,8 +5,8 @@ pub mod response;
 mod router;
 
 pub use request::{HttpRequest, Method};
-#[allow(unused_imports)] // used by the WS-FLV handshake when that feature is enabled
-pub(crate) use request::{ParseError, parse_request};
+#[doc(hidden)]
+pub use request::{ParseError, parse_request};
 pub use response::ResponseWriter;
 pub use router::ConnWriter;
 pub use router::{Handler, Router};

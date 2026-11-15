@@ -1,7 +1,7 @@
 use crate::{RtpHeader, RtpPacket};
+use bytes::{BufMut, Bytes, BytesMut};
 use rtflow_core::error::{Error, Result};
 use rtflow_media::{AccessUnit, Codec};
-use bytes::{BufMut, Bytes, BytesMut};
 
 #[derive(Clone, Debug)]
 pub struct Packetizer {
@@ -99,7 +99,9 @@ impl Packetizer {
             Codec::Mpeg4 => self.mpeg4(frame),
             // `Codec` is `#[non_exhaustive]`; a codec this build has no
             // packetizer for is a caller error, not a panic.
-            _ => Err(Error::Unsupported("RTP packetization for this codec".into())),
+            _ => Err(Error::Unsupported(
+                "RTP packetization for this codec".into(),
+            )),
         }
     }
     /// VP9 payload descriptor (draft-ietf-payload-vp9, the format used by

@@ -15,11 +15,11 @@
 //! # Example
 //!
 //! ```no_run
-//! use rtflow::rtmp::RtmpServer;
-//! use rtflow::mount::MountRegistry;
+//! use rtflow_rtmp::RtmpServer;
+//! use rtflow_mount::MountRegistry;
 //! use std::sync::Arc;
 //!
-//! # async fn example() -> rtflow::Result<()> {
+//! # async fn example() -> rtflow_core::error::Result<()> {
 //! let mounts = Arc::new(MountRegistry::new(100));
 //! let server = RtmpServer::bind("0.0.0.0:1935", mounts).await?;
 //! server.run().await?;
@@ -40,8 +40,8 @@ use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use rtflow_mount::MountRegistry;
 use rtflow_core::error::{Error, Result as RtflowResult};
+use rtflow_mount::MountRegistry;
 
 /// RTMP server configuration.
 #[derive(Clone, Debug)]

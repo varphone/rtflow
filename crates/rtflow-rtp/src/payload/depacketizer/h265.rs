@@ -1,7 +1,7 @@
 use super::Depacketizer;
 use super::MAX_ASSEMBLY_BYTES;
-use rtflow_core::error::{Error, Result};
 use bytes::{Bytes, BytesMut};
+use rtflow_core::error::{Error, Result};
 
 impl Depacketizer {
     pub(super) fn h265(&mut self, p: Bytes) -> Result<Option<(Bytes, bool)>> {

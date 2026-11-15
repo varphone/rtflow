@@ -23,11 +23,11 @@ use super::session::{SessionRegistry, SessionState, SessionType, WebrtcSession};
 use super::transport::{
     GATHER_TIMEOUT, PcHandler, PcState, build_peer_connection, sender_payload_type,
 };
+use rtflow_core::error::{Error, Result};
 use rtflow_http::ResponseWriter;
 use rtflow_media::Codec;
 use rtflow_mount::MountRegistry;
 use rtflow_rtp::Packetizer;
-use rtflow_core::error::{Error, Result};
 
 /// WHEP endpoint configuration.
 #[derive(Clone, Debug)]

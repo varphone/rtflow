@@ -1,10 +1,10 @@
 //! Cooperative task supervision with bounded shutdown.
+use futures::FutureExt;
 use rtflow_core::{
     error::{Operation, Result},
     identity::TaskId,
     observe::{EventSink, FrameworkEvent, NoopEventSink, RuntimeEvent, emit},
 };
-use futures::FutureExt;
 use std::{
     collections::HashMap,
     future::Future,

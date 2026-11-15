@@ -4,8 +4,8 @@
 //! OBU header with the size bit cleared and no LEB size field. The
 //! depacketizer restores the size field and emits a complete temporal unit.
 
-use rtflow_core::error::{Error, Result};
 use bytes::Bytes;
+use rtflow_core::error::{Error, Result};
 
 pub(crate) struct Obu {
     pub header: Vec<u8>,

@@ -46,24 +46,24 @@ pub struct StreamCounters {
     pub rtcp_publisher_sender_reports: AtomicU64,
     /// Optional global registry to mirror frame counters into
     /// (`rtflow_frames_accepted_total` / `rtflow_frames_dropped_total`).
-        global: Option<Arc<rtflow_core::metrics::MetricsRegistry>>,
+    global: Option<Arc<rtflow_core::metrics::MetricsRegistry>>,
 }
 
 impl StreamCounters {
     /// Mirror frame counters into a global metrics registry (once per mount).
-        pub fn attach_global(&mut self, registry: Arc<rtflow_core::metrics::MetricsRegistry>) {
+    pub fn attach_global(&mut self, registry: Arc<rtflow_core::metrics::MetricsRegistry>) {
         self.global = Some(registry);
     }
 
     pub fn add_accepted(&self, value: u64) {
         self.accepted_frames.fetch_add(value, Ordering::Relaxed);
-                if let Some(global) = &self.global {
+        if let Some(global) = &self.global {
             global.frames_accepted.fetch_add(value, Ordering::Relaxed);
         }
     }
     pub fn add_dropped(&self, value: u64) {
         self.dropped_frames.fetch_add(value, Ordering::Relaxed);
-                if let Some(global) = &self.global {
+        if let Some(global) = &self.global {
             global.frames_dropped.fetch_add(value, Ordering::Relaxed);
         }
     }
@@ -71,7 +71,7 @@ impl StreamCounters {
     pub fn add_rtp(&self, packets: u64, octets: u64) {
         self.rtp_packets.fetch_add(packets, Ordering::Relaxed);
         self.rtp_octets.fetch_add(octets, Ordering::Relaxed);
-                if let Some(global) = &self.global {
+        if let Some(global) = &self.global {
             global
                 .rtp_packets_sent
                 .fetch_add(packets, Ordering::Relaxed);

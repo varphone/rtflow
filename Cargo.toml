@@ -37,6 +37,9 @@ rtflow-webrtc = { path = "crates/rtflow-webrtc", version = "0.3.0" }
 rtflow-gst = { path = "crates/rtflow-gst", version = "0.3.0" }
 rtflow-gateway = { path = "crates/rtflow-gateway", version = "0.3.0" }
 rtflow-admin = { path = "crates/rtflow-admin", version = "0.3.0" }
+rtflow-metrics = { path = "crates/rtflow-metrics", version = "0.3.0" }
+rtflow-source = { path = "crates/rtflow-source", version = "0.3.0" }
+rtflow = { path = "crates/rtflow", version = "0.3.0" }
 rtflow-testkit = { path = "crates/rtflow-testkit" }
 
 # Third-party
@@ -51,7 +54,6 @@ getrandom = "0.2"
 gstreamer = { version = "0.25" }
 gstreamer-app = { version = "0.25" }
 hmac = "0.13"
-http = { version = "1" }
 matroska-demuxer = { version = "0.8" }
 md-5 = "0.11"
 mp4box = { version = "0.12", default-features = false }

@@ -13,26 +13,27 @@
 //! # Example
 //!
 //! ```no_run
-//! use rtflow::dash::{create_dash_handlers, DashConfig};
-//! use rtflow::server::RtspServer;
+//! use rtflow_dash::{create_dash_handlers, DashConfig};
+//! use rtflow_mount::{MountConfig, MountHandle};
 //!
-//! # async fn example(server: &RtspServer) -> rtflow::Result<()> {
-//! let mount = server.register_mount("/live/cam", /* config */ todo!()).await?;
-//! let (mpd_handler, segment_handler, init_handler) =
-//!     create_dash_handlers(DashConfig::default(), &mount);
-//! // Register handlers with HTTP server router...
-//! # Ok(())
-//! # }
+//! fn example(mount: &MountHandle) {
+//!     let (mpd_handler, segment_handler, init_handler) =
+//!         create_dash_handlers(DashConfig::default(), mount);
+//!     let _ = (mpd_handler, segment_handler, init_handler);
+//!     let _ = MountConfig::Local {
+//!         description: mount.description(),
+//!     };
+//! }
 //! ```
 pub mod handler;
 pub mod mpd;
 
+use handler::DashState;
+use mpd::MpdConfig;
 use rtflow_hls::segment_ring::SegmentRing;
 use rtflow_hls::segmenter::{Segmenter, SegmenterConfig};
 use rtflow_http::Handler;
 use rtflow_media::MediaDescription;
-use handler::DashState;
-use mpd::MpdConfig;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};

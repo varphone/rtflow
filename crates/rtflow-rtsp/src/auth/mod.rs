@@ -1,4 +1,3 @@
-use rtflow_core::error::{Error, Result};
 use crate::Method;
 use base64::{
     Engine as _,
@@ -6,6 +5,7 @@ use base64::{
 };
 use futures::future::BoxFuture;
 use md5::{Digest, Md5};
+use rtflow_core::error::{Error, Result};
 use sha2::{Digest as ShaDigest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap},

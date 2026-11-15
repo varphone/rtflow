@@ -319,10 +319,8 @@ pub(super) async fn connect_udp(
         }
         spec.pts_base = pts_base;
     }
-    let (tx, rx) = crate::queue::FrameReceiver::new(
-        options.output_queue_capacity,
-        options.max_output_bytes,
-    );
+    let (tx, rx) =
+        crate::queue::FrameReceiver::new(options.output_queue_capacity, options.max_output_bytes);
     let cancel = CancellationToken::new();
     let quality = Arc::new(std::sync::Mutex::new(HashMap::new()));
     let mut tasks = Vec::new();

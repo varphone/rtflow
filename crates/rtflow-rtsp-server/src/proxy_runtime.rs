@@ -1,5 +1,4 @@
 //! On-demand proxy task lifecycle owned by a server mount.
-use rtflow_mount::{Mount, MountConfig};
 use rtflow_core::{
     error::Operation,
     observe::{FrameworkEvent, ProxyEvent, emit},
@@ -8,6 +7,7 @@ use rtflow_mount::continuity::{TimelineNormalizer, TrackCompatibility};
 use rtflow_mount::upstream::{
     PolicySelector, ProxyState, UpstreamConfig, UpstreamHealth, UpstreamSelector,
 };
+use rtflow_mount::{Mount, MountConfig};
 use rtflow_rtsp_client::{ClientOptions, RtspClient};
 use rtflow_runtime::{TaskSpec, TaskSupervisor};
 

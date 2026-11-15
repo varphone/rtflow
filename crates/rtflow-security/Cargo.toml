@@ -11,11 +11,9 @@ publish = true
 
 [features]
 default = []
-tls = ["dep:rustls", "dep:rustls-pemfile", "dep:tokio-rustls"]
+tls = ["dep:rustls", "dep:rustls-pemfile"]
 
 [dependencies]
 rtflow-core.workspace = true
 rustls = { workspace = true, optional = true }
 rustls-pemfile = { workspace = true, optional = true }
-tokio-rustls = { workspace = true, optional = true }
-tokio.workspace = true

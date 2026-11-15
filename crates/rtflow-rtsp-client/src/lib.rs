@@ -1,10 +1,5 @@
 //! RTSP client control-plane primitives.
 
-#[cfg(feature = "tls")]
-use rtflow_security::TlsClientConfig;
-/// Transport selection for RTSP client connections (re-exported here so
-/// callers do not need to reach into `rtflow::proxy`/`rtflow::transport`).
-pub use rtflow_rtsp::transport::UpstreamTransport;
 use rtflow_core::{
     error::{Error, Result, RetryClass},
     identity::SessionId,
@@ -13,10 +8,15 @@ use rtflow_core::{
 use rtflow_media::{AccessUnit, MediaDescription};
 use rtflow_rtcp::{ReceptionSnapshot, RtcpSession};
 use rtflow_rtp::{Depacketizer, JitterBuffer, JitterBufferConfig, RtpPacket};
-use rtflow_runtime::io::{ControlConnection, ControlWriteHalf};
 use rtflow_rtsp::auth::{Credentials, authorization_from_challenge, basic_authorization};
 use rtflow_rtsp::range::NptRange;
+/// Transport selection for RTSP client connections (re-exported here so
+/// callers do not need to reach into `rtflow::proxy`/`rtflow::transport`).
+pub use rtflow_rtsp::transport::UpstreamTransport;
 use rtflow_rtsp::{self as rtsp, Message, Method, Response, sdp};
+use rtflow_runtime::io::{ControlConnection, ControlWriteHalf};
+#[cfg(feature = "tls")]
+use rtflow_security::TlsClientConfig;
 use std::{
     collections::{BTreeMap, HashMap},
     str::FromStr,

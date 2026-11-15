@@ -1,7 +1,7 @@
 use super::*;
 
-use rtflow_media::Codec;
 use bytes::Bytes;
+use rtflow_media::Codec;
 use std::time::Duration;
 
 struct Sink {

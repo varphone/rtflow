@@ -15,11 +15,11 @@ use webrtc::peer_connection::{PeerConnection, RTCSessionDescription};
 
 use super::session::{SessionRegistry, SessionState, SessionType};
 use super::transport::{GATHER_TIMEOUT, PcHandler, PcState, build_peer_connection};
+use rtflow_core::error::{Error, Result};
 use rtflow_http::ResponseWriter;
 use rtflow_media::Codec;
 use rtflow_mount::MountRegistry;
 use rtflow_rtp::Depacketizer;
-use rtflow_core::error::{Error, Result};
 
 /// WHIP endpoint configuration.
 #[derive(Clone, Debug)]

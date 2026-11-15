@@ -19,11 +19,11 @@
 //! # Example
 //!
 //! ```no_run
-//! use rtflow::srt::SrtServer;
-//! use rtflow::mount::MountRegistry;
+//! use rtflow_srt::SrtServer;
+//! use rtflow_mount::MountRegistry;
 //! use std::sync::Arc;
 //!
-//! # async fn example() -> rtflow::Result<()> {
+//! # async fn example() -> rtflow_core::error::Result<()> {
 //! let mounts = Arc::new(MountRegistry::new(100));
 //! let server = SrtServer::bind("0.0.0.0:9000", mounts).await?;
 //! server.run().await?;
@@ -52,8 +52,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use tsbpd::TsbpdBuffer;
 
-use rtflow_mount::{MountConfig, MountRegistry};
 use rtflow_core::error::{Error, Result};
+use rtflow_mount::{MountConfig, MountRegistry};
 
 pub struct SrtServer {
     socket: Arc<UdpSocket>,

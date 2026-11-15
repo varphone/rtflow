@@ -1,0 +1,27 @@
+[package]
+name = "rtflow-gateway"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Multi-protocol gateway orchestration for rtflow"
+readme = false
+publish = true
+
+[features]
+default = []
+http = []
+rtmp = []
+srt = []
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+rtflow-mount.workspace = true
+rtflow-http.workspace = true
+rtflow-rtsp-server.workspace = true
+rtflow-rtmp.workspace = true
+rtflow-srt.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true

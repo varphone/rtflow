@@ -7,8 +7,8 @@
 //! its IR (`TrackSpec` + `Sample`) and expose the result as an HLS `Segment`.
 
 use super::{Segment, SegmentFormat, SegmenterConfig};
-use rtflow_media::{Codec, MediaDescription, MediaKind};
 use bytes::Bytes;
+use rtflow_media::{Codec, MediaDescription, MediaKind};
 use std::time::Duration;
 use transmux::avc_config::AVCConfigurationBox;
 use transmux::hevc_config::HEVCConfigurationBox;

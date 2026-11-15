@@ -1,0 +1,18 @@
+[package]
+name = "rtflow-metrics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Prometheus/JSON metrics exporter for rtflow servers"
+readme = false
+publish = true
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-mount.workspace = true
+rtflow-http.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true

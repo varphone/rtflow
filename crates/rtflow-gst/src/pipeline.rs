@@ -1,8 +1,8 @@
 //! GStreamer pipeline builder for media capture and encoding.
 
-use rtflow_media::{Codec, MediaKind};
 use gstreamer as gst;
 use gstreamer::prelude::*;
+use rtflow_media::{Codec, MediaKind};
 
 /// Video source configuration.
 #[derive(Clone, Debug)]

@@ -1,0 +1,30 @@
+[package]
+name = "rtflow-http-flv"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "HTTP-FLV and WS-FLV endpoints for rtflow"
+readme = false
+publish = true
+
+[features]
+default = []
+ws = []
+metrics = []
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+rtflow-mount.workspace = true
+rtflow-http.workspace = true
+base64.workspace = true
+bytes.workspace = true
+sha1.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+rtflow-rtsp-server.workspace = true

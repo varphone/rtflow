@@ -1,0 +1,108 @@
+[package]
+name = "rtflow"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Async RTSP/RTP client, server and on-demand proxy framework for embedded media"
+documentation = "https://docs.rs/rtflow"
+readme = "../../README.md"
+categories = ["network-programming", "asynchronous", "multimedia"]
+keywords = ["rtsp", "rtp", "streaming", "media", "embedded"]
+publish = ["crates-io"]
+autobins = false
+autoexamples = false
+
+[package.metadata.docs.rs]
+features = ["rtmp", "srt", "dash", "webrtc", "srtp", "tls"]
+
+# The umbrella crate. Feature names are the public contract; each one turns on
+# the crate that implements it. See docs/architecture/crates.md.
+[features]
+default = ["full"]
+full = [
+    "tls", "mp4", "mkv", "client", "server", "file-storage",
+    "metrics", "http", "http-flv", "hls", "ws-flv", "srtp", "multicast",
+]
+embedded-gateway = ["client", "server", "tls", "metrics", "http", "http-flv", "hls", "ws-flv"]
+experimental-protocols = ["dash", "rtmp", "srt", "webrtc"]
+
+tls = ["rtflow-security/tls", "rtflow-rtsp-client/tls", "rtflow-rtsp-server/tls", "rtflow-mount/tls"]
+mp4 = ["rtflow-file/mp4"]
+mkv = ["rtflow-file/mkv"]
+client = ["dep:rtflow-rtsp-client"]
+server = ["dep:rtflow-rtsp-server"]
+file-storage = ["dep:rtflow-file", "dep:rtflow-storage"]
+metrics = ["dep:rtflow-metrics"]
+http = ["dep:rtflow-http"]
+http-flv = ["http", "dep:rtflow-http-flv"]
+ws-flv = ["http-flv", "rtflow-http-flv/ws"]
+hls = ["http", "mp4", "dep:rtflow-hls"]
+dash = ["hls", "dep:rtflow-dash"]
+rtmp = ["dep:rtflow-rtmp"]
+srt = ["dep:rtflow-srt"]
+webrtc = ["http", "dep:rtflow-webrtc"]
+srtp = ["dep:rtflow-srtp", "rtflow-rtsp/srtp", "rtflow-rtsp-client/srtp", "rtflow-rtsp-server/srtp"]
+multicast = [
+    "rtflow-media/multicast",
+    "rtflow-rtsp/multicast",
+    "rtflow-rtsp-client/multicast",
+    "rtflow-rtsp-server/multicast",
+    "rtflow-mount/multicast",
+    "rtflow-hls/multicast",
+]
+test-source = ["dep:rtflow-source"]
+gstreamer = ["dep:rtflow-gst"]
+admin = ["http", "server", "hls", "dep:rtflow-admin"]
+
+[dependencies]
+rtflow-core.workspace = true
+rtflow-media.workspace = true
+rtflow-rtp.workspace = true
+rtflow-rtcp.workspace = true
+rtflow-rtsp.workspace = true
+rtflow-security.workspace = true
+rtflow-multicast.workspace = true
+rtflow-runtime.workspace = true
+rtflow-framing = { workspace = true, optional = true }
+rtflow-mount.workspace = true
+rtflow-pipeline.workspace = true
+rtflow-gateway.workspace = true
+rtflow-srtp = { workspace = true, optional = true }
+rtflow-rtsp-client = { workspace = true, optional = true }
+rtflow-rtsp-server = { workspace = true, optional = true }
+rtflow-http = { workspace = true, optional = true }
+rtflow-file = { workspace = true, optional = true }
+rtflow-storage = { workspace = true, optional = true }
+rtflow-hls = { workspace = true, optional = true }
+rtflow-dash = { workspace = true, optional = true }
+rtflow-http-flv = { workspace = true, optional = true }
+rtflow-rtmp = { workspace = true, optional = true }
+rtflow-srt = { workspace = true, optional = true }
+rtflow-webrtc = { workspace = true, optional = true }
+rtflow-metrics = { workspace = true, optional = true }
+rtflow-admin = { workspace = true, optional = true }
+rtflow-source = { workspace = true, optional = true }
+rtflow-gst = { workspace = true, optional = true }
+tokio.workspace = true
+
+[dev-dependencies]
+base64.workspace = true
+async-trait.workspace = true
+rtc.workspace = true
+webrtc.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+clap.workspace = true
+futures.workspace = true
+criterion.workspace = true
+rcgen.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+rtflow-testkit.workspace = true
+socket2.workspace = true
+tokio-rustls.workspace = true
+tracing-log.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true

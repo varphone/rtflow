@@ -242,7 +242,7 @@ mod tests {
         assert!(!acl.permits("192.168.1.1".parse().unwrap()));
     }
 
-        #[test]
+    #[test]
     fn token_bucket_refills_deterministically() {
         use std::time::Instant;
         let limiter = ConnectionRateLimiter::new(Some(RateLimitConfig {

@@ -1,7 +1,7 @@
 use super::sps::{h264_dimensions_from_avcc, h265_dimensions_from_hvcc};
 use super::util::codec_config_from_fmtp;
-use rtflow_media::Codec;
 use bytes::{BufMut, Bytes, BytesMut};
+use rtflow_media::Codec;
 
 pub(super) fn write_video_entry(
     buf: &mut BytesMut,

@@ -1,9 +1,9 @@
 use super::Depacketizer;
 use super::MAX_ASSEMBLY_BYTES;
 use crate::RtpPacket;
+use bytes::BytesMut;
 use rtflow_core::error::{Error, Result};
 use rtflow_media::{AccessUnit, Codec};
-use bytes::BytesMut;
 
 impl Depacketizer {
     /// VP8/VP9 depacketization: strips the payload descriptor and

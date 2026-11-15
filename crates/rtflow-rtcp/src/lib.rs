@@ -11,8 +11,8 @@ pub use stats::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rtflow_rtp::{RtpHeader, RtpPacket};
     use bytes::Bytes;
+    use rtflow_rtp::{RtpHeader, RtpPacket};
     use std::time::Duration;
     use tokio::time::Instant;
 

@@ -1,9 +1,9 @@
 //! DASH HTTP handlers for MPD, init segment, and media segments.
 use super::mpd::{self, MpdConfig};
-use rtflow_hls::segment_ring::SegmentRing;
-use rtflow_media::MediaDescription;
 use rtflow_core::error::Result;
+use rtflow_hls::segment_ring::SegmentRing;
 use rtflow_http::{HttpRequest, ResponseWriter};
+use rtflow_media::MediaDescription;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::SystemTime;
 use tokio::io::AsyncWrite;

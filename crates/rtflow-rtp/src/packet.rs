@@ -1,6 +1,6 @@
 //! RTP fixed-header parsing with zero-copy payload slicing.
-use rtflow_core::error::{Error, Result};
 use bytes::Bytes;
+use rtflow_core::error::{Error, Result};
 
 #[derive(Clone, Debug)]
 pub struct RtpHeader {

@@ -1,6 +1,6 @@
 use super::*;
-use rtflow_media::TrackDescription;
 use crate::TimelineMode;
+use rtflow_media::TrackDescription;
 
 fn timeline_ntp_anchor(state: &State, timeline: TimelineMode) -> Option<u64> {
     let seconds = match timeline {

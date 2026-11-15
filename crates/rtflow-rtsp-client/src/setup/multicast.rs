@@ -227,10 +227,8 @@ pub(super) async fn connect_multicast(
     }
     let rtp_info = super::parse_rtp_info(&response, &description, &setup_base);
     let pts_base = super::play_pts_base(&response);
-    let (tx, rx) = crate::queue::FrameReceiver::new(
-        options.output_queue_capacity,
-        options.max_output_bytes,
-    );
+    let (tx, rx) =
+        crate::queue::FrameReceiver::new(options.output_queue_capacity, options.max_output_bytes);
     let cancel = CancellationToken::new();
     let quality = Arc::new(std::sync::Mutex::new(HashMap::new()));
     let mut tasks = Vec::new();

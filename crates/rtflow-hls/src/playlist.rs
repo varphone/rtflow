@@ -82,9 +82,9 @@ pub fn write_live_playlist_at_q_pdt(
     playlist.push_str(&format!(
         "#EXT-X-DISCONTINUITY-SEQUENCE:{discontinuity_sequence}\n"
     ));
-    let mpeg_ts = segments.first().is_some_and(|segment| {
-        segment.format == crate::segmenter::SegmentFormat::MpegTs
-    });
+    let mpeg_ts = segments
+        .first()
+        .is_some_and(|segment| segment.format == crate::segmenter::SegmentFormat::MpegTs);
     if !mpeg_ts {
         playlist.push_str(&format!(
             "#EXT-X-MAP:URI=\"{}\"\n",
@@ -149,9 +149,9 @@ pub fn write_vod_playlist_at_q(segments: &[Segment], asset_prefix: &str, query: 
     playlist.push_str(&format!("#EXT-X-TARGETDURATION:{}\n", max_duration));
     playlist.push_str("#EXT-X-MEDIA-SEQUENCE:0\n");
     playlist.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
-    let mpeg_ts = segments.first().is_some_and(|segment| {
-        segment.format == crate::segmenter::SegmentFormat::MpegTs
-    });
+    let mpeg_ts = segments
+        .first()
+        .is_some_and(|segment| segment.format == crate::segmenter::SegmentFormat::MpegTs);
     if !mpeg_ts {
         playlist.push_str(&format!(
             "#EXT-X-MAP:URI=\"{}\"\n",

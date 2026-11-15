@@ -1,8 +1,8 @@
 //! RFC 4585 feedback, RFC 3611 extended reports and their constructors.
 
 use super::{Packet, read_u32};
-use rtflow_core::error::{Error, Result};
 use bytes::{Bytes, BytesMut};
+use rtflow_core::error::{Error, Result};
 
 /// One RFC 3611 XR block; `data` excludes the 4-byte block header.
 #[derive(Clone, Debug, Eq, PartialEq)]

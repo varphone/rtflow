@@ -1,6 +1,6 @@
+use bytes::BytesMut;
 use rtflow_core::error::Result;
 use rtflow_rtsp::{self as rtsp, InterleavedFrame, Message};
-use bytes::BytesMut;
 #[derive(Clone, Debug)]
 pub enum InboundFrame {
     Rtsp(Message),

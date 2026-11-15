@@ -5,15 +5,14 @@ pub mod app_src;
 pub mod buffer;
 pub mod pipeline;
 
-use rtflow_media::{Codec, MediaDescription, MediaKind, TrackDescription};
-use rtflow_mount::{LocalPublisher, MountConfig, MountRegistry};
-#[cfg(feature = "server")]
-use rtflow_rtsp_server::RtspServer;
-use rtflow_core::error::{Error, Result};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use pipeline::{AudioSourceConfig, EncoderConfig, TrackInfo, VideoSourceConfig};
+use rtflow_core::error::{Error, Result};
+use rtflow_media::{Codec, MediaDescription, MediaKind, TrackDescription};
+use rtflow_mount::{LocalPublisher, MountConfig, MountRegistry};
+use rtflow_rtsp_server::RtspServer;
 use std::mem::ManuallyDrop;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -172,7 +171,7 @@ impl GStreamerSource {
                 width: None,
                 height: None,
                 frame_rate: None,
-                                crypto: None,
+                crypto: None,
                 direction: None,
                 ptime: None,
                 rtcp: None,
@@ -184,12 +183,11 @@ impl GStreamerSource {
         MediaDescription {
             session_name: Arc::from("gstreamer-source"),
             tracks,
-                        connection: None,
+            connection: None,
         }
     }
 
     /// Register with an RTSP server and start push-mode playback.
-    #[cfg(feature = "server")]
     pub async fn register_and_play(
         self,
         server: &RtspServer,
