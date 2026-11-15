@@ -1,7 +1,7 @@
 //! Container-agnostic demuxing abstractions.
 //!
 //! [`Demuxer`] is implemented by the concrete container readers in
-//! [`rtflow_file`] and consumed by file playback, recording and VOD sources, so
+//! `rtflow_file` and consumed by file playback, recording and VOD sources, so
 //! the trait lives with the media value types instead of the file layer.
 
 use super::MediaDescription;

@@ -28,7 +28,8 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BASELINE = ROOT / "scripts" / "tree-baseline.json"
 MAX_LINES = 800
-TRACKED_PREFIXES = ("src/",)
+# Workspace layout: every crate keeps its sources under `crates/<name>/src/`.
+TRACKED_PREFIXES = ("crates/",)
 
 
 def tracked_files() -> list[str]:

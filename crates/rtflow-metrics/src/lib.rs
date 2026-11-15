@@ -1,7 +1,7 @@
 //! Metrics collection and export for rtflow server instances.
 //!
 //! The counter/histogram registry and the event sink live in
-//! [`crate::core::metrics`]; this module adds the Prometheus exporter and the
+//! `rtflow_core::metrics`; this module adds the Prometheus exporter and the
 //! HTTP handlers (`/metrics`, `/stats`, `/health`).
 
 pub use rtflow_core::metrics::{Histogram, MetricsEventSink, MetricsRegistry, registry_from_sink};

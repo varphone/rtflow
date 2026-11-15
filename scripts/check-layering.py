@@ -1,295 +1,147 @@
 #!/usr/bin/env python3
-"""Enforce the rtflow module layering rules.
+"""Enforce the rtflow workspace layering rules.
 
-Rules
------
-1. A module may only depend on modules in a *lower* layer (higher number ->
-   lower number). Depending on a module in a higher layer is a violation.
-2. Same-layer cross-group dependencies are allowed but reported, because they
-   usually mean two peers should be split or moved.
-3. The dependency graph must be acyclic: every strongly connected component
-   (SCC) with more than one node is a violation, regardless of layers.
+The workspace split made the module layers physical: each layer is a crate in
+`crates/`, and Cargo itself rejects an upward dependency. This script adds a
+readable check on top:
 
-Dependencies are extracted from `crate::...` paths and `use crate::{...}`
-statements in non-test code; line comments, doc comments and `#[cfg(test)]`
-modules are ignored.
+1. Every `crates/*/Cargo.toml` may only depend on crates in a strictly *lower*
+   layer (the umbrella crate `rtflow` sits above everything).
+2. The internal dependency graph must be acyclic.
 
 Usage
 -----
     python3 scripts/check-layering.py            # fail on violations
     python3 scripts/check-layering.py --matrix   # also print the edge matrix
-    python3 scripts/check-layering.py --write-baseline
-    python3 scripts/check-layering.py --baseline scripts/layering-baseline.json
-
-`--baseline` only fails when a violation is *not* listed in the baseline, so
-existing debt can be burned down incrementally (P1-P3 of the layout plan).
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import pathlib
 import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SRC = ROOT / "src"
-BASELINE = ROOT / "scripts" / "layering-baseline.json"
+CRATES = ROOT / "crates"
 
-# Layer assignment of the *target* layout (see docs/architecture/modules.md).
+# Layer of every workspace crate. A crate may depend only on lower layers.
 LAYERS: dict[str, int] = {
-    "core": 0,
-    "media": 1,
-    "segment": 2,
-    "rtsp": 2,
-    "rtp": 2,
-    "rtcp": 2,
-    "srtp": 2,
-    "security": 2,
-    "runtime": 3,
-    "pipeline": 3,
-    "mount": 3,
-    "file": 3,
-    "http": 4,
-    "client": 4,
-    "proxy": 4,
-    "metrics": 5,
-    "server": 6,
-    "storage": 6,
-    "protocols": 6,
-    "gateway": 7,
+    "rtflow-core": 0,
+    "rtflow-media": 1,
+    "rtflow-rtp": 2,
+    "rtflow-rtcp": 3,
+    "rtflow-srtp": 3,
+    "rtflow-multicast": 3,
+    "rtflow-security": 3,
+    "rtflow-rtsp": 4,
+    "rtflow-runtime": 5,
+    "rtflow-framing": 6,
+    "rtflow-mount": 6,
+    "rtflow-pipeline": 6,
+    "rtflow-http": 6,
+    "rtflow-file": 6,
+    "rtflow-storage": 7,
+    "rtflow-metrics": 7,
+    "rtflow-rtsp-client": 8,
+    "rtflow-rtsp-server": 8,
+    "rtflow-source": 8,
+    "rtflow-hls": 9,
+    "rtflow-dash": 10,
+    "rtflow-http-flv": 9,
+    "rtflow-rtmp": 9,
+    "rtflow-srt": 9,
+    "rtflow-webrtc": 9,
+    "rtflow-gst": 9,
+    "rtflow-admin": 10,
+    "rtflow-gateway": 10,
+    "rtflow": 11,
+    "rtflow-testkit": 12,
 }
 
-# crate-level module name -> target group. Keeps the check useful while the
-# physical layout is still being migrated (P1 moves files, not public paths).
-ALIASES: dict[str, str] = {
-    "core": "core",
-    "error": "core",
-    "identity": "core",
-    "observe": "core",
-    "auth": "rtsp",
-    "transport": "rtsp",
-    "token_auth": "rtsp",
-    "multicast": "rtsp",
-    "rtsp": "rtsp",
-    "protocol": "rtsp",
-    "sdp": "rtsp",
-    "range": "rtsp",
-    "hls": "protocols",
-    "dash": "protocols",
-    "http_flv": "protocols",
-    "rtmp": "protocols",
-    "srt": "protocols",
-    "webrtc": "protocols",
-    "gst": "protocols",
-    "pipeline": "pipeline",
-    "mount": "mount",
-    "metrics": "metrics",
-    "http": "http",
-    "client": "client",
-    "proxy": "proxy",
-    "server": "server",
-    "gateway": "gateway",
-    "file": "file",
-    "storage": "storage",
-    "media": "media",
-    "rtp": "rtp",
-    "rtcp": "rtcp",
-    "srtp": "srtp",
-    "security": "security",
-    "runtime": "runtime",
-}
-
-PATH_GROUPS: dict[str, str] = {
-    "core": "core",
-    "media": "media",
-    "protocol": "rtsp",
-    "rtsp": "rtsp",
-    "protocols": "protocols",
-    "pipeline": "pipeline",
-    "mount": "mount",
-    "metrics": "metrics",
-    "http": "http",
-    "client": "client",
-    "proxy": "proxy",
-    "server": "server",
-    "gateway": "gateway",
-    "file": "file",
-    "storage": "storage",
-    "rtp": "rtp",
-    "rtcp": "rtcp",
-    "srtp": "srtp",
-    "security": "security",
-    "runtime": "runtime",
-}
-
-ROOT_FILE_GROUPS = {
-    "core": "core",
-    "error": "core",
-    "identity": "core",
-    "observe": "core",
-    "mount": "mount",
-}
-
-USE_CREATE_RE = re.compile(r"use\s+crate::[^;]*;", re.S)
-CRATE_PATH_RE = re.compile(r"crate::([a-z][a-z0-9_]*)")
-MODULE_PATH_RE = re.compile(r"\b([a-z][a-z0-9_]*)::")
+# Internal crates may be declared as `name =` or as a workspace dependency
+# (`[dependencies.rtflow-http]`), so both forms are recognised.
+DEP_RE = re.compile(r'^(?:\[dependencies\.([a-z0-9_-]+)\]|([a-z0-9_-]*rtflow[a-z0-9_-]*)\s*=)', re.M)
 
 
-def strip_comments(text: str) -> str:
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-    return re.sub(r"//[^\n]*", "", text)
+def crate_dirs() -> dict[str, pathlib.Path]:
+    found: dict[str, pathlib.Path] = {}
+    for manifest in sorted(CRATES.glob("*/Cargo.toml")):
+        text = manifest.read_text(encoding="utf-8")
+        name = re.search(r'^name\s*=\s*"([^"]+)"', text, re.M)
+        if name:
+            # The package name is canonical; fall back to the directory when a
+            # manifest inherits it from `[workspace.package]`.
+            found[name.group(1)] = manifest
+    return found
 
 
-def module_group(path: pathlib.Path) -> str | None:
-    rel = path.relative_to(SRC)
-    if len(rel.parts) == 1:
-        return ROOT_FILE_GROUPS.get(rel.stem)
-    first = rel.parts[0]
-    return PATH_GROUPS.get(first)
-
-
-def referenced_modules(text: str) -> set[str]:
-    names: set[str] = set(CRATE_PATH_RE.findall(text))
-    for statement in USE_CREATE_RE.findall(text):
-        names.update(MODULE_PATH_RE.findall(statement))
-    return names
-
-
-def collect_edges() -> dict[tuple[str, str], int]:
-    edges: dict[tuple[str, str], int] = {}
-    for path in sorted(SRC.rglob("*.rs")):
-        group = module_group(path)
-        if group is None:  # lib.rs and future root helpers
-            continue
-        text = path.read_text(encoding="utf-8")
-        cut = text.find("#[cfg(test)]")
-        if cut > 0:
-            text = text[:cut]
-        text = strip_comments(text)
-        for name in referenced_modules(text):
-            target = ALIASES.get(name)
-            if target is None or target == group:
-                continue
-            key = (group, target)
-            edges[key] = edges.get(key, 0) + 1
-    return edges
-
-
-def strongly_connected(edges: dict[tuple[str, str], int]) -> list[list[str]]:
-    graph: dict[str, set[str]] = {}
-    nodes: set[str] = set()
-    for (a, b) in edges:
-        graph.setdefault(a, set()).add(b)
-        nodes.update((a, b))
-
-    index: dict[str, int] = {}
-    low: dict[str, int] = {}
-    stack: list[str] = []
-    on_stack: set[str] = set()
-    counter = [0]
-    components: list[list[str]] = []
-
-    def visit(node: str) -> None:
-        index[node] = low[node] = counter[0]
-        counter[0] += 1
-        stack.append(node)
-        on_stack.add(node)
-        for nxt in graph.get(node, ()):
-            if nxt not in index:
-                visit(nxt)
-                low[node] = min(low[node], low[nxt])
-            elif nxt in on_stack:
-                low[node] = min(low[node], index[nxt])
-        if low[node] == index[node]:
-            component: list[str] = []
-            while True:
-                top = stack.pop()
-                on_stack.discard(top)
-                component.append(top)
-                if top == node:
-                    break
-            if len(component) > 1:
-                components.append(sorted(component))
-
-    for node in sorted(nodes):
-        if node not in index:
-            visit(node)
-    return components
-
-
-def violations(edges: dict[tuple[str, str], int]) -> dict[str, list]:
-    upward = []
-    same_layer = []
-    for (a, b), count in sorted(edges.items()):
-        la, lb = LAYERS.get(a), LAYERS.get(b)
-        if la is None or lb is None:
-            continue
-        if la < lb:
-            upward.append([a, b, count])
-        elif la == lb:
-            same_layer.append([a, b, count])
-    return {
-        "cycles": strongly_connected(edges),
-        "upward_edges": upward,
-        "same_layer_edges": same_layer,
+def dependencies(manifest: pathlib.Path) -> set[str]:
+    """Internal crate dependencies (runtime only; dev-dependencies are skipped)."""
+    text = manifest.read_text(encoding="utf-8")
+    cut = text.find("[dev-dependencies]")
+    runtime = text if cut < 0 else text[:cut]
+    deps = {
+        (table or inline).replace("_", "-")
+        for table, inline in DEP_RE.findall(runtime)
+        if (table or inline).startswith("rtflow")
     }
-
-
-def normalise(found: dict[str, list]) -> dict[str, list]:
-    cycles = sorted(" <-> ".join(sorted(c)) for c in found["cycles"])
-    upward = sorted(f"{a} -> {b}" for a, b, _ in found["upward_edges"])
-    return {"cycles": cycles, "upward_edges": upward}
+    return {dep for dep in deps if dep != manifest.parent.name}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline", type=pathlib.Path, help="tolerate debt listed here")
-    parser.add_argument("--write-baseline", action="store_true")
-    parser.add_argument("--matrix", action="store_true", help="print the edge matrix")
+    parser.add_argument("--matrix", action="store_true")
     args = parser.parse_args()
 
-    edges = collect_edges()
-    if args.matrix:
-        print(f"{'from':<12} -> {'to':<12} count  layer")
-        for (a, b), count in sorted(edges.items()):
-            print(f"{a:<12} -> {b:<12} {count:5d}  {LAYERS.get(a)} -> {LAYERS.get(b)}")
-
-    found = violations(edges)
-    debt = normalise(found)
-
-    if args.write_baseline:
-        BASELINE.write_text(json.dumps(debt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        print(f"wrote {BASELINE.relative_to(ROOT)}")
-        return 0
-
-    for edge in found["same_layer_edges"]:
-        print(f"note: same-layer dependency {edge[0]} -> {edge[1]} ({edge[2]} refs)")
-
+    manifests = crate_dirs()
+    edges: dict[str, set[str]] = {}
     problems = 0
-    if args.baseline:
-        allowed = json.loads(args.baseline.read_text(encoding="utf-8"))
-        new_cycles = sorted(set(debt["cycles"]) - set(allowed.get("cycles", [])))
-        new_upward = sorted(set(debt["upward_edges"]) - set(allowed.get("upward_edges", [])))
-        stale = sorted(set(allowed.get("cycles", [])) - set(debt["cycles"])) + sorted(
-            set(allowed.get("upward_edges", [])) - set(debt["upward_edges"])
-        )
-        for item in new_cycles:
-            print(f"error: new dependency cycle: {item}")
+    unknown: set[str] = set()
+    for name, manifest in manifests.items():
+        deps = dependencies(manifest)
+        edges[name] = deps
+        for dep in deps:
+            if dep not in manifests:
+                unknown.add(f"{name} -> {dep}")
+                continue
+            if dep == name:
+                continue
+            if LAYERS.get(dep, 99) >= LAYERS.get(name, 99):
+                print(
+                    f"error: {name} (layer {LAYERS.get(name)}) depends on "
+                    f"{dep} (layer {LAYERS.get(dep)}): dependencies must point downwards"
+                )
+                problems += 1
+    for item in sorted(unknown):
+        print(f"error: unknown workspace dependency {item}")
+        problems += 1
+
+    # Cycle detection (DFS with colouring).
+    state: dict[str, int] = {}
+
+    def visit(node: str, path: list[str]) -> None:
+        nonlocal problems
+        colour = state.get(node, 0)
+        if colour == 1:
+            print("error: dependency cycle: " + " -> ".join(path + [node]))
             problems += 1
-        for item in new_upward:
-            print(f"error: new upward dependency: {item}")
-            problems += 1
-        for item in stale:
-            print(f"note: baseline entry fixed, drop it from {args.baseline.name}: {item}")
-    else:
-        for item in debt["cycles"]:
-            print(f"error: dependency cycle: {item}")
-            problems += 1
-        for item in debt["upward_edges"]:
-            print(f"error: upward dependency: {item}")
-            problems += 1
+            return
+        if colour == 2:
+            return
+        state[node] = 1
+        for dep in sorted(edges.get(node, ())):
+            if dep in edges:
+                visit(dep, path + [node])
+        state[node] = 2
+
+    for name in sorted(edges):
+        visit(name, [])
+
+    if args.matrix:
+        for name in sorted(edges, key=lambda item: (LAYERS.get(item, 99), item)):
+            deps = ", ".join(sorted(edges[name])) or "-"
+            print(f"{LAYERS.get(name, 99):>2} {name:<22} -> {deps}")
 
     if problems:
         print(f"\n{problems} layering violation(s)")

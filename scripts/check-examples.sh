@@ -6,7 +6,7 @@ set -euo pipefail
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_dir"
 
-cargo build --quiet --examples
+cargo build --quiet -p rtflow --examples
 
 examples=(
   authenticated_server
@@ -28,9 +28,9 @@ examples=(
 
 for example in "${examples[@]}"; do
   if [[ "$example" == "local_source" ]]; then
-    cargo run --quiet --example "$example" --features test-source -- --help >/dev/null
+    cargo run --quiet -p rtflow --example "$example" --features test-source -- --help >/dev/null
   else
-    cargo run --quiet --example "$example" -- --help >/dev/null
+    cargo run --quiet -p rtflow --example "$example" -- --help >/dev/null
   fi
   printf 'example %s: CLI OK\n' "$example"
 done

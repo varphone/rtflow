@@ -56,6 +56,83 @@ test-source = ["dep:rtflow-source"]
 gstreamer = ["dep:rtflow-gst"]
 admin = ["http", "server", "hls", "dep:rtflow-admin"]
 
+[[example]]
+name = "authenticated_server"
+path = "examples/server/authenticated_server.rs"
+[[example]]
+name = "file_server"
+path = "examples/server/file_server.rs"
+[[example]]
+name = "hls_server"
+path = "examples/server/hls_server.rs"
+[[example]]
+name = "http_flv_server"
+path = "examples/server/http_flv_server.rs"
+[[example]]
+name = "live_stream_demo"
+path = "examples/server/live_stream_demo.rs"
+[[example]]
+name = "local_source"
+path = "examples/server/local_source.rs"
+required-features = ["test-source", "server"]
+[[example]]
+name = "pipeline_server"
+path = "examples/server/pipeline_server.rs"
+[[example]]
+name = "proxy_server"
+path = "examples/server/proxy_server.rs"
+[[example]]
+name = "publisher_server"
+path = "examples/server/publisher_server.rs"
+[[example]]
+name = "recording_vod_server"
+path = "examples/server/recording_vod_server.rs"
+[[example]]
+name = "mem_probe"
+path = "examples/client/mem_probe.rs"
+[[example]]
+name = "play_client"
+path = "examples/client/play_client.rs"
+[[example]]
+name = "dash_server"
+path = "examples/protocols/dash_server.rs"
+required-features = ["dash", "server"]
+[[example]]
+name = "gstreamer_live_play"
+path = "examples/protocols/gstreamer_live_play.rs"
+[[example]]
+name = "rtmp_server"
+path = "examples/protocols/rtmp_server.rs"
+required-features = ["rtmp", "server"]
+[[example]]
+name = "srt_server"
+path = "examples/protocols/srt_server.rs"
+required-features = ["srt", "server"]
+[[example]]
+name = "webrtc_server"
+path = "examples/protocols/webrtc_server.rs"
+required-features = ["webrtc", "http", "server"]
+[[example]]
+name = "live_vod_gateway"
+path = "examples/gateway/live_vod_gateway.rs"
+required-features = ["server", "rtmp", "hls", "admin", "file-storage", "mp4", "mkv"]
+[[example]]
+name = "multi_protocol_gateway"
+path = "examples/gateway/multi_protocol_gateway.rs"
+required-features = ["rtmp", "srt", "dash", "webrtc", "server", "hls", "http-flv"]
+[[example]]
+name = "ffmpeg_live_publish"
+path = "examples/embedded/ffmpeg_live_publish.rs"
+[[example]]
+name = "ipc_camera"
+path = "examples/embedded/ipc_camera.rs"
+[[bench]]
+name = "hot_path"
+harness = false
+[[bench]]
+name = "throughput"
+harness = false
+
 [dependencies]
 rtflow-core.workspace = true
 rtflow-media.workspace = true

@@ -1,6 +1,9 @@
 {
   "path_attributes": [],
-  "oversized_files": [],
+  "oversized_files": [
+    "crates/rtflow-rtmp/src/session/commands.rs (833 lines)",
+    "crates/rtflow/tests/protocols/hls.rs (913 lines)"
+  ],
   "root_entries": [
     ".cargo",
     ".editorconfig",
@@ -13,14 +16,11 @@
     "LICENSE-MIT",
     "README.md",
     "SECURITY.md",
-    "benches",
+    "crates",
     "deny.toml",
     "docs",
-    "examples",
     "fuzz",
     "scripts",
-    "src",
-    "support",
     "tests"
   ]
 }
