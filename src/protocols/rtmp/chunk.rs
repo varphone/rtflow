@@ -83,6 +83,11 @@ struct ChunkStreamState {
     msg_stream_id: u32,
     buffer: BytesMut,
     extended_timestamp: bool,
+    /// True after a fmt0/1/2 header opened a message and until its payload is
+    /// complete. fmt3 with this false starts a *new* message (reusing the
+    /// previous delta); with it true it is a continuation and must not apply
+    /// the delta again.
+    in_message: bool,
 }
 
 /// Dechunker: accumulates incoming bytes and emits complete messages.
@@ -281,6 +286,7 @@ impl Dechunker {
                 }
                 self.buffered = self.buffered.saturating_sub(state.buffer.len());
                 state.buffer.clear();
+                state.in_message = true;
             }
             1 => {
                 let b = &data[header_start..header_start + 7];
@@ -298,6 +304,7 @@ impl Dechunker {
                 state.timestamp = state.timestamp.wrapping_add(state.timestamp_delta);
                 self.buffered = self.buffered.saturating_sub(state.buffer.len());
                 state.buffer.clear();
+                state.in_message = true;
             }
             2 => {
                 let b = &data[header_start..header_start + 3];
@@ -313,12 +320,14 @@ impl Dechunker {
                 state.timestamp = state.timestamp.wrapping_add(state.timestamp_delta);
                 self.buffered = self.buffered.saturating_sub(state.buffer.len());
                 state.buffer.clear();
+                state.in_message = true;
             }
             _ => {
-                // fmt 3: continuation
-                if state.buffer.is_empty() {
-                    // New message with same type/length: apply delta
+                // fmt 3: continuation or a new message reusing the previous
+                // header's type/length/delta.
+                if !state.in_message {
                     state.timestamp = state.timestamp.wrapping_add(state.timestamp_delta);
+                    state.in_message = true;
                 }
             }
         }
@@ -347,6 +356,7 @@ impl Dechunker {
         // Check if message is complete
         if state.buffer.len() as u32 >= state.msg_length {
             self.buffered = self.buffered.saturating_sub(state.buffer.len());
+            state.in_message = false;
             let payload = state.buffer.split().freeze();
             let msg = RtmpMessage {
                 chunk_stream_id: csid,

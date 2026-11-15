@@ -12,6 +12,10 @@
   hls.js 均可持续播放；VOD/静态 HLS 仍使用 fMP4。
 - HLS live 不再自动启动 segmenter；由首个 playlist 请求启动，修复长推流
   只产出首段、播放器缓冲停在 1.88s 的问题。
+- TS 分段为每个 sample 写入真实 duration：此前 duration 全为 0，所有 PES
+  使用同一 PTS/DTS，播放器只显示首帧（1 fps）；现在按相邻 DTS 差补齐。
+- 管理台 HLS 播放移除会重置 currentTime 的 seek/nudge，交给 hls.js 正常
+  live sync；RTMP fmt3 用显式 in_message 标记，避免续包重复累计时间戳。
 
 ### Added
 

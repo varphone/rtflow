@@ -403,10 +403,6 @@
 
   function closeModal() {
     state.modal = null;
-    if (state.playTimer) {
-      clearInterval(state.playTimer);
-      state.playTimer = null;
-    }
     modalRoot.innerHTML = "";
     if (state.hls) { try { state.hls.destroy(); } catch (_) {} state.hls = null; }
   }
@@ -465,66 +461,16 @@
           }
         });
         const startHlsPlayback = () => {
-          // Live streams start at a media timestamp far from 0. Seeking to
-          // buffered.start(0) jumps to the oldest retained segment (up to
-          // the whole 30-segment window); always prefer the live edge.
-          if (video.buffered.length) {
-            const start = video.buffered.start(0);
-            const end = video.buffered.end(video.buffered.length - 1);
-            const live = state.hls.liveSyncPosition;
-            let target = Number.isFinite(live) && live >= start && live <= end
-              ? live
-              : Math.max(start + 0.05, end - 2);
-            if (video.currentTime === 0 || video.currentTime < start || video.currentTime > end) {
-              video.currentTime = target;
-            }
-          }
-          video.play().catch(() => {
-            status.textContent = "hls.js 播放（点击播放开始）";
-          });
+          video.play().catch(() => {});
         };
-        // Register listeners before loadSource/attachMedia: MANIFEST_PARSED
-        // can fire synchronously for a cached local playlist.
-        state.hls.once(Hls.Events.MANIFEST_PARSED, () => {
-          // Force the live start position. Without this hls.js may begin
-          // buffering at the first fragment of a long playlist while the
-          // media element still sits at currentTime 0.
-          state.hls.startLoad(-1);
-          startHlsPlayback();
-        });
+        // Register listeners before attach/load: MANIFEST_PARSED can fire
+        // synchronously for a cached local playlist.
+        state.hls.once(Hls.Events.MANIFEST_PARSED, startHlsPlayback);
         state.hls.on(Hls.Events.LEVEL_LOADED, startHlsPlayback);
         state.hls.on(Hls.Events.BUFFER_APPENDED, startHlsPlayback);
-        let autoSeeked = false;
-        state.hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
-          if (!autoSeeked && data && data.frag && Number.isFinite(data.frag.start)) {
-            video.currentTime = data.frag.start + 0.05;
-            autoSeeked = true;
-            video.play().catch(() => {});
-          }
-        });
         state.hls.attachMedia(video);
         state.hls.loadSource(url);
         status.textContent = "hls.js 播放";
-        // Some Firefox/Windows MSE builds do not fire the events above
-        // while currentTime is still 0. Nudge it into the first buffered
-        // range for the first 10 seconds; real user pauses are untouched
-        // once playback advances past zero.
-        if (state.playTimer) clearInterval(state.playTimer);
-        let nudges = 0;
-        state.playTimer = setInterval(() => {
-          if (video.buffered.length) {
-            const start = video.buffered.start(0);
-            const end = video.buffered.end(video.buffered.length - 1);
-            if (video.currentTime === 0 || video.currentTime < start || video.currentTime > end) {
-              video.currentTime = Math.max(start + 0.05, end - 2);
-            }
-          }
-          video.play().catch(() => {});
-          if (++nudges > 20) {
-            clearInterval(state.playTimer);
-            state.playTimer = null;
-          }
-        }, 500);
       } else if (native) {
         video.src = url;
         video.addEventListener(
