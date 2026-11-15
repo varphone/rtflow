@@ -28,6 +28,7 @@ pub(super) struct TsPipeline {
     /// (ffmpeg publishers can arrive with 1.5–1.8× inflated deltas); the
     /// codec frame rate / AAC frame size is the stable clock.
     durations: std::collections::HashMap<u8, u32>,
+    discontinuity_sequence: u32,
 }
 
 fn aac_esds(sample_rate: u32, channels: u16) -> EsdsBox {
@@ -162,6 +163,7 @@ impl TsPipeline {
             track_ids,
             timescales,
             durations,
+            discontinuity_sequence: 0,
         })
     }
 
@@ -227,6 +229,12 @@ impl TsPipeline {
             .map(|segment| {
                 let duration = Duration::from_secs_f64(segment.duration.max(0.001));
                 self.timestamp += duration;
+                let discontinuity_sequence = if segment.discontinuous {
+                    self.discontinuity_sequence = self.discontinuity_sequence.saturating_add(1);
+                    Some(self.discontinuity_sequence)
+                } else {
+                    None
+                };
                 Segment {
                     sequence: segment.sequence + self.sequence_offset,
                     duration,
@@ -234,7 +242,7 @@ impl TsPipeline {
                     data: Bytes::from(segment.bytes),
                     starts_with_keyframe: true,
                     discontinuity: segment.discontinuous,
-                    discontinuity_sequence: None,
+                    discontinuity_sequence,
                     timestamp: self.timestamp,
                     format: SegmentFormat::MpegTs,
                 }

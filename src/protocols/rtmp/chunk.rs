@@ -231,8 +231,14 @@ impl Dechunker {
         let header_start = pos;
         pos += header_size;
 
-        // Check for extended timestamp
-        let needs_extended = if header_size > 0 {
+        // Check for extended timestamp. A type 3 chunk carries one when the
+        // most recent type 0/1/2 header on the same chunk stream advertised
+        // it (RTMP 2012 §5.3.1.3; SRS handles this too).
+        let needs_extended = if fmt == 3 {
+            self.streams
+                .get(&csid)
+                .is_some_and(|state| state.extended_timestamp)
+        } else if header_size > 0 {
             let ts_field = match fmt {
                 0 => {
                     let b = &data[header_start..header_start + 3];

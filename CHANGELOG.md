@@ -18,6 +18,9 @@
   被放大的时间戳。
 - 管理台 HLS 播放移除会重置 currentTime 的 seek/nudge，交给 hls.js 正常
   live sync；RTMP fmt3 用显式 in_message 标记，避免续包重复累计时间戳。
+- 参照 SRS/MediaMTX 审核 live/VOD：补 TS discontinuity sequence、清理
+  VOD 临时目录、拒绝 `.`/`..` VOD id、处理 RTMP fmt3 extended timestamp；
+  详细对照见 `docs/audits/2026-11-live-vod-srs-mediamtx.md`。
 
 ### Added
 

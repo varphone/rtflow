@@ -145,7 +145,7 @@ pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
     mut writer: ResponseWriter<W>,
     ring: &SegmentRing,
 ) -> Result<ResponseWriter<W>> {
-    let init = match ring.latest_init() {
+    let init = match ring.latest_init().filter(|init| !init.is_empty()) {
         Some(i) => i,
         None => {
             writer

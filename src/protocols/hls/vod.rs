@@ -88,7 +88,7 @@ impl HlsVodManager {
         let valid = id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-        if !valid {
+        if !valid || id == "." || id == ".." || id.starts_with('.') {
             return Err(crate::Error::InvalidConfig("invalid VOD id".into()));
         }
         let directory = self.config.cache_dir.join(id);
@@ -105,9 +105,17 @@ impl HlsVodManager {
         let config = self.config.clone();
         let label = entry.title.clone();
         let target = directory.clone();
+        let temporary_for_cleanup = temporary.clone();
         tokio::task::spawn_blocking(move || {
-            generate(source, &label, &config, &temporary)?;
-            std::fs::rename(&temporary, &target)?;
+            let _ = std::fs::remove_dir_all(&temporary_for_cleanup);
+            if let Err(error) = generate(source, &label, &config, &temporary_for_cleanup) {
+                let _ = std::fs::remove_dir_all(&temporary_for_cleanup);
+                return Err(error);
+            }
+            if let Err(error) = std::fs::rename(&temporary_for_cleanup, &target) {
+                let _ = std::fs::remove_dir_all(&temporary_for_cleanup);
+                return Err(error.into());
+            }
             Ok::<(), crate::Error>(())
         })
         .await
