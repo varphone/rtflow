@@ -21,6 +21,7 @@
 - 参照 SRS/MediaMTX 审核 live/VOD：补 TS discontinuity sequence、清理
   VOD 临时目录、拒绝 `.`/`..` VOD id、处理 RTMP fmt3 extended timestamp；
   详细对照见 `docs/audits/2026-11-live-vod-srs-mediamtx.md`。
+- H.265 live TS、enhanced-RTMP H.264、VOD fingerprint/HEAD/suffix Range。
 
 ### Added
 

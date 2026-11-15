@@ -29,6 +29,7 @@ const FOURCC_HEVC: &[u8; 4] = b"hvc1";
 // AV1/VP9 FourCCs documented for the enhanced-RTMP mapping; HEVC is the
 // only codec actually muxed today.
 #[allow(dead_code)]
+const FOURCC_AVC: &[u8; 4] = b"avc1";
 const FOURCC_AV1: &[u8; 4] = b"av01";
 #[allow(dead_code)]
 const FOURCC_VP9: &[u8; 4] = b"vp09";
@@ -194,8 +195,37 @@ fn parse_enhanced_video_tag(data: &Bytes) -> Option<VideoData> {
             }
             _ => None,
         }
+    } else if fourcc == FOURCC_AVC {
+        match packet_type {
+            ENHANCED_PACKET_SEQUENCE_START => Some(VideoData::AvcSequenceHeader(data.slice(5..))),
+            ENHANCED_PACKET_CODED_FRAMES => {
+                if data.len() < 8 {
+                    return None;
+                }
+                let composition_time =
+                    ((data[5] as i32) << 16) | ((data[6] as i32) << 8) | (data[7] as i32);
+                let composition_time = if composition_time & 0x800000 != 0 {
+                    composition_time | !0xFFFFFF
+                } else {
+                    composition_time
+                };
+                Some(VideoData::AvcNalu {
+                    composition_time,
+                    data: data.slice(8..),
+                    is_keyframe,
+                })
+            }
+            ENHANCED_PACKET_CODED_FRAMES_X => Some(VideoData::AvcNalu {
+                composition_time: 0,
+                data: data.slice(5..),
+                is_keyframe,
+            }),
+            _ => None,
+        }
     } else {
-        None // AV1/VP9 not yet supported
+        // AV1/VP9 need codec-config plumbing that the HLS/DASH muxers do not
+        // expose yet; reject them explicitly instead of misparsing as H.264.
+        None
     }
 }
 
