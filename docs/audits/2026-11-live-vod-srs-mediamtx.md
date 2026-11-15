@@ -81,7 +81,7 @@ PTS: 0.100000, 0.133333, 0.166667, 0.200000, ...
 | L-05 | P1 | HLS VOD | VOD id 允许 `.`/`..`（虽然只能来自本地配置），存在路径穿越风险。 | 已修 |
 | L-06 | P1 | RTMP 收流 | fmt3 续包未读取 extended timestamp，长会话/使用 extended timestamp 的发布端会错位。SRS `srs_protocol_rtmp_stack.cpp` 明确处理了该分支。 | 已修 |
 | L-07 | P1 | RTMP 收流 | 连续丢帧 90 次后主动关闭发布连接，并每 30 次记录 debug；统计仍在 mount stats。 | 已完成 |
-| L-08 | P1 | RTMP 编码 | enhanced-RTMP 的 HEVC/H.264 已接入；AV1/VP9 尚未接入（HLS/TS 也尚无对应 sample entry）。 | 部分完成 |
+| L-08 | P1 | RTMP 编码 | enhanced-RTMP 的 HEVC/H.264/VP9/AV1 已解析；HLS fMP4 增加 vp09/av01 sample entry（TS 仍只支持 H.264/H.265）。 | 已完成（fMP4 路径） |
 | L-09 | P2 | HLS live | 已按 segmenter 启动时间 + segment timestamp 输出 `EXT-X-PROGRAM-DATE-TIME`（UTC 毫秒）。 | 已完成 |
 | L-10 | P2 | HLS live | 示例默认窗口降为 7 段，并提供 `--hls-segments` / `--hls-segment-seconds` 配置；ring 仍保留 3× 窗口。 | 已完成 |
 | L-11 | P2 | HLS live | 已支持 LL-HLS blocking playlist reload（`_HLS_msn` + `CAN-BLOCK-RELOAD`）；仍无 `EXT-X-PART`/part segmenter。 | 部分完成 |

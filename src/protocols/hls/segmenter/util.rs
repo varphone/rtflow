@@ -99,6 +99,22 @@ pub(super) fn codec_config_from_fmtp(track: &crate::media::TrackDescription) -> 
                 &value("sprop-pps")?,
             )
         }
+        Codec::Vp9 | Codec::Av1 => {
+            let value = fmtp
+                .split(';')
+                .find(|part| part.trim().starts_with("config="))?
+                .split_once('=')?
+                .1
+                .trim();
+            let bytes: Option<Vec<u8>> = (0..value.len())
+                .step_by(2)
+                .map(|index| {
+                    let pair = value.as_bytes().get(index..index + 2)?;
+                    u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()
+                })
+                .collect();
+            bytes.filter(|bytes| !bytes.is_empty()).map(Bytes::from)
+        }
         _ => None,
     }
 }

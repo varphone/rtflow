@@ -508,6 +508,98 @@ pub async fn serve_rtmp_session(
                                     break;
                                 }
                             }
+                            VideoData::Vp9SequenceHeader(data) => {
+                                let codec = Codec::Vp9;
+                                *video_seq_header = Some(data.clone());
+                                if let Ok(mut headers) = mount_handle.inner.rtmp_seq_headers.lock()
+                                {
+                                    headers.insert(0, data);
+                                }
+                                *video_codec = Some(codec);
+                                *has_video = true;
+                                let _ = commands::sync_description(
+                                    mount_handle,
+                                    stream_name,
+                                    Some(codec),
+                                    true,
+                                    *has_audio,
+                                    *width,
+                                    *height,
+                                    *frame_rate,
+                                    *audio_sample_rate,
+                                    *audio_channels,
+                                    video_seq_header.as_deref(),
+                                );
+                            }
+                            VideoData::Av1SequenceHeader(data) => {
+                                let codec = Codec::Av1;
+                                *video_seq_header = Some(data.clone());
+                                if let Ok(mut headers) = mount_handle.inner.rtmp_seq_headers.lock()
+                                {
+                                    headers.insert(0, data);
+                                }
+                                *video_codec = Some(codec);
+                                *has_video = true;
+                                let _ = commands::sync_description(
+                                    mount_handle,
+                                    stream_name,
+                                    Some(codec),
+                                    true,
+                                    *has_audio,
+                                    *width,
+                                    *height,
+                                    *frame_rate,
+                                    *audio_sample_rate,
+                                    *audio_channels,
+                                    video_seq_header.as_deref(),
+                                );
+                            }
+                            VideoData::Vp9Nalu {
+                                data,
+                                is_keyframe,
+                                composition_time,
+                            } => {
+                                let codec = Codec::Vp9;
+                                let base = *base_timestamp.get_or_insert(msg.timestamp);
+                                let ts_ms = msg.timestamp.wrapping_sub(base);
+                                let pts_ms = (ts_ms as i64 + composition_time as i64).max(0) as u32;
+                                let unit = AccessUnit {
+                                    track_id: 0,
+                                    codec,
+                                    pts: Duration::from_millis(pts_ms as u64),
+                                    dts: Some(Duration::from_millis(ts_ms as u64)),
+                                    rtp_timestamp: ts_ms.wrapping_mul(90),
+                                    is_keyframe,
+                                    data,
+                                };
+                                if !publish_frame(publisher, unit, drop_streak) {
+                                    overloaded = true;
+                                    break;
+                                }
+                            }
+                            VideoData::Av1Nalu {
+                                data,
+                                is_keyframe,
+                                composition_time,
+                            } => {
+                                let codec = Codec::Av1;
+                                let base = *base_timestamp.get_or_insert(msg.timestamp);
+                                let ts_ms = msg.timestamp.wrapping_sub(base);
+                                let pts_ms = (ts_ms as i64 + composition_time as i64).max(0) as u32;
+                                let unit = AccessUnit {
+                                    track_id: 0,
+                                    codec,
+                                    pts: Duration::from_millis(pts_ms as u64),
+                                    dts: Some(Duration::from_millis(ts_ms as u64)),
+                                    rtp_timestamp: ts_ms.wrapping_mul(90),
+                                    is_keyframe,
+                                    data,
+                                };
+                                if !publish_frame(publisher, unit, drop_streak) {
+                                    overloaded = true;
+                                    break;
+                                }
+                            }
                         }
                     }
                 }

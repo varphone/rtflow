@@ -26,6 +26,8 @@ const ENHANCED_PACKET_CODED_FRAMES_X: u8 = 3; // no composition time
 
 /// Enhanced RTMP FourCC codes (AV1/VP9 are not muxed yet).
 const FOURCC_HEVC: &[u8; 4] = b"hvc1";
+const FOURCC_AV1: &[u8; 4] = b"av01";
+const FOURCC_VP9: &[u8; 4] = b"vp09";
 const FOURCC_AVC: &[u8; 4] = b"avc1";
 
 /// FLV audio codec IDs
@@ -61,6 +63,22 @@ pub enum VideoData {
     HevcSequenceHeader(Bytes),
     /// H.265 NALUs
     HevcNalu {
+        composition_time: i32,
+        data: Bytes,
+        is_keyframe: bool,
+    },
+    /// VP9 sequence header (VPCodecConfigurationRecord, enhanced RTMP).
+    Vp9SequenceHeader(Bytes),
+    /// VP9 coded frame (enhanced RTMP).
+    Vp9Nalu {
+        composition_time: i32,
+        data: Bytes,
+        is_keyframe: bool,
+    },
+    /// AV1 sequence header (AV1CodecConfigurationRecord, enhanced RTMP).
+    Av1SequenceHeader(Bytes),
+    /// AV1 temporal unit (enhanced RTMP).
+    Av1Nalu {
         composition_time: i32,
         data: Bytes,
         is_keyframe: bool,
@@ -216,9 +234,55 @@ fn parse_enhanced_video_tag(data: &Bytes) -> Option<VideoData> {
             }),
             _ => None,
         }
+    } else if fourcc == FOURCC_VP9 || fourcc == FOURCC_AV1 {
+        let sequence = fourcc == FOURCC_AV1;
+        match packet_type {
+            ENHANCED_PACKET_SEQUENCE_START => Some(if sequence {
+                VideoData::Av1SequenceHeader(data.slice(5..))
+            } else {
+                VideoData::Vp9SequenceHeader(data.slice(5..))
+            }),
+            ENHANCED_PACKET_CODED_FRAMES => {
+                if data.len() < 8 {
+                    return None;
+                }
+                let composition_time =
+                    ((data[5] as i32) << 16) | ((data[6] as i32) << 8) | (data[7] as i32);
+                let composition_time = if composition_time & 0x800000 != 0 {
+                    composition_time | !0xFFFFFF
+                } else {
+                    composition_time
+                };
+                Some(if sequence {
+                    VideoData::Av1Nalu {
+                        composition_time,
+                        data: data.slice(8..),
+                        is_keyframe,
+                    }
+                } else {
+                    VideoData::Vp9Nalu {
+                        composition_time,
+                        data: data.slice(8..),
+                        is_keyframe,
+                    }
+                })
+            }
+            ENHANCED_PACKET_CODED_FRAMES_X => Some(if sequence {
+                VideoData::Av1Nalu {
+                    composition_time: 0,
+                    data: data.slice(5..),
+                    is_keyframe,
+                }
+            } else {
+                VideoData::Vp9Nalu {
+                    composition_time: 0,
+                    data: data.slice(5..),
+                    is_keyframe,
+                }
+            }),
+            _ => None,
+        }
     } else {
-        // AV1/VP9 need codec-config plumbing that the HLS/DASH muxers do not
-        // expose yet; reject them explicitly instead of misparsing as H.264.
         None
     }
 }
@@ -597,5 +661,35 @@ mod tests {
         let (rate, ch) = parse_aac_config(Some(&config));
         assert_eq!(rate, 44100);
         assert_eq!(ch, 2);
+    }
+}
+
+#[cfg(test)]
+mod enhanced_codec_tests {
+    use super::*;
+
+    #[test]
+    fn parses_enhanced_vp9_and_av1_tags() {
+        let mut vp9 = vec![0x90]; // keyframe + sequence start
+        vp9.extend_from_slice(b"vp09");
+        vp9.extend_from_slice(&[1, 2, 3]);
+        assert!(matches!(
+            parse_video_tag(&Bytes::from(vp9)),
+            Some(VideoData::Vp9SequenceHeader(_))
+        ));
+
+        let mut av1 = vec![0x91]; // keyframe + coded frames
+        av1.extend_from_slice(b"av01");
+        av1.extend_from_slice(&[0, 0, 0]);
+        av1.extend_from_slice(&[0x0a, 0x0b]);
+        match parse_video_tag(&Bytes::from(av1)) {
+            Some(VideoData::Av1Nalu {
+                data, is_keyframe, ..
+            }) => {
+                assert!(is_keyframe);
+                assert_eq!(&data[..], &[0x0a, 0x0b]);
+            }
+            other => panic!("expected AV1 NAL, got {other:?}"),
+        }
     }
 }

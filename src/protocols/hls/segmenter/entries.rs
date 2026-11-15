@@ -21,6 +21,8 @@ pub(super) fn write_video_entry(
     buf.put_u32(0);
     match track.codec {
         Codec::H265 => buf.put_slice(b"hvc1"),
+        Codec::Vp9 => buf.put_slice(b"vp09"),
+        Codec::Av1 => buf.put_slice(b"av01"),
         _ => buf.put_slice(b"avc1"),
     }
     buf.put_u32(0);
@@ -34,6 +36,10 @@ pub(super) fn write_video_entry(
     let dimensions = match track.codec {
         Codec::H265 => codec_config.and_then(|config| h265_dimensions_from_hvcc(config)),
         Codec::H264 => codec_config.and_then(|config| h264_dimensions_from_avcc(config)),
+        Codec::Vp9 | Codec::Av1 => track
+            .width
+            .zip(track.height)
+            .map(|(width, height)| (width as u16, height as u16)),
         _ => None,
     };
     buf.put_u16(dimensions.map_or(0, |(width, _)| width));
@@ -55,10 +61,20 @@ pub(super) fn write_video_entry(
     buf.put_u32(0);
     match track.codec {
         Codec::H265 => buf.put_slice(b"hvcC"),
+        Codec::Vp9 => buf.put_slice(b"vpcC"),
+        Codec::Av1 => buf.put_slice(b"av1C"),
         _ => buf.put_slice(b"avcC"),
     }
     if let Some(config) = codec_config {
         buf.put_slice(config);
+    } else if track.codec == Codec::Vp9 {
+        // Minimal VPCodecConfigurationRecord: version 1, profile 0, level 0,
+        // 8-bit 4:2:0 limited range, BT.709 colour.
+        buf.put_slice(&[1, 0, 10, 0x82, 1, 1, 1, 0, 0]);
+    } else if track.codec == Codec::Av1 {
+        // Minimal AV1CodecConfigurationRecord: marker/version 1, profile 0,
+        // level 0, 8-bit 4:2:0.
+        buf.put_slice(&[0x81, 0x00, 0x00, 0x00]);
     }
     let config_size = (buf.len() - config_start) as u32;
     buf[config_start..config_start + 4].copy_from_slice(&config_size.to_be_bytes());

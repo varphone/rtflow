@@ -30,6 +30,10 @@ fn video_fmtp(codec: Codec, config: Option<&[u8]>) -> Option<String> {
             let (vps, sps, pps) = h265_parameter_sets_from_hvcc(config)?;
             Some(crate::media::bitstream::h265_fmtp(&vps, &sps, &pps))
         }
+        Codec::Vp9 | Codec::Av1 => {
+            let hex: String = config.iter().map(|byte| format!("{byte:02x}")).collect();
+            Some(format!("config={hex}"))
+        }
         _ => None,
     }
 }

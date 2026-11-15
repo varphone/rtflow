@@ -140,6 +140,10 @@ pub(super) fn write_trak(
         match track.codec {
             Codec::H265 => codec_config.and_then(|c| h265_dimensions_from_hvcc(c)),
             Codec::H264 => codec_config.and_then(|c| h264_dimensions_from_avcc(c)),
+            Codec::Vp9 | Codec::Av1 => track
+                .width
+                .zip(track.height)
+                .map(|(width, height)| (width as u16, height as u16)),
             _ => None,
         }
     } else {
