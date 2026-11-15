@@ -1,4 +1,4 @@
-use super::segmenter::{Segment, SegmentFormat};
+use super::segmenter::Segment;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn asset_uri(asset_prefix: &str, asset: &str, query: &str) -> String {
@@ -95,13 +95,11 @@ pub fn write_live_playlist_at_q_pdt(
         if segment.discontinuity {
             playlist.push_str("#EXT-X-DISCONTINUITY\n");
         }
-        if mpeg_ts {
-            if let Some(base) = program_date_time {
-                playlist.push_str(&format!(
-                    "#EXT-X-PROGRAM-DATE-TIME:{}\n",
-                    format_pdt(base + segment.timestamp)
-                ));
-            }
+        if mpeg_ts && let Some(base) = program_date_time {
+            playlist.push_str(&format!(
+                "#EXT-X-PROGRAM-DATE-TIME:{}\n",
+                format_pdt(base + segment.timestamp)
+            ));
         }
         let duration = segment.duration.as_secs_f64();
         playlist.push_str(&format!("#EXTINF:{:.3},\n", duration));
