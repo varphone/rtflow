@@ -189,7 +189,16 @@ pub fn create_hls_handlers(
         let r = ring_p.clone();
         let asset_prefix = playlist_asset_prefix.clone();
         Box::pin(async move {
-            handler::serve_playlist(_req, writer, &r, is_live, target_duration, &asset_prefix).await
+            handler::serve_playlist(
+                _req,
+                writer,
+                &r,
+                is_live,
+                target_duration,
+                &asset_prefix,
+                None,
+            )
+            .await
         })
     });
 

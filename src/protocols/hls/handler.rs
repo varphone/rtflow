@@ -52,6 +52,7 @@ pub async fn serve_playlist<W: AsyncWrite + Unpin>(
     is_live: bool,
     target_duration: Duration,
     asset_prefix: &str,
+    program_date_time: Option<std::time::SystemTime>,
 ) -> Result<ResponseWriter<W>> {
     let segments = ring.snapshot();
 
@@ -80,7 +81,13 @@ pub async fn serve_playlist<W: AsyncWrite + Unpin>(
     }
 
     let body = if is_live {
-        playlist::write_live_playlist_at_q(&segments, target_duration, asset_prefix, &query)
+        playlist::write_live_playlist_at_q_pdt(
+            &segments,
+            target_duration,
+            asset_prefix,
+            &query,
+            program_date_time,
+        )
     } else {
         playlist::write_vod_playlist_at_q(&segments, asset_prefix, &query)
     };
@@ -231,6 +238,7 @@ mod tests {
             true,
             Duration::from_secs(2),
             "/live/stream",
+            None,
         )
         .await
         .unwrap();
@@ -260,6 +268,7 @@ mod tests {
             true,
             Duration::from_secs(2),
             "/live/stream",
+            None,
         )
         .await
         .unwrap();
@@ -277,6 +286,7 @@ mod tests {
             true,
             Duration::from_secs(2),
             "/live/stream",
+            None,
         )
         .await
         .unwrap();

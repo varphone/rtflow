@@ -24,6 +24,8 @@
 - H.265 live TS、enhanced-RTMP H.264、VOD fingerprint/HEAD/suffix Range。
 - `live_vod_gateway` 新增 `--hls-segments`（默认 7）和
   `--hls-segment-seconds`（默认 1）。
+- HLS live 输出 `EXT-X-PROGRAM-DATE-TIME`（UTC 毫秒，按 segmenter
+  启动时间锚定）。
 
 ### Added
 

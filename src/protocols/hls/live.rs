@@ -32,6 +32,9 @@ struct Channel {
     /// Cache-busting token for init/segments. A server restart or segmenter
     /// restart must not reuse the previous run's browser-cached init.m4s.
     generation: Mutex<String>,
+    /// Wall-clock start of the current segmenter generation, used for
+    /// `EXT-X-PROGRAM-DATE-TIME`.
+    started_at: Mutex<std::time::SystemTime>,
 }
 
 /// Per-registry HLS live manager. One segmenter/channel per mount.
@@ -72,6 +75,7 @@ impl HlsLiveManager {
                             .unwrap_or_default()
                             .as_nanos()
                     )),
+                    started_at: Mutex::new(std::time::SystemTime::now()),
                 })
             })
             .clone()
@@ -90,6 +94,10 @@ impl HlsLiveManager {
             return;
         }
         let generation = channel.next_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        *channel
+            .started_at
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = std::time::SystemTime::now();
         *active = Some(generation);
         *channel
             .generation
@@ -262,6 +270,10 @@ pub fn create_hls_live_handler(manager: Arc<HlsLiveManager>) -> Handler {
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .clone();
                     req.query.insert("v".to_owned(), generation);
+                    let started_at = *channel
+                        .started_at
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     handler::serve_playlist(
                         req,
                         writer,
@@ -269,6 +281,7 @@ pub fn create_hls_live_handler(manager: Arc<HlsLiveManager>) -> Handler {
                         true,
                         manager.config.segment_duration,
                         "",
+                        Some(started_at),
                     )
                     .await
                 }

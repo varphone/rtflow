@@ -1,5 +1,5 @@
-use super::segmenter::Segment;
-use std::time::Duration;
+use super::segmenter::{Segment, SegmentFormat};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn asset_uri(asset_prefix: &str, asset: &str, query: &str) -> String {
     let prefix = asset_prefix.trim_end_matches('/');
@@ -36,6 +36,18 @@ pub fn write_live_playlist_at_q(
     target_duration: Duration,
     asset_prefix: &str,
     query: &str,
+) -> String {
+    write_live_playlist_at_q_pdt(segments, target_duration, asset_prefix, query, None)
+}
+
+/// Like [`write_live_playlist_at_q`], with wall-clock `EXT-X-PROGRAM-DATE-TIME`
+/// anchored at `program_date_time` (the first segment's wall clock).
+pub fn write_live_playlist_at_q_pdt(
+    segments: &[Segment],
+    target_duration: Duration,
+    asset_prefix: &str,
+    query: &str,
+    program_date_time: Option<SystemTime>,
 ) -> String {
     if segments.is_empty() {
         // A valid but empty playlist: players poll it until segments
@@ -82,6 +94,14 @@ pub fn write_live_playlist_at_q(
     for segment in segments {
         if segment.discontinuity {
             playlist.push_str("#EXT-X-DISCONTINUITY\n");
+        }
+        if mpeg_ts {
+            if let Some(base) = program_date_time {
+                playlist.push_str(&format!(
+                    "#EXT-X-PROGRAM-DATE-TIME:{}\n",
+                    format_pdt(base + segment.timestamp)
+                ));
+            }
         }
         let duration = segment.duration.as_secs_f64();
         playlist.push_str(&format!("#EXTINF:{:.3},\n", duration));
@@ -159,6 +179,33 @@ pub fn write_vod_playlist_at_q(segments: &[Segment], asset_prefix: &str, query: 
 
     playlist.push_str("#EXT-X-ENDLIST\n");
     playlist
+}
+
+/// RFC 3339 UTC with milliseconds (HLS `EXT-X-PROGRAM-DATE-TIME`).
+fn format_pdt(time: SystemTime) -> String {
+    let since = time.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let secs = since.as_secs();
+    let millis = since.subsec_millis();
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    let hour = rem / 3_600;
+    let minute = (rem % 3_600) / 60;
+    let second = rem % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+}
+
+fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
 }
 
 #[cfg(test)]
