@@ -161,6 +161,7 @@ mod retention_tests {
             discontinuity: false,
             discontinuity_sequence: None,
             timestamp: Duration::from_secs(sequence),
+            format: crate::protocols::hls::segmenter::SegmentFormat::Fmp4,
         }
     }
 

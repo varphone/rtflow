@@ -121,8 +121,13 @@ pub async fn serve_segment<W: AsyncWrite + Unpin>(
     };
 
     let content_length = segment.data.len().to_string();
+    let content_type = if segment.format == super::segmenter::SegmentFormat::MpegTs {
+        "video/mp2t"
+    } else {
+        "video/iso.segment"
+    };
     let headers = [
-        ("Content-Type", "video/iso.segment"),
+        ("Content-Type", content_type),
         ("Content-Length", content_length.as_str()),
         ("Cache-Control", "no-store"),
         ("Access-Control-Allow-Origin", "*"),
@@ -184,6 +189,7 @@ mod tests {
             discontinuity: false,
             discontinuity_sequence: None,
             timestamp: Duration::from_millis(seq * 2000),
+            format: crate::protocols::hls::segmenter::SegmentFormat::Fmp4,
         }
     }
 

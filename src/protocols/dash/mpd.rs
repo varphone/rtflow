@@ -447,6 +447,7 @@ mod tests {
                 discontinuity: false,
                 discontinuity_sequence: None,
                 timestamp: Duration::ZERO,
+                format: crate::hls::segmenter::SegmentFormat::Fmp4,
             },
             Segment {
                 sequence: 2,
@@ -457,6 +458,7 @@ mod tests {
                 discontinuity: false,
                 discontinuity_sequence: None,
                 timestamp: Duration::from_secs(2),
+                format: crate::hls::segmenter::SegmentFormat::Fmp4,
             },
         ];
 

@@ -68,10 +68,15 @@ pub fn write_live_playlist_at_q(
     playlist.push_str(&format!(
         "#EXT-X-DISCONTINUITY-SEQUENCE:{discontinuity_sequence}\n"
     ));
-    playlist.push_str(&format!(
-        "#EXT-X-MAP:URI=\"{}\"\n",
-        asset_uri(asset_prefix, "init.m4s", query)
-    ));
+    let mpeg_ts = segments.first().is_some_and(|segment| {
+        segment.format == crate::protocols::hls::segmenter::SegmentFormat::MpegTs
+    });
+    if !mpeg_ts {
+        playlist.push_str(&format!(
+            "#EXT-X-MAP:URI=\"{}\"\n",
+            asset_uri(asset_prefix, "init.m4s", query)
+        ));
+    }
 
     for segment in segments {
         if segment.discontinuity {
@@ -79,9 +84,14 @@ pub fn write_live_playlist_at_q(
         }
         let duration = segment.duration.as_secs_f64();
         playlist.push_str(&format!("#EXTINF:{:.3},\n", duration));
+        let extension = if mpeg_ts { "ts" } else { "m4s" };
         playlist.push_str(&format!(
             "{}\n",
-            asset_uri(asset_prefix, &format!("{}.m4s", segment.sequence), query)
+            asset_uri(
+                asset_prefix,
+                &format!("{}.{}", segment.sequence, extension),
+                query
+            )
         ));
     }
 
@@ -118,10 +128,15 @@ pub fn write_vod_playlist_at_q(segments: &[Segment], asset_prefix: &str, query: 
     playlist.push_str(&format!("#EXT-X-TARGETDURATION:{}\n", max_duration));
     playlist.push_str("#EXT-X-MEDIA-SEQUENCE:0\n");
     playlist.push_str("#EXT-X-PLAYLIST-TYPE:VOD\n");
-    playlist.push_str(&format!(
-        "#EXT-X-MAP:URI=\"{}\"\n",
-        asset_uri(asset_prefix, "init.m4s", query)
-    ));
+    let mpeg_ts = segments.first().is_some_and(|segment| {
+        segment.format == crate::protocols::hls::segmenter::SegmentFormat::MpegTs
+    });
+    if !mpeg_ts {
+        playlist.push_str(&format!(
+            "#EXT-X-MAP:URI=\"{}\"\n",
+            asset_uri(asset_prefix, "init.m4s", query)
+        ));
+    }
 
     for segment in segments {
         if segment.discontinuity {
@@ -129,9 +144,14 @@ pub fn write_vod_playlist_at_q(segments: &[Segment], asset_prefix: &str, query: 
         }
         let duration = segment.duration.as_secs_f64();
         playlist.push_str(&format!("#EXTINF:{:.3},\n", duration));
+        let extension = if mpeg_ts { "ts" } else { "m4s" };
         playlist.push_str(&format!(
             "{}\n",
-            asset_uri(asset_prefix, &format!("{}.m4s", segment.sequence), query)
+            asset_uri(
+                asset_prefix,
+                &format!("{}.{}", segment.sequence, extension),
+                query
+            )
         ));
     }
 
@@ -154,6 +174,7 @@ mod tests {
             discontinuity: false,
             discontinuity_sequence: None,
             timestamp: Duration::from_millis(sequence * 2000),
+            format: crate::protocols::hls::segmenter::SegmentFormat::Fmp4,
         }
     }
 

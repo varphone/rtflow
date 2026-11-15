@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- HLS 直播改为 MPEG-TS（`transmux::StreamingTsHlsSegmenter`）：按关键帧
+  切段、每段自带 PAT/PMT、跨段 continuity counter，Firefox/Edge 的
+  hls.js 均可持续播放；VOD/静态 HLS 仍使用 fMP4。
+- HLS live 不再自动启动 segmenter；由首个 playlist 请求启动，修复长推流
+  只产出首段、播放器缓冲停在 1.88s 的问题。
+
 ### Added
 
 - RTMP：`onMetaData` 宽高/帧率进入动态 `MediaDescription`，AVC/HEVC/AAC

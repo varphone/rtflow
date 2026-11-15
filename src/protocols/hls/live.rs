@@ -111,7 +111,7 @@ impl HlsLiveManager {
             lookback_count: self.config.segment_count,
         };
         tokio::spawn(async move {
-            let mut segmenter = Segmenter::new(seg_config, &description);
+            let mut segmenter = Segmenter::new_mpegts(seg_config, &description);
             segmenter.set_sequence(next_sequence.load(Ordering::Acquire));
             let mut segments = segmenter.subscribe();
             let (mut receiver, startup) = mount.subscribe_with_startup();
@@ -189,7 +189,7 @@ fn mount_path(path: &str) -> Option<(&str, &str)> {
         return Some((mount, "init"));
     }
     let (mount, file) = rest.rsplit_once('/')?;
-    if file.ends_with(".m4s") {
+    if file.ends_with(".m4s") || file.ends_with(".ts") {
         return Some((mount, "segment"));
     }
     None
@@ -278,7 +278,10 @@ pub fn create_hls_live_handler(manager: Arc<HlsLiveManager>) -> Handler {
                         .path
                         .rsplit('/')
                         .next()
-                        .and_then(|file| file.strip_suffix(".m4s"))
+                        .and_then(|file| {
+                            file.strip_suffix(".m4s")
+                                .or_else(|| file.strip_suffix(".ts"))
+                        })
                         .and_then(|value| value.parse::<u64>().ok())
                         .unwrap_or(u64::MAX);
                     handler::serve_segment(req, writer, &channel.ring, sequence).await

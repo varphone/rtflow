@@ -181,6 +181,7 @@ fn segment_ring_push_and_get() {
         discontinuity: false,
         discontinuity_sequence: None,
         timestamp: Duration::ZERO,
+        format: rtflow::protocols::hls::segmenter::SegmentFormat::Fmp4,
     });
     ring.push(Segment {
         sequence: 1,
@@ -191,6 +192,7 @@ fn segment_ring_push_and_get() {
         discontinuity: false,
         discontinuity_sequence: None,
         timestamp: Duration::from_secs(2),
+        format: rtflow::protocols::hls::segmenter::SegmentFormat::Fmp4,
     });
 
     assert_eq!(ring.len(), 2);
@@ -213,6 +215,7 @@ fn segment_ring_eviction() {
             discontinuity: false,
             discontinuity_sequence: None,
             timestamp: Duration::from_secs(i * 2),
+            format: rtflow::protocols::hls::segmenter::SegmentFormat::Fmp4,
         });
     }
 
@@ -237,6 +240,7 @@ fn live_playlist_format() {
             discontinuity: false,
             discontinuity_sequence: None,
             timestamp: Duration::ZERO,
+            format: rtflow::protocols::hls::segmenter::SegmentFormat::Fmp4,
         },
         Segment {
             sequence: 1,
@@ -247,6 +251,7 @@ fn live_playlist_format() {
             discontinuity: false,
             discontinuity_sequence: None,
             timestamp: Duration::from_millis(2000),
+            format: rtflow::protocols::hls::segmenter::SegmentFormat::Fmp4,
         },
     ];
     let playlist = playlist::write_live_playlist(&segments, Duration::from_secs(3));
@@ -274,6 +279,7 @@ fn vod_playlist_format() {
         discontinuity: false,
         discontinuity_sequence: None,
         timestamp: Duration::ZERO,
+        format: rtflow::protocols::hls::segmenter::SegmentFormat::Fmp4,
     }];
     let playlist = playlist::write_vod_playlist(&segments);
 
@@ -856,4 +862,25 @@ fn segmenter_can_continue_sequence_after_restart() {
     });
     let segment = segments.try_recv().expect("segment");
     assert_eq!(segment.sequence, 114);
+}
+
+#[test]
+fn live_playlist_uses_mpeg_ts_for_ts_segments() {
+    let segments = vec![Segment {
+        sequence: 7,
+        duration: Duration::from_millis(2000),
+        init: Bytes::new(),
+        data: Bytes::from_static(b"ts"),
+        starts_with_keyframe: true,
+        discontinuity: false,
+        discontinuity_sequence: None,
+        timestamp: Duration::ZERO,
+        format: rtflow::protocols::hls::segmenter::SegmentFormat::MpegTs,
+    }];
+    let playlist = playlist::write_live_playlist(&segments, Duration::from_secs(2));
+
+    assert!(playlist.contains("#EXT-X-MEDIA-SEQUENCE:7"));
+    assert!(playlist.contains("7.ts"));
+    assert!(!playlist.contains("#EXT-X-MAP"));
+    assert!(!playlist.contains(".m4s"));
 }

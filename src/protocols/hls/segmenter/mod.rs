@@ -8,10 +8,12 @@ mod entries;
 mod init;
 mod media;
 mod sps;
+mod ts;
 mod util;
 
 use self::init::build_init_segment;
 use self::media::build_media_segment;
+use self::ts::TsPipeline;
 use self::util::{annex_b_to_length_prefixed, codec_config_from_annex_b, codec_config_from_fmtp};
 
 /// Hard safety bound for a segment whose timestamps never advance.
@@ -39,7 +41,16 @@ impl Default for SegmenterConfig {
     }
 }
 
-/// A completed fMP4 segment.
+/// Container written for a completed segment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SegmentFormat {
+    /// fMP4 (init + moof/mdat), used by VOD and static HLS.
+    Fmp4,
+    /// MPEG-TS (PAT/PMT/PES), used by live HLS.
+    MpegTs,
+}
+
+/// A completed HLS segment.
 #[derive(Clone, Debug)]
 pub struct Segment {
     /// Sequence number (monotonically increasing).
@@ -59,6 +70,8 @@ pub struct Segment {
     pub discontinuity_sequence: Option<u32>,
     /// Timestamp of the first sample in the segment.
     pub timestamp: Duration,
+    /// Container format of `data`.
+    pub format: SegmentFormat,
 }
 
 struct TrackState {
@@ -94,6 +107,8 @@ pub struct Segmenter {
     next_discontinuity: bool,
     /// Monotonic counter of discontinuities ever generated.
     discontinuity_counter: u32,
+    ts_pipeline: Option<TsPipeline>,
+    mpeg_ts: bool,
 }
 
 impl Segmenter {
@@ -129,7 +144,20 @@ impl Segmenter {
             init_segment: None,
             next_discontinuity: false,
             discontinuity_counter: 0,
+            ts_pipeline: None,
+            mpeg_ts: false,
         }
+    }
+
+    /// Create a live segmenter that emits MPEG-TS segments via the
+    /// `transmux` streaming TS-HLS segmenter. Falls back to fMP4 when the
+    /// description lacks a usable AVC/AAC configuration.
+    pub fn new_mpegts(config: SegmenterConfig, description: &MediaDescription) -> Self {
+        let ts_pipeline = TsPipeline::new(description, &config);
+        let mut segmenter = Self::new(config, description);
+        segmenter.mpeg_ts = ts_pipeline.is_some();
+        segmenter.ts_pipeline = ts_pipeline;
+        segmenter
     }
 
     /// Subscribe to completed segments.
@@ -170,9 +198,20 @@ impl Segmenter {
     /// EXT-X-MEDIA-SEQUENCE must never go backwards.
     pub fn set_sequence(&mut self, sequence: u64) {
         self.sequence = sequence;
+        if let Some(pipeline) = &mut self.ts_pipeline {
+            pipeline.set_sequence(sequence);
+        }
     }
 
     pub fn push(&mut self, unit: AccessUnit) {
+        if self.mpeg_ts
+            && let Some(pipeline) = &mut self.ts_pipeline
+        {
+            for segment in pipeline.push(unit) {
+                let _ = self.tx.send(segment);
+            }
+            return;
+        }
         let Some(&track_index) = self.track_indices.get(&unit.track_id) else {
             return;
         };
@@ -312,6 +351,7 @@ impl Segmenter {
             discontinuity: discontinuity_flag,
             discontinuity_sequence: segment_discontinuity_sequence,
             timestamp: segment_pts,
+            format: SegmentFormat::Fmp4,
         };
 
         tracing::debug!(sequence = segment.sequence, ?segment.duration, "HLS segment finalized");
@@ -327,6 +367,9 @@ impl Segmenter {
 
     /// Drop incomplete samples after a transport gap and mark the next segment.
     pub fn reset_after_discontinuity(&mut self) {
+        if let Some(pipeline) = &mut self.ts_pipeline {
+            pipeline.mark_discontinuity();
+        }
         for track in &mut self.tracks {
             track.samples.clear();
             track.last_dts = None;
@@ -340,6 +383,14 @@ impl Segmenter {
 
     /// Flush any remaining samples as a final segment.
     pub fn flush(&mut self) {
+        if self.mpeg_ts
+            && let Some(pipeline) = &mut self.ts_pipeline
+        {
+            for segment in pipeline.flush() {
+                let _ = self.tx.send(segment);
+            }
+            return;
+        }
         let has_samples = self.tracks.iter().any(|t| !t.samples.is_empty());
         if !has_samples {
             return;
@@ -381,6 +432,7 @@ impl Segmenter {
             discontinuity: discontinuity_flag,
             discontinuity_sequence: segment_discontinuity_sequence,
             timestamp: segment_pts,
+            format: SegmentFormat::Fmp4,
         };
 
         let _ = self.tx.send(segment);
