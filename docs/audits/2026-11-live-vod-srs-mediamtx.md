@@ -75,7 +75,7 @@ PTS: 0.100000, 0.133333, 0.166667, 0.200000, ...
 | ID | 级别 | 区域 | 结论 | 状态 |
 |---|---|---|---|---|
 | L-01 | P0 | RTMP 推流 | 已用 tcpdump/代理抓取客户端→服务端原始 RTMP 字节，并用 `Dechunker` 重放：69 个视频消息 / 约 2.3 s，时间戳为 21/54/88/121/154/188/221/254…，与 ffmpeg 源一致；RTMP 时间戳本身没有放大。此前的 1.7 s/30 帧来自 TS mux 的 `Sample.duration` 处理，已用码流帧率修正。 | 已排除 |
-| L-02 | P0 | HLS live | TS 路径仅接受 H.264 + AAC；H.265 live 会退回 fMP4，Firefox/Shaka 对长 fMP4 的 MSE 路径不稳定。SRS/MediaMTX 均输出 H.265 TS（PMT stream_type 0x24）。 | 已知限制 |
+| L-02 | P1 | HLS live | TS 路径已接入 H.265（hvcC + PMT stream_type 0x24），但 RTMP H.265 目前没有生成 sprop-vps/sps/pps fmtp，实际仍会回退 fMP4。 | 部分完成 |
 | L-03 | P1 | HLS live | TS segment 的 `discontinuity_sequence` 之前恒为 `None`，`EXT-X-DISCONTINUITY-SEQUENCE` 永远为 0。 | 已修 |
 | L-04 | P1 | HLS VOD | 生成失败时 `.tmp-<id>` 不清理；下次生成可能复用残留目录。 | 已修 |
 | L-05 | P1 | HLS VOD | VOD id 允许 `.`/`..`（虽然只能来自本地配置），存在路径穿越风险。 | 已修 |
@@ -126,7 +126,7 @@ TS 路径的 `Segment` 由 `transmux` 返回，原先只带 `discontinuous`，�
 ## 推荐后续
 
 1. **已完成：RTMP 时间戳验证**（原始字节回放，时间戳 21/54/88…；无需重写状态机）。
-2. **已完成：H.265 live TS**（hvcC/PMT stream_type 0x24；无参数集回退 fMP4）。
+2. **部分完成：H.265 live TS**（hvcC/PMT 已接入；RTMP H.265 尚未生成 sprop fmtp，实际仍回退 fMP4）。
 3. **已完成：发布端丢帧日志 + 独立分段标记 + VOD 临时目录/路径校验**。
 4. **待做：HLS live `EXT-X-PROGRAM-DATE-TIME`、可配置窗口、LL-HLS**。
 5. **待做：VOD 源变更检测（mtime/size）、HEAD/Range；enhanced-RTMP AV1/VP9。**
