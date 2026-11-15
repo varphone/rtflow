@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 仓库重构为 Cargo workspace 多 crate 布局：根 `Cargo.toml` 只保留 workspace
+  配置，源码迁入 `crates/<name>/src/`；`tests/`、`examples/`、`benches/` 随之
+  迁入 `crates/rtflow/`，`support/` 变为 `crates/rtflow-testkit`。
+- 对外 API 路径保持不变：`rtflow` 仍是唯一门面 crate，`rtflow::server`、
+  `rtflow::client`、`rtflow::hls`、`rtflow::mount`、`rtflow::media` 等全部
+  re-export；分层改由 Cargo 依赖图强制。
+- 新增 `docs/architecture/crates.md`；分层/树形/示例/发布脚本与 CI 改为
+  workspace 口径。
+
 ### Added
 
 - RTSP 发布增强：`ServerConfig::dynamic_publishers`（opt-in）允许 ANNOUNCE

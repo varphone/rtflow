@@ -2,49 +2,49 @@
 
 ## 分层
 
-依赖只允许从上往下（脚本 `scripts/check-layering.py` 强制，当前依赖图
-SCC = 0、上行依赖 = 0）：
+workspace 拆分为 29 个 crate，依赖只允许从上往下（`scripts/check-layering.py`
+按各 `Cargo.toml` 的依赖图校验，当前 0 违规、0 环）：
 
 ```text
-application / device integration
-        │ AccessUnit / MediaDescription
-        ▼
-gateway ── protocols/{hls,dash,http_flv,rtmp,srt,webrtc,gst} ── server/client
-   │                    │                                        │
-   │                    └─────────────┬──────────────────────────┘
-   │                                  ▼
-   │            http / metrics(exporter) / mount / pipeline
-   │                                  │
-   │            segment / file / storage / runtime
-   ▼                                  │
-rtsp/{message,sdp,range,auth,token_auth,transport,multicast}
-   │                                  │
-   └──────── rtp / rtcp / srtp / security ──────────┘
-                                      │
-                        core/{error,identity,observe,metrics} + media
+application
+   │  rtflow（门面，仅 re-export）
+   ▼
+gateway ── admin ── protocol adapters
+   │        ├── hls, dash
+   │        ├── http-flv
+   │        ├── rtmp, srt, webrtc, gst
+   ▼        ▼
+rtsp-server / rtsp-client / source
+   │
+http ── metrics ── mount ── pipeline ── storage ── file
+   │
+rtsp ── framing ── runtime
+   │
+rtp ── rtcp ── srtp ── security ── multicast
+   │
+media
+   │
+core
 ```
 
-- `core/`：`error`、`identity`、`observe`（事件与 `EventSink`）、`metrics`
-  （无状态的计数器/直方图注册表与事件汇）。整个 crate 的最底层。
-- `media/`：稳定领域类型、位流/时钟/FLV 工具、容器无关的 `Demuxer`、
-  `VodSource`、SDP 值类型（`SdpCrypto`/`SdpConnection`）与 fMP4 写出。
-- `rtsp/`：RTSP 消息编解码、SDP、NPT Range、鉴权、Transport（UDP/TCP
-  interleaved/`rtcp-mux`/multicast/SRTP profile）与组播，输入全部设上限；
-  根模块继续以 `rtflow::auth`、`rtflow::transport` 等路径再导出。
-- `rtp/`、`rtcp/`、`srtp/`：载荷编解包、jitter buffer、控制报告与 SRTP。
-- `security/`：CIDR ACL、有界连接限流以及 Rustls 客户端/服务端配置。
-- `runtime/`：连接 framing，把 RTSP 消息和 `$` interleaved frame 从同一字节流中分离。
-- `pipeline/`：可运行的 Element DAG，每个节点和 Link 都有独立有界队列。
-- `mount/`：流注册表、发布者句柄、启动关键帧缓存，以及代理的上游配置/状态
-  （`upstream`）与时间线连续性（`continuity`）。
-- `http/`、`metrics/`：HTTP 服务与 Prometheus/`/stats` 导出（注册表在 `core`）。
-- `client/`、`server/`：RTSP 播放客户端（控制面独立任务、重连、keep-alive）
-  与服务端会话状态机、代理/VOD 运行时。
-- `file/`、`storage/`：容器解复用与文件播放；崩溃安全录制、恢复与 VOD source。
-- `protocols/`：HLS、DASH、HTTP-FLV/WS-FLV、RTMP、SRT、WebRTC、GStreamer
-  适配器；根模块以 `rtflow::hls` 等路径再导出。
-- `proxy/`：兼容门面，类型已迁入 `mount::{upstream,continuity}`（0.3 弃用）。
-- `gateway/`：多协议编排入口。
+- `rtflow-core`：`error`、`identity`、`observe`、`metrics`（无状态计数器）。
+- `rtflow-media`：Codec/AccessUnit/描述、位流与时钟工具、`Demuxer`/`VodSource`
+  抽象、SDP 值类型（`SdpCrypto`/`SdpConnection`）。
+- `rtflow-rtp`、`rtflow-rtcp`、`rtflow-srtp`：RTP 载荷编解包与 jitter、RTCP 包与
+  统计、SRTP/SRTCP。
+- `rtflow-rtsp`：RTSP 消息、SDP、NPT Range、鉴权、Transport；组播在
+  `rtflow-multicast`，TLS 配置在 `rtflow-security`。
+- `rtflow-runtime`（任务监督、控制连接、UDP 批量发送）与 `rtflow-framing`
+  （RTSP 消息与 `$` interleaved frame 的帧化）。
+- `rtflow-mount`（注册表、FrameBus、启动缓存、代理上游状态）、
+  `rtflow-pipeline`（Element DAG）、`rtflow-http`、`rtflow-file`、
+  `rtflow-storage`、`rtflow-metrics`（Prometheus 导出）。
+- `rtflow-rtsp-client`、`rtflow-rtsp-server`、`rtflow-source`（合成测试源）。
+- 协议适配器：`rtflow-hls`、`rtflow-dash`、`rtflow-http-flv`、`rtflow-rtmp`、
+  `rtflow-srt`、`rtflow-webrtc`、`rtflow-gst`。
+- `rtflow-admin`（可选控制台）、`rtflow-gateway`（多协议编排）。
+- `rtflow`：唯一对外稳定入口，所有路径保持 `rtflow::*`；`rtflow-testkit` 为
+  dev-only 线束。
 
 RTSP 方法/传输/码流/feature 的完整矩阵见 [rtsp-matrix.md](rtsp-matrix.md)。
 
@@ -52,10 +52,11 @@ RTSP 方法/传输/码流/feature 的完整矩阵见 [rtsp-matrix.md](rtsp-matri
 
 | 目录 | 内容 |
 |---|---|
-| `src/` | 按上文分层组织的 crate 源码；目录结构即模块结构（无 `#[path]`） |
-| `tests/<area>/` | 集成测试：`rtsp`/`client`/`proxy`/`protocols`/`security`/`storage`/`interop`/`system`，每个域一个测试二进制 |
-| `examples/<area>/` | 示例：`server`/`client`/`protocols`/`gateway`/`embedded`，资源在 `examples/assets/` |
-| `support/` | 不发布的 dev 线束 `rtflow-testkit`（测试与示例共用） |
+| `crates/<name>/src/` | 每个 crate 的源码；目录结构即模块结构（无 `#[path]`） |
+| `crates/<name>/tests/` | 该 crate 的集成测试（目前集中在 `crates/rtflow/tests/`） |
+| `crates/rtflow/examples/<area>/` | 示例：`server`/`client`/`protocols`/`gateway`/`embedded`，资源在 `examples/assets/` |
+| `crates/rtflow-testkit/` | 不发布的 dev 线束（测试与示例共用） |
+| `tests/fixtures/` | 全仓库共用的媒体夹具 |
 | `scripts/` | 布局校验、示例冒烟、fixture 生成与发布检查 |
 | `docs/` | `architecture`（含 ADR）、`guides`、`audits`、`roadmap`、`archive` |
 | `benches/`、`fuzz/` | 性能基线与模糊测试（fuzz 为独立 workspace） |
