@@ -884,3 +884,27 @@ fn live_playlist_uses_mpeg_ts_for_ts_segments() {
     assert!(!playlist.contains("#EXT-X-MAP"));
     assert!(!playlist.contains(".m4s"));
 }
+
+#[test]
+fn live_playlist_writes_program_date_time_for_ts() {
+    let base = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let segments = vec![Segment {
+        sequence: 0,
+        duration: Duration::from_secs(1),
+        init: Bytes::new(),
+        data: Bytes::new(),
+        starts_with_keyframe: true,
+        discontinuity: false,
+        discontinuity_sequence: None,
+        timestamp: Duration::ZERO,
+        format: rtflow::protocols::hls::segmenter::SegmentFormat::MpegTs,
+    }];
+    let playlist = playlist::write_live_playlist_at_q_pdt(
+        &segments,
+        Duration::from_secs(1),
+        "",
+        "",
+        Some(base),
+    );
+    assert!(playlist.contains("#EXT-X-PROGRAM-DATE-TIME:2023-11-14T22:13:20.000Z"));
+}

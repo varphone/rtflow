@@ -354,3 +354,17 @@ pub fn create_hls_vod_handler(manager: Arc<HlsVodManager>) -> Handler {
 
 #[allow(dead_code)]
 fn _keep_handler_import(_: ResponseWriter<tokio::net::tcp::OwnedWriteHalf>) {}
+
+#[cfg(test)]
+mod tests {
+    use super::byte_range;
+
+    #[test]
+    fn byte_range_supports_suffix_and_open_ended() {
+        assert_eq!(byte_range(Some("bytes=-10"), 100), Some((90, 99)));
+        assert_eq!(byte_range(Some("bytes=10-"), 100), Some((10, 99)));
+        assert_eq!(byte_range(Some("bytes=10-19"), 100), Some((10, 19)));
+        assert_eq!(byte_range(Some("bytes=-0"), 100), None);
+        assert_eq!(byte_range(Some("bytes=200-"), 100), None);
+    }
+}
