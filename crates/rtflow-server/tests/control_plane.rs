@@ -108,6 +108,10 @@ async fn control_plane_round_trip() {
         .await
         .unwrap();
     assert!(paths.contains("\"read\":false"), "{paths}");
+    assert!(
+        paths.contains("\"record\":true"),
+        "PATCH must preserve omitted fields: {paths}"
+    );
 
     let keys = client
         .get(format!("{base}/admin/api/v1/keys"))

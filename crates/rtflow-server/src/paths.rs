@@ -52,6 +52,25 @@ pub struct PathRecord {
     pub expires_at: Option<u64>,
 }
 
+/// Partial update for an API-registered path. Omitted fields keep their
+/// current value (PATCH semantics).
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct PathPatch {
+    pub enabled: Option<bool>,
+    pub publish: Option<bool>,
+    pub read: Option<bool>,
+    pub record: Option<bool>,
+    pub hls: Option<bool>,
+    pub dash: Option<bool>,
+    pub flv: Option<bool>,
+    pub webrtc: Option<bool>,
+    pub max_readers: Option<usize>,
+    pub tenant: Option<String>,
+    pub labels: Option<BTreeMap<String, String>>,
+    pub metadata: Option<serde_json::Value>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct PathSpec {
@@ -248,6 +267,61 @@ impl PathStore {
             return Err(PathError::Conflict(name.into()));
         }
         let record = spec.into_record(name, PathSource::Api);
+        records.insert(name.to_owned(), record.clone());
+        self.persist_locked(&records)?;
+        Ok(record)
+    }
+
+    pub fn patch(&self, name: &str, patch: PathPatch) -> Result<PathRecord, PathError> {
+        validate_name(name)?;
+        let mut records = self
+            .records
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(existing) = records.get(name) else {
+            return Err(PathError::NotFound(name.into()));
+        };
+        if existing.source == PathSource::Config {
+            return Err(PathError::ReadOnly(name.into()));
+        }
+        let mut record = existing.clone();
+        if let Some(value) = patch.enabled {
+            record.enabled = value;
+        }
+        if let Some(value) = patch.publish {
+            record.publish = value;
+        }
+        if let Some(value) = patch.read {
+            record.read = value;
+        }
+        if let Some(value) = patch.record {
+            record.record = value;
+        }
+        if let Some(value) = patch.hls {
+            record.hls = value;
+        }
+        if let Some(value) = patch.dash {
+            record.dash = value;
+        }
+        if let Some(value) = patch.flv {
+            record.flv = value;
+        }
+        if let Some(value) = patch.webrtc {
+            record.webrtc = value;
+        }
+        if let Some(value) = patch.max_readers {
+            record.max_readers = value;
+        }
+        if let Some(value) = patch.tenant {
+            record.tenant = Some(value);
+        }
+        if let Some(value) = patch.labels {
+            record.labels = value;
+        }
+        if let Some(value) = patch.metadata {
+            record.metadata = value;
+        }
+        record.updated_at = unix_now();
         records.insert(name.to_owned(), record.clone());
         self.persist_locked(&records)?;
         Ok(record)

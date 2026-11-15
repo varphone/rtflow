@@ -1,4 +1,5 @@
 //! Out-of-the-box streaming server application.
+pub mod api;
 pub mod auth;
 pub mod config;
 pub mod discovery;

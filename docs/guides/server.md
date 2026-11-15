@@ -101,7 +101,7 @@ curl -u admin:password -X DELETE http://127.0.0.1:8080/admin/api/v1/keys/<kid>
 
 ### HTTP 钩子
 
-`[hooks]` 支持 `on_publish_auth`、`on_play_auth`、`on_publish_done`、`on_play_done`、`on_record_done`。认证钩子失败时按 `fail_closed` 拒绝；请求带 `X-Rtflow-Timestamp` 与 `X-Rtflow-Signature`（HMAC-SHA256）。
+`[hooks]` 支持 `on_publish_auth`、`on_play_auth`、`on_publish_done`、`on_record_done`。认证钩子失败时按 `fail_closed` 拒绝；请求带 `X-Rtflow-Timestamp` 与 `X-Rtflow-Signature`（HMAC-SHA256）。RTMP 认证钩子尚未接入（RTMP 使用流密钥/账号），`on_play_done` 为预留事件。
 
 ## 录制与点播
 
