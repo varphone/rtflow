@@ -81,6 +81,7 @@ async fn main() -> ExitCode {
         .or_else(|| Some(config.log.level.clone()));
     init_logging(filter, config.log.format);
 
+    let config_path = config_path.exists().then(|| config_path.clone());
     let handle = match ServerApp::start(config).await {
         Ok(handle) => handle,
         Err(error) => {
@@ -88,7 +89,7 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    handle.wait_for_signal().await;
+    handle.wait_for_signal(config_path).await;
     ExitCode::SUCCESS
 }
 

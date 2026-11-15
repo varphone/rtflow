@@ -63,6 +63,16 @@ async fn control_plane_round_trip() {
         .unwrap();
     assert_eq!(detail.status(), 200);
 
+    let stale = client
+        .patch(format!("{base}/admin/api/v1/paths/live/cam"))
+        .basic_auth("admin", Some("testpass"))
+        .header("if-match", "1")
+        .json(&json!({"read": false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale.status(), 412, "stale If-Match must be rejected");
+
     let update = client
         .patch(format!("{base}/admin/api/v1/paths/live/cam"))
         .basic_auth("admin", Some("testpass"))
@@ -71,6 +81,37 @@ async fn control_plane_round_trip() {
         .await
         .unwrap();
     assert_eq!(update.status(), 200);
+    let updated: serde_json::Value = update.json().await.unwrap();
+    let version = updated["updated_at"].to_string();
+    let fresh = client
+        .patch(format!("{base}/admin/api/v1/paths/live/cam"))
+        .basic_auth("admin", Some("testpass"))
+        .header("if-match", version.trim_matches('"'))
+        .json(&json!({"record": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(fresh.status(), 200, "matching If-Match must succeed");
+
+    // A retried POST with the same Idempotency-Key creates one resource only.
+    let first = client
+        .post(format!("{base}/admin/api/v1/paths"))
+        .basic_auth("admin", Some("testpass"))
+        .header("idempotency-key", "create-live-idem")
+        .json(&json!({"name": "live/idem"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 200);
+    let second = client
+        .post(format!("{base}/admin/api/v1/paths"))
+        .basic_auth("admin", Some("testpass"))
+        .header("idempotency-key", "create-live-idem")
+        .json(&json!({"name": "live/idem"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), 200);
 
     let key = client
         .post(format!("{base}/admin/api/v1/keys"))

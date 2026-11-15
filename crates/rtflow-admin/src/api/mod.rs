@@ -327,6 +327,190 @@ fn system_handler(state: Arc<AdminState>) -> Handler {
     })
 }
 
+fn control(state: &AdminState) -> Option<&Arc<dyn super::ControlPlane>> {
+    state.config.control.as_ref()
+}
+
+fn control_paths_handler(state: Arc<AdminState>) -> Handler {
+    Arc::new(move |req, writer: ResponseWriter<_>| {
+        let state = state.clone();
+        Box::pin(async move {
+            if auth(&state, &req).is_none() {
+                return unauthorized(writer).await;
+            }
+            let Some(control) = control(&state) else {
+                return respond_json(writer, 404, &json!({"error":"control_disabled"}), None).await;
+            };
+            respond_json(writer, 200, &control.paths(), None).await
+        })
+    })
+}
+
+fn control_paths_write_handler(state: Arc<AdminState>, action: &'static str) -> Handler {
+    Arc::new(move |req, writer: ResponseWriter<_>| {
+        let state = state.clone();
+        Box::pin(async move {
+            let Some(auth) = auth(&state, &req) else {
+                return unauthorized(writer).await;
+            };
+            if !csrf_allows(&state, &req, &auth) {
+                return forbidden(writer, "CSRF 校验失败").await;
+            }
+            let Some(control) = control(&state) else {
+                return respond_json(writer, 404, &json!({"error":"control_disabled"}), None).await;
+            };
+            let body = match serde_json::from_slice::<serde_json::Value>(&req.body) {
+                Ok(body) => body,
+                Err(_) => {
+                    return respond_json(writer, 400, &json!({"error":"bad_json"}), None).await;
+                }
+            };
+            let result = match action {
+                "create" => control.create_path(body).map(|_| json!({"ok":true})),
+                "update" => {
+                    let name = body
+                        .get("name")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_owned();
+                    control.update_path(&name, body).map(|_| json!({"ok":true}))
+                }
+                "delete" => body
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| "missing name".to_owned())
+                    .and_then(|name| control.delete_path(name))
+                    .map(|_| json!({"ok":true})),
+                _ => body
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| "missing name".to_owned())
+                    .and_then(|name| control.kick(name))
+                    .map(|_| json!({"ok":true})),
+            };
+            match result {
+                Ok(value) => respond_json(writer, 200, &value, None).await,
+                Err(message) => {
+                    respond_json(
+                        writer,
+                        409,
+                        &json!({"error":"rejected","message":message}),
+                        None,
+                    )
+                    .await
+                }
+            }
+        })
+    })
+}
+
+fn control_keys_handler(state: Arc<AdminState>) -> Handler {
+    Arc::new(move |req, writer: ResponseWriter<_>| {
+        let state = state.clone();
+        Box::pin(async move {
+            if auth(&state, &req).is_none() {
+                return unauthorized(writer).await;
+            }
+            let Some(control) = control(&state) else {
+                return respond_json(writer, 404, &json!({"error":"control_disabled"}), None).await;
+            };
+            respond_json(writer, 200, &control.keys(), None).await
+        })
+    })
+}
+
+fn control_keys_write_handler(state: Arc<AdminState>, action: &'static str) -> Handler {
+    Arc::new(move |req, writer: ResponseWriter<_>| {
+        let state = state.clone();
+        Box::pin(async move {
+            let Some(auth) = auth(&state, &req) else {
+                return unauthorized(writer).await;
+            };
+            if !csrf_allows(&state, &req, &auth) {
+                return forbidden(writer, "CSRF 校验失败").await;
+            }
+            let Some(control) = control(&state) else {
+                return respond_json(writer, 404, &json!({"error":"control_disabled"}), None).await;
+            };
+            let body = serde_json::from_slice::<serde_json::Value>(&req.body).unwrap_or_default();
+            let result = if action == "issue" {
+                control.issue_key(body)
+            } else {
+                body.get("kid")
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| "missing kid".to_owned())
+                    .and_then(|kid| control.revoke_key(kid))
+                    .map(|_| json!({"ok":true}))
+            };
+            match result {
+                Ok(value) => respond_json(writer, 200, &value, None).await,
+                Err(message) => {
+                    respond_json(
+                        writer,
+                        409,
+                        &json!({"error":"rejected","message":message}),
+                        None,
+                    )
+                    .await
+                }
+            }
+        })
+    })
+}
+
+fn control_recordings_handler(state: Arc<AdminState>) -> Handler {
+    Arc::new(move |req, writer: ResponseWriter<_>| {
+        let state = state.clone();
+        Box::pin(async move {
+            if auth(&state, &req).is_none() {
+                return unauthorized(writer).await;
+            }
+            let Some(control) = control(&state) else {
+                return respond_json(writer, 404, &json!({"error":"control_disabled"}), None).await;
+            };
+            respond_json(writer, 200, &control.recordings(), None).await
+        })
+    })
+}
+
+fn control_recording_action_handler(state: Arc<AdminState>, start: bool) -> Handler {
+    Arc::new(move |req, writer: ResponseWriter<_>| {
+        let state = state.clone();
+        Box::pin(async move {
+            let Some(auth) = auth(&state, &req) else {
+                return unauthorized(writer).await;
+            };
+            if !csrf_allows(&state, &req, &auth) {
+                return forbidden(writer, "CSRF 校验失败").await;
+            }
+            let Some(control) = control(&state) else {
+                return respond_json(writer, 404, &json!({"error":"control_disabled"}), None).await;
+            };
+            let body = serde_json::from_slice::<serde_json::Value>(&req.body).unwrap_or_default();
+            let Some(path) = body.get("path").and_then(|value| value.as_str()) else {
+                return respond_json(writer, 400, &json!({"error":"missing_path"}), None).await;
+            };
+            let result = if start {
+                control.start_recording(path).await
+            } else {
+                control.stop_recording(path).await
+            };
+            match result {
+                Ok(()) => respond_json(writer, 200, &json!({"ok":true}), None).await,
+                Err(message) => {
+                    respond_json(
+                        writer,
+                        409,
+                        &json!({"error":"rejected","message":message}),
+                        None,
+                    )
+                    .await
+                }
+            }
+        })
+    })
+}
+
 fn csrf_allows(state: &AdminState, req: &HttpRequest, auth: &Auth) -> bool {
     if state.config.readonly {
         return false;
@@ -465,6 +649,72 @@ pub(super) async fn register(http: &HttpServer, state: Arc<AdminState>) {
         Method::Get,
         &format!("{base}/api/vods"),
         vods_handler(state.clone()),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
+        &format!("{base}/api/paths"),
+        control_paths_handler(state.clone()),
+    )
+    .await;
+    http.add_route(
+        Method::Post,
+        &format!("{base}/api/paths"),
+        control_paths_write_handler(state.clone(), "create"),
+    )
+    .await;
+    http.add_route(
+        Method::Put,
+        &format!("{base}/api/paths"),
+        control_paths_write_handler(state.clone(), "update"),
+    )
+    .await;
+    http.add_route(
+        Method::Delete,
+        &format!("{base}/api/paths"),
+        control_paths_write_handler(state.clone(), "delete"),
+    )
+    .await;
+    http.add_route(
+        Method::Post,
+        &format!("{base}/api/paths/kick"),
+        control_paths_write_handler(state.clone(), "kick"),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
+        &format!("{base}/api/keys"),
+        control_keys_handler(state.clone()),
+    )
+    .await;
+    http.add_route(
+        Method::Post,
+        &format!("{base}/api/keys"),
+        control_keys_write_handler(state.clone(), "issue"),
+    )
+    .await;
+    http.add_route(
+        Method::Delete,
+        &format!("{base}/api/keys"),
+        control_keys_write_handler(state.clone(), "revoke"),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
+        &format!("{base}/api/recordings"),
+        control_recordings_handler(state.clone()),
+    )
+    .await;
+    http.add_route(
+        Method::Post,
+        &format!("{base}/api/recordings/start"),
+        control_recording_action_handler(state.clone(), true),
+    )
+    .await;
+    http.add_route(
+        Method::Post,
+        &format!("{base}/api/recordings/stop"),
+        control_recording_action_handler(state.clone(), false),
     )
     .await;
     http.add_route(

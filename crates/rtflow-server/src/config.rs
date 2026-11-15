@@ -29,6 +29,7 @@ pub struct Config {
     pub auth: AuthSection,
     pub keys: KeysSection,
     pub hooks: HooksSection,
+    pub audit: AuditSection,
     pub discovery: DiscoverySection,
     /// Static path rules. Keys are globs (`live/*`, `private/**`).
     pub paths: BTreeMap<String, PathRule>,
@@ -92,16 +93,27 @@ pub enum LogFormat {
 pub struct RtspSection {
     pub enabled: bool,
     pub listen: SocketAddr,
+    /// Optional TLS listener files. RTSP over TLS is used by browsers and
+    /// some ONVIF clients; HTTP TLS is expected to terminate at a proxy.
+    pub tls: Option<TlsFiles>,
     #[serde(with = "humantime_serde")]
     pub session_timeout: Duration,
     pub max_sessions: usize,
     pub dynamic_publishers: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TlsFiles {
+    pub certificate: PathBuf,
+    pub private_key: PathBuf,
+}
+
 impl Default for RtspSection {
     fn default() -> Self {
         Self {
             enabled: true,
+            tls: None,
             listen: "0.0.0.0:8554".parse().expect("valid default"),
             session_timeout: Duration::from_secs(60),
             max_sessions: 256,
@@ -344,6 +356,27 @@ impl Default for HooksSection {
             secret: None,
             timeout: Duration::from_secs(2),
             fail_closed: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct AuditSection {
+    pub enabled: bool,
+    /// Defaults to `<state_dir>/audit.log` when empty.
+    pub path: Option<PathBuf>,
+    pub max_bytes: u64,
+    pub max_files: usize,
+}
+
+impl Default for AuditSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            path: None,
+            max_bytes: 64 * 1024 * 1024,
+            max_files: 5,
         }
     }
 }

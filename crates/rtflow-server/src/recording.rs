@@ -44,10 +44,10 @@ struct Session {
 }
 
 pub struct RecordingSupervisor {
-    config: Arc<Config>,
     paths: Arc<PathStore>,
     mounts: Arc<MountRegistry>,
     hooks: Option<Arc<HookClient>>,
+    policy: std::sync::RwLock<RecordingSection>,
     sessions: AsyncMutex<HashMap<String, Session>>,
     last_scan: Mutex<HashMap<String, u64>>,
     /// Paths where an operator explicitly stopped recording; auto_start
@@ -62,8 +62,9 @@ impl RecordingSupervisor {
         mounts: Arc<MountRegistry>,
         hooks: Option<Arc<HookClient>>,
     ) -> Arc<Self> {
+        let policy = std::sync::RwLock::new(config.recording.clone());
         Arc::new(Self {
-            config,
+            policy,
             paths,
             mounts,
             hooks,
@@ -71,6 +72,22 @@ impl RecordingSupervisor {
             last_scan: Mutex::new(HashMap::new()),
             suppressed: Mutex::new(HashSet::new()),
         })
+    }
+
+    /// Apply a reloaded `[recording]` section. Running sessions keep their
+    /// original segment policy; new sessions use the new one.
+    pub fn set_policy(&self, section: RecordingSection) {
+        *self
+            .policy
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = section;
+    }
+
+    fn policy(&self) -> RecordingSection {
+        self.policy
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub fn status(&self) -> Vec<RecordingStatus> {
@@ -147,8 +164,8 @@ impl RecordingSupervisor {
     pub async fn tick(&self) {
         let _ = self.paths.remove_expired();
         tracing::debug!(
-            enabled = self.config.recording.enabled,
-            auto_start = self.config.recording.auto_start,
+            enabled = self.policy().enabled,
+            auto_start = self.policy().auto_start,
             "recording tick"
         );
         let names: Vec<String> = self
@@ -159,7 +176,7 @@ impl RecordingSupervisor {
             .collect();
         for name in &names {
             let (_, rule) = self.paths.rule_for(name);
-            self.paths.ensure_dynamic(name, rule);
+            self.paths.ensure_dynamic(name, &rule);
         }
         let mut stop: Vec<(String, Session)> = Vec::new();
         {
@@ -175,8 +192,8 @@ impl RecordingSupervisor {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .contains(name);
-                let wanted = self.config.recording.enabled
-                    && self.config.recording.auto_start
+                let wanted = self.policy().enabled
+                    && self.policy().auto_start
                     && !suppressed
                     && record.record
                     && snapshot.publisher_connected;
@@ -242,11 +259,11 @@ impl RecordingSupervisor {
             return Err("mount has no tracks".into());
         }
         let started_at = unix_now();
-        let directory = recording_directory(&self.config.recording, path, unix_millis());
+        let directory = recording_directory(&self.policy(), path, unix_millis());
         let recording_config = RecordingConfig {
             directory: directory.clone(),
-            segment_duration: self.config.recording.segment_duration,
-            max_disk_bytes: self.config.recording.max_disk_bytes,
+            segment_duration: self.policy().segment_duration,
+            max_disk_bytes: self.policy().max_disk_bytes,
             max_segments: 100_000,
             queue_capacity: 256,
             sync_on_finalize: true,

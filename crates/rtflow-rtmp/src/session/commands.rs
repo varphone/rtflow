@@ -145,35 +145,6 @@ pub(super) fn sync_description(
         .update_description(rtflow_media::MediaDescription::new(stream_name, tracks))
 }
 
-pub(crate) fn split_stream_token<'a>(
-    stream_name: &'a str,
-    token: &rtflow_rtsp::token_auth::TokenConfig,
-) -> (&'a str, Option<&'a str>) {
-    let Some((name, query)) = stream_name.split_once('?') else {
-        return (stream_name, None);
-    };
-    let value = query.split('&').find_map(|pair| {
-        let (key, value) = pair.split_once('=')?;
-        (key == token.param_name).then_some(value)
-    });
-    (name, value)
-}
-
-pub(crate) fn token_allows(
-    token: Option<&rtflow_rtsp::token_auth::TokenConfig>,
-    app: &str,
-    stream: &str,
-    value: Option<&str>,
-) -> bool {
-    let Some(token) = token else {
-        return true;
-    };
-    let Some(value) = value else {
-        return false;
-    };
-    rtflow_rtsp::token_auth::verify_token(token, &format!("/{app}/{stream}"), value)
-}
-
 pub(crate) fn apply_metadata(state: &mut SessionState, data: &AmfValue) {
     let SessionState::Publishing {
         mount_handle,
@@ -318,33 +289,17 @@ pub(super) async fn handle_command(
             };
 
             let (stream_name, token_value) = match config.token.as_ref() {
-                Some(token) => split_stream_token(stream_name, token),
+                Some(token) => super::authz::split_stream_token(stream_name, token),
                 None => (stream_name.as_str(), None),
             };
-            if !token_allows(config.token.as_ref(), &app, stream_name, token_value) {
-                warn!("RTMP: publish denied by URL token for /{app}/{stream_name}");
-                let error_payload = command::error_response(
-                    *transaction_id,
-                    "NetStream.Publish.Denied",
-                    "Authentication failed: invalid token.",
-                );
-                return Some(vec![RtmpMessage {
-                    chunk_stream_id: 5,
-                    timestamp: 0,
-                    msg_type: MessageType::CommandAmf0 as u8,
-                    msg_stream_id: 1,
-                    payload: error_payload,
-                }]);
-            }
-            // Authenticate publish request
-            if let Some(ref auth) = config.authenticator
-                && !auth.authorize_publish(&app, stream_name)
+            if let Err(message) =
+                super::authz::authorize_publish(config, &app, stream_name, token_value).await
             {
-                warn!("RTMP: publish denied for /{app}/{stream_name}");
+                warn!("RTMP: publish denied for /{app}/{stream_name}: {message}");
                 let error_payload = command::error_response(
                     *transaction_id,
                     "NetStream.Publish.Denied",
-                    "Authentication failed: publish not authorized.",
+                    &format!("Authentication failed: {message}."),
                 );
                 return Some(vec![RtmpMessage {
                     chunk_stream_id: 5,
@@ -354,7 +309,6 @@ pub(super) async fn handle_command(
                     payload: error_payload,
                 }]);
             }
-
             // Query parameters carry credentials/tokens; they must never
             // become part of the mount name or show up in discovery/HLS.
             let stream_base = stream_name
@@ -487,15 +441,17 @@ pub(super) async fn handle_command(
             };
 
             let (stream_name, token_value) = match config.token.as_ref() {
-                Some(token) => split_stream_token(stream_name, token),
+                Some(token) => super::authz::split_stream_token(stream_name, token),
                 None => (stream_name.as_str(), None),
             };
-            if !token_allows(config.token.as_ref(), &app, stream_name, token_value) {
-                warn!("RTMP: play denied by URL token for /{app}/{stream_name}");
+            if let Err(message) =
+                super::authz::authorize_play(config, &app, stream_name, token_value).await
+            {
+                warn!("RTMP: play denied for /{app}/{stream_name}: {message}");
                 let error_payload = command::error_response(
                     *transaction_id,
                     "NetStream.Play.Denied",
-                    "Authentication failed: invalid token.",
+                    &format!("Authentication failed: {message}."),
                 );
                 return Some(vec![RtmpMessage {
                     chunk_stream_id: 5,
@@ -511,25 +467,6 @@ pub(super) async fn handle_command(
                 .unwrap_or(stream_name);
             let mount_path = format!("/{app}/{stream_base}");
             info!("RTMP: play {mount_path}");
-
-            // Authenticate play (same policy as publish by default)
-            if let Some(ref auth) = config.authenticator
-                && !auth.authorize_play(&app, stream_name)
-            {
-                warn!("RTMP: play denied for /{app}/{stream_name}");
-                let error_payload = command::error_response(
-                    *transaction_id,
-                    "NetStream.Play.Denied",
-                    "Authentication failed: play not authorized.",
-                );
-                return Some(vec![RtmpMessage {
-                    chunk_stream_id: 5,
-                    timestamp: 0,
-                    msg_type: MessageType::CommandAmf0 as u8,
-                    msg_stream_id: 1,
-                    payload: error_payload,
-                }]);
-            }
 
             let mount_handle = match mounts.get_handle(&mount_path) {
                 Some(handle) => handle,

@@ -11,6 +11,7 @@ mod api;
 mod auth;
 
 use auth::{PasswordDigest, Sessions};
+use futures::future::BoxFuture;
 use rtflow_mount::MountRegistry;
 use std::{
     sync::Arc,
@@ -40,6 +41,28 @@ pub struct AdminConfig {
     /// Public RTMP base used for ingest hints, e.g. `rtmp://host:1935`.
     pub rtmp_base: Option<String>,
     pub(crate) vod: Option<Arc<rtflow_hls::vod::HlsVodManager>>,
+    pub(crate) control: Option<Arc<dyn ControlPlane>>,
+}
+
+/// Optional control plane exposed by the admin console: path registration,
+/// stream keys and recording control.
+///
+/// The console renders the data and forwards operator intent; the application
+/// (`rtflow-server`) owns persistence, policy and audit. Values are JSON so
+/// this crate does not depend on the application's types.
+pub trait ControlPlane: Send + Sync + 'static {
+    fn paths(&self) -> serde_json::Value;
+    fn create_path(&self, body: serde_json::Value) -> Result<serde_json::Value, String>;
+    fn update_path(&self, name: &str, body: serde_json::Value)
+    -> Result<serde_json::Value, String>;
+    fn delete_path(&self, name: &str) -> Result<(), String>;
+    fn kick(&self, name: &str) -> Result<(), String>;
+    fn keys(&self) -> serde_json::Value;
+    fn issue_key(&self, body: serde_json::Value) -> Result<serde_json::Value, String>;
+    fn revoke_key(&self, kid: &str) -> Result<(), String>;
+    fn recordings(&self) -> serde_json::Value;
+    fn start_recording<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<(), String>>;
+    fn stop_recording<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<(), String>>;
 }
 
 impl AdminConfig {
@@ -59,6 +82,7 @@ impl AdminConfig {
             ll_hls_prefix: "/llhls".to_owned(),
             rtmp_base: None,
             vod: None,
+            control: None,
         };
         config.validate()?;
         Ok(config)
@@ -104,6 +128,12 @@ impl AdminConfig {
     }
     pub fn with_vod(mut self, vod: Arc<rtflow_hls::vod::HlsVodManager>) -> Self {
         self.vod = Some(vod);
+        self
+    }
+
+    /// Enable the path/key/recording control pages and API.
+    pub fn with_control(mut self, control: Arc<dyn ControlPlane>) -> Self {
+        self.control = Some(control);
         self
     }
 

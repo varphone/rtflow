@@ -9,6 +9,7 @@ use super::chunk::{
 use super::command::{self, RtmpCommand};
 use super::flv::{self, AudioData, VideoData};
 use super::handshake;
+mod authz;
 use bytes::Bytes;
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,6 +38,25 @@ pub trait PublishAuthenticator: Send + Sync + std::fmt::Debug {
     fn authorize_play(&self, app: &str, stream_name: &str) -> bool {
         self.authorize_publish(app, stream_name)
     }
+}
+
+/// Asynchronous publish authenticator for policy checks that need I/O
+/// (HTTP hooks, token introspection, database lookups).
+///
+/// Consulted after [`PublishAuthenticator`], so a synchronous allow-list can
+/// still short-circuit the expensive path.
+pub trait AsyncPublishAuthenticator: Send + Sync + std::fmt::Debug {
+    fn authorize_publish<'a>(
+        &'a self,
+        app: &'a str,
+        stream_name: &'a str,
+    ) -> futures::future::BoxFuture<'a, bool>;
+
+    fn authorize_play<'a>(
+        &'a self,
+        app: &'a str,
+        stream_name: &'a str,
+    ) -> futures::future::BoxFuture<'a, bool>;
 }
 
 /// A simple authenticator that validates stream keys against a static list.
@@ -88,6 +108,8 @@ pub struct RtmpSessionConfig {
     pub authenticator: Option<Arc<dyn PublishAuthenticator>>,
     /// Optional HMAC URL token (OBS stream key: `name?token=...`).
     pub token: Option<rtflow_rtsp::token_auth::TokenConfig>,
+    /// Optional asynchronous policy check (HTTP hooks, key introspection).
+    pub async_authenticator: Option<Arc<dyn AsyncPublishAuthenticator>>,
 }
 
 impl Default for RtmpSessionConfig {
@@ -99,6 +121,7 @@ impl Default for RtmpSessionConfig {
             write_timeout: Duration::from_secs(30),
             authenticator: None,
             token: None,
+            async_authenticator: None,
         }
     }
 }

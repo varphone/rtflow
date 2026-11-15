@@ -204,3 +204,8 @@ table.data tbody tr:hover { background: rgba(255,255,255,.018); }
   .kv { grid-template-columns: 1fr; gap: 2px 0; }
   .kv dd { margin-bottom: 9px; }
 }
+
+/* Control plane (paths / keys / recordings) */
+.badge.ok { color: #7ff0c2; border-color: rgba(52,211,153,.35); background: rgba(52,211,153,.1); }
+.empty-cell { text-align: center; color: var(--muted); padding: 18px 0; }
+pre.code { background: #091322; border: 1px solid var(--line-soft); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 12px; }

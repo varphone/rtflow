@@ -171,7 +171,7 @@ struct StoreFile {
 
 pub struct PathStore {
     file: PathBuf,
-    rules: BTreeMap<String, PathRule>,
+    rules: RwLock<BTreeMap<String, PathRule>>,
     records: RwLock<BTreeMap<String, PathRecord>>,
     persist_dynamic: bool,
 }
@@ -187,7 +187,7 @@ impl PathStore {
         }
         Ok(Self {
             file,
-            rules,
+            rules: RwLock::new(rules),
             records: RwLock::new(records),
             persist_dynamic,
         })
@@ -202,12 +202,22 @@ impl PathStore {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(name)
+            .cloned()
         {
-            return record.clone();
+            // Dynamically registered paths always follow the current config
+            // rule: otherwise a reloaded `[paths]` policy would be ignored for
+            // every path that ever went live.
+            if record.source == PathSource::Dynamic {
+                let (pattern, rule) = self.rule_for(name);
+                if !pattern.is_empty() {
+                    return PathSpec::from_rule(&rule, PathSource::Dynamic, name);
+                }
+            }
+            return record;
         }
         let (pattern, rule) = self.rule_for(name);
         PathSpec::from_rule(
-            rule,
+            &rule,
             if pattern.is_empty() {
                 PathSource::Dynamic
             } else {
@@ -217,14 +227,30 @@ impl PathStore {
         )
     }
 
-    pub fn rule_for(&self, name: &str) -> (&str, &PathRule) {
+    /// Replace the configured rules (SIGHUP reload). API records are kept.
+    pub fn set_rules(&self, rules: BTreeMap<String, PathRule>) {
+        let mut rules = rules;
+        if rules.is_empty() {
+            rules.insert("**".into(), PathRule::default());
+        }
+        *self
+            .rules
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = rules;
+    }
+
+    pub fn rule_for(&self, name: &str) -> (String, PathRule) {
         let path = name.trim_start_matches('/');
-        self.rules
+        let rules = self
+            .rules
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        rules
             .iter()
             .filter(|(pattern, _)| crate::config::glob_match(pattern, path))
             .max_by_key(|(pattern, _)| specificity(pattern))
-            .map(|(pattern, rule)| (pattern.as_str(), rule))
-            .unwrap_or(("", &DISABLED_RULE))
+            .map(|(pattern, rule)| (pattern.clone(), rule.clone()))
+            .unwrap_or_else(|| (String::new(), disabled_rule()))
     }
 
     /// True when an explicit record or a configured rule covers `name`.
@@ -419,19 +445,21 @@ impl PathStore {
     }
 }
 
-static DISABLED_RULE: PathRule = PathRule {
-    enabled: false,
-    publish: false,
-    read: false,
-    record: false,
-    hls: false,
-    dash: false,
-    flv: false,
-    webrtc: false,
-    max_readers: 0,
-    tenant: None,
-    labels: BTreeMap::new(),
-};
+fn disabled_rule() -> PathRule {
+    PathRule {
+        enabled: false,
+        publish: false,
+        read: false,
+        record: false,
+        hls: false,
+        dash: false,
+        flv: false,
+        webrtc: false,
+        max_readers: 0,
+        tenant: None,
+        labels: BTreeMap::new(),
+    }
+}
 
 fn specificity(pattern: &str) -> (usize, usize) {
     let wildcards = pattern.matches('*').count();

@@ -11,6 +11,9 @@
     page: "dashboard",
     streams: [],
     vods: [],
+    paths: [],
+    keys: [],
+    recordings: [],
     overview: {},
     system: {},
     query: "",
@@ -27,6 +30,7 @@
     ["dashboard", "总览", "grid"],
     ["live", "直播管理", "broadcast"],
     ["vod", "点播管理", "film"],
+    ["control", "路径与密钥", "key"],
     ["system", "系统信息", "server"],
   ];
 
@@ -44,6 +48,7 @@
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
     menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
     filmSmall: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16"/>',
+    key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 4l4 4M14 6l3 3"/>',
   };
 
   const icon = (name, cls = "") =>
@@ -253,11 +258,13 @@
     if (state.page === "dashboard") html += dashboardPage();
     else if (state.page === "live") html += livePage();
     else if (state.page === "vod") html += vodPage();
+    else if (state.page === "control") html += controlPage();
     else html += systemPage();
     const meta = {
       dashboard: ["总览", "流媒体运行状态与关键指标", ""],
       live: ["直播管理", "实时发布状态、播放与流控制", `<button class="btn small" data-action="refresh">${icon("refresh")} 刷新</button>`],
       vod: ["点播管理", "HLS 点播资源与缓存", `<button class="btn small" data-action="refresh">${icon("refresh")} 刷新</button>`],
+      control: ["路径与密钥", "路径注册、推流密钥与录像控制", `<button class="btn small" data-action="refresh-control">${icon("refresh")} 刷新</button>`],
       system: ["系统信息", "版本、构建特性与运行配置", ""],
     }[state.page];
     app.innerHTML = shell(html, meta[0], meta[1], meta[2]);
@@ -372,6 +379,114 @@
             ${state.session.readonly ? "" : `<button class="btn small ghost" data-action="refresh-vod" data-id="${esc(v.id)}" title="清除缓存并重新生成">${icon("refresh")}</button>`}
           </div>
         </article>`).join("")}</div>` : empty("暂无可用的点播资源", "在服务端配置录制目录或文件 VOD 后显示")}`;
+  }
+
+  function controlPage() {
+    const paths = state.paths.map((item) => `
+      <tr>
+        <td><code>${esc(item.name)}</code></td>
+        <td>${item.online ? '<span class="badge ok">在线</span>' : '<span class="badge">离线</span>'}</td>
+        <td>${esc(item.source || "")}</td>
+        <td>${item.publisher ? "是" : "—"}</td>
+        <td>${num(item.readers)}</td>
+        <td>${item.recording ? '<span class="badge ok">录制中</span>' : "—"}</td>
+        <td class="row-actions">
+          <button class="btn small" data-action="kick" data-path="${esc(item.name)}">断开</button>
+          <button class="btn small danger" data-action="delete-path" data-path="${esc(item.name)}">删除</button>
+        </td>
+      </tr>`).join("");
+    const keys = state.keys.map((item) => `
+      <tr>
+        <td><code>${esc(item.kid)}</code></td>
+        <td>${esc(item.name)}</td>
+        <td>${esc((item.roles || []).join(","))}</td>
+        <td>${esc((item.paths || []).join(",") || "全部")}</td>
+        <td>${item.expires_at ? new Date(item.expires_at * 1000).toLocaleString("zh-CN") : "—"}</td>
+        <td>${item.enabled ? '<span class="badge ok">有效</span>' : '<span class="badge">已吊销</span>'}</td>
+        <td class="row-actions"><button class="btn small danger" data-action="revoke-key" data-kid="${esc(item.kid)}">吊销</button></td>
+      </tr>`).join("");
+    const recordings = state.recordings.map((item) => `
+      <tr>
+        <td><code>${esc(item.path)}</code></td>
+        <td>${item.active ? '<span class="badge ok">录制中</span>' : "已停止"}</td>
+        <td>${num(item.segments)}</td>
+        <td>${bytes(item.bytes)}</td>
+        <td>${item.last_error ? esc(item.last_error) : "—"}</td>
+        <td class="row-actions">
+          <button class="btn small" data-action="start-rec" data-path="${esc(item.path)}">开始</button>
+          <button class="btn small" data-action="stop-rec" data-path="${esc(item.path)}">停止</button>
+        </td>
+      </tr>`).join("");
+    return `
+      <div class="stack">
+        <section class="panel">
+          <div class="panel-head"><h3>路径</h3><span class="sub">配置/API/动态注册</span>
+            <div class="actions"><button class="btn small" data-action="create-path">新增路径</button></div></div>
+          <div class="table-wrap"><table class="data">
+            <thead><tr><th>名称</th><th>状态</th><th>来源</th><th>发布</th><th>观看</th><th>录制</th><th></th></tr></thead>
+            <tbody>${paths || '<tr><td colspan="7" class="empty-cell">暂无注册路径</td></tr>'}</tbody>
+          </table></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h3>推流密钥</h3><span class="sub">secret 只显示一次</span>
+            <div class="actions"><button class="btn small" data-action="issue-key">签发密钥</button></div></div>
+          <div class="table-wrap"><table class="data">
+            <thead><tr><th>Key ID</th><th>名称</th><th>角色</th><th>路径</th><th>过期</th><th>状态</th><th></th></tr></thead>
+            <tbody>${keys || '<tr><td colspan="7" class="empty-cell">暂未签发密钥</td></tr>'}</tbody>
+          </table></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h3>录像</h3><span class="sub">手动开始/停止</span></div>
+          <div class="table-wrap"><table class="data">
+            <thead><tr><th>路径</th><th>状态</th><th>分段</th><th>大小</th><th>错误</th><th></th></tr></thead>
+            <tbody>${recordings || '<tr><td colspan="6" class="empty-cell">当前没有录制任务</td></tr>'}</tbody>
+          </table></div>
+        </section>
+      </div>`;
+  }
+
+  async function loadControl() {
+    const [paths, keys, recordings] = await Promise.all([api("/paths"), api("/keys"), api("/recordings")]);
+    state.paths = Array.isArray(paths) ? paths : (paths.items || []);
+    state.keys = Array.isArray(keys) ? keys : (keys.items || []);
+    state.recordings = Array.isArray(recordings) ? recordings : (recordings.items || []);
+  }
+
+  async function createPath() {
+    const name = prompt("路径名（例如 live/cam）");
+    if (!name) return;
+    try {
+      await api("/paths", { method: "POST", body: JSON.stringify({ name, publish: true, read: true, record: true, hls: true, dash: true, flv: true, webrtc: true }) });
+      toast("路径已注册", "ok"); await loadControl(); render();
+    } catch (error) { toast(error.message, "bad"); }
+  }
+
+  async function deletePath(name) {
+    if (!confirm(`删除路径 ${name}？`)) return;
+    try { await api("/paths", { method: "DELETE", body: JSON.stringify({ name }) }); toast("路径已删除", "ok"); await loadControl(); render(); }
+    catch (error) { toast(error.message, "bad"); }
+  }
+
+  async function issueKey() {
+    const name = prompt("密钥名称（例如 obs）", "stream key");
+    if (!name) return;
+    const paths = prompt("允许的路径 glob（逗号分隔，留空表示全部）", "live/*");
+    try {
+      const result = await api("/keys", { method: "POST", body: JSON.stringify({ name, roles: ["publish", "read"], paths: paths ? paths.split(",").map((v) => v.trim()) : [], ttl: "24h" }) });
+      await loadControl(); render();
+      openModal("推流密钥（只显示一次）", `<p>请立即保存，关闭后无法再次查看。</p><pre class="code">${esc(result.secret)}</pre>`);
+    } catch (error) { toast(error.message, "bad"); }
+  }
+
+  async function revokeKey(kid) {
+    if (!confirm(`吊销密钥 ${kid}？`)) return;
+    try { await api("/keys", { method: "DELETE", body: JSON.stringify({ kid }) }); toast("密钥已吊销", "ok"); await loadControl(); render(); }
+    catch (error) { toast(error.message, "bad"); }
+  }
+
+  async function recordingAction(action, path) {
+    try { await api("/recordings/" + action, { method: "POST", body: JSON.stringify({ path }) }); toast("操作已提交", "ok"); await loadControl(); render(); }
+    catch (error) { toast(error.message, "bad"); }
   }
 
   function systemPage() {
@@ -524,7 +639,9 @@
   app.addEventListener("click", async (event) => {
     const nav = event.target.closest("[data-nav]");
     if (nav) {
-      state.page = nav.dataset.nav; state.query = ""; state.status = "all"; closeModal(); render(); return;
+      state.page = nav.dataset.nav; state.query = ""; state.status = "all"; closeModal(); render();
+      if (state.page === "control") { loadControl().then(render).catch((error) => toast(error.message, "bad")); }
+      return;
     }
     const status = event.target.closest("[data-status]");
     if (status) { state.status = status.dataset.status; render(); return; }
@@ -554,6 +671,13 @@
     if (action === "copy") return copyText(actionEl.dataset.copy || "");
     if (action === "kick") return kickStream(actionEl.dataset.path);
     if (action === "refresh-vod") return refreshVod(actionEl.dataset.id);
+    if (action === "refresh-control") { try { await loadControl(); render(); } catch (error) { toast(error.message, "bad"); } return; }
+    if (action === "create-path") return createPath();
+    if (action === "delete-path") return deletePath(actionEl.dataset.path);
+    if (action === "issue-key") return issueKey();
+    if (action === "revoke-key") return revokeKey(actionEl.dataset.kid);
+    if (action === "start-rec") return recordingAction("start", actionEl.dataset.path);
+    if (action === "stop-rec") return recordingAction("stop", actionEl.dataset.path);
   });
 
   app.addEventListener("input", (event) => {

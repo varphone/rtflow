@@ -1,5 +1,6 @@
 //! Server application lifecycle and protocol wiring.
 use crate::{
+    audit::AuditLog,
     auth::AppAuth,
     config::Config,
     discovery::{Discovery, DiscoveryService, PathStatus, public_rtmp},
@@ -12,29 +13,20 @@ use crate::{
 use rtflow::{
     MountRegistry,
     admin::{Admin, AdminConfig},
-    dash::{DashConfig, DashHandlers, create_dash_router},
     hls::{
         HlsConfig,
         live::{HlsLiveManager, create_hls_live_handler},
         ll::{LlHlsConfig, LlHlsLiveManager, create_ll_hls_handler},
         vod::{HlsVodConfig, HlsVodManager, create_hls_vod_handler},
     },
-    http::{Handler, HttpConfig, HttpServer, Method},
-    http_flv::{
-        handler::serve_flv_stream,
-        ws::{WsFlvConfig, WsFlvServer},
-    },
+    http::{HttpConfig, HttpServer, Method},
+    http_flv::ws::{WsFlvConfig, WsFlvServer},
     metrics::{MetricsRegistry, create_metrics_handler},
     rtmp::{RtmpConfig, RtmpServer, session::RtmpSessionConfig},
     srt::{SrtConfig, SrtServer},
     webrtc::{WebRtcConfig, create_webrtc_handlers},
 };
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -55,6 +47,14 @@ pub struct ServerHandle {
     keys: Arc<KeyStore>,
     discovery: Arc<DiscoveryService>,
     vod: Arc<VodCatalog>,
+    config: Arc<Config>,
+}
+
+/// What a SIGHUP reload applied and what still needs a restart.
+#[derive(Debug, Default, serde::Serialize)]
+pub struct ReloadReport {
+    pub applied: Vec<&'static str>,
+    pub restart_required: Vec<&'static str>,
 }
 
 impl ServerHandle {
@@ -77,18 +77,94 @@ impl ServerHandle {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    pub async fn wait_for_signal(self) {
+    /// Reload the mutable parts of the configuration (SIGHUP).
+    ///
+    /// Applies path rules, recording policy, discovery/publication metadata and
+    /// the effective log level (the caller re-installs the filter). Listener
+    /// addresses, enabled protocols and the auth mode are reported as
+    /// `restart_required` instead of being half-applied.
+    pub fn reload(&self, config: Config) -> Result<ReloadReport, String> {
+        config.validate().map_err(|error| error.to_string())?;
+        let mut report = ReloadReport::default();
+        self.paths.set_rules(config.paths.clone());
+        report.applied.push("paths");
+        self.recording.set_policy(config.recording.clone());
+        report.applied.push("recording");
+        self.discovery.reload(Arc::new(config.clone()));
+        report.applied.push("discovery");
+
+        let old = &self.config;
+        if old.rtsp.listen != config.rtsp.listen || old.rtsp.enabled != config.rtsp.enabled {
+            report.restart_required.push("rtsp listen/enabled");
+        }
+        if old.rtmp.listen != config.rtmp.listen || old.rtmp.enabled != config.rtmp.enabled {
+            report.restart_required.push("rtmp listen/enabled");
+        }
+        if old.srt.listen != config.srt.listen || old.srt.enabled != config.srt.enabled {
+            report.restart_required.push("srt listen/enabled");
+        }
+        if old.http.listen != config.http.listen {
+            report.restart_required.push("http listen");
+        }
+        if old.flv.ws_listen != config.flv.ws_listen {
+            report.restart_required.push("flv ws_listen");
+        }
+        if old.auth.mode != config.auth.mode
+            || old.auth.users.len() != config.auth.users.len()
+            || old.auth.token_secrets != config.auth.token_secrets
+        {
+            report.restart_required.push("auth credentials");
+        }
+        if old.hooks.on_publish_auth != config.hooks.on_publish_auth
+            || old.hooks.on_play_auth != config.hooks.on_play_auth
+        {
+            report.restart_required.push("auth hooks");
+        }
+        if old.http.admin_password != config.http.admin_password
+            || old.http.admin_username != config.http.admin_username
+        {
+            report.restart_required.push("admin credentials");
+        }
+        Ok(report)
+    }
+
+    pub async fn wait_for_signal(self, config_path: Option<PathBuf>) {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{SignalKind, signal};
             let mut term = signal(SignalKind::terminate()).expect("SIGTERM handler");
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {}
-                _ = term.recv() => {}
+            let mut hup = signal(SignalKind::hangup()).expect("SIGHUP handler");
+            loop {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => break,
+                    _ = term.recv() => break,
+                    _ = hup.recv() => {
+                        let Some(path) = config_path.as_deref() else {
+                            tracing::warn!("SIGHUP ignored: no config file");
+                            continue;
+                        };
+                        match Config::load(path) {
+                            Ok(config) => match self.reload(config) {
+                                Ok(report) => {
+                                    tracing::info!(
+                                        applied = ?report.applied,
+                                        restart_required = ?report.restart_required,
+                                        "configuration reloaded"
+                                    );
+                                }
+                                Err(error) => tracing::warn!(%error, "configuration reload failed"),
+                            },
+                            Err(error) => {
+                                tracing::warn!(%error, path = %path.display(), "configuration reload failed");
+                            }
+                        }
+                    }
+                }
             }
         }
         #[cfg(not(unix))]
         {
+            let _ = config_path;
             let _ = tokio::signal::ctrl_c().await;
         }
         self.shutdown().await;
@@ -179,12 +255,26 @@ impl ServerApp {
         } else {
             None
         };
-        let auth =
-            Arc::new(AppAuth::new(&config, keys.clone(), paths.clone())?.with_hooks(hooks.clone()));
+        let audit = config.audit.enabled.then(|| {
+            Arc::new(AuditLog::new(
+                config
+                    .audit
+                    .path
+                    .clone()
+                    .unwrap_or_else(|| config.server.state_dir.join("audit.log")),
+                config.audit.max_bytes,
+                config.audit.max_files,
+            ))
+        });
+        let auth = Arc::new(
+            AppAuth::new(&config, keys.clone(), paths.clone(), mounts.clone())?
+                .with_hooks(hooks.clone())
+                .with_audit(audit.clone()),
+        );
         let recording =
             RecordingSupervisor::new(config.clone(), paths.clone(), mounts.clone(), hooks.clone());
 
-        let event_sink: Arc<dyn rtflow::EventSink> = Arc::new(AppEventSink {
+        let event_sink: Arc<dyn rtflow::EventSink> = Arc::new(crate::control::AppEventSink {
             metrics: rtflow::core::metrics::MetricsEventSink::new(metrics.clone()),
             hooks: hooks.clone(),
         });
@@ -199,6 +289,18 @@ impl ServerApp {
             rtsp_config.max_sessions = config.rtsp.max_sessions;
             rtsp_config.dynamic_publishers = config.rtsp.dynamic_publishers;
             rtsp_config.authenticator = auth.clone();
+            if let Some(tls) = &config.rtsp.tls {
+                let certificate = std::fs::read(&tls.certificate)?;
+                let private_key = std::fs::read(&tls.private_key)?;
+                rtsp_config.tls = Some(rtflow::security::TlsServerConfig::from_pem(
+                    &certificate,
+                    &private_key,
+                )?);
+                tracing::info!(
+                    cert = %tls.certificate.display(),
+                    "RTSP TLS enabled"
+                );
+            }
             rtsp_config.event_sink = event_sink.clone();
             let server = rtflow::server::RtspServer::bind_with(rtsp_config, mounts.clone()).await?;
             Some(server)
@@ -209,6 +311,7 @@ impl ServerApp {
         let (rtmp_addr, rtmp_cancel) = if config.rtmp.enabled {
             let session = RtmpSessionConfig {
                 authenticator: Some(auth.clone()),
+                async_authenticator: Some(auth.clone()),
                 ..RtmpSessionConfig::default()
             };
             #[allow(clippy::needless_update)] // `metrics` only exists with feature
@@ -285,7 +388,7 @@ impl ServerApp {
             http.add_route(
                 Method::Get,
                 "/hls/*",
-                auth_guard(
+                crate::media::auth_guard(
                     create_hls_live_handler(hls),
                     auth.clone(),
                     mounts.clone(),
@@ -299,7 +402,7 @@ impl ServerApp {
                 http.add_route(
                     Method::Get,
                     "/llhls/*",
-                    auth_guard(
+                    crate::media::auth_guard(
                         create_ll_hls_handler(ll_hls),
                         auth.clone(),
                         mounts.clone(),
@@ -313,7 +416,7 @@ impl ServerApp {
             http.add_route(
                 Method::Get,
                 "/vod/*",
-                auth_guard(
+                crate::media::auth_guard(
                     create_hls_vod_handler(vod_manager.clone()),
                     auth.clone(),
                     mounts.clone(),
@@ -328,8 +431,8 @@ impl ServerApp {
             http.add_route(
                 Method::Get,
                 "/flv/*",
-                auth_guard(
-                    flv_handler(mounts.clone()),
+                crate::media::auth_guard(
+                    crate::media::flv_handler(mounts.clone()),
                     auth.clone(),
                     mounts.clone(),
                     "/flv/",
@@ -343,8 +446,8 @@ impl ServerApp {
             http.add_route(
                 Method::Get,
                 "/dash/*",
-                auth_guard(
-                    dash_handler(mounts.clone(), config.clone()),
+                crate::media::auth_guard(
+                    crate::media::dash_handler(mounts.clone(), config.clone()),
                     auth.clone(),
                     mounts.clone(),
                     "/dash/",
@@ -359,7 +462,7 @@ impl ServerApp {
             http.add_route(
                 Method::Post,
                 "/whip/*",
-                auth_guard(
+                crate::media::auth_guard(
                     whip,
                     auth.clone(),
                     mounts.clone(),
@@ -372,7 +475,7 @@ impl ServerApp {
             http.add_route(
                 Method::Post,
                 "/whep/*",
-                auth_guard(
+                crate::media::auth_guard(
                     whep,
                     auth.clone(),
                     mounts.clone(),
@@ -384,9 +487,9 @@ impl ServerApp {
             .await;
         }
         if config.http.health {
-            http.add_route(Method::Get, "/healthz", health_handler())
+            http.add_route(Method::Get, "/healthz", crate::media::health_handler())
                 .await;
-            http.add_route(Method::Get, "/readyz", health_handler())
+            http.add_route(Method::Get, "/readyz", crate::media::health_handler())
                 .await;
         }
         if config.http.metrics {
@@ -411,6 +514,7 @@ impl ServerApp {
             vod.clone(),
             recording.clone(),
             mounts.clone(),
+            audit.clone(),
         )
         .await;
 
@@ -423,7 +527,14 @@ impl ServerApp {
                     .with_rtmp_base(
                         public_rtmp(&config).unwrap_or_else(|| "rtmp://127.0.0.1:1935".into()),
                     )
-                    .with_vod(vod_manager.clone());
+                    .with_vod(vod_manager.clone())
+                    .with_control(Arc::new(crate::control::ControlBridge {
+                        discovery: discovery.clone(),
+                        paths: paths.clone(),
+                        keys: keys.clone(),
+                        recording: recording.clone(),
+                        mounts: mounts.clone(),
+                    }));
             let admin = Admin::new(admin_config, mounts.clone())?;
             admin.register(&http).await;
         } else if config.http.admin {
@@ -512,195 +623,7 @@ impl ServerApp {
             keys,
             discovery,
             vod,
+            config,
         })
     }
-}
-
-struct AppEventSink {
-    metrics: rtflow::core::metrics::MetricsEventSink,
-    hooks: Option<Arc<HookClient>>,
-}
-
-impl rtflow::EventSink for AppEventSink {
-    fn record(&self, event: &rtflow::FrameworkEvent) {
-        self.metrics.record(event);
-        if let rtflow::FrameworkEvent::Mount(rtflow::observe::MountEvent::Unregistered { id }) =
-            event
-            && let Some(hooks) = &self.hooks
-        {
-            hooks.notify(crate::hooks::HookRequest {
-                event: crate::hooks::HookKind::PublishDone,
-                path: id.as_str().trim_start_matches('/').to_owned(),
-                role: "publish".into(),
-                protocol: "server".into(),
-                peer: None,
-                key_id: None,
-                stream_id: None,
-                reason: None,
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            });
-        }
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-fn health_handler() -> Handler {
-    Arc::new(|_req, mut writer| {
-        Box::pin(async move {
-            writer
-                .write_body(200, "application/json", br#"{"status":"ok"}"#)
-                .await?;
-            Ok(writer)
-        })
-    })
-}
-
-fn auth_guard(
-    inner: Handler,
-    auth: Arc<AppAuth>,
-    mounts: Arc<MountRegistry>,
-    prefix: &'static str,
-    role: rtflow::auth::AccessRole,
-    protocol: &'static str,
-) -> Handler {
-    Arc::new(move |req, writer| {
-        let auth = auth.clone();
-        let mounts = mounts.clone();
-        let inner = inner.clone();
-        Box::pin(async move {
-            let full = req.path.trim_start_matches('/').to_owned();
-            if prefix == "/vod/" {
-                // VOD ids are not mount paths; authorize against the VOD
-                // namespace so `vod/**` tokens and read rules apply.
-                if !auth.verify_http_request("vod", &req, role, protocol) {
-                    let mut writer = writer;
-                    writer
-                        .write_body(401, "text/plain", b"unauthorized")
-                        .await?;
-                    return Ok(writer);
-                }
-                return inner(req, writer).await;
-            }
-            let mount_path = mounts
-                .find_longest_prefix(&format!("/{full}"))
-                .map(|(id, _)| id.as_str().trim_start_matches('/').to_owned())
-                .or_else(|| {
-                    req.path.strip_prefix(prefix).map(|rest| {
-                        rest.split('/')
-                            .next()
-                            .unwrap_or(rest)
-                            .trim_end_matches(".flv")
-                            .to_owned()
-                    })
-                })
-                .unwrap_or_else(|| full.clone());
-            if !auth.verify_http_request(&mount_path, &req, role, protocol) {
-                let mut writer = writer;
-                writer
-                    .write_body(401, "text/plain", b"unauthorized")
-                    .await?;
-                return Ok(writer);
-            }
-            inner(req, writer).await
-        })
-    })
-}
-
-fn flv_handler(mounts: Arc<MountRegistry>) -> Handler {
-    Arc::new(move |req, writer| {
-        let mounts = mounts.clone();
-        Box::pin(async move {
-            let path = req
-                .path
-                .trim_start_matches("/flv/")
-                .strip_suffix(".flv")
-                .unwrap_or("");
-            tracing::debug!(request_path = %req.path, mount = %path, "FLV request");
-            let Some(handle) = mounts.get_handle(&format!("/{path}")) else {
-                tracing::debug!(mount = %path, "FLV mount not found");
-                let mut writer = writer;
-                writer
-                    .write_body(404, "text/plain", b"stream not found")
-                    .await?;
-                return Ok(writer);
-            };
-            let description = handle.description();
-            let (receiver, startup) = handle.subscribe_with_startup();
-            serve_flv_stream(req, writer, description, receiver, startup, handle).await
-        })
-    })
-}
-
-fn dash_handler(mounts: Arc<MountRegistry>, config: Arc<Config>) -> Handler {
-    let cache: Arc<Mutex<HashMap<String, Arc<DashHandlers>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-    Arc::new(move |req, writer| {
-        let mounts = mounts.clone();
-        let config = config.clone();
-        let cache = cache.clone();
-        Box::pin(async move {
-            let Some((mount_path, kind)) = dash_route(&req.path) else {
-                let mut writer = writer;
-                writer.write_body(404, "text/plain", b"not found").await?;
-                return Ok(writer);
-            };
-            let Some(handle) = mounts.get_handle(&format!("/{mount_path}")) else {
-                let mut writer = writer;
-                writer
-                    .write_body(404, "text/plain", b"mount not found")
-                    .await?;
-                return Ok(writer);
-            };
-            let handlers = {
-                let mut cache = cache
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                cache
-                    .entry(mount_path.to_owned())
-                    .or_insert_with(|| {
-                        Arc::new(create_dash_router(
-                            DashConfig {
-                                segment_duration: config.hls.segment_duration,
-                                segment_count: config.hls.window,
-                                ..DashConfig::default()
-                            },
-                            &handle,
-                        ))
-                    })
-                    .clone()
-            };
-            let handler = match kind {
-                DashKind::Manifest => handlers.manifest.clone(),
-                DashKind::Init => handlers.init.clone(),
-                DashKind::Segment => handlers.segment.clone(),
-            };
-            handler(req, writer).await
-        })
-    })
-}
-
-enum DashKind {
-    Manifest,
-    Init,
-    Segment,
-}
-
-fn dash_route(path: &str) -> Option<(&str, DashKind)> {
-    let path = path.strip_prefix("/dash/")?;
-    if let Some(mount) = path.strip_suffix("/manifest.mpd") {
-        return Some((mount, DashKind::Manifest));
-    }
-    if let Some(mount) = path.strip_suffix("/init.m4s") {
-        return Some((mount, DashKind::Init));
-    }
-    let (mount, file) = path.rsplit_once('/')?;
-    if file.ends_with(".m4s") {
-        return Some((mount, DashKind::Segment));
-    }
-    None
 }

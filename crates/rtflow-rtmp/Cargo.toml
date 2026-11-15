@@ -20,6 +20,7 @@ rtflow-mount.workspace = true
 rtflow-rtsp.workspace = true
 base64.workspace = true
 bytes.workspace = true
+futures.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true

@@ -8,7 +8,11 @@ use rtflow::{
     media::{MediaKind, TrackDescription},
 };
 use serde::Serialize;
-use std::{net::SocketAddr, sync::Arc, time::SystemTime};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, RwLock},
+    time::SystemTime,
+};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TrackView {
@@ -74,7 +78,7 @@ pub struct ProtocolStatus {
 }
 
 pub struct DiscoveryService {
-    config: Arc<Config>,
+    config: RwLock<Arc<Config>>,
     paths: Arc<PathStore>,
     mounts: Arc<MountRegistry>,
     started: SystemTime,
@@ -83,11 +87,27 @@ pub struct DiscoveryService {
 impl DiscoveryService {
     pub fn new(config: Arc<Config>, paths: Arc<PathStore>, mounts: Arc<MountRegistry>) -> Self {
         Self {
-            config,
+            config: RwLock::new(config),
             paths,
             mounts,
             started: SystemTime::now(),
         }
+    }
+
+    /// Replace the effective configuration (SIGHUP). Listen addresses are
+    /// reported from the new config but only take effect after a restart.
+    pub fn reload(&self, config: Arc<Config>) {
+        *self
+            .config
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = config;
+    }
+
+    fn config(&self) -> Arc<Config> {
+        self.config
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub fn list(&self) -> Vec<PathStatus> {
@@ -162,57 +182,55 @@ impl DiscoveryService {
 
     pub fn discovery(&self) -> Discovery {
         Discovery {
-            server: self.config.server.name.clone(),
+            server: self.config().server.name.clone(),
             version: env!("CARGO_PKG_VERSION"),
             generated_at: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
             protocols: ProtocolStatus {
-                rtsp: self.config.rtsp.enabled,
-                rtmp: self.config.rtmp.enabled,
-                srt: self.config.srt.enabled,
-                webrtc: self.config.webrtc.enabled && self.config.http.listen.port() != 0,
-                hls: self.config.hls.enabled,
-                llhls: self.config.hls.enabled && self.config.hls.low_latency,
-                dash: self.config.dash.enabled,
-                flv: self.config.flv.enabled,
-                ws_flv: self.config.flv.enabled,
+                rtsp: self.config().rtsp.enabled,
+                rtmp: self.config().rtmp.enabled,
+                srt: self.config().srt.enabled,
+                webrtc: self.config().webrtc.enabled && self.config().http.listen.port() != 0,
+                hls: self.config().hls.enabled,
+                llhls: self.config().hls.enabled && self.config().hls.low_latency,
+                dash: self.config().dash.enabled,
+                flv: self.config().flv.enabled,
+                ws_flv: self.config().flv.enabled,
             },
             paths: self.list(),
         }
     }
 
     fn urls(&self, name: &str, record: &PathRecord) -> PathUrls {
-        let http = public_http(&self.config);
+        let config = self.config();
+        let http = public_http(&config);
         PathUrls {
             rtsp: record
                 .enabled
-                .then(|| public_rtsp(&self.config).map(|base| format!("{base}/{name}")))
+                .then(|| public_rtsp(&config).map(|base| format!("{base}/{name}")))
                 .flatten(),
             rtmp: record
                 .enabled
-                .then(|| public_rtmp(&self.config).map(|base| format!("{base}/{name}")))
+                .then(|| public_rtmp(&config).map(|base| format!("{base}/{name}")))
                 .flatten(),
             srt: record
                 .enabled
-                .then(|| public_srt(&self.config).map(|base| format!("{base}?streamid={name}")))
+                .then(|| public_srt(&config).map(|base| format!("{base}?streamid={name}")))
                 .flatten(),
-            whep: (record.enabled && record.webrtc && self.config.webrtc.enabled)
+            whep: (record.enabled && record.webrtc && config.webrtc.enabled)
                 .then(|| format!("{http}/whep/{name}")),
-            hls: (record.enabled && record.hls && self.config.hls.enabled)
+            hls: (record.enabled && record.hls && config.hls.enabled)
                 .then(|| format!("{http}/hls/{name}/index.m3u8")),
-            llhls: (record.enabled
-                && record.hls
-                && self.config.hls.enabled
-                && self.config.hls.low_latency)
+            llhls: (record.enabled && record.hls && config.hls.enabled && config.hls.low_latency)
                 .then(|| format!("{http}/llhls/{name}/index.m3u8")),
-            dash: (record.enabled && record.dash && self.config.dash.enabled)
+            dash: (record.enabled && record.dash && config.dash.enabled)
                 .then(|| format!("{http}/dash/{name}/manifest.mpd")),
-            flv: (record.enabled && record.flv && self.config.flv.enabled)
+            flv: (record.enabled && record.flv && config.flv.enabled)
                 .then(|| format!("{http}/flv/{name}.flv")),
-            ws_flv: (record.enabled && record.flv && self.config.flv.enabled).then(|| {
-                let addr = host_for(self.config.flv.ws_listen);
+            ws_flv: (record.enabled && record.flv && config.flv.enabled).then(|| {
+                let addr = host_for(config.flv.ws_listen);
                 format!("ws://{addr}/{name}.flv")
             }),
             vod: Some(format!("{http}/vod/")),

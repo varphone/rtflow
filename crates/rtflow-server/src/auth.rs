@@ -8,6 +8,7 @@
 //! All successful and failed decisions are returned to the caller so it can
 //! audit them; secrets are never logged here.
 use crate::{
+    audit::{AuditEvent, AuditLog},
     config::{AuthMode, Config},
     hooks::{HookClient, HookKind, HookRequest},
     keys::KeyStore,
@@ -16,6 +17,7 @@ use crate::{
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, KeyInit, Mac};
 use rtflow::{
+    MountRegistry,
     auth::{AccessRole, AuthDecision, AuthRequest, Authenticator, Credentials, DigestNonceManager},
     rtmp::session::PublishAuthenticator,
 };
@@ -56,7 +58,9 @@ pub struct AppAuth {
     paths: Arc<PathStore>,
     nonces: DigestNonceManager,
     replay: Mutex<HashMap<String, u64>>,
+    mounts: Arc<MountRegistry>,
     hooks: Option<Arc<HookClient>>,
+    audit: Option<Arc<AuditLog>>,
 }
 
 impl AppAuth {
@@ -64,6 +68,7 @@ impl AppAuth {
         config: &Config,
         keys: Arc<KeyStore>,
         paths: Arc<PathStore>,
+        mounts: Arc<MountRegistry>,
     ) -> Result<Self, rtflow::Error> {
         let auth = &config.auth;
         let mut secrets = Vec::new();
@@ -103,8 +108,64 @@ impl AppAuth {
             paths,
             nonces: DigestNonceManager::new(nonce_secret, Duration::from_secs(300), 16_384)?,
             replay: Mutex::new(HashMap::new()),
+            mounts,
             hooks: None,
+            audit: None,
         })
+    }
+
+    /// Ask the configured HTTP authorization hook; allow when no hook is set.
+    async fn run_hook(
+        &self,
+        kind: HookKind,
+        path: &str,
+        role: &str,
+        protocol: &str,
+        peer: Option<String>,
+    ) -> bool {
+        let Some(hooks) = &self.hooks else {
+            return true;
+        };
+        let request = HookRequest {
+            event: kind,
+            path: path.trim_start_matches('/').to_owned(),
+            role: role.to_owned(),
+            protocol: protocol.to_owned(),
+            peer,
+            key_id: None,
+            stream_id: None,
+            reason: None,
+            timestamp: unix_now(),
+        };
+        match hooks.authorize(kind, request).await {
+            Ok(decision) => decision.allow,
+            Err(error) => {
+                tracing::warn!(%error, path, "authorization hook failed");
+                false
+            }
+        }
+    }
+
+    /// Attach the audit log for authentication decisions.
+    pub fn with_audit(mut self, audit: Option<Arc<AuditLog>>) -> Self {
+        self.audit = audit;
+        self
+    }
+
+    fn audit_decision(&self, request: &AuthRequest<'_>, allowed: bool, protocol: &str) {
+        let Some(audit) = &self.audit else {
+            return;
+        };
+        let path = request.path.split('?').next().unwrap_or(request.path);
+        let event = AuditEvent::new(
+            if allowed { "auth.allow" } else { "auth.deny" },
+            if allowed { "ok" } else { "denied" },
+        )
+        .path(path.trim_start_matches('/'))
+        .protocol(protocol)
+        .role(role_name(request.role))
+        .peer(request.peer_addr.to_string());
+        audit.record(&event);
     }
 
     /// Attach HTTP authorization hooks. They are consulted after local
@@ -130,10 +191,37 @@ impl AppAuth {
         if !self.config.enforce_path_rules && self.config.mode == AuthMode::None {
             return true;
         }
-        match role {
+        let permitted = match role {
             AccessRole::Publish => record.publish,
             AccessRole::Read => record.read,
+        };
+        if !permitted {
+            return false;
         }
+        // Best-effort reader quota: the session count is sampled before the
+        // new session registers, so a burst can overshoot by the number of
+        // concurrent authorizations. The RTSP server's global and per-IP
+        // limits remain the hard bound.
+        if role == AccessRole::Read && record.max_readers > 0 {
+            let current = self
+                .mounts
+                .get_handle(&format!("/{}", path.trim_start_matches('/')))
+                .map(|handle| {
+                    let snapshot = handle.snapshot();
+                    snapshot.subscriber_count.max(snapshot.broadcast_receivers)
+                })
+                .unwrap_or(0);
+            if current >= record.max_readers {
+                tracing::warn!(
+                    path,
+                    readers = current,
+                    limit = record.max_readers,
+                    "reader quota reached"
+                );
+                return false;
+            }
+        }
+        true
     }
 
     fn user_allowed(&self, username: &str, password: &str, role: AccessRole) -> bool {
@@ -224,8 +312,16 @@ impl AppAuth {
     }
 
     fn authorize_sync(&self, request: &AuthRequest<'_>) -> AuthDecision {
+        let decision = self.authorize_sync_inner(request);
         // OPTIONS is capability discovery and carries no media/path state;
-        // requiring credentials here breaks clients that probe before auth.
+        // it is intentionally not audited.
+        if request.method != rtflow::rtsp::Method::Options {
+            self.audit_decision(request, matches!(decision, AuthDecision::Allow), "rtsp");
+        }
+        decision
+    }
+
+    fn authorize_sync_inner(&self, request: &AuthRequest<'_>) -> AuthDecision {
         if request.method == rtflow::rtsp::Method::Options {
             return AuthDecision::Allow;
         }
@@ -395,6 +491,60 @@ impl PublishAuthenticator for AppAuth {
     }
 }
 
+impl rtflow::rtmp::session::AsyncPublishAuthenticator for AppAuth {
+    fn authorize_publish<'a>(
+        &'a self,
+        app: &'a str,
+        stream_name: &'a str,
+    ) -> futures::future::BoxFuture<'a, bool> {
+        Box::pin(async move {
+            let (stream, _) = split_rtmp_stream(stream_name);
+            let path = format!("{app}/{stream}");
+            let allowed = self
+                .run_hook(HookKind::PublishAuth, &path, "publish", "rtmp", None)
+                .await;
+            if let Some(audit) = &self.audit {
+                audit.record(
+                    &AuditEvent::new(
+                        if allowed { "auth.allow" } else { "auth.deny" },
+                        if allowed { "ok" } else { "denied" },
+                    )
+                    .path(path)
+                    .protocol("rtmp")
+                    .role("publish"),
+                );
+            }
+            allowed
+        })
+    }
+
+    fn authorize_play<'a>(
+        &'a self,
+        app: &'a str,
+        stream_name: &'a str,
+    ) -> futures::future::BoxFuture<'a, bool> {
+        Box::pin(async move {
+            let (stream, _) = split_rtmp_stream(stream_name);
+            let path = format!("{app}/{stream}");
+            let allowed = self
+                .run_hook(HookKind::PlayAuth, &path, "read", "rtmp", None)
+                .await;
+            if let Some(audit) = &self.audit {
+                audit.record(
+                    &AuditEvent::new(
+                        if allowed { "auth.allow" } else { "auth.deny" },
+                        if allowed { "ok" } else { "denied" },
+                    )
+                    .path(path)
+                    .protocol("rtmp")
+                    .role("read"),
+                );
+            }
+            allowed
+        })
+    }
+}
+
 fn split_rtmp_stream(stream_name: &str) -> (&str, Option<&str>) {
     let Some((stream, query)) = stream_name.split_once('?') else {
         return (stream_name, None);
@@ -519,7 +669,8 @@ mod tests {
         });
         let keys = Arc::new(KeyStore::new(&config).unwrap());
         let paths = Arc::new(PathStore::new(&config, false).unwrap());
-        AppAuth::new(&config, keys, paths).unwrap()
+        let mounts = Arc::new(MountRegistry::new(16));
+        AppAuth::new(&config, keys, paths, mounts).unwrap()
     }
 
     #[test]

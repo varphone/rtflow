@@ -101,7 +101,47 @@ curl -u admin:password -X DELETE http://127.0.0.1:8080/admin/api/v1/keys/<kid>
 
 ### HTTP 钩子
 
-`[hooks]` 支持 `on_publish_auth`、`on_play_auth`、`on_publish_done`、`on_record_done`。认证钩子失败时按 `fail_closed` 拒绝；请求带 `X-Rtflow-Timestamp` 与 `X-Rtflow-Signature`（HMAC-SHA256）。RTMP 认证钩子尚未接入（RTMP 使用流密钥/账号），`on_play_done` 为预留事件。
+`[hooks]` 支持 `on_publish_auth`、`on_play_auth`、`on_publish_done`、`on_record_done`。RTSP 与 RTMP 的推流/播放认证都会先过本地凭据与路径规则，再调用钩子；钩子失败时按 `fail_closed` 拒绝。请求带 `X-Rtflow-Timestamp` 与 `X-Rtflow-Signature`（HMAC-SHA256）。`on_play_done` 为预留事件。
+
+### 配额
+
+- `paths.<rule>.max_readers`：观看人数上限。鉴权时按 mount 当前订阅数检查，属于准入控制（并发鉴权可能短暂超出）。
+- `rtsp.max_sessions`、`[security]` 的连接限流仍是硬上限。
+
+## 审计日志
+
+```toml
+[audit]
+enabled = true
+# 默认 <state_dir>/audit.log
+# path = "/var/log/rtflow/audit.log"
+max_bytes = 67108864
+max_files = 5
+```
+
+JSON Lines，按大小轮转，记录认证允许/拒绝、路径增删改、kick、密钥签发/吊销、录像开始/停止、VOD 刷新。不记录密码、secret 或完整 token。
+
+## 热加载
+
+```bash
+systemctl reload rtflow      # 发送 SIGHUP
+```
+
+SIGHUP 会重新读取配置文件并应用：`[paths]` 规则、`[recording]` 策略、发现接口使用的公开地址/能力。监听地址、启用的协议、认证模式/用户/密钥、钩子 URL 与管理台凭据变更会记录为 `restart_required`，需重启生效。
+
+```text
+INFO rtflow_server::server: configuration reloaded applied=["paths", "recording", "discovery"] restart_required=[]
+```
+
+## TLS
+
+```toml
+[rtsp.tls]
+certificate = "/etc/rtflow/server.crt"
+private_key = "/etc/rtflow/server.key"
+```
+
+HTTP 推荐由反向代理终止 TLS；RTSP over TLS 直接由内置监听提供。
 
 ## 录制与点播
 
@@ -149,7 +189,20 @@ POST   /admin/api/v1/recordings/stop?path=<path>
 POST   /admin/api/v1/kick?path=<path>
 ```
 
-`/admin` 仍提供原有直播/点播/系统信息控制台；管理 API 适合脚本、CI 和外部业务系统。
+`/admin` 控制台除直播/点播/系统信息外，还提供“路径与密钥”页：路径注册/删除/kick、推流密钥签发/吊销、录像开始/停止。对应会话 API：
+
+```text
+GET/POST/PUT/DELETE /admin/api/paths
+POST                /admin/api/paths/kick
+GET/POST/DELETE     /admin/api/keys
+GET                 /admin/api/recordings
+POST                /admin/api/recordings/start|stop
+```
+
+这些接口使用管理台会话 + CSRF，与 `/admin/api/v1` 的 Basic 接口等价。管理 API 还支持：
+
+- `If-Match: <updated_at>`：PATCH 的乐观并发控制，版本不匹配返回 412；
+- `Idempotency-Key: <key>`：POST 重试在 10 分钟内返回首次结果，避免重复创建路径/密钥。
 
 ## 部署
 
@@ -168,6 +221,8 @@ POST   /admin/api/v1/kick?path=<path>
 ## 当前限制
 
 - SRT 认证只支持 stream id 白名单，不支持按 key 的 HMAC 签名；
+- 密钥的 `max_connections` 字段已保留但尚未强制；
+- `on_play_done` 与 SRT/WebRTC 的认证钩子尚未接入；
 - HLS 播放 token 需客户端在请求中携带，播放列表内的分片不会自动附加 token；
 - DASH/HLS 在首个发布 keyframe 前返回 404/503 属于正常冷启动；
 - `paths` API 注册的是逻辑路径，实际 mount 在推流上线时创建；离线路径会在发现中显示为 `online=false`。

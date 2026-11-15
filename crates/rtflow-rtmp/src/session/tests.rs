@@ -31,22 +31,22 @@ fn rtmp_url_token_is_verified_against_app_and_stream() {
     let token = rtflow_rtsp::token_auth::TokenConfig::new(b"secret".to_vec());
     let value = rtflow_rtsp::token_auth::generate_token(&token, "/live/cam");
     let stream = format!("cam?token={value}");
-    let (name, parsed) = super::commands::split_stream_token(&stream, &token);
+    let (name, parsed) = super::authz::split_stream_token(&stream, &token);
     assert_eq!(name, "cam");
     assert_eq!(parsed, Some(value.as_str()));
-    assert!(super::commands::token_allows(
+    assert!(super::authz::token_allows(
         Some(&token),
         "live",
         name,
         parsed
     ));
-    assert!(!super::commands::token_allows(
+    assert!(!super::authz::token_allows(
         Some(&token),
         "live",
         name,
         Some("invalid")
     ));
-    assert!(!super::commands::token_allows(
+    assert!(!super::authz::token_allows(
         Some(&token),
         "live",
         name,

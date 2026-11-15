@@ -1,7 +1,6 @@
 {
   "path_attributes": [],
   "oversized_files": [
-    "crates/rtflow-rtmp/src/session/commands.rs (843 lines)",
     "crates/rtflow/tests/protocols/hls.rs (908 lines)"
   ],
   "root_entries": [
