@@ -102,3 +102,30 @@ fn max_connections_is_enforced_per_peer() {
         AuthDecision::Allow
     ));
 }
+
+#[test]
+fn srt_signed_token_is_verified() {
+    let mut config = Config::default();
+    config.server.state_dir =
+        std::env::temp_dir().join(format!("rtflow-srt-auth-{}", std::process::id()));
+    config.auth.mode = AuthMode::Token;
+    config.auth.token_secrets = vec!["srt-secret-0123456789abcdef0123456789".into()];
+    let keys = Arc::new(KeyStore::new(&config).unwrap());
+    let paths = Arc::new(PathStore::new(&config, false).unwrap());
+    let mounts = Arc::new(MountRegistry::new(16));
+    let auth = AppAuth::new(&config, keys, paths, mounts).unwrap();
+    let payload = TokenPayload {
+        sub: "srt".into(),
+        role: "publish".into(),
+        path: "live/**".into(),
+        exp: unix_now() + 60,
+        nonce: "srt-1".into(),
+        tenant: None,
+    };
+    let token = auth.issue_signed_token(&payload).unwrap();
+    let peer: std::net::SocketAddr = "127.0.0.1:9000".parse().unwrap();
+    assert!(auth.verify_srt(&format!("live/cam?token={token}"), peer));
+    assert!(!auth.verify_srt("live/cam", peer));
+    // Replay of a nonce is rejected by the signed-token verifier.
+    assert!(!auth.verify_srt(&format!("live/cam?token={token}"), peer));
+}

@@ -109,27 +109,120 @@ pub(crate) struct AppEventSink {
 impl rtflow::EventSink for AppEventSink {
     fn record(&self, event: &rtflow::FrameworkEvent) {
         self.metrics.record(event);
-        if let rtflow::FrameworkEvent::Mount(rtflow::observe::MountEvent::Unregistered { id }) =
-            event
-            && let Some(hooks) = &self.hooks
-        {
-            hooks.notify(crate::hooks::HookRequest {
-                event: crate::hooks::HookKind::PublishDone,
-                path: id.as_str().trim_start_matches('/').to_owned(),
-                role: "publish".into(),
-                protocol: "server".into(),
-                peer: None,
-                key_id: None,
-                stream_id: None,
-                reason: None,
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            });
-        }
+        let Some(hooks) = &self.hooks else {
+            return;
+        };
+        let (event, path, role, protocol, peer) = match event {
+            rtflow::FrameworkEvent::Mount(rtflow::observe::MountEvent::Unregistered { id }) => (
+                crate::hooks::HookKind::PublishDone,
+                id.as_str().trim_start_matches('/').to_owned(),
+                "publish",
+                "server",
+                None,
+            ),
+            rtflow::FrameworkEvent::Session(rtflow::observe::SessionEvent::PlaybackStopped {
+                peer,
+                mount,
+                ..
+            }) => (
+                crate::hooks::HookKind::PlayDone,
+                mount.as_str().trim_start_matches('/').to_owned(),
+                "read",
+                "rtsp",
+                Some(peer.to_string()),
+            ),
+            _ => return,
+        };
+        hooks.notify(crate::hooks::HookRequest {
+            event,
+            path,
+            role: role.into(),
+            protocol: protocol.into(),
+            peer,
+            key_id: None,
+            stream_id: None,
+            reason: None,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        });
     }
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::HooksSection;
+    use rtflow::{EventSink, FrameworkEvent};
+    use std::time::Duration;
+    use tokio::io::AsyncReadExt;
+
+    #[tokio::test]
+    async fn playback_stopped_triggers_play_done_hook() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let received = Arc::new(tokio::sync::Mutex::new(String::new()));
+        let received_worker = received.clone();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buffer = Vec::new();
+                let mut chunk = [0u8; 1024];
+                loop {
+                    match stream.read(&mut chunk).await {
+                        Ok(0) => break,
+                        Ok(size) => {
+                            buffer.extend_from_slice(&chunk[..size]);
+                            if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                                let text = String::from_utf8_lossy(&buffer).to_string();
+                                *received_worker.lock().await = text;
+                                let _ = tokio::io::AsyncWriteExt::write_all(
+                                    &mut stream,
+                                    b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}",
+                                )
+                                .await;
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+        });
+
+        let hooks = HookClient::new(HooksSection {
+            on_play_done: Some(format!("http://{addr}/play-done")),
+            timeout: Duration::from_secs(2),
+            ..HooksSection::default()
+        })
+        .unwrap();
+        let sink = AppEventSink {
+            metrics: rtflow::core::metrics::MetricsEventSink::new(Arc::new(
+                rtflow::core::metrics::MetricsRegistry::default(),
+            )),
+            hooks: Some(hooks),
+        };
+        sink.record(&FrameworkEvent::Session(
+            rtflow::observe::SessionEvent::PlaybackStopped {
+                peer: "127.0.0.1:5000".parse().unwrap(),
+                mount: rtflow::MountId::from("live/cam"),
+                elapsed: Duration::from_secs(3),
+            },
+        ));
+
+        let mut text = String::new();
+        for _ in 0..50 {
+            text = received.lock().await.clone();
+            if !text.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(text.contains("/play-done"), "hook not called: {text}");
+        assert!(text.contains("play_done"), "payload missing event: {text}");
+        assert!(text.contains("live/cam"), "payload missing path: {text}");
     }
 }

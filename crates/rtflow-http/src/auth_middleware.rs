@@ -77,20 +77,19 @@ async fn write_forbidden<W: tokio::io::AsyncWrite + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ConnWriter;
 
     fn test_config() -> TokenConfig {
         TokenConfig::new(b"test-secret".to_vec())
     }
 
     fn ok_handler() -> Handler {
-        Arc::new(
-            |_req, mut writer: ResponseWriter<tokio::net::tcp::OwnedWriteHalf>| {
-                Box::pin(async move {
-                    writer.write_body(200, "text/plain", b"OK").await?;
-                    Ok(writer)
-                })
-            },
-        )
+        Arc::new(|_req, mut writer: ResponseWriter<ConnWriter>| {
+            Box::pin(async move {
+                writer.write_body(200, "text/plain", b"OK").await?;
+                Ok(writer)
+            })
+        })
     }
 
     #[test]

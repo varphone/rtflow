@@ -17,6 +17,7 @@ metrics = []
 rtflow-core.workspace = true
 rtflow-media.workspace = true
 rtflow-mount.workspace = true
+rtflow-rtsp.workspace = true
 bytes.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

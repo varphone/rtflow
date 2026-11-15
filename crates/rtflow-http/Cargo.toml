@@ -12,6 +12,7 @@ publish = true
 [features]
 default = []
 metrics = []
+tls = ["rtflow-security/tls", "dep:tokio-rustls"]
 
 [dependencies]
 rtflow-core.workspace = true
@@ -20,4 +21,5 @@ rtflow-security.workspace = true
 bytes.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+tokio-rustls = { workspace = true, optional = true }
 tracing.workspace = true

@@ -45,4 +45,5 @@ argon2.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+rcgen.workspace = true
 tempfile = "3"

@@ -37,17 +37,18 @@ pub(crate) async fn authorize_publish(
     app: &str,
     stream_name: &str,
     token_value: Option<&str>,
+    peer: Option<std::net::SocketAddr>,
 ) -> Result<(), &'static str> {
     if !token_allows(config.token.as_ref(), app, stream_name, token_value) {
         return Err("invalid token");
     }
     if let Some(auth) = &config.authenticator
-        && !auth.authorize_publish(app, stream_name)
+        && !auth.authorize_publish_peer(app, stream_name, peer)
     {
         return Err("publish not authorized");
     }
     if let Some(auth) = &config.async_authenticator
-        && !auth.authorize_publish(app, stream_name).await
+        && !auth.authorize_publish_peer(app, stream_name, peer).await
     {
         return Err("publish not authorized");
     }
@@ -60,17 +61,18 @@ pub(crate) async fn authorize_play(
     app: &str,
     stream_name: &str,
     token_value: Option<&str>,
+    peer: Option<std::net::SocketAddr>,
 ) -> Result<(), &'static str> {
     if !token_allows(config.token.as_ref(), app, stream_name, token_value) {
         return Err("invalid token");
     }
     if let Some(auth) = &config.authenticator
-        && !auth.authorize_play(app, stream_name)
+        && !auth.authorize_play_peer(app, stream_name, peer)
     {
         return Err("play not authorized");
     }
     if let Some(auth) = &config.async_authenticator
-        && !auth.authorize_play(app, stream_name).await
+        && !auth.authorize_play_peer(app, stream_name, peer).await
     {
         return Err("play not authorized");
     }

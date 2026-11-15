@@ -1,7 +1,8 @@
 use super::*;
 
-#[derive(Default)]
 pub(crate) struct ConnectionResources {
+    /// When this RTSP session started; used for playback-duration events.
+    pub(crate) started: std::time::Instant,
     pub(crate) senders: Vec<tokio::task::JoinHandle<()>>,
     pub(crate) recording_mounts: Vec<Arc<Mount>>,
     pub(crate) claims: Vec<Arc<Mount>>,
@@ -12,6 +13,20 @@ pub(crate) struct ConnectionResources {
     /// unique-client counter.
     pub(crate) played_mounts: Vec<Arc<Mount>>,
 }
+impl Default for ConnectionResources {
+    fn default() -> Self {
+        Self {
+            started: std::time::Instant::now(),
+            senders: Vec::new(),
+            recording_mounts: Vec::new(),
+            claims: Vec::new(),
+            dynamic_mounts: Vec::new(),
+            vod: None,
+            played_mounts: Vec::new(),
+        }
+    }
+}
+
 impl ConnectionResources {
     pub(crate) fn abort_senders(&mut self) {
         for task in self.senders.drain(..) {

@@ -1,5 +1,6 @@
 use super::*;
 use crate::amf::AmfValue;
+use std::net::SocketAddr;
 
 fn gcd(mut left: u32, mut right: u32) -> u32 {
     while right != 0 {
@@ -209,6 +210,7 @@ pub(super) async fn handle_command(
     tx: &mpsc::Sender<RtmpMessage>,
     subscriber_task: &mut Option<tokio::task::JoinHandle<()>>,
     cancel: &CancellationToken,
+    peer: Option<SocketAddr>,
     #[cfg(feature = "metrics")] metrics: &Option<Arc<rtflow_core::metrics::MetricsRegistry>>,
 ) -> Option<Vec<RtmpMessage>> {
     match cmd {
@@ -293,7 +295,7 @@ pub(super) async fn handle_command(
                 None => (stream_name.as_str(), None),
             };
             if let Err(message) =
-                super::authz::authorize_publish(config, &app, stream_name, token_value).await
+                super::authz::authorize_publish(config, &app, stream_name, token_value, peer).await
             {
                 warn!("RTMP: publish denied for /{app}/{stream_name}: {message}");
                 let error_payload = command::error_response(
@@ -445,7 +447,7 @@ pub(super) async fn handle_command(
                 None => (stream_name.as_str(), None),
             };
             if let Err(message) =
-                super::authz::authorize_play(config, &app, stream_name, token_value).await
+                super::authz::authorize_play(config, &app, stream_name, token_value, peer).await
             {
                 warn!("RTMP: play denied for /{app}/{stream_name}: {message}");
                 let error_payload = command::error_response(

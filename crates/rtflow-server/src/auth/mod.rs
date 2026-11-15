@@ -151,6 +151,22 @@ impl AppAuth {
         }
     }
 
+    /// Media endpoints are hit per segment/request: audit denials only, so the
+    /// log stays about security events rather than playlist polling.
+    fn audit_http_decision(&self, allowed: bool, path: &str, role: AccessRole, protocol: &str) {
+        if !allowed && let Some(counters) = &self.counters {
+            counters.auth_failure();
+        }
+        if !allowed && let Some(audit) = &self.audit {
+            audit.record(
+                &AuditEvent::new("auth.deny", "denied")
+                    .path(path.trim_start_matches('/'))
+                    .protocol(protocol)
+                    .role(role_name(role)),
+            );
+        }
+    }
+
     /// Attach application counters (auth failures).
     pub fn with_counters(mut self, counters: Arc<crate::metrics::ServerCounters>) -> Self {
         self.counters = Some(counters);
@@ -503,163 +519,6 @@ impl Authenticator for AppAuth {
     }
 }
 
-impl AppAuth {
-    fn rtmp_audit(&self, allowed: bool, path: &str, role: &str) {
-        if let Some(counters) = &self.counters
-            && !allowed
-        {
-            counters.auth_failure();
-        }
-        if let Some(audit) = &self.audit {
-            audit.record(
-                &AuditEvent::new(
-                    if allowed { "auth.allow" } else { "auth.deny" },
-                    if allowed { "ok" } else { "denied" },
-                )
-                .path(path)
-                .protocol("rtmp")
-                .role(role),
-            );
-        }
-    }
-}
-
-impl PublishAuthenticator for AppAuth {
-    fn authorize_publish(&self, app: &str, stream_name: &str) -> bool {
-        let (stream, token) = split_rtmp_stream(stream_name);
-        let allowed = self.authorize_publish_inner(app, stream, token);
-        self.rtmp_audit(allowed, &format!("{app}/{stream}"), "publish");
-        allowed
-    }
-
-    fn authorize_play(&self, app: &str, stream_name: &str) -> bool {
-        let (stream, token) = split_rtmp_stream(stream_name);
-        let allowed = self.authorize_play_inner(app, stream, token);
-        self.rtmp_audit(allowed, &format!("{app}/{stream}"), "read");
-        allowed
-    }
-}
-
-impl AppAuth {
-    fn authorize_publish_inner(&self, app: &str, stream: &str, token: Option<&str>) -> bool {
-        let path = format!("{app}/{stream}");
-        if let Some(token) = token {
-            if (token.starts_with("rk_")
-                && token.contains('.')
-                && self.key_allowed(token, &path, AccessRole::Publish, "rtmp", None))
-                || self.verify_signed_token(token, &path, AccessRole::Publish)
-            {
-                return true;
-            }
-            return false;
-        }
-        if self.config.mode == AuthMode::None {
-            return self.path_allowed(&path, AccessRole::Publish);
-        }
-        if let Some((username, password, stream)) = parse_rtmp_credentials(stream) {
-            let path = format!("{app}/{stream}");
-            return self.user_allowed(&username, &password, AccessRole::Publish)
-                && self.path_allowed(&path, AccessRole::Publish);
-        }
-        false
-    }
-
-    fn authorize_play_inner(&self, app: &str, stream: &str, token: Option<&str>) -> bool {
-        let path = format!("{app}/{stream}");
-        if let Some(token) = token {
-            if (token.starts_with("rk_")
-                && token.contains('.')
-                && self.key_allowed(token, &path, AccessRole::Read, "rtmp", None))
-                || self.verify_signed_token(token, &path, AccessRole::Read)
-            {
-                return true;
-            }
-            return false;
-        }
-        if self.config.mode == AuthMode::None {
-            return self.path_allowed(&path, AccessRole::Read);
-        }
-        if let Some((username, password, stream)) = parse_rtmp_credentials(stream) {
-            let path = format!("{app}/{stream}");
-            return self.user_allowed(&username, &password, AccessRole::Read)
-                && self.path_allowed(&path, AccessRole::Read);
-        }
-        false
-    }
-}
-
-impl rtflow::rtmp::session::AsyncPublishAuthenticator for AppAuth {
-    fn authorize_publish<'a>(
-        &'a self,
-        app: &'a str,
-        stream_name: &'a str,
-    ) -> futures::future::BoxFuture<'a, bool> {
-        Box::pin(async move {
-            let (stream, _) = split_rtmp_stream(stream_name);
-            let path = format!("{app}/{stream}");
-            let allowed = self
-                .run_hook(HookKind::PublishAuth, &path, "publish", "rtmp", None)
-                .await;
-            if let Some(audit) = &self.audit {
-                audit.record(
-                    &AuditEvent::new(
-                        if allowed { "auth.allow" } else { "auth.deny" },
-                        if allowed { "ok" } else { "denied" },
-                    )
-                    .path(path)
-                    .protocol("rtmp")
-                    .role("publish"),
-                );
-            }
-            allowed
-        })
-    }
-
-    fn authorize_play<'a>(
-        &'a self,
-        app: &'a str,
-        stream_name: &'a str,
-    ) -> futures::future::BoxFuture<'a, bool> {
-        Box::pin(async move {
-            let (stream, _) = split_rtmp_stream(stream_name);
-            let path = format!("{app}/{stream}");
-            let allowed = self
-                .run_hook(HookKind::PlayAuth, &path, "read", "rtmp", None)
-                .await;
-            if let Some(audit) = &self.audit {
-                audit.record(
-                    &AuditEvent::new(
-                        if allowed { "auth.allow" } else { "auth.deny" },
-                        if allowed { "ok" } else { "denied" },
-                    )
-                    .path(path)
-                    .protocol("rtmp")
-                    .role("read"),
-                );
-            }
-            allowed
-        })
-    }
-}
-
-fn split_rtmp_stream(stream_name: &str) -> (&str, Option<&str>) {
-    let Some((stream, query)) = stream_name.split_once('?') else {
-        return (stream_name, None);
-    };
-    let token = query.split('&').find_map(|pair| {
-        let (key, value) = pair.split_once('=')?;
-        (key == "token" || key == "key").then_some(value)
-    });
-    (stream, token)
-}
-
-fn parse_rtmp_credentials(stream: &str) -> Option<(String, String, String)> {
-    let (credentials, stream) = stream.split_once('@')?;
-    let (username, password) = credentials.split_once(':')?;
-    (!username.is_empty() && !stream.is_empty())
-        .then(|| (username.to_owned(), password.to_owned(), stream.to_owned()))
-}
-
 fn parse_basic(header: &str) -> Option<(String, String)> {
     let encoded = header.strip_prefix("Basic ")?;
     // Basic uses standard base64; accept URL-safe input as a convenience for
@@ -700,77 +559,8 @@ fn unix_now() -> u64 {
         .as_secs()
 }
 
-/// Verify an HTTP bearer token or API key for a playback path.
-impl AppAuth {
-    /// Verify an HTTP request using a Bearer token, `?token=` query, or
-    /// Basic credentials. Used by HLS/DASH/FLV/VOD/WebRTC routes.
-    pub fn verify_http_request(
-        &self,
-        path: &str,
-        request: &rtflow::http::HttpRequest,
-        role: AccessRole,
-        protocol: &str,
-    ) -> bool {
-        let allowed = self.verify_http_request_inner(path, request, role, protocol);
-        if !allowed && let Some(counters) = &self.counters {
-            counters.auth_failure();
-        }
-        // Media endpoints are hit per segment/request: audit denials only, so
-        // the log stays about security events rather than playlist polling.
-        if !allowed && let Some(audit) = &self.audit {
-            audit.record(
-                &AuditEvent::new("auth.deny", "denied")
-                    .path(path.trim_start_matches('/'))
-                    .protocol(protocol)
-                    .role(role_name(role)),
-            );
-        }
-        allowed
-    }
-
-    fn verify_http_request_inner(
-        &self,
-        path: &str,
-        request: &rtflow::http::HttpRequest,
-        role: AccessRole,
-        protocol: &str,
-    ) -> bool {
-        let path = path.trim_start_matches('/');
-        let token = request
-            .header("authorization")
-            .and_then(|header| header.strip_prefix("Bearer ").map(str::trim))
-            .or_else(|| {
-                request
-                    .query
-                    .get("token")
-                    .or_else(|| request.query.get("key"))
-                    .map(String::as_str)
-            });
-        if let Some(token) = token {
-            return self.verify_http(path, token, role, protocol);
-        }
-        if self.config.mode == AuthMode::None {
-            return self.path_allowed(path, role);
-        }
-        if let Some(header) = request.header("authorization")
-            && let Some((username, password)) = parse_basic(header)
-            && self.user_allowed(&username, &password, role)
-        {
-            return self.path_allowed(path, role);
-        }
-        false
-    }
-
-    pub fn verify_http(&self, path: &str, token: &str, role: AccessRole, protocol: &str) -> bool {
-        if self.config.mode == AuthMode::None {
-            return self.path_allowed(path, role);
-        }
-        if token.starts_with("rk_") && token.contains('.') {
-            return self.key_allowed(token, path, role, protocol, None);
-        }
-        self.verify_signed_token(token, path, role)
-    }
-}
+mod media;
+mod rtmp;
 
 #[cfg(test)]
 mod tests;

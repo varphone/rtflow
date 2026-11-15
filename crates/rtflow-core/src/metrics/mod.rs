@@ -248,6 +248,7 @@ impl EventSink for MetricsEventSink {
                         }
                     }
                 }
+                SessionEvent::PlaybackStopped { .. } => {}
                 SessionEvent::Closed { elapsed, error, .. } => {
                     self.registry
                         .connections_active

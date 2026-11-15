@@ -134,7 +134,10 @@ impl SrtServer {
                         *next_socket_id += 1;
 
                         let response = induction_response(local_socket_id, cookie);
-                        let response_pkt = handshake_control_packet(&response, 0, ctrl.timestamp);
+                        // Destination is the client's socket id so it accepts
+                        // the response; the response's own SRT_SOCKID is ours.
+                        let response_pkt =
+                            handshake_control_packet(&response, hs.socket_id, ctrl.timestamp);
                         let encoded = encode_control_packet(&response_pkt);
 
                         if let Err(e) = self.socket.send_to(&encoded, peer).await {
@@ -199,9 +202,29 @@ impl SrtServer {
                             );
                             return;
                         }
+                        if let Some(authenticator) = &self.config.authenticator {
+                            let allowed = stream_id
+                                .as_deref()
+                                .is_some_and(|id| authenticator.authorize(id, peer));
+                            if !allowed {
+                                warn!(
+                                    "SRT: rejected stream_id {stream_id:?} from {peer} (authorization failed)"
+                                );
+                                return;
+                            }
+                        }
 
-                        let response =
-                            conclusion_response(local_socket_id, hs.initial_sequence, hs.socket_id);
+                        // The response carries the server's own initial packet
+                        // sequence; echoing the client's ISN desynchronises
+                        // its receive buffer.
+                        let server_initial_sequence = (ctrl.timestamp
+                            ^ (local_socket_id.wrapping_mul(2_654_435_761)))
+                            & 0x7fff_ffff;
+                        let response = conclusion_response(
+                            local_socket_id,
+                            server_initial_sequence,
+                            hs.socket_id,
+                        );
                         let response_pkt =
                             handshake_control_packet(&response, hs.socket_id, ctrl.timestamp);
                         let encoded = encode_control_packet(&response_pkt);

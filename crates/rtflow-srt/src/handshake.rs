@@ -191,13 +191,14 @@ pub fn encode_handshake(hs: &Handshake) -> Bytes {
 
 /// Build an induction response handshake.
 ///
-/// Per SRT spec, the induction exchange uses UDT version 4 with an HSREQ
-/// extension; libsrt rejects a version-5 induction response.
+/// The induction exchange uses UDT version 4 and carries no extensions:
+/// libsrt rejects a version-5 induction response and ignores one that
+/// advertises an extension block without data.
 pub fn induction_response(socket_id: u32, cookie: u32) -> Handshake {
     Handshake {
         version: SRT_VERSION_4,
         encryption: 0,
-        extension: 0x0001, // HS_EXT_HSREQ
+        extension: 0,
         initial_sequence: 0,
         mtu: 1500,
         flow_window: 8192,

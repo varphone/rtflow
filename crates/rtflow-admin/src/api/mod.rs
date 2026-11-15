@@ -22,6 +22,11 @@ struct Auth {
     csrf: String,
 }
 
+/// Validate the console session cookie (used by host applications).
+pub(super) fn session_valid(state: &AdminState, req: &HttpRequest) -> bool {
+    auth(state, req).is_some()
+}
+
 fn auth(state: &AdminState, req: &HttpRequest) -> Option<Auth> {
     let token = session_cookie(req, COOKIE)?;
     let csrf = state.sessions.get(&token)?;

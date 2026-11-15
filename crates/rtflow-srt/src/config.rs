@@ -25,6 +25,18 @@ pub struct SrtConfig {
     /// means open mode (any stream id may publish); otherwise a caller
     /// whose stream id is not listed is rejected at handshake time.
     pub allowed_stream_ids: Vec<String>,
+    /// Optional publish authorization (HMAC token, API key, path policy).
+    /// Consulted after the stream-id allow-list.
+    pub authenticator: Option<Arc<dyn PublishAuthenticator>>,
+}
+
+/// SRT publish authorization hook.
+///
+/// The stream id is passed exactly as received (`live/cam` or
+/// `live/cam?token=...`), so implementations can extract credentials and
+/// apply the same policy as the other protocols.
+pub trait PublishAuthenticator: Send + Sync + std::fmt::Debug {
+    fn authorize(&self, stream_id: &str, peer: SocketAddr) -> bool;
 }
 
 impl Default for SrtConfig {
@@ -40,6 +52,7 @@ impl Default for SrtConfig {
             #[cfg(feature = "metrics")]
             metrics: None,
             allowed_stream_ids: Vec::new(),
+            authenticator: None,
         }
     }
 }

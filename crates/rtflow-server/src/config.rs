@@ -176,23 +176,31 @@ impl Default for WebrtcSection {
 #[serde(deny_unknown_fields, default)]
 pub struct HttpSection {
     pub listen: SocketAddr,
+    /// Optional HTTPS listener files. Without them the server speaks plain
+    /// HTTP and TLS is expected to terminate at a proxy.
+    pub tls: Option<TlsFiles>,
     pub admin: bool,
     pub metrics: bool,
     pub health: bool,
     pub admin_username: String,
     /// Empty disables the console (no insecure default password).
     pub admin_password: String,
+    /// Static bearer tokens accepted by the control API (`Authorization:
+    /// Bearer ...` or `?token=`), in addition to Basic/session.
+    pub api_tokens: Vec<String>,
 }
 
 impl Default for HttpSection {
     fn default() -> Self {
         Self {
             listen: "0.0.0.0:8080".parse().expect("valid default"),
+            tls: None,
             admin: true,
             metrics: true,
             health: true,
             admin_username: "admin".into(),
             admin_password: String::new(),
+            api_tokens: Vec::new(),
         }
     }
 }
@@ -457,6 +465,9 @@ impl Config {
         }
         for user in &mut copy.auth.users {
             user.password = "<redacted>".into();
+        }
+        for token in &mut copy.http.api_tokens {
+            *token = "<redacted>".into();
         }
         if copy.hooks.secret.is_some() {
             copy.hooks.secret = Some("<redacted>".into());
@@ -742,9 +753,11 @@ mod tests {
         config.http.admin_password = "secret".into();
         config.auth.token_secrets = vec!["token-secret".into()];
         config.hooks.secret = Some("hook-secret".into());
+        config.http.api_tokens = vec!["api-token".into()];
         let text = config.redacted().to_toml().unwrap();
         assert!(!text.contains("token-secret"));
         assert!(!text.contains("hook-secret"));
+        assert!(!text.contains("api-token"));
         assert!(text.contains("<redacted>"));
         // The original config keeps the real values.
         assert_eq!(config.http.admin_password, "secret");

@@ -29,6 +29,7 @@ pub(crate) async fn register_api_routes(
     recording: Arc<RecordingSupervisor>,
     mounts: Arc<MountRegistry>,
     audit_log: Option<Arc<AuditLog>>,
+    admin: Option<Arc<rtflow::admin::Admin>>,
 ) {
     let state = ApiState {
         config,
@@ -39,6 +40,7 @@ pub(crate) async fn register_api_routes(
         recording,
         mounts,
         audit: audit_log,
+        admin,
         idempotency: std::sync::Mutex::new(std::collections::HashMap::new()),
     };
     let state = Arc::new(state);
@@ -458,6 +460,7 @@ struct ApiState {
     recording: Arc<RecordingSupervisor>,
     mounts: Arc<MountRegistry>,
     audit: Option<Arc<AuditLog>>,
+    admin: Option<Arc<rtflow::admin::Admin>>,
     /// Replayed responses for `Idempotency-Key` POSTs.
     idempotency: std::sync::Mutex<
         std::collections::HashMap<String, (std::time::Instant, u16, serde_json::Value)>,
@@ -480,7 +483,7 @@ where
         let state = state.clone();
         let handler = handler.clone();
         Box::pin(async move {
-            if !api_authorized(&state.config, &req) {
+            if !api_authorized(&state, &req) {
                 return write_api_error(writer, 401, "unauthorized").await;
             }
             match handler(state, req).await {
@@ -531,7 +534,7 @@ where
 }
 
 fn public_authorized(state: &ApiState, req: &HttpRequest) -> bool {
-    if api_authorized(&state.config, req) {
+    if api_authorized(state, req) {
         return true;
     }
     if state.config.discovery.public {
@@ -567,7 +570,7 @@ where
         let state = state.clone();
         let handler = handler.clone();
         Box::pin(async move {
-            if !api_authorized(&state.config, &req) {
+            if !api_authorized(&state, &req) {
                 return write_api_error(writer, 401, "unauthorized").await;
             }
             // Idempotent retries: a POST with the same Idempotency-Key returns
@@ -610,8 +613,31 @@ where
     })
 }
 
-fn api_authorized(config: &Config, req: &HttpRequest) -> bool {
-    if !config.http.admin || config.http.admin_password.is_empty() {
+fn api_authorized(state: &ApiState, req: &HttpRequest) -> bool {
+    let config = &state.config;
+    // Browser session from the console login.
+    if let Some(admin) = &state.admin
+        && admin.is_authenticated(req)
+    {
+        return true;
+    }
+    // Static API token: `Authorization: Bearer ...` or `?token=`.
+    if !config.http.api_tokens.is_empty() {
+        let provided = req
+            .header("authorization")
+            .and_then(|header| header.strip_prefix("Bearer ").map(str::trim))
+            .or_else(|| req.query.get("token").map(String::as_str));
+        if let Some(provided) = provided
+            && config
+                .http
+                .api_tokens
+                .iter()
+                .any(|token| provided.as_bytes().ct_eq(token.as_bytes()).into())
+        {
+            return true;
+        }
+    }
+    if config.http.admin_password.is_empty() {
         return false;
     }
     let Some(header) = req.header("authorization") else {

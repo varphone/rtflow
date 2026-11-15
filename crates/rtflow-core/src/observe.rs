@@ -44,6 +44,13 @@ pub enum SessionEvent {
         elapsed: Duration,
         error: Option<ErrorCode>,
     },
+    /// A playback session ended (TEARDOWN, PAUSE or disconnect) after having
+    /// played `mount`. Emitted once per distinct mount a session played.
+    PlaybackStopped {
+        peer: SocketAddr,
+        mount: MountId,
+        elapsed: Duration,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -28,7 +28,13 @@ full = [
 embedded-gateway = ["client", "server", "tls", "metrics", "http", "http-flv", "hls", "ws-flv"]
 experimental-protocols = ["dash", "rtmp", "srt", "webrtc"]
 
-tls = ["rtflow-security/tls", "rtflow-rtsp-client/tls", "rtflow-rtsp-server/tls", "rtflow-mount/tls"]
+tls = [
+    "rtflow-security/tls",
+    "rtflow-rtsp-client/tls",
+    "rtflow-rtsp-server/tls",
+    "rtflow-mount/tls",
+    "rtflow-http/tls",
+]
 mp4 = ["rtflow-file/mp4"]
 mkv = ["rtflow-file/mkv"]
 client = ["dep:rtflow-rtsp-client"]

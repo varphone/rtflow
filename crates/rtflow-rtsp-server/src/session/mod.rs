@@ -11,7 +11,7 @@ use super::{
 use rtflow_core::{
     error::{Error, Result},
     identity::MountId,
-    observe::{FrameworkEvent, SecurityEvent, emit},
+    observe::{FrameworkEvent, SecurityEvent, SessionEvent, emit},
 };
 use rtflow_framing::{ConnectionFramer, InboundFrame};
 use rtflow_media::MediaDescription;
@@ -304,7 +304,7 @@ pub(super) async fn serve_connection(
                     &mut interleaved_depacketizers,
                 )
                 .await?;
-                cleanup_session(&state, &mut resources).await;
+                cleanup_session(&state, peer, &mut resources).await;
                 return Ok(());
             } else {
                 let response = handle_request(req, &state, local_addr, scheme).await;
@@ -316,7 +316,7 @@ pub(super) async fn serve_connection(
             }
         }
     }
-    cleanup_session(&state, &mut resources).await;
+    cleanup_session(&state, peer, &mut resources).await;
     Ok(())
 }
 
@@ -328,7 +328,23 @@ fn epoch_millis() -> u64 {
 }
 
 /// Release session resources and remove idle dynamic publisher mounts.
-async fn cleanup_session(state: &Arc<State>, resources: &mut ConnectionResources) {
+async fn cleanup_session(
+    state: &Arc<State>,
+    peer: SocketAddr,
+    resources: &mut ConnectionResources,
+) {
+    // Report playback ends before releasing the mounts, so the hook sees the
+    // same path the PLAY used.
+    for mount in &resources.played_mounts {
+        emit(
+            &state.config.event_sink,
+            FrameworkEvent::Session(SessionEvent::PlaybackStopped {
+                peer,
+                mount: mount.id.clone(),
+                elapsed: resources.started.elapsed(),
+            }),
+        );
+    }
     resources.cleanup();
     for handle in resources.dynamic_mounts.drain(..) {
         // Aborted receive tasks release their publisher lease asynchronously;

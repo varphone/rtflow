@@ -32,18 +32,25 @@ listen = "0.0.0.0:1935"
 enabled = true
 listen = "0.0.0.0:9000"
 allowed_stream_ids = []  # empty = open; list exact stream ids to restrict
+# Publish tokens/keys are verified from `streamid` (`live/cam?token=...`)
+# using the [auth] configuration, like RTSP/RTMP/HTTP.
 
 [webrtc]
 enabled = true
 
 [http]
 listen = "0.0.0.0:8080"
+# HTTPS: set both files (RTSP TLS is configured under [rtsp.tls]).
+# tls.certificate = "/etc/rtflow/server.crt"
+# tls.private_key = "/etc/rtflow/server.key"
 admin = true
 metrics = true
 health = true
 admin_username = "admin"
 # Prefer RTFLOW_ADMIN_PASSWORD in production; empty disables the console.
 admin_password = ""
+# Static bearer tokens for the control API (`Authorization: Bearer ...`).
+# api_tokens = ["${RTFLOW_API_TOKEN}"]
 
 [hls]
 enabled = true

@@ -14,10 +14,7 @@ pub use router::{Handler, Router};
 use rtflow_core::error::{Error, Result};
 use rtflow_security::SecurityConfig;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::RwLock,
-};
+use tokio::{net::TcpListener, sync::RwLock};
 use tokio_util::sync::CancellationToken;
 
 const DEFAULT_MAX_CONNECTIONS: usize = 1024;
@@ -38,6 +35,12 @@ pub struct HttpConfig {
     pub security: SecurityConfig,
     /// Optional global metrics registry for request counting.
     pub metrics: Option<Arc<rtflow_core::metrics::MetricsRegistry>>,
+    /// Serve HTTPS when a certificate/key is configured.
+    #[cfg(feature = "tls")]
+    pub tls: Option<rtflow_security::TlsServerConfig>,
+    /// TLS handshake deadline (defaults to 5 s).
+    #[cfg(feature = "tls")]
+    pub tls_handshake_timeout: Duration,
 }
 
 impl HttpConfig {
@@ -52,7 +55,18 @@ impl HttpConfig {
             response_timeout: Duration::from_secs(60),
             security: SecurityConfig::default(),
             metrics: None,
+            #[cfg(feature = "tls")]
+            tls: None,
+            #[cfg(feature = "tls")]
+            tls_handshake_timeout: Duration::from_secs(5),
         }
+    }
+
+    /// Serve HTTPS with the given certificate and key.
+    #[cfg(feature = "tls")]
+    pub fn with_tls(mut self, tls: rtflow_security::TlsServerConfig) -> Self {
+        self.tls = Some(tls);
+        self
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -124,6 +138,10 @@ impl HttpServer {
         let max_header_bytes = self.config.max_header_bytes;
         let max_body_bytes = self.config.max_body_bytes;
         let response_timeout = self.config.response_timeout;
+        #[cfg(feature = "tls")]
+        let tls = self.config.tls.clone();
+        #[cfg(feature = "tls")]
+        let tls_handshake_timeout = self.config.tls_handshake_timeout;
         let connections = Arc::new(tokio::sync::Semaphore::new(self.config.max_connections));
         let rate_limiter = Arc::new(rtflow_security::ConnectionRateLimiter::new(
             self.config.security.connection_rate_limit,
@@ -177,23 +195,77 @@ impl HttpServer {
                         let router = router.clone();
                         let security = security.clone();
                         let metrics = metrics.clone();
+                        #[cfg(feature = "tls")]
+                        let tls = tls.clone();
                         tasks.spawn(async move {
                             let _permit = permit;
                             if let Some(metrics) = &metrics {
                                 use std::sync::atomic::Ordering;
                                 metrics.http_requests_total.fetch_add(1, Ordering::Relaxed);
                             }
-                            if let Err(e) = handle_connection(
-                                stream,
-                                router,
-                                security,
-                                read_timeout,
-                                max_header_bytes,
-                                max_body_bytes,
-                                response_timeout,
-                            )
-                            .await
-                            {
+                            let result = {
+                                #[cfg(feature = "tls")]
+                                {
+                                    if let Some(tls) = tls {
+                                        let acceptor = tokio_rustls::TlsAcceptor::from(tls.config);
+                                        match tokio::time::timeout(
+                                            tls_handshake_timeout,
+                                            acceptor.accept(stream),
+                                        )
+                                        .await
+                                        {
+                                            Ok(Ok(tls_stream)) => {
+                                                let (reader, writer) = tokio::io::split(tls_stream);
+                                                handle_connection(
+                                                    Some(addr),
+                                                    reader,
+                                                    ConnWriter::Tls(writer),
+                                                    router,
+                                                    security,
+                                                    read_timeout,
+                                                    max_header_bytes,
+                                                    max_body_bytes,
+                                                    response_timeout,
+                                                )
+                                                .await
+                                            }
+                                            Ok(Err(error)) => Err(Error::Tls(error.to_string())),
+                                            Err(_) => Err(Error::Tls("TLS handshake timeout".into())),
+                                        }
+                                    } else {
+                                        let (reader, writer) = stream.into_split();
+                                        handle_connection(
+                                            Some(addr),
+                                            reader,
+                                            ConnWriter::Tcp(writer),
+                                            router,
+                                            security,
+                                            read_timeout,
+                                            max_header_bytes,
+                                            max_body_bytes,
+                                            response_timeout,
+                                        )
+                                        .await
+                                    }
+                                }
+                                #[cfg(not(feature = "tls"))]
+                                {
+                                    let (reader, writer) = stream.into_split();
+                                    handle_connection(
+                                        Some(addr),
+                                        reader,
+                                        ConnWriter::Tcp(writer),
+                                        router,
+                                        security,
+                                        read_timeout,
+                                        max_header_bytes,
+                                        max_body_bytes,
+                                        response_timeout,
+                                    )
+                                    .await
+                                }
+                            };
+                            if let Err(e) = result {
                                 tracing::debug!("http connection error: {e}");
                             }
                         });
@@ -223,17 +295,21 @@ impl HttpServer {
     }
 }
 
-async fn handle_connection(
-    stream: TcpStream,
+#[allow(clippy::too_many_arguments)]
+async fn handle_connection<R>(
+    peer: Option<SocketAddr>,
+    mut read_half: R,
+    write_half: ConnWriter,
     router: Arc<RwLock<Router>>,
     security: SecurityConfig,
     read_timeout: Duration,
     max_header_bytes: usize,
     max_body_bytes: usize,
     response_timeout: Duration,
-) -> Result<()> {
-    let peer = stream.peer_addr().ok();
-
+) -> Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
     // ACL check
     if let Some(peer_addr) = peer
         && !security.ip_acl.permits(peer_addr.ip())
@@ -241,7 +317,6 @@ async fn handle_connection(
         return Err(Error::Unauthorized);
     }
 
-    let (mut read_half, write_half) = stream.into_split();
     let mut writer =
         Some(ResponseWriter::new(write_half).with_write_timeout(Some(response_timeout)));
     let mut buf = Vec::with_capacity(READ_BUF_SIZE);

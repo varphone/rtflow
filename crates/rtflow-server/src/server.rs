@@ -30,6 +30,23 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+/// SRT publish authorization adapter over the shared [`AppAuth`].
+struct SrtAuth {
+    auth: Arc<AppAuth>,
+}
+
+impl std::fmt::Debug for SrtAuth {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SrtAuth")
+    }
+}
+
+impl rtflow::srt::PublishAuthenticator for SrtAuth {
+    fn authorize(&self, stream_id: &str, peer: std::net::SocketAddr) -> bool {
+        self.auth.verify_srt(stream_id, peer)
+    }
+}
+
 pub struct ServerApp;
 
 pub struct ServerHandle {
@@ -342,6 +359,7 @@ impl ServerApp {
             let srt_config = SrtConfig {
                 bind_addr: config.srt.listen,
                 allowed_stream_ids: config.srt.allowed_stream_ids.clone(),
+                authenticator: Some(Arc::new(SrtAuth { auth: auth.clone() })),
                 ..SrtConfig::default()
             };
             let server = SrtServer::with_config(srt_config, mounts.clone()).await?;
@@ -384,7 +402,17 @@ impl ServerApp {
         let vod = Arc::new(VodCatalog::new(&config, vod_manager.clone()));
         vod.refresh();
 
-        let mut http = HttpServer::bind(HttpConfig::new(config.http.listen)).await?;
+        let mut http_config = HttpConfig::new(config.http.listen);
+        if let Some(tls) = &config.http.tls {
+            let certificate = std::fs::read(&tls.certificate)?;
+            let private_key = std::fs::read(&tls.private_key)?;
+            http_config = http_config.with_tls(rtflow::security::TlsServerConfig::from_pem(
+                &certificate,
+                &private_key,
+            )?);
+            tracing::info!(cert = %tls.certificate.display(), "HTTPS enabled");
+        }
+        let mut http = HttpServer::bind(http_config).await?;
         let http_addr = http.local_addr();
         if config.hls.enabled {
             http.add_route(
@@ -510,20 +538,7 @@ impl ServerApp {
             paths.clone(),
             mounts.clone(),
         ));
-        crate::api::register_api_routes(
-            &http,
-            config.clone(),
-            discovery.clone(),
-            paths.clone(),
-            keys.clone(),
-            vod.clone(),
-            recording.clone(),
-            mounts.clone(),
-            audit.clone(),
-        )
-        .await;
-
-        if config.http.admin && !config.http.admin_password.is_empty() {
+        let admin = if config.http.admin && !config.http.admin_password.is_empty() {
             let admin_config =
                 AdminConfig::new(&config.http.admin_username, &config.http.admin_password)?
                     .with_title(format!("{} 控制台", config.server.name))
@@ -540,11 +555,32 @@ impl ServerApp {
                         recording: recording.clone(),
                         mounts: mounts.clone(),
                     }));
-            let admin = Admin::new(admin_config, mounts.clone())?;
+            Some(Arc::new(Admin::new(admin_config, mounts.clone())?))
+        } else {
+            if config.http.admin {
+                tracing::warn!("admin console disabled: http.admin_password is empty");
+            }
+            None
+        };
+        crate::api::register_api_routes(
+            &http,
+            config.clone(),
+            discovery.clone(),
+            paths.clone(),
+            keys.clone(),
+            vod.clone(),
+            recording.clone(),
+            mounts.clone(),
+            audit.clone(),
+            admin.clone(),
+        )
+        .await;
+        // The console's catch-all assets route must be registered after the
+        // JSON API, otherwise `/admin/api/v1/...` would be served the SPA.
+        if let Some(admin) = &admin {
             admin.register(&http).await;
-        } else if config.http.admin {
-            tracing::warn!("admin console disabled: http.admin_password is empty");
         }
+
         cancels.push(http.cancellation_token());
         let task = tokio::spawn(async move {
             if let Err(error) = http.run().await {

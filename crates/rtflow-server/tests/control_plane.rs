@@ -28,12 +28,51 @@ async fn control_plane_round_trip() {
     let health = client.get(format!("{base}/healthz")).send().await.unwrap();
     assert_eq!(health.status(), 200);
 
+    // Control API: Basic, browser session and bearer token all authorize.
+    let wrong = client
+        .get(format!("{base}/admin/api/v1/paths"))
+        .bearer_auth("nope")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong.status(), 401);
+    let basic = client
+        .get(format!("{base}/admin/api/v1/paths"))
+        .basic_auth("admin", Some("testpass"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(basic.status(), 200);
+    let login = client
+        .post(format!("{base}/admin/api/login"))
+        .json(&json!({"username": "admin", "password": "testpass"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(login.status(), 200);
+    let cookie = login
+        .headers()
+        .get("set-cookie")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::to_owned)
+        .expect("login sets a session cookie");
+
     let discovery = client
         .get(format!("{base}/api/v1/discovery"))
         .send()
         .await
         .unwrap();
     assert_eq!(discovery.status(), 200);
+
+    // The session cookie from the console login also authorizes the v1 API.
+    let session = client
+        .get(format!("{base}/admin/api/v1/paths"))
+        .header("cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(session.status(), 200);
 
     let create = client
         .post(format!("{base}/admin/api/v1/paths"))
@@ -194,6 +233,37 @@ async fn discovery_token_gates_public_paths() {
             .unwrap()
             .status(),
         200
+    );
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn api_token_authorizes_control_plane() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = config(dir.path());
+    config.http.api_tokens = vec!["api-secret".into()];
+    let handle = ServerApp::start(config).await.unwrap();
+    let base = format!("http://{}", handle.http_addr);
+    let client = reqwest::Client::new();
+    assert_eq!(
+        client
+            .get(format!("{base}/admin/api/v1/paths"))
+            .bearer_auth("api-secret")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}/admin/api/v1/paths"))
+            .bearer_auth("wrong")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
     );
     handle.shutdown().await;
 }

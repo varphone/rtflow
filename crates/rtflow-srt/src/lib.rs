@@ -74,5 +74,5 @@ mod session;
 #[cfg(test)]
 mod tests;
 
-pub use config::SrtConfig;
+pub use config::{PublishAuthenticator, SrtConfig};
 pub use connection::SrtConnection;

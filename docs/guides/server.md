@@ -77,7 +77,7 @@ token_secrets = ["${RTFLOW_TOKEN_SECRET}"]
 - RTSP：Basic/Digest、`Authorization: Bearer` 或 URL `?token=`；
 - RTMP：流密钥后接 `?key=<kid>.<secret>`，或 `user:password@cam`；
 - HTTP HLS/FLV/DASH/VOD：Bearer、`?token=`/`?key=`；
-- SRT：`[srt].allowed_stream_ids` 白名单。
+- SRT：`streamid=live/cam?token=<签名或流密钥>` 走与 RTSP 相同的 HMAC/密钥校验，另可用 `[srt].allowed_stream_ids` 白名单。
 
 ### 签发流密钥
 
@@ -101,7 +101,7 @@ curl -u admin:password -X DELETE http://127.0.0.1:8080/admin/api/v1/keys/<kid>
 
 ### HTTP 钩子
 
-`[hooks]` 支持 `on_publish_auth`、`on_play_auth`、`on_publish_done`、`on_record_done`。RTSP 与 RTMP 的推流/播放认证都会先过本地凭据与路径规则，再调用钩子；钩子失败时按 `fail_closed` 拒绝。请求带 `X-Rtflow-Timestamp` 与 `X-Rtflow-Signature`（HMAC-SHA256）。`on_play_done` 为预留事件。
+`[hooks]` 支持 `on_publish_auth`、`on_play_auth`、`on_publish_done`、`on_play_done`、`on_record_done`。RTSP/RTMP/SRT 的推流与播放认证都会先过本地凭据与路径规则，再调用钩子；钩子失败时按 `fail_closed` 拒绝。RTSP 会话结束后会为每个播放过的 mount 发送一次 `on_play_done`。请求带 `X-Rtflow-Timestamp` 与 `X-Rtflow-Signature`（HMAC-SHA256）。
 
 ### 配额
 
@@ -154,9 +154,13 @@ INFO rtflow_server::server: configuration reloaded applied=["paths", "recording"
 [rtsp.tls]
 certificate = "/etc/rtflow/server.crt"
 private_key = "/etc/rtflow/server.key"
+
+[http.tls]
+certificate = "/etc/rtflow/server.crt"
+private_key = "/etc/rtflow/server.key"
 ```
 
-HTTP 推荐由反向代理终止 TLS；RTSP over TLS 直接由内置监听提供。
+两者都内置支持；配置后 RTSP 使用 `rtsps://`、HTTP 使用 `https://`。WS-FLV 仍为明文端口，可放在反向代理之后。
 
 ## 录制与点播
 
@@ -214,7 +218,13 @@ GET                 /admin/api/recordings
 POST                /admin/api/recordings/start|stop
 ```
 
-这些接口使用管理台会话 + CSRF，与 `/admin/api/v1` 的 Basic 接口等价。管理 API 还支持：
+这些接口使用管理台会话 + CSRF，与 `/admin/api/v1` 的 Basic 接口等价。管理 API 支持三种认证：
+
+- 管理台会话 cookie（浏览器登录后自动携带）；
+- HTTP Basic（`admin_username` / `admin_password`）；
+- 静态 `Bearer` token（`[http].api_tokens`，也接受 `?token=`）。
+
+管理 API 还支持：
 
 - `If-Match: <updated_at>`：PATCH 的乐观并发控制，版本不匹配返回 412；
 - `Idempotency-Key: <key>`：POST 重试在 10 分钟内返回首次结果，避免重复创建路径/密钥。
@@ -236,8 +246,8 @@ POST                /admin/api/recordings/start|stop
 ## 当前限制
 
 - SRT 认证只支持 stream id 白名单，不支持按 key 的 HMAC 签名；
-- 密钥的 `max_connections` 对 RTSP 按 peer 租约（120s 刷新）强制执行，HTTP 需反向代理注入 `X-Forwarded-For`，RTMP 暂不限制；
-- `on_play_done` 与 SRT/WebRTC 的认证钩子尚未接入；
+- 密钥的 `max_connections` 对 RTSP/RTMP 按 peer 租约（120s 刷新）强制执行；HTTP 不强制（可配合反代限流）；
+- WebRTC 的认证钩子尚未接入；
 - HLS 播放 token 需客户端在请求中携带，播放列表内的分片不会自动附加 token；
 - DASH/HLS 在首个发布 keyframe 前返回 404/503 属于正常冷启动；
 - `paths` API 注册的是逻辑路径，实际 mount 在推流上线时创建；离线路径会在发现中显示为 `online=false`。

@@ -202,4 +202,12 @@ impl Admin {
     pub fn config(&self) -> &AdminConfig {
         &self.state.config
     }
+
+    /// True when the request carries a valid console session cookie.
+    ///
+    /// Applications that mount their own API on the same HTTP server can use
+    /// this to accept the browser session alongside other credentials.
+    pub fn is_authenticated(&self, request: &rtflow_http::HttpRequest) -> bool {
+        api::session_valid(&self.state, request)
+    }
 }

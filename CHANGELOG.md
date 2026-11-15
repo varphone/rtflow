@@ -18,6 +18,9 @@
 
 ### Added
 
+- SRT 推流支持 HMAC token/流密钥校验；HTTP 内置 HTTPS；RTSP 会话结束触发
+  `on_play_done` 钩子；RTMP 流密钥 `max_connections` 生效；控制 API 支持
+  会话 cookie、Basic 与 Bearer token 三种认证。
 - `rtflow-server` 增加审计日志（JSONL 轮转）、SIGHUP 热加载、RTSP TLS、
   路径观看配额、RTMP 异步认证钩子、应用级 Prometheus 指标，以及管理台
   “路径与密钥”控制页。

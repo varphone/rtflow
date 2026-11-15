@@ -7,7 +7,62 @@ use std::sync::Arc;
 use tokio::net::tcp::OwnedWriteHalf;
 
 /// Shared write half of an accepted HTTP connection.
-pub type ConnWriter = OwnedWriteHalf;
+///
+/// The TLS variant only exists with the `tls` feature; handlers stay generic
+/// over the writer so no media code needs to know which transport it serves.
+pub enum ConnWriter {
+    Tcp(OwnedWriteHalf),
+    #[cfg(feature = "tls")]
+    Tls(tokio::io::WriteHalf<tokio_rustls::server::TlsStream<tokio::net::TcpStream>>),
+}
+
+impl ConnWriter {
+    #[cfg(not(feature = "tls"))]
+    pub fn tcp(writer: OwnedWriteHalf) -> Self {
+        Self::Tcp(writer)
+    }
+
+    #[cfg(feature = "tls")]
+    pub fn tcp(writer: OwnedWriteHalf) -> Self {
+        Self::Tcp(writer)
+    }
+}
+
+impl tokio::io::AsyncWrite for ConnWriter {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            Self::Tcp(writer) => std::pin::Pin::new(writer).poll_write(cx, buf),
+            #[cfg(feature = "tls")]
+            Self::Tls(writer) => std::pin::Pin::new(writer).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Tcp(writer) => std::pin::Pin::new(writer).poll_flush(cx),
+            #[cfg(feature = "tls")]
+            Self::Tls(writer) => std::pin::Pin::new(writer).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Tcp(writer) => std::pin::Pin::new(writer).poll_shutdown(cx),
+            #[cfg(feature = "tls")]
+            Self::Tls(writer) => std::pin::Pin::new(writer).poll_shutdown(cx),
+        }
+    }
+}
 
 pub type Handler = Arc<
     dyn Fn(
