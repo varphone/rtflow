@@ -201,39 +201,21 @@ fn proxy_restart(
     state: &ApiState,
     mount: &crate::config::ProxyMount,
 ) -> Result<serde_json::Value, (u16, String)> {
-    let upstream = mount.upstream_config().map_err(|error| (400, error))?;
-    let options = rtflow::mount::MountOptions::builder()
-        .event_sink(state.proxy_event_sink.clone())
-        .startup_cache_config(upstream.startup_cache)
-        .cancel(state.proxy_cancel.child_token())
-        .build();
-    state.proxies.remove(&mount.path);
-    state
+    let pending = state
         .proxies
-        .ensure(
-            std::sync::Arc::from(mount.path.as_str()),
-            upstream,
-            options,
-            mount.idle_grace,
-            mount.mode.is_always(),
-            mount.description_refresh.or(Some(
-                state
-                    .proxy_config
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .description_refresh,
-            )),
-        )
-        .map_err(|error| (500, error.to_string()))?;
+        .restart(&mount.path)
+        .map_err(|error| (404, error.to_string()))?;
     audit(
         state,
         AuditEvent::new("proxy.restart", "ok").path(&mount.path),
     );
-    Ok(state
+    let mut value = state
         .proxies
         .status(&mount.path)
         .map(|status| proxy_status_value(&status))
-        .unwrap_or_else(|| serde_json::json!({"path": mount.path, "state": "describing"})))
+        .unwrap_or_else(|| serde_json::json!({"path": mount.path, "state": "describing"}));
+    value["pending"] = serde_json::json!(pending);
+    Ok(value)
 }
 
 fn proxy_status_value(status: &rtflow::server::ProxyStatus) -> serde_json::Value {

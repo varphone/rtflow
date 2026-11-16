@@ -14,6 +14,9 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+mod status;
+use status::{sanitize_description, status_of};
+
 /// Network policy applied to upstream endpoints.
 #[derive(Clone, Debug)]
 pub struct ProxyPolicy {
@@ -60,6 +63,7 @@ struct EntryState {
     attempts: u32,
     last_error: Option<String>,
     retry_at: Option<Instant>,
+    restart_pending: bool,
 }
 
 struct Entry {
@@ -160,6 +164,7 @@ impl ProxyService {
                         attempts: 0,
                         last_error: None,
                         retry_at: None,
+                        restart_pending: false,
                     },
                     grace: self.default_grace,
                     always: false,
@@ -206,6 +211,7 @@ impl ProxyService {
                 attempts: 0,
                 last_error: None,
                 retry_at: None,
+                restart_pending: false,
             },
             grace: grace.unwrap_or(self.default_grace),
             always,
@@ -448,6 +454,105 @@ impl ProxyService {
         Some(status_of(&path, &entry))
     }
 
+    /// Restart a proxy now, or defer until its current subscribers leave.
+    /// Returns `true` when the restart was deferred.
+    pub fn restart(self: &Arc<Self>, path: &str) -> rtflow_core::error::Result<bool> {
+        let (upstream, options, grace, always, refresh, mount) = {
+            let entries = self
+                .entries
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let entry = entries
+                .get(path)
+                .ok_or_else(|| rtflow_core::error::Error::NotFound(path.into()))?;
+            let entry = entry
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if entry.state.restart_pending {
+                return Ok(true);
+            }
+            (
+                entry.upstream.clone(),
+                entry.options.clone(),
+                entry.grace,
+                entry.always,
+                entry.refresh,
+                entry.mount.clone(),
+            )
+        };
+        let subscribers = mount
+            .as_ref()
+            .map(|mount| {
+                let snapshot = mount.snapshot();
+                snapshot.subscriber_count.max(snapshot.broadcast_receivers)
+            })
+            .unwrap_or(0);
+        if subscribers == 0 {
+            self.remove(path);
+            self.ensure(
+                Arc::from(path),
+                upstream,
+                options,
+                Some(grace),
+                always,
+                refresh,
+            )?;
+            return Ok(false);
+        }
+        {
+            let entries = self
+                .entries
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(entry) = entries.get(path) {
+                entry
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .state
+                    .restart_pending = true;
+            }
+        }
+        let service = self.clone();
+        let path: Arc<str> = Arc::from(path);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                if service.cancel.is_cancelled() {
+                    return;
+                }
+                let entry = {
+                    let entries = service
+                        .entries
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    entries.get(&path).cloned()
+                };
+                let Some(entry) = entry else {
+                    return;
+                };
+                let (mount, cancel) = {
+                    let entry = entry
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    (entry.mount.clone(), entry.cancel.clone())
+                };
+                if cancel.is_cancelled() {
+                    return;
+                }
+                let Some(mount) = mount else {
+                    return;
+                };
+                let snapshot = mount.snapshot();
+                if snapshot.subscriber_count.max(snapshot.broadcast_receivers) == 0 {
+                    service.remove(&path);
+                    let _ = service.ensure(path, upstream, options, Some(grace), always, refresh);
+                    return;
+                }
+            }
+        });
+        Ok(true)
+    }
+
     /// Remove a proxy: cancel its worker, unregister the mount and forget it.
     pub fn remove(&self, path: &str) -> bool {
         let entry = self
@@ -496,76 +601,6 @@ fn validate_path(path: &str) -> rtflow_core::error::Result<()> {
         ));
     }
     Ok(())
-}
-
-fn status_of(path: &Arc<str>, entry: &Arc<Mutex<Entry>>) -> ProxyStatus {
-    let entry = entry
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (state, subscribers, bytes, tracks) = match &entry.mount {
-        Some(mount) => {
-            let snapshot = mount.snapshot();
-            let state = match entry.upstream.state() {
-                ProxyState::Idle => "idle",
-                ProxyState::Connecting => "connecting",
-                ProxyState::Streaming => "streaming",
-                ProxyState::BackingOff { .. } => "backoff",
-                ProxyState::Stopped => "stopped",
-            };
-            (
-                state,
-                snapshot.subscriber_count.max(snapshot.broadcast_receivers),
-                snapshot.stats.published_bytes,
-                mount.description().tracks.len(),
-            )
-        }
-        None => ("describing", 0, 0, 0),
-    };
-    let state = match entry.state.phase {
-        Phase::Describing if entry.mount.is_none() => "describing",
-        Phase::Backoff => "backoff",
-        _ => state,
-    };
-    ProxyStatus {
-        path: path.clone(),
-        state,
-        subscribers,
-        bytes,
-        tracks,
-        upstream: redacted_upstream(&entry.upstream),
-        attempts: entry.state.attempts,
-        retry_in: entry
-            .state
-            .retry_at
-            .map(|retry_at| retry_at.saturating_duration_since(Instant::now())),
-        last_error: entry.state.last_error.clone(),
-    }
-}
-
-fn redacted_upstream(upstream: &UpstreamConfig) -> String {
-    let url = &upstream.url;
-    match url.port_or_known_default() {
-        Some(port) => format!(
-            "{}://{}:{port}",
-            url.scheme(),
-            url.host_str().unwrap_or("?")
-        ),
-        None => format!("{}://{}", url.scheme(), url.host_str().unwrap_or("?")),
-    }
-}
-
-/// Rewrite upstream-absolute control URLs and strip upstream RTCP hints so a
-/// downstream client SETUPs against this server, not against the camera.
-fn sanitize_description(
-    mut description: rtflow_media::MediaDescription,
-) -> rtflow_media::MediaDescription {
-    for track in &mut description.tracks {
-        track.rtcp = None;
-        if let Ok(url) = url::Url::parse(&track.control) {
-            track.control = Arc::from(url.path().trim_start_matches('/').to_string());
-        }
-    }
-    description
 }
 
 async fn describe_upstream(

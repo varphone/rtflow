@@ -16,7 +16,7 @@
 - [x] 描述失败自动重试/退避（`ProxyService::ensure` 后台 worker）。
 - [x] SIGHUP 代理配置 diff（新增/删除/修改）。
 - [x] per-mount `idle_grace`、常连模式（always）。
-- [ ] `restart_pending`（有订阅者时延迟切换）。
+- [x] `restart_pending`（有订阅者时延迟切换，空闲后重建）。
 - [ ] 已发现描述缓存（重启后上游离线仍可注册）。
 
 ## M2 — 动态管理与可观测

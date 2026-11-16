@@ -72,6 +72,9 @@ POST /admin/api/v1/proxies/probe?path=%2Fcameras%2Ffront
 `retry_in_ms`、`last_error`。`probe` 只做一次 DESCRIBE 并返回轨道摘要，不影响运行中
 的代理。
 
+`restart` 在仍有订阅者时返回 `pending: true`，等待订阅者离开后自动重建，避免
+直接打断观众。
+
 管理页“路径与密钥”页包含代理只读状态表。
 
 ## 指标
