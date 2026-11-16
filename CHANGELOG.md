@@ -18,8 +18,8 @@
 
 ### Added
 
-- SRT 新增连接统计（监听端与 caller），通过 `/api/v1/srt`、
-  `/admin/api/v1/srt` 暴露 peer、mount、RTT、丢包/跳包、加解密与拉流状态。
+- SRT 新增连接统计（监听端、caller、sender），通过 `/api/v1/srt`、
+  `/admin/api/v1/srt` 暴露 peer、mount、RTT、丢包/跳包、加解密与推拉流状态。
 - SRT 新增 sender（推流）角色与 `SrtSender`：数据分包、重传窗口、ACK/NAK、
   ACKACK、keepalive、加密发送；`rtflow-server` 支持 `[[srt.push]]`，将 mount
   复用为 MPEG-TS 后推送到远端 listener（指数退避重连）。

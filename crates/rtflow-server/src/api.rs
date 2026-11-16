@@ -32,6 +32,7 @@ pub(crate) async fn register_api_routes(
     admin: Option<Arc<rtflow::admin::Admin>>,
     srt_listener: Option<Arc<std::sync::RwLock<Vec<rtflow::srt::SrtConnectionStats>>>>,
     srt_pulls: Arc<std::sync::Mutex<Vec<crate::srt_pull::SrtPullStatus>>>,
+    srt_pushes: Arc<std::sync::Mutex<Vec<crate::srt_push::SrtPushStatus>>>,
 ) {
     let state = ApiState {
         config,
@@ -45,6 +46,7 @@ pub(crate) async fn register_api_routes(
         admin,
         srt_listener,
         srt_pulls,
+        srt_pushes,
         idempotency: std::sync::Mutex::new(std::collections::HashMap::new()),
     };
     let state = Arc::new(state);
@@ -483,6 +485,7 @@ struct ApiState {
     admin: Option<Arc<rtflow::admin::Admin>>,
     srt_listener: Option<Arc<std::sync::RwLock<Vec<rtflow::srt::SrtConnectionStats>>>>,
     srt_pulls: Arc<std::sync::Mutex<Vec<crate::srt_pull::SrtPullStatus>>>,
+    srt_pushes: Arc<std::sync::Mutex<Vec<crate::srt_push::SrtPushStatus>>>,
     /// Replayed responses for `Idempotency-Key` POSTs.
     idempotency: std::sync::Mutex<
         std::collections::HashMap<String, (std::time::Instant, u16, serde_json::Value)>,
@@ -546,7 +549,26 @@ fn srt_status_json(state: &ApiState) -> serde_json::Value {
             })
         })
         .collect();
-    json!({"listener": listener, "pulls": pulls})
+    let pushes: Vec<serde_json::Value> = state
+        .srt_pushes
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .map(|entry| {
+            json!({
+                "role": "sender",
+                "mount": entry.mount,
+                "remote": entry.remote,
+                "stream_id": entry.stream_id,
+                "connected": entry.connected,
+                "encrypted": entry.encrypted,
+                "bytes_sent": entry.bytes_sent,
+                "rtt_us": entry.rtt_us,
+                "last_error": entry.last_error,
+            })
+        })
+        .collect();
+    json!({"listener": listener, "pulls": pulls, "pushes": pushes})
 }
 
 fn api_json<F, Fut>(state: Arc<ApiState>, handler: F) -> Handler

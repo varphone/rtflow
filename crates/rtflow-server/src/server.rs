@@ -310,10 +310,12 @@ impl ServerApp {
             cancel.clone(),
             srt_pull_status.clone(),
         ));
+        let srt_push_status = crate::srt_push::status_table(&config);
         tasks.extend(crate::srt_push::spawn(
             config.clone(),
             mounts.clone(),
             cancel.clone(),
+            srt_push_status.clone(),
         ));
 
         let rtsp = if config.rtsp.enabled {
@@ -603,6 +605,7 @@ impl ServerApp {
             admin.clone(),
             srt_listener_stats,
             srt_pull_status.clone(),
+            srt_push_status.clone(),
         )
         .await;
         // The console's catch-all assets route must be registered after the

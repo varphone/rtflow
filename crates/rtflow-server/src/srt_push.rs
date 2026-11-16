@@ -17,31 +17,83 @@ use transmux::{
     },
 };
 
+/// Runtime status of one configured push destination.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct SrtPushStatus {
+    pub mount: String,
+    pub remote: String,
+    pub stream_id: String,
+    pub connected: bool,
+    pub encrypted: bool,
+    pub bytes_sent: u64,
+    pub rtt_us: u32,
+    pub last_error: Option<String>,
+}
+
+/// Build the status table for the configured push destinations.
+pub fn status_table(config: &Config) -> Arc<std::sync::Mutex<Vec<SrtPushStatus>>> {
+    Arc::new(std::sync::Mutex::new(
+        config
+            .srt
+            .push
+            .iter()
+            .map(|push| SrtPushStatus {
+                mount: push.mount.clone(),
+                remote: push.remote.clone(),
+                stream_id: push
+                    .stream_id
+                    .clone()
+                    .unwrap_or_else(|| push.mount.trim_start_matches('/').to_owned()),
+                ..SrtPushStatus::default()
+            })
+            .collect(),
+    ))
+}
+
 /// Spawn one task per configured push destination.
 pub fn spawn(
     config: Arc<Config>,
     mounts: Arc<MountRegistry>,
     cancel: CancellationToken,
+    status: Arc<std::sync::Mutex<Vec<SrtPushStatus>>>,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     config
         .srt
         .push
         .iter()
         .cloned()
-        .map(|push| {
+        .enumerate()
+        .map(|(index, push)| {
             let mounts = mounts.clone();
             let cancel = cancel.clone();
             let base = config.clone();
-            tokio::spawn(async move { run_push(push, base, mounts, cancel).await })
+            let status = status.clone();
+            tokio::spawn(async move { run_push(push, index, base, mounts, cancel, status).await })
         })
         .collect()
 }
 
+fn update_status(
+    status: &Arc<std::sync::Mutex<Vec<SrtPushStatus>>>,
+    index: usize,
+    update: impl FnOnce(&mut SrtPushStatus),
+) {
+    if let Some(entry) = status
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_mut(index)
+    {
+        update(entry);
+    }
+}
+
 async fn run_push(
     push: SrtPush,
+    index: usize,
     config: Arc<Config>,
     mounts: Arc<MountRegistry>,
     cancel: CancellationToken,
+    status: Arc<std::sync::Mutex<Vec<SrtPushStatus>>>,
 ) {
     let mut backoff = Duration::from_secs(1);
     loop {
@@ -108,12 +160,31 @@ async fn run_push(
                     stream_id = %stream_id,
                     "SRT push: connected"
                 );
+                update_status(&status, index, |entry| {
+                    entry.connected = true;
+                    entry.encrypted = sender.encrypted();
+                    entry.last_error = None;
+                });
                 if let Err(error) = pump(&mut sender, &handle, cancel.clone()).await {
                     tracing::warn!(%error, mount = %push.mount, "SRT push: stream ended");
+                    update_status(&status, index, |entry| {
+                        entry.last_error = Some(error.to_string());
+                    });
                 }
+                let stats = sender.stats();
+                update_status(&status, index, |entry| {
+                    entry.connected = false;
+                    entry.bytes_sent = stats.bytes_sent;
+                    entry.rtt_us = stats.rtt_us;
+                });
                 let _ = sender.close().await;
             }
             Err(error) => {
+                let message = error.to_string();
+                update_status(&status, index, |entry| {
+                    entry.connected = false;
+                    entry.last_error = Some(message.clone());
+                });
                 tracing::warn!(remote = %push.remote, %error, "SRT push: connect failed");
             }
         }
@@ -158,9 +229,15 @@ async fn pump(
         }
     }
 
+    let mut ticker = tokio::time::interval(Duration::from_secs(1));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         let unit = tokio::select! {
             _ = cancel.cancelled() => return Ok(()),
+            _ = ticker.tick() => {
+                sender.tick().await?;
+                continue;
+            }
             result = receiver.recv() => match result {
                 Ok(unit) => unit,
                 Err(rtflow::FrameRecvError::Lagged(_)) => continue,

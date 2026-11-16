@@ -185,7 +185,9 @@ GET /admin/api/v1/srt    # admin Basic / 会话 / token
                 "encrypted":true,"rtt_us":124,"packets":42,"delivered":42,
                 "skipped":0,"losses":0,"latency_ms":120}],
   "pulls":    [{"remote":"…","mount":"/live/pulled","connected":true,
-                "bytes":67680,"rtt_us":120,"last_error":null}]
+                "bytes":67680,"rtt_us":120,"last_error":null}],
+  "pushes":   [{"mount":"/live/camera1","remote":"…","connected":true,
+                "bytes_sent":0,"last_error":null}]
 }
 ```
 

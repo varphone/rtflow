@@ -50,6 +50,7 @@ pub struct SrtSender {
     retransmits: u64,
     stream_id: Option<String>,
     latency_ms: u32,
+    max_inflight: usize,
 }
 
 const MAX_SEND_BUFFER: usize = 8192;
@@ -89,6 +90,7 @@ impl SrtSender {
             retransmits: 0,
             stream_id: config.stream_id.clone(),
             latency_ms: config.latency_ms,
+            max_inflight: config.flow_window.clamp(64, 8192) as usize,
         };
         // Consume any immediate handshake leftovers (e.g. duplicate conclusion).
         sender.poll_inbound().await?;
@@ -118,6 +120,7 @@ impl SrtSender {
         let chunks: Vec<&[u8]> = data.chunks(self.payload_size).collect();
         let count = chunks.len();
         for (index, chunk) in chunks.into_iter().enumerate() {
+            self.wait_for_inflight().await?;
             let position = match (index, count) {
                 (0, 1) => 3,               // single
                 (0, _) => 2,               // first
@@ -136,6 +139,26 @@ impl SrtSender {
                 payload: chunk.to_vec(),
             });
             self.trim_buffer();
+        }
+        Ok(())
+    }
+
+    /// Keep the unacknowledged window bounded so a fast producer cannot
+    /// overrun the receiver's flow window.
+    async fn wait_for_inflight(&mut self) -> Result<()> {
+        if self.buffer.len() < self.max_inflight {
+            return Ok(());
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while self.buffer.len() >= self.max_inflight {
+            if Instant::now() >= deadline {
+                return Err(Error::Srt("SRT sender: flow window timeout".into()));
+            }
+            self.poll_inbound().await?;
+            if self.buffer.len() < self.max_inflight {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
         }
         Ok(())
     }
