@@ -125,7 +125,7 @@ function openVodDetail(vod, ctx) {
         <div class="detail-item"><span>资源 ID</span><strong class="mono">${esc(vod.id)}</strong></div>
       </div>
       <section class="drawer-section"><h3>播放地址</h3><div class="endpoint"><span class="endpoint-label">HLS</span><code>${esc(location.origin + vod.playlist)}</code><button class="btn small ghost" data-vod-copy>复制</button></div></section>
-      <div class="actions"><button class="btn small primary" data-vod-play>播放</button><button class="btn small ghost" data-vod-refresh>刷新生成缓存</button></div>
+      <div class="actions"><button class="btn small primary" data-vod-play>播放</button><button class="btn small ghost" data-vod-refresh>刷新生成缓存</button><button class="btn small ghost" data-vod-recording>查看录制</button></div>
     </div>`,
     onMount(root) {
       const close = () => root.querySelector("[data-close-drawer]")?.click();
@@ -136,6 +136,11 @@ function openVodDetail(vod, ctx) {
       root.querySelector("[data-vod-refresh]").onclick = async () => {
         try { await api(`/vods/${encodeURIComponent(vod.id)}/refresh`, { method: "POST" }); toast("缓存已清除，下次播放重新生成", "ok"); close(); ctx.reload(); }
         catch (error) { toast(error.message, "bad"); }
+      };
+      root.querySelector("[data-vod-recording]").onclick = () => {
+        const path = String(vod.title).split("/").slice(0, -1).join("/");
+        close();
+        location.hash = `#/config/recordings?q=${encodeURIComponent(path)}`;
       };
     },
   });

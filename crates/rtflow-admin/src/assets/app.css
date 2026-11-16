@@ -166,6 +166,8 @@ textarea.input { resize: vertical; min-height: 80px; }
 .quick-action .kicker { color: var(--faint); font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; }
 .quick-action strong { font-size: 13.5px; }
 .quick-action small { color: var(--muted); font-size: 11.5px; }
+.stat.attention { border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+.stat .value.warn { color: var(--warn); }
 .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .stat { background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 15px; }
 .stat .label { color: var(--muted); font-size: 11.5px; display: flex; align-items: center; gap: 6px; }

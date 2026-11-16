@@ -52,7 +52,7 @@ export async function render() {
         <div class="stat"><div class="label">在线流</div><div class="value" data-ov="mounts">${num(data.overview.mounts)}</div><div class="hint"><span data-ov="publishers">${num(data.overview.publishers)}</span> 个发布中</div></div>
         <div class="stat"><div class="label">观看连接</div><div class="value" data-ov="subscribers">${num(data.overview.subscribers)}</div><div class="hint">RTP <span data-ov="rtp">${bytes(data.overview.rtp_octets)}</span></div></div>
         <div class="stat"><div class="label">代理 streaming</div><div class="value" data-ov="proxy-streaming">${num(data.proxies.filter((item) => item.state === "streaming").length)}</div><div class="hint">共 <span data-ov="proxy-total">${num(data.proxies.length)}</span> 个代理</div></div>
-        <div class="stat"><div class="label">需要关注</div><div class="value" data-ov="attention-count">${num(d.attention.length)}</div><div class="hint">代理 / SRT / 录制异常</div></div>
+        <div class="stat ${d.attention.length ? "attention" : ""}"><div class="label">需要关注</div><div class="value ${d.attention.length ? "warn" : ""}" data-ov="attention-count">${num(d.attention.length)}</div><div class="hint">代理 / SRT / 录制异常</div></div>
       </div>
       <div class="quick-actions">
         <a class="quick-action" href="#/config/paths"><span class="kicker">配置</span><strong>新建路径</strong><small>注册路径与发布策略</small></a>
@@ -129,6 +129,9 @@ export async function render() {
         set("proxy-streaming", num(next.proxies.filter((item) => item.state === "streaming").length));
         set("proxy-total", num(next.proxies.length));
         set("attention-count", num(view.attention.length));
+        const attentionValue = root.querySelector('[data-ov="attention-count"]');
+        attentionValue?.classList.toggle("warn", view.attention.length > 0);
+        attentionValue?.closest(".stat")?.classList.toggle("attention", view.attention.length > 0);
         set("attention-list-count", `${view.attention.length} 项`);
         set("runtime", uptime(next.overview.uptime_seconds));
         set("vods", num(next.overview.vods));
