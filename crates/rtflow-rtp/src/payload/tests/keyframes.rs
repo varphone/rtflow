@@ -53,6 +53,27 @@ mod fu_keyframe_tests {
         assert!(!units[0].is_keyframe, "P-frame FU-A must not be a keyframe");
     }
 
+    /// Random camera RTP timestamps above i32::MAX must not overflow the
+    /// wrap extension into a constant saturated PTS.
+    #[test]
+    fn h264_high_initial_timestamp_has_advancing_pts() {
+        let mut d = Depacketizer::new(Codec::H264, 0, 90_000);
+        let base = 0xF000_0000u32;
+        let first = d.push(packet(1, base, true, &[0x65, 0x01, 0x02])).unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].pts, std::time::Duration::ZERO);
+        let second = d
+            .push(packet(2, base.wrapping_add(3_000), true, &[0x41, 0x03]))
+            .unwrap();
+        assert_eq!(second.len(), 1);
+        assert!(
+            second[0].pts >= std::time::Duration::from_millis(33)
+                && second[0].pts <= std::time::Duration::from_millis(34),
+            "unexpected PTS {:?}",
+            second[0].pts
+        );
+    }
+
     /// H.265 FU (type 49) IDR (NAL type 19) across fragments.
     #[test]
     fn h265_fu_multi_fragment_idr_is_keyframe() {

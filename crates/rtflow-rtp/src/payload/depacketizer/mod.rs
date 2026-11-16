@@ -44,7 +44,9 @@ pub struct Depacketizer {
     /// Last raw RTP timestamp, for wrap-extended PTS.
     last_rtp_ts: u32,
     /// Wrap-free RTP timestamp clock (units of `clock_rate` ticks).
-    extended_ts: u64,
+    extended_ts: i128,
+    /// Whether the first RTP timestamp has been anchored.
+    timestamp_initialized: bool,
     av1: super::av1::Av1State,
     /// NPT base added to the RTP-timestamp-derived PTS.
     pts_base: std::time::Duration,
@@ -67,6 +69,7 @@ impl Depacketizer {
             assembled_is_keyframe: false,
             last_rtp_ts: 0,
             extended_ts: 0,
+            timestamp_initialized: false,
             av1: super::av1::Av1State::default(),
             pts_base: std::time::Duration::ZERO,
         }
@@ -82,6 +85,7 @@ impl Depacketizer {
     pub fn set_time_base(&mut self, rtp_base: u32, pts_base: std::time::Duration) {
         self.last_rtp_ts = rtp_base;
         self.extended_ts = 0;
+        self.timestamp_initialized = true;
         self.pts_base = pts_base;
     }
 
@@ -89,13 +93,27 @@ impl Depacketizer {
         if self.clock_rate == 0 {
             return std::time::Duration::ZERO;
         }
-        let raw_delta = rtp_ts.wrapping_sub(self.last_rtp_ts) as i32 as i64;
-        self.extended_ts = self.extended_ts.wrapping_add(raw_delta as u64);
-        self.last_rtp_ts = rtp_ts;
+        if !self.timestamp_initialized {
+            // Preserve the old relative-to-zero behaviour for normal RTP
+            // timestamps (tests/servers starting near zero). Random camera
+            // timestamps are usually above i32::MAX; measuring them from zero
+            // produced a negative delta and a saturated, constant PTS.
+            self.last_rtp_ts = rtp_ts;
+            self.extended_ts = if rtp_ts <= i32::MAX as u32 {
+                i128::from(rtp_ts)
+            } else {
+                0
+            };
+            self.timestamp_initialized = true;
+        } else {
+            let raw_delta = rtp_ts.wrapping_sub(self.last_rtp_ts) as i32 as i64;
+            self.extended_ts = self.extended_ts.saturating_add(raw_delta as i128);
+            self.last_rtp_ts = rtp_ts;
+        }
+        let micros =
+            self.extended_ts.saturating_mul(1_000_000) / i128::from(self.clock_rate).max(1);
         self.pts_base
-            + std::time::Duration::from_micros(
-                self.extended_ts.saturating_mul(1_000_000) / u64::from(self.clock_rate),
-            )
+            + std::time::Duration::from_micros(u64::try_from(micros.max(0)).unwrap_or(u64::MAX))
     }
     pub fn push(&mut self, p: RtpPacket) -> Result<Vec<AccessUnit>> {
         let timestamp = p.header.timestamp;
