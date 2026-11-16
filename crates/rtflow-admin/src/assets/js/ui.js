@@ -94,12 +94,16 @@ export function openCommandPalette(commands) {
   const paint = () => {
     if (!filtered.length) { list.innerHTML = `<div class="command-empty">没有匹配项</div>`; return; }
     selected = Math.max(0, Math.min(selected, filtered.length - 1));
-    list.innerHTML = filtered.map((command, index) =>
-      `<button class="command-item ${index === selected ? "active" : ""}" data-command="${index}">
+    let group = "";
+    list.innerHTML = filtered.map((command, index) => {
+      const heading = command.group && command.group !== group ? `<div class="command-group">${esc(command.group)}</div>` : "";
+      group = command.group || group;
+      return `${heading}<button class="command-item ${index === selected ? "active" : ""}" data-command="${index}">
         <span class="command-icon">${command.icon || "›"}</span>
         <span><strong>${esc(command.label)}</strong>${command.hint ? `<small>${esc(command.hint)}</small>` : ""}</span>
         ${command.shortcut ? `<span class="command-shortcut">${esc(command.shortcut)}</span>` : ""}
-      </button>`).join("");
+      </button>`;
+    }).join("");
     list.querySelectorAll("[data-command]").forEach((button) => {
       button.onmouseenter = () => { selected = Number(button.dataset.command); paint(); };
       button.onclick = () => run(filtered[Number(button.dataset.command)]);
