@@ -239,7 +239,23 @@ async fn run_proxy(
                 finish_proxy(&mount, &upstream, ProxyState::Stopped);
                 return Ok(());
             }
-            result = RtspClient::connect(endpoint.url.clone(), options) => result,
+            result = async {
+                if let Some(description) = upstream.cached_description.clone() {
+                    match RtspClient::connect_with_description(
+                        endpoint.url.clone(),
+                        description,
+                        options.clone(),
+                    )
+                    .await
+                    {
+                        Ok(session) => return Ok(session),
+                        Err(error) => {
+                            tracing::debug!(%error, "cached SDP reconnect failed; re-describing");
+                        }
+                    }
+                }
+                RtspClient::connect(endpoint.url.clone(), options).await
+            } => result,
         };
         let mut failure_code = rtflow_core::error::ErrorCode::UpstreamUnavailable;
         match connected {

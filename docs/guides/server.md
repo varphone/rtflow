@@ -74,6 +74,8 @@ GET /api/v1/proxies          # 公开发现权限
 GET /admin/api/v1/proxies    # admin
 ```
 
+重连时优先使用缓存 SDP（少一次 DESCRIBE），失败会自动回退到完整探测。
+
 返回代理路径、状态（describing/idle/connecting/streaming/backoff）、订阅者、轨道数、
 上游主机（已脱敏）、重试次数、下次重试时间与最后一次错误。
 

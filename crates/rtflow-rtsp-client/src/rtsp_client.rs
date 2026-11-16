@@ -102,6 +102,45 @@ impl RtspClient {
         Err(Error::Rtsp("too many RTSP REDIRECTs".into()))
     }
 
+    /// Connect using a previously obtained SDP description, skipping
+    /// DESCRIBE (one control round-trip less on reconnect). The caller is
+    /// responsible for refreshing the description when the upstream changes.
+    pub async fn connect_with_description(
+        url: impl IntoRtspUrl,
+        description: MediaDescription,
+        options: ClientOptions,
+    ) -> Result<PlaySession> {
+        validate_options(&options)?;
+        let url = url.into_rtsp_url()?;
+        let (mut stream, uri) = open_control(&url, &options).await?;
+        let require = options.require_headers();
+        let response = request(
+            &mut stream,
+            "OPTIONS",
+            &uri,
+            1,
+            require.as_deref(),
+            options.request_timeout,
+            options.credentials.as_ref(),
+        )
+        .await?;
+        if response.status != 200 {
+            return Err(status_error("OPTIONS", response.status));
+        }
+        let capabilities = ServerCapabilities::from_response(&response);
+        setup::connect(
+            stream,
+            uri.clone(),
+            uri,
+            description,
+            capabilities,
+            options,
+            next_client_session_id(),
+        )
+        .await
+        .map_err(|failure| failure.error)
+    }
+
     async fn connect_once(url: url::Url, options: ClientOptions) -> Result<PlaySession> {
         validate_options(&options)?;
         tracing::debug!(
