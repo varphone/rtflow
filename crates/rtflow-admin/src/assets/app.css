@@ -253,6 +253,9 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 .toast.bad { border-left-color: var(--bad); }
 @keyframes toast-in { from { transform: translateY(5px); opacity: 0; } }
 
+.data .select-col { width: 30px; padding-right: 0; }
+.data .select-col input { accent-color: var(--accent); width: 14px; height: 14px; }
+.data tr.selected td { background: var(--surface-2); }
 .link-cell { border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 600; padding: 0; cursor: pointer; text-align: left; }
 .link-cell:hover { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
