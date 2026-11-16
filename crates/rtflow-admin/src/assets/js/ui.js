@@ -13,7 +13,7 @@ export function toast(message, kind = "") {
 }
 
 function focusFirst(root) {
-  const target = root.querySelector("input, select, textarea")
+  const target = root.querySelector("[autofocus]") || root.querySelector("input, select, textarea")
     || root.querySelector(".drawer-body, .modal-body")
     || root.querySelector("button, [tabindex]");
   if (target) {
@@ -22,7 +22,9 @@ function focusFirst(root) {
   }
 }
 
+let dialogEscape = null;
 export function openDialog({ title, body, footer = "", onMount }) {
+  closeDialog();
   modalRoot().innerHTML = `<div class="modal-backdrop" data-dialog-backdrop>
     <div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
       <div class="modal-head"><h2>${esc(title)}</h2><button class="btn ghost small" data-close-dialog aria-label="关闭">${icon("close")}</button></div>
@@ -34,17 +36,15 @@ export function openDialog({ title, body, footer = "", onMount }) {
   root.querySelector("[data-dialog-backdrop]")?.addEventListener("click", (event) => {
     if (event.target.dataset.dialogBackdrop !== undefined) closeDialog();
   });
-  document.addEventListener("keydown", escDialog, { once: true });
+  dialogEscape = (event) => { if (event.key === "Escape") { event.preventDefault(); closeDialog(); } };
+  document.addEventListener("keydown", dialogEscape);
+  root.addEventListener("keydown", (event) => trapFocus(root, event));
   focusFirst(root);
   onMount?.(root);
 }
 
-function escDialog(event) {
-  if (event.key === "Escape") closeDialog();
-  else document.addEventListener("keydown", escDialog, { once: true });
-}
-
 export function closeDialog() {
+  if (dialogEscape) { document.removeEventListener("keydown", dialogEscape); dialogEscape = null; }
   modalRoot().innerHTML = "";
 }
 
@@ -53,7 +53,7 @@ export function confirmDialog({ title, message, confirmLabel = "确认", danger 
     openDialog({
       title,
       body: `<p class="note">${esc(message)}</p>`,
-      footer: `<button class="btn" data-cancel>取消</button><button class="btn ${danger ? "danger" : "primary"}" data-confirm>${esc(confirmLabel)}</button>`,
+      footer: `<button class="btn" data-cancel autofocus>取消</button><button class="btn ${danger ? "danger" : "primary"}" data-confirm>${esc(confirmLabel)}</button>`,
       onMount(root) {
         root.querySelector("[data-cancel]").onclick = () => { closeDialog(); resolve(false); };
         root.querySelector("[data-confirm]").onclick = () => { closeDialog(); resolve(true); };
