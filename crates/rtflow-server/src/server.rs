@@ -129,6 +129,7 @@ impl ServerHandle {
             .proxy_config
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = config.proxy.clone();
+        crate::proxy_control::save_overlay(&self.config.server.state_dir, &config.proxy);
 
         let old = &self.config;
         if old.rtsp.listen != config.rtsp.listen || old.rtsp.enabled != config.rtsp.enabled {
@@ -274,6 +275,7 @@ impl ServerApp {
     pub async fn start(
         config: Config,
     ) -> Result<ServerHandle, Box<dyn std::error::Error + Send + Sync>> {
+        let config = crate::proxy_control::load_overlay(config);
         config.validate()?;
         let config = Arc::new(config);
         let metrics = Arc::new(MetricsRegistry::default());

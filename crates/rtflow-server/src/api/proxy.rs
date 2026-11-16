@@ -52,12 +52,14 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
             let Some(index) = existed else {
                 return Err((404, "proxy not found".into()));
             };
-            state
-                .proxy_config
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .mounts
-                .remove(index);
+            {
+                let mut config = state
+                    .proxy_config
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                config.mounts.remove(index);
+                crate::proxy_control::save_overlay(&state.config.server.state_dir, &config);
+            }
             state.proxies.remove(&path);
             audit(&state, AuditEvent::new("proxy.delete", "ok").path(&path));
             Ok(serde_json::json!({"deleted": path}))
@@ -160,6 +162,7 @@ fn proxy_upsert(
             config.mounts.remove(index);
         }
         config.mounts.push(mount.clone());
+        crate::proxy_control::save_overlay(&state.config.server.state_dir, &config);
     }
     let upstream = mount.upstream_config().map_err(|error| (400, error))?;
     let options = rtflow::mount::MountOptions::builder()

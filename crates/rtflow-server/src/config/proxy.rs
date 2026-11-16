@@ -18,6 +18,8 @@ pub struct ProxySection {
     pub redirect_policy: RedirectPolicy,
     #[serde(with = "humantime_serde")]
     pub description_refresh: Duration,
+    /// Persist runtime API changes to `state_dir/proxies.toml` (0600).
+    pub persist_runtime: bool,
     pub mounts: Vec<ProxyMount>,
 }
 
@@ -33,6 +35,7 @@ impl Default for ProxySection {
             allowed_hosts: Vec::new(),
             redirect_policy: RedirectPolicy::SameOrigin,
             description_refresh: Duration::from_secs(300),
+            persist_runtime: false,
             mounts: Vec::new(),
         }
     }
