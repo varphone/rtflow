@@ -14,7 +14,7 @@ function row(item) {
     <td class="mono" data-cell="segments">${num(item.segments)}</td>
     <td class="mono" data-cell="bytes">${bytes(item.bytes)}</td>
     <td class="cell-sub" data-cell="error">${esc(item.last_error || "—")}</td>
-    <td><div class="row-actions"><button class="btn small" data-action="${item.active ? "stop" : "start"}" data-path="${esc(item.path)}" data-cell="action">${item.active ? "停止" : "开始"}</button></div></td>
+    <td><div class="row-actions"><button class="btn small ghost" data-action="vod" data-path="${esc(item.path)}">点播</button><button class="btn small" data-action="${item.active ? "stop" : "start"}" data-path="${esc(item.path)}" data-cell="action">${item.active ? "停止" : "开始"}</button></div></td>
   </tr>`;
 }
 
@@ -103,7 +103,9 @@ export async function render(params) {
           return;
         }
         const target = event.target.closest("[data-action]");
-        if (!target || !["start", "stop"].includes(target.dataset.action)) return;
+        if (!target) return;
+        if (target.dataset.action === "vod") { location.hash = `#/vod?q=${encodeURIComponent(target.dataset.path)}`; return; }
+        if (!["start", "stop"].includes(target.dataset.action)) return;
         try {
           await api(`/recordings/${target.dataset.action}`, { method: "POST", body: { path: target.dataset.path } });
           toast("操作已提交", "ok");
