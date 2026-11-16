@@ -93,6 +93,7 @@ async function boot() {
 }
 
 function renderLogin(message = "") {
+  document.title = `登录 · ${state.session?.title || "rtflow"}`;
   app.innerHTML = `<main class="login-wrap"><div class="login-shell">
     <section class="login-aside">
       <div class="brand"><span class="brand-logo">R</span><span>${esc(state.session?.title || "rtflow")}</span></div>
@@ -207,6 +208,7 @@ function setCrumbs(route) {
   const crumbs = document.getElementById("crumbs");
   if (!crumbs) return;
   crumbs.innerHTML = `<span>${info.group}</span><span>/</span><b>${info.label}</b>`;
+  document.title = `${info.label} · ${state.session?.title || "rtflow"}`;
   app.querySelectorAll("[data-route]").forEach((link) => {
     const active = link.dataset.route === route;
     link.classList.toggle("active", active);

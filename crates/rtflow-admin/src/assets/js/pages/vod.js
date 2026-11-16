@@ -5,6 +5,7 @@ import { confirmDialog, toast } from "../ui.js";
 import { playUrl } from "../player.js";
 
 let query = "";
+let sort = "recent";
 
 export async function render(params) {
   const linked = params?.get("q");
@@ -18,6 +19,7 @@ export async function render(params) {
     actions: `<button class="btn small" data-vod-refresh>刷新</button>`,
     html: `<div class="toolbar"><label class="checkline"><input type="checkbox" data-vod-select-all> 全选</label>
       <div class="search">${iconSvg("search")}<input class="input" data-vod-search value="${esc(query)}" placeholder="搜索点播名称或 ID"></div>
+      <select class="input" data-vod-sort aria-label="点播排序" style="width:auto"><option value="recent" ${sort === "recent" ? "selected" : ""}>最新录制</option><option value="duration" ${sort === "duration" ? "selected" : ""}>按时长</option><option value="cached" ${sort === "cached" ? "selected" : ""}>已缓存优先</option></select>
       <span class="meta" data-vod-count>${initial.length} 条</span>
       <button class="btn small ghost" data-vod-bulk disabled>刷新所选缓存</button></div>
       <div data-vod-results>${initial.length ? cards(initial, new Set()) : empty("暂无可用的点播资源", "在服务端配置录制目录或文件 VOD 后显示")}</div>`,
@@ -26,6 +28,7 @@ export async function render(params) {
       const results = root.querySelector("[data-vod-results]");
       const count = root.querySelector("[data-vod-count]");
       const selectAll = root.querySelector("[data-vod-select-all]");
+      const sorter = root.querySelector("[data-vod-sort]");
       const bulk = root.querySelector("[data-vod-bulk]");
       const selected = new Set();
       let visible = initial;
@@ -70,6 +73,7 @@ export async function render(params) {
         ctx.reload();
       };
       search.oninput = () => { query = search.value; paint(); };
+      sorter.onchange = () => { sort = sorter.value; paint(); };
       root.querySelector("[data-vod-refresh]").onclick = () => ctx.reload();
       root.addEventListener("click", async (event) => {
         const target = event.target.closest("[data-action]");
@@ -90,7 +94,12 @@ export async function render(params) {
 
 function filter(vods, value) {
   const q = String(value || "").trim().toLowerCase();
-  return !q ? vods : vods.filter((item) => `${item.title} ${item.id}`.toLowerCase().includes(q));
+  const items = !q ? [...vods] : vods.filter((item) => `${item.title} ${item.id}`.toLowerCase().includes(q));
+  const stamp = (item) => Number(String(item.id).split("@").pop()) || 0;
+  if (sort === "duration") items.sort((a, b) => Number(b.duration_ms || 0) - Number(a.duration_ms || 0));
+  else if (sort === "cached") items.sort((a, b) => Number(Boolean(b.cached)) - Number(Boolean(a.cached)) || stamp(b) - stamp(a));
+  else items.sort((a, b) => stamp(b) - stamp(a));
+  return items;
 }
 
 function cards(items, selected) {
