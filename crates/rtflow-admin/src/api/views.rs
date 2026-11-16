@@ -134,6 +134,8 @@ pub(super) struct VodView {
     title: String,
     duration_ms: u128,
     playlist: String,
+    cached: bool,
+    cache_bytes: u64,
 }
 
 pub(super) fn vods(state: &AdminState) -> Vec<VodView> {
@@ -142,11 +144,16 @@ pub(super) fn vods(state: &AdminState) -> Vec<VodView> {
             let entries = vod.entries();
             return entries
                 .into_iter()
-                .map(|entry| VodView {
-                    id: entry.id.clone(),
-                    title: entry.title.clone(),
-                    duration_ms: entry.duration.map_or(0, |duration| duration.as_millis()),
-                    playlist: format!("/vod/{}/index.m3u8", entry.id),
+                .map(|entry| {
+                    let cache_bytes = vod.cache_size(&entry.id).unwrap_or(0);
+                    VodView {
+                        id: entry.id.clone(),
+                        title: entry.title.clone(),
+                        duration_ms: entry.duration.map_or(0, |duration| duration.as_millis()),
+                        playlist: format!("/vod/{}/index.m3u8", entry.id),
+                        cached: cache_bytes > 0,
+                        cache_bytes,
+                    }
                 })
                 .collect();
         }

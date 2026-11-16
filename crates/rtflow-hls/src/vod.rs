@@ -102,6 +102,41 @@ impl HlsVodManager {
             .insert(entry.id.clone(), entry);
     }
 
+    /// Generated cache size for an entry: `None` when unknown, `Some(0)` when
+    /// the VOD exists but has not been generated yet.
+    pub fn cache_size(&self, id: &str) -> Option<u64> {
+        if !self
+            .entries
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(id)
+        {
+            return None;
+        }
+        let directory = self.config.cache_dir.join(id);
+        if !directory.is_dir() {
+            return Some(0);
+        }
+        let mut total = 0;
+        let mut stack = vec![directory];
+        while let Some(current) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(current) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let Ok(metadata) = entry.metadata() else {
+                    continue;
+                };
+                if metadata.is_dir() {
+                    stack.push(entry.path());
+                } else {
+                    total += metadata.len();
+                }
+            }
+        }
+        Some(total)
+    }
+
     pub fn remove_entry(&self, id: &str) -> bool {
         let removed = self
             .entries

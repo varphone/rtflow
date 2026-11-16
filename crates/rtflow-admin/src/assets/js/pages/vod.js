@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { dateTime, duration, empty, esc, iconSvg } from "../format.js";
+import { bytes, dateTime, duration, empty, esc, iconSvg } from "../format.js";
 import { openDrawer } from "../ui.js";
 import { confirmDialog, toast } from "../ui.js";
 import { playUrl } from "../player.js";
@@ -100,7 +100,7 @@ function cards(items, selected) {
       <label class="vod-check"><input type="checkbox" data-vod-select="${esc(vod.id)}" ${selected.has(vod.id) ? "checked" : ""} aria-label="选择 ${esc(vod.title)}"></label>
       <div class="vod-thumb"><span class="vod-play">${iconSvg("play")}</span><span class="vod-duration">${vod.duration_ms ? duration(vod.duration_ms) : "生成中"}</span></div>
       <div class="vod-title"><h3><button class="link-cell" data-action="detail" data-id="${esc(vod.id)}">${esc(vod.title)}</button></h3><div class="cell-sub mono">${esc(vod.id)}</div></div>
-      <div class="vod-meta"><span class="badge codec">HLS</span>${stamp > 1e12 ? `<span class="cell-sub">${esc(dateTime(stamp / 1000))}</span>` : ""}</div>
+      <div class="vod-meta"><span class="badge codec">HLS</span><span class="badge ${vod.cached ? "ok" : ""}">${vod.cached ? "已缓存" : "未缓存"}</span>${stamp > 1e12 ? `<span class="cell-sub">${esc(dateTime(stamp / 1000))}</span>` : ""}</div>
       <div class="vod-actions"><button class="btn small primary" data-action="play" data-id="${esc(vod.id)}">播放</button>
         <button class="btn small ghost" data-action="detail" data-id="${esc(vod.id)}">详情</button>
         <button class="btn small" data-action="copy" data-url="${esc(location.origin + vod.playlist)}">复制地址</button>
@@ -122,6 +122,7 @@ function openVodDetail(vod, ctx) {
         <div class="detail-item"><span>时长</span><strong class="mono">${vod.duration_ms ? duration(vod.duration_ms) : "生成中"}</strong></div>
         <div class="detail-item"><span>录制时间</span><strong>${esc(recorded)}</strong></div>
         <div class="detail-item"><span>格式</span><strong>HLS · MPEG-TS</strong></div>
+        <div class="detail-item"><span>缓存</span><strong>${vod.cached ? `已生成 · ${bytes(vod.cache_bytes)}` : "未生成"}</strong></div>
         <div class="detail-item"><span>资源 ID</span><strong class="mono">${esc(vod.id)}</strong></div>
       </div>
       <section class="drawer-section"><h3>播放地址</h3><div class="endpoint"><span class="endpoint-label">HLS</span><code>${esc(location.origin + vod.playlist)}</code><button class="btn small ghost" data-vod-copy>复制</button></div></section>
