@@ -24,7 +24,7 @@
 - [x] admin CRUD、restart、probe。
 - [x] 审计事件与代理指标（configured/streaming）。
 - [x] 管理页代理只读表格（状态/上游/订阅/重试/错误）。
-- [ ] 运行时配置持久化（可选，0600）。
+- [x] 运行时配置持久化（`persist_runtime`，0600）。
 
 ## M3 — 运行时与时间轴
 
@@ -43,7 +43,7 @@
 - [x] 上游 host/CIDR 允许列表、私网策略、跨源重定向策略。
 - [x] 代理数量、上游数与并发 DESCRIBE 上限。
 - [x] DNS 解析后固定连接地址（`peer_addr` 固定，URL host 保留用于 SNI）。
-- [ ] 下游路径鉴权与凭据泄漏测试。
+- [x] 下游 Basic 鉴权、未认证拒绝与凭据泄漏测试。
 
 ## M5 — 互操作与收尾
 
@@ -53,10 +53,11 @@
 - [x] 可配置 soak 测试工具（`proxy_soak.rs`，默认 60s，可跑 8h）。
 - [ ] 8h soak 实际执行。
 - [x] server 配置 → 代理 mount → HLS 端到端测试（`proxy_config.rs`）。
-- [ ] 文档、迁移说明、CHANGELOG。
+- [x] 文档、迁移说明、CHANGELOG。
 
 ## 已知缺口
 
-- 运行时 CRUD 只改内存，不写回配置文件。
-- 代理媒体统计的 `bytes` 目前来自 mount `rtp_octets`，代理发布路径未累计字节（显示 0），M2 补 `published_bytes`。
-- 代理 HLS 播放曾观察到重复 DTS 警告，列入 M3 时间轴专项。
+- `restart_pending`（有订阅者时延迟切换）尚未实现；restart 会先断开现有订阅者。
+- 已发现描述缓存（上游离线时用上次 SDP 注册）尚未实现；离线启动仍会 backoff 重试。
+- 8h soak 工具已就绪，实际 8h 执行待部署环境完成。
+- 运行时 CRUD 通过 `persist_runtime` 写入覆盖文件，不回写原配置文件。
