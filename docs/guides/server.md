@@ -31,6 +31,13 @@ ffmpeg -re -i input.mp4 -c copy -f mpegts \
   'srt://host:9000?streamid=live/cam?key=<kid>.<secret>'
 ```
 
+支持的 SRT 能力：listener / caller（拉流）/ sender（推流）、HSv5 握手、
+HSREQ/HSRSP、Stream ID、ACK/ACKACK/NAK/keepalive/SHUTDOWN/DROPREQ、
+TSBPD + TLPKTDROP、HaiCrypt AES-CTR（含发送侧密钥刷新）。
+
+未实现（libsrt 可选扩展，默认部署不启用）：FEC 包过滤、rendezvous
+（双端同时连接）、group/bonding。
+
 SRT 与 libsrt 系工具（ffmpeg、OBS、srt-live-transmit）互通：HSv5 握手、
 HSREQ/HSRSP 延迟协商、Stream ID、ACK/ACKACK/NAK、keepalive、TLPKTDROP。
 

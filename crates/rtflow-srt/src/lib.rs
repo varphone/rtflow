@@ -17,7 +17,11 @@
 //!
 //! # Limitations
 //!
-//! - No rendezvous mode
+//! - No rendezvous mode (peer-to-peer simultaneous connect; the gateway
+//!   always has a reachable listener or connects to one)
+//! - No FEC packet filter (libsrt's optional forward-error-correction is
+//!   negotiated only when both sides enable it; the gateway relies on ARQ)
+//! - No group/bonding (multiple connections treated as one stream)
 //! - Key refresh is supported on receipt (mid-stream KMREQ) and by the
 //!   sender (`SrtCallerConfig::key_refresh_packets`)
 //! - MPEG-TS payloads only (other payloads are consumed but not exposed)
