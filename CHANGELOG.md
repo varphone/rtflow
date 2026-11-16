@@ -30,6 +30,8 @@
 
 ### Changed
 
+- 录制详情可复制录制目录，代理详情可复制全部上游地址。
+
 - 登录密码支持显示/隐藏切换，带 aria-label 与焦点保持。
 
 - 排序表头同步 aria-sort，toast 增加 role=status/aria-live。

@@ -160,7 +160,7 @@ function openRecordingDetail(item, ctx) {
         <div class="detail-item"><span>丢弃</span><strong class="mono" data-rec-detail="dropped">${num(item.dropped)}</strong></div>
         <div class="detail-item"><span>错误</span><strong class="cell-sub" data-rec-detail="error">${esc(item.last_error || "—")}</strong></div>
       </div>
-      <section class="drawer-section"><h3>录制目录</h3><pre class="code">${esc(item.directory || "—")}</pre></section>
+      <section class="drawer-section"><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">录制目录</h3><button class="btn small ghost" data-rec-copy style="margin-left:auto">复制</button></div><pre class="code">${esc(item.directory || "—")}</pre></section>
       <div class="actions"><button class="btn small" data-rec-detail-toggle>${item.active ? "停止录制" : "开始录制"}</button>
         <button class="btn small ghost" data-rec-detail-vod>查看点播</button></div>
     </div>`,
@@ -188,6 +188,9 @@ function openRecordingDetail(item, ctx) {
       };
       timer = setInterval(update, 2000);
       const close = () => root.querySelector("[data-close-drawer]")?.click();
+      root.querySelector("[data-rec-copy]").onclick = async () => {
+        try { await navigator.clipboard.writeText(item.directory || ""); toast("目录已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      };
       root.querySelector("[data-rec-detail-toggle]").onclick = async () => {
         const action = active ? "stop" : "start";
         try { await api(`/recordings/${action}`, { method: "POST", body: { path: item.path } }); toast("操作已提交", "ok"); close(); ctx.reload(); }

@@ -145,12 +145,16 @@ function openProxyDetail(item, ctx) {
         <div class="detail-item"><span>接收流量</span><strong class="mono">${bytes(item.bytes || 0)}</strong></div>
       </div>
       <section class="drawer-section"><h3>上游列表</h3>${upstreams.length ? upstreams.map((upstream, index) => `
-        <div class="endpoint"><span class="endpoint-label">#${index + 1}</span><code>${esc(upstream.url || "—")}</code><span class="cell-sub">${esc(upstream.transport || "auto")}</span></div>`).join("") : `<div class="note">未配置上游。</div>`}</section>
+        <div class="endpoint"><span class="endpoint-label">#${index + 1}</span><code>${esc(upstream.url || "—")}</code><span class="cell-sub">${esc(upstream.transport || "auto")}</span></div>`).join("") : `<div class="note">未配置上游。</div>`}
+        ${upstreams.length ? `<div class="actions" style="margin-top:8px"><button class="btn small ghost" data-proxy-copy-all>复制上游列表</button></div>` : ""}</section>
       ${item.last_error ? `<div class="error-banner">${esc(item.last_error)}</div>` : ""}
       <div class="actions"><button class="btn small" data-pd-edit>编辑</button><button class="btn small" data-pd-restart>重启</button><button class="btn small ghost" data-pd-probe>探测上游</button><button class="btn small danger" data-pd-delete>删除</button></div>
     </div>`,
     onMount(root) {
       const close = () => root.querySelector("[data-close-drawer]")?.click();
+      root.querySelector("[data-proxy-copy-all]")?.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(upstreams.map((upstream) => upstream.url || "").filter(Boolean).join("\n")); toast("上游列表已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      });
       root.querySelector("[data-pd-edit]").onclick = () => { close(); openProxyDrawer(item, () => ctx.reload()); };
       root.querySelector("[data-pd-restart]").onclick = async () => {
         try { await apiV1("/proxies/restart?path=" + encodeURIComponent(item.path), { method: "POST" }); toast("重启已提交", "ok"); close(); ctx.reload(); }
