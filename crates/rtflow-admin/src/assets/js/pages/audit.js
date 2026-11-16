@@ -27,7 +27,8 @@ export async function render() {
     actions: `<button class="btn small ghost" data-audit-auto>自动刷新：开</button><button class="btn small ghost" data-audit-export>导出 CSV</button><button class="btn small" data-audit-refresh>刷新</button>`,
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" data-audit-search placeholder="搜索动作、路径、操作者或详情"></div>
       <div class="seg"><button data-audit-kind="all" class="active">全部</button><button data-audit-kind="change">变更</button><button data-audit-kind="auth">认证</button></div>
-      <span class="meta" data-audit-count>${events.length} 条</span></div>
+      <span class="meta" data-audit-count>${events.length} 条</span>
+      <button class="btn small ghost" data-audit-new hidden></button></div>
       ${payload.enabled === false ? `<div class="error-banner">审计日志未启用：在服务配置中设置审计路径后重启。</div>` : ""}
       <section class="panel"><div class="table-wrap audit-table"><table class="data"><thead><tr><th>时间</th><th>动作</th><th>结果</th><th>对象</th><th>操作者</th><th>详情</th><th></th></tr></thead><tbody data-audit-rows></tbody></table></div>
         <div class="pager"><span class="meta" data-audit-range></span><div class="pager-buttons"><button class="btn small ghost" data-audit-prev>上一页</button><span class="meta" data-audit-page></span><button class="btn small ghost" data-audit-next>下一页</button></div></div>
@@ -41,11 +42,15 @@ export async function render() {
       const prev = root.querySelector("[data-audit-prev]");
       const next = root.querySelector("[data-audit-next]");
       const auto = root.querySelector("[data-audit-auto]");
+      const newButton = root.querySelector("[data-audit-new]");
       let current = events;
+      let pending = null;
+      let newCount = 0;
       let kind = "all";
       let page = 1;
       let automatic = true;
       let timer = null;
+      const signature = (event) => `${event.ts}|${event.action}|${event.path || ""}|${event.key_id || ""}|${event.peer || ""}`;
       const filtered = () => {
         const q = search.value.trim().toLowerCase();
         return current.filter((event) => {
@@ -70,8 +75,24 @@ export async function render() {
           button.onclick = () => openAuditEvent(slice[index]);
         });
       };
+      const showNew = () => {
+        newButton.hidden = newCount === 0;
+        newButton.textContent = `${newCount} 条新事件`;
+      };
       const refresh = async () => {
-        try { current = (await api("/audit?limit=300")).events || []; } catch (_) { return; }
+        let next;
+        try { next = (await api("/audit?limit=300")).events || []; } catch (_) { return; }
+        if (page > 1) {
+          const known = new Set(current.map(signature));
+          newCount += next.filter((event) => !known.has(signature(event))).length;
+          pending = next;
+          showNew();
+          return;
+        }
+        current = next;
+        newCount = 0;
+        pending = null;
+        showNew();
         paint();
       };
       const setAuto = (enabled) => {
@@ -80,6 +101,14 @@ export async function render() {
         auto.classList.toggle("active", enabled);
         if (timer) { clearInterval(timer); timer = null; }
         if (enabled) timer = setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+      };
+      newButton.onclick = () => {
+        if (pending) current = pending;
+        pending = null;
+        newCount = 0;
+        page = 1;
+        showNew();
+        paint();
       };
       search.oninput = () => { page = 1; paint(); };
       root.querySelectorAll("[data-audit-kind]").forEach((button) => button.onclick = () => {
