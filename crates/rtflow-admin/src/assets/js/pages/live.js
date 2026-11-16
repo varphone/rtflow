@@ -14,7 +14,7 @@ export async function render(params) {
   return {
     title: "直播流",
     subtitle: "实时发布状态、播放与流控制。",
-    actions: `<button class="btn small" data-live-refresh>刷新</button>`,
+    actions: `<button class="btn small ghost active" data-live-auto>自动刷新：开</button><button class="btn small" data-live-refresh>刷新</button>`,
     html: `<div class="toolbar">
       <div class="search">${iconSvg("search")}<input class="input" data-live-search value="${esc(query)}" placeholder="搜索名称、路径或编码"></div>
       <div class="seg"><button data-live-status="all">全部</button><button data-live-status="live">直播中</button><button data-live-status="idle">待机</button></div>
@@ -27,6 +27,7 @@ export async function render(params) {
       const bulk = root.querySelector("[data-bulk-kick]");
       const search = root.querySelector("[data-live-search]");
       const selected = new Set();
+      let liveStreams = streams;
       let visible = [];
       const syncBulk = () => {
         bulk.disabled = selected.size === 0;
@@ -35,7 +36,7 @@ export async function render(params) {
       const syncStatus = () => root.querySelectorAll("[data-live-status]").forEach((button) => button.classList.toggle("active", button.dataset.liveStatus === status));
       const paint = () => {
         const q = query.trim().toLowerCase();
-        visible = streams.filter((stream) => {
+        visible = liveStreams.filter((stream) => {
           const match = !q || stream.path.toLowerCase().includes(q) || stream.name.toLowerCase().includes(q) || (stream.video?.codec || "").toLowerCase().includes(q);
           const state = status === "all" || (status === "live" ? stream.publisher : !stream.publisher);
           return match && state;
@@ -89,7 +90,43 @@ export async function render(params) {
         toast(failed ? `已断开 ${total - failed} 条，${failed} 条失败` : `已断开 ${total} 条流`, failed ? "bad" : "ok");
         ctx.reload();
       };
-      root.querySelector("[data-live-refresh]").onclick = () => ctx.reload();
+      const refresh = async () => {
+        let next;
+        try { next = (await api("/streams")).items || []; } catch (_) { return; }
+        liveStreams = next;
+        const filtered = next.filter((stream) => {
+          const q = query.trim().toLowerCase();
+          const match = !q || stream.path.toLowerCase().includes(q) || stream.name.toLowerCase().includes(q) || (stream.video?.codec || "").toLowerCase().includes(q);
+          const state = status === "all" || (status === "live" ? stream.publisher : !stream.publisher);
+          return match && state;
+        });
+        const existing = [...panel.querySelectorAll("tr[data-stream]")].map((row) => row.dataset.stream);
+        if (existing.length !== filtered.length || existing.some((path, index) => path !== filtered[index].path)) {
+          visible = filtered;
+          paint();
+          return;
+        }
+        for (const stream of filtered) {
+          const row = panel.querySelector(`tr[data-stream="${CSS.escape(stream.path)}"]`);
+          if (!row) continue;
+          row.querySelector('[data-cell="status"]').innerHTML = statusBadge(stream);
+          row.querySelector('[data-cell="video"]').innerHTML = `<span class="badge codec">${esc(stream.video?.codec || "—")}</span><div class="cell-sub">${esc(resolution(stream.video))} ${esc(fps(stream.video))}</div>`;
+          row.querySelector('[data-cell="audio"]').textContent = audioLabel(stream.audio);
+          row.querySelector('[data-cell="subscribers"]').textContent = num(stream.subscribers);
+          row.querySelector('[data-cell="metrics"]').innerHTML = `<span style="color:var(--ok)">${num(stream.accepted_frames)}</span> / <span style="color:var(--bad)">${num(stream.dropped_frames)}</span>`;
+        }
+        visible = filtered;
+      };
+      const setAuto = (enabled) => {
+        automatic = enabled;
+        const button = root.querySelector("[data-live-auto]");
+        button.textContent = enabled ? "自动刷新：开" : "自动刷新：关";
+        button.classList.toggle("active", enabled);
+        if (timer) { clearInterval(timer); timer = null; }
+        if (enabled) timer = setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+      };
+      root.querySelector("[data-live-auto]").onclick = () => setAuto(!automatic);
+      root.querySelector("[data-live-refresh]").onclick = () => refresh();
       root.addEventListener("click", async (event) => {
         const target = event.target.closest("[data-action]");
         if (!target) return;
@@ -108,20 +145,22 @@ export async function render(params) {
         }
       });
       paint();
+      setAuto(true);
+      return () => { if (timer) clearInterval(timer); };
     },
   };
 }
 
 function table(items, selected) {
   return `<div class="table-wrap"><table class="data"><thead><tr><th class="select-col"><input type="checkbox" data-select-all aria-label="选择全部"></th><th>流</th><th>状态</th><th>视频</th><th>音频</th><th>订阅</th><th>接收 / 丢弃</th><th></th></tr></thead><tbody>
-    ${items.map((stream) => `<tr class="${selected.has(stream.path) ? "selected" : ""}">
+    ${items.map((stream) => `<tr data-stream="${esc(stream.path)}" class="${selected.has(stream.path) ? "selected" : ""}">
       <td class="select-col"><input type="checkbox" data-select="${esc(stream.path)}" ${selected.has(stream.path) ? "checked" : ""} aria-label="选择 ${esc(stream.name)}"></td>
       <td><button class="link-cell" data-action="detail" data-path="${esc(stream.path)}">${esc(stream.name)}</button><div class="cell-sub mono">${esc(stream.path)}</div></td>
-      <td>${statusBadge(stream)}</td>
-      <td><span class="badge codec">${esc(stream.video?.codec || "—")}</span><div class="cell-sub">${esc(resolution(stream.video))} ${esc(fps(stream.video))}</div></td>
-      <td class="faint">${esc(audioLabel(stream.audio))}</td>
-      <td class="mono">${num(stream.subscribers)}</td>
-      <td class="mono"><span style="color:var(--ok)">${num(stream.accepted_frames)}</span> / <span style="color:var(--bad)">${num(stream.dropped_frames)}</span></td>
+      <td data-cell="status">${statusBadge(stream)}</td>
+      <td data-cell="video"><span class="badge codec">${esc(stream.video?.codec || "—")}</span><div class="cell-sub">${esc(resolution(stream.video))} ${esc(fps(stream.video))}</div></td>
+      <td class="faint" data-cell="audio">${esc(audioLabel(stream.audio))}</td>
+      <td class="mono" data-cell="subscribers">${num(stream.subscribers)}</td>
+      <td class="mono" data-cell="metrics"><span style="color:var(--ok)">${num(stream.accepted_frames)}</span> / <span style="color:var(--bad)">${num(stream.dropped_frames)}</span></td>
       <td><div class="row-actions"><button class="btn small ghost" data-action="detail" data-path="${esc(stream.path)}">详情</button>
         <button class="btn small" data-action="play" data-path="${esc(stream.path)}">HLS</button>
         <button class="btn small ghost" data-action="play-ll" data-path="${esc(stream.path)}">LL</button>
