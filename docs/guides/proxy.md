@@ -19,6 +19,8 @@ allow_private_networks = true
 allowed_hosts = []                # host / host:port / *.domain / CIDR
 redirect_policy = "same-origin"   # none | same-origin | any
 
+# 注意：启用 SQLite 后，[[proxy.mounts]] 仅首次启动时 seed 到数据库；
+# 之后的修改请使用 /admin/api/v1/proxies 或控制台。
 [[proxy.mounts]]
 path = "/cameras/front"
 enabled = true

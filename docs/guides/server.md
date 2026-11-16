@@ -1,53 +1,71 @@
-# RTSP 代理服务完善路线图
+# rtflow-server 配置与运维
 
-本文件对应“完善 RTSP 代理服务”开发计划的状态看板。
+`rtflow-server` 使用单个 TOML 文件启动；运营期数据（路径、密钥、代理、SRT 端点）
+保存在 SQLite。完整字段见 [deploy/rtflow.toml](../../crates/rtflow-server/deploy/rtflow.toml)。
 
-## 已完成（M0 / M1 第一批）
+## 配置分层
 
-- [x] 抽取公开 `rtflow::server::ProxyService`：DESCRIBE、描述净化、mount 注册、订阅者 watcher、状态快照。
-- [x] `RtspServer::bind_with_proxy_service` 允许与 `rtflow-server` 共享同一服务，避免重复 watcher。
-- [x] `[proxy]` / `[[proxy.mounts]]` / `[[proxy.mounts.upstreams]]` 配置、校验与密码脱敏。
-- [x] `rtflow-server` 启动时并发注册静态代理；上游离线不阻塞启动。
-- [x] `GET /api/v1/proxies`、`GET /admin/api/v1/proxies` 只读状态。
-- [x] 现有代理集成测试与全量测试保持通过。
+| 类型 | 位置 | 修改方式 |
+| --- | --- | --- |
+| 服务配置 | `rtflow.toml` | 编辑后 SIGHUP 或重启 |
+| 业务数据 | `state/rtflow.db` | 管理 API/控制台 |
+| 录制文件/VOD | `recording.root` 等 | 文件系统/录制 API |
 
-## M1 剩余
+服务配置包括监听地址、TLS、日志、鉴权、限额、HLS/DASH、全局录制策略、
+`[storage]` 和 `[paths]` glob 策略。路径记录、推流密钥、RTSP 代理、SRT pull/push
+属于业务数据，见 [storage.md](storage.md)。
 
-- [x] 描述失败自动重试/退避（`ProxyService::ensure` 后台 worker）。
-- [x] SIGHUP 代理配置 diff（新增/删除/修改）。
-- [x] per-mount `idle_grace`、常连模式（always）。
-- [ ] `restart_pending`（有订阅者时延迟切换）。
-- [ ] 已发现描述缓存（重启后上游离线仍可注册）。
+## 最小示例
 
-## M2 — 动态管理与可观测
+```toml
+[server]
+name = "rtflow"
+state_dir = "./state"
 
-- [x] admin CRUD、restart、probe。
-- [x] 审计事件与代理指标（configured/streaming）。
-- [ ] 管理页代理页签。
-- [ ] 运行时配置持久化（可选，0600）。
+[rtsp]
+listen = "0.0.0.0:8554"
 
-## M3 — 运行时与时间轴
+[rtmp]
+listen = "0.0.0.0:1935"
 
-- [x] 媒体空闲看门狗可配置（`media_idle_timeout`），去掉逐帧 timeout。
-- [x] `RtspClient::connect_with_description` 快速重连（失败自动回退 DESCRIBE）。
-- [x] 周期性描述刷新（无订阅者时更新 mount 描述）。
-- [ ] RTCP SR NTP↔RTP 映射、RTP 时间戳回绕扩展、重连 A/V 同步。
-- [ ] RTSPS/SRTP/multicast/461 回退/redirect 代理测试矩阵。
+[http]
+listen = "0.0.0.0:8080"
+admin_password = "${RTFLOW_ADMIN_PASSWORD}"
 
-## M4 — 安全与边界
+[storage]
+database = "./state/rtflow.db"
 
-- [x] 上游 host/CIDR 允许列表、私网策略、跨源重定向策略。
-- [x] 代理数量、上游数与并发 DESCRIBE 上限。
-- [x] DNS 解析后固定连接地址（`peer_addr` 固定，URL host 保留用于 SNI）。
-- [ ] 下游路径鉴权与凭据泄漏测试。
+[paths."live/*"]
+publish = true
+read = true
+hls = true
+```
 
-## M5 — 互操作与收尾
+## 启动与自检
 
-- [ ] ffmpeg/GStreamer 上下游互操作、50 代理/200 读者、8h soak。
-- [ ] 文档、迁移说明、CHANGELOG。
+```bash
+rtflow-server --config rtflow.toml --check-config
+rtflow-server --config rtflow.toml --print-config   # 脱敏
+rtflow-server --config rtflow.toml --db-info
+rtflow-server --config rtflow.toml --db-backup /backup/rtflow.db
+rtflow-server --config rtflow.toml
+```
 
-## 已知缺口
+- `--check-config`/`--print-config` 不创建数据库。
+- 首次启动自动建库、迁移；旧 `paths.json`/`keys.json`/`proxies.toml` 导入一次。
+- `SIGHUP` 重新读取服务配置；业务 TOML 段只作为首次 seed，之后修改会打印 ignored。
 
-- 运行时 CRUD 只改内存，不写回配置文件。
-- 代理媒体统计的 `bytes` 目前来自 mount `rtp_octets`，代理发布路径未累计字节（显示 0），M2 补 `published_bytes`。
-- 代理 HLS 播放曾观察到重复 DTS 警告，列入 M3 时间轴专项。
+## 管理入口
+
+```text
+http://<host>:8080/admin
+```
+
+控制台提供直播/点播/路径/密钥/代理/SRT/录制/系统页面；业务 CRUD 走
+`/admin/api/v1/*`。API 认证支持 Basic、Bearer 和浏览器会话 + CSRF。
+
+## 相关文档
+
+- [storage.md](storage.md)：SQLite、主密钥、迁移、备份。
+- [proxy.md](proxy.md)：RTSP 拉流代理。
+- [logging.md](logging.md)、[embedded.md](embedded.md)。
