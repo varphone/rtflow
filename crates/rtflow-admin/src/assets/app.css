@@ -214,6 +214,10 @@ table.data tbody tr:hover { background: var(--surface-2); }
 .vod-card h3 { margin: 0; font-size: 14px; }
 .vod-thumb { position: relative; height: 118px; border-radius: var(--radius-sm); background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 16%, var(--surface-2)), var(--surface-2)); border: 1px solid var(--line-soft); display: grid; place-items: center; color: var(--accent-strong); overflow: hidden; }
 .vod-card:hover { border-color: var(--muted); }
+.vod-card { position: relative; }
+.vod-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+.vod-check { position: absolute; top: 8px; left: 8px; z-index: 2; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 5px; background: rgba(0,0,0,.45); }
+.vod-check input { accent-color: var(--accent); width: 14px; height: 14px; }
 .vod-play { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 18%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
 .vod-play .icon { width: 18px; height: 18px; }
 .vod-duration { position: absolute; right: 7px; bottom: 7px; padding: 1px 5px; border-radius: 4px; background: rgba(0,0,0,.55); color: #fff; font-size: 10.5px; font-variant-numeric: tabular-nums; }
