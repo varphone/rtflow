@@ -10,6 +10,26 @@ pub(super) enum Command {
 pub(super) struct Counters {
     accepted: AtomicU64,
     dropped: AtomicU64,
+    segments: AtomicU64,
+    finalized_bytes: AtomicU64,
+    current_bytes: AtomicU64,
+}
+
+impl Counters {
+    fn finish_segment(&self, bytes: u64) {
+        self.finalized_bytes.fetch_add(bytes, Ordering::Relaxed);
+        self.segments.fetch_add(1, Ordering::Relaxed);
+        self.current_bytes.store(0, Ordering::Relaxed);
+    }
+}
+
+/// Live progress of an active recording.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RecordingProgress {
+    pub segments: u64,
+    pub bytes: u64,
+    pub accepted_units: u64,
+    pub dropped_units: u64,
 }
 
 #[derive(Clone)]
@@ -59,6 +79,9 @@ impl SegmentRecorder {
         let counters = Arc::new(Counters {
             accepted: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
+            segments: AtomicU64::new(0),
+            finalized_bytes: AtomicU64::new(0),
+            current_bytes: AtomicU64::new(0),
         });
         let worker_counters = counters.clone();
         let worker_closed = closed.clone();
@@ -86,6 +109,17 @@ impl SegmentRecorder {
 
     pub fn sink(&self) -> RecordingSink {
         self.sink.clone()
+    }
+
+    pub fn progress(&self) -> RecordingProgress {
+        let counters = &self.sink.counters;
+        RecordingProgress {
+            segments: counters.segments.load(Ordering::Relaxed),
+            bytes: counters.finalized_bytes.load(Ordering::Relaxed)
+                + counters.current_bytes.load(Ordering::Relaxed),
+            accepted_units: counters.accepted.load(Ordering::Relaxed),
+            dropped_units: counters.dropped.load(Ordering::Relaxed),
+        }
     }
 
     pub async fn shutdown(mut self) -> Result<RecordingReport> {
@@ -147,6 +181,7 @@ pub(super) fn run_writer(
                         Ok(bytes) => {
                             report.written_bytes = report.written_bytes.saturating_add(bytes);
                             report.finalized_segments += 1;
+                            counters.finish_segment(bytes);
                             let _ = prune(&config);
                         }
                         Err(_) => report.dropped_units += 1,
@@ -154,7 +189,12 @@ pub(super) fn run_writer(
                 }
                 if segment.is_none() {
                     match SegmentWriter::create(&config.directory, &description, unit.pts) {
-                        Ok(writer) => segment = Some(writer),
+                        Ok(writer) => {
+                            counters
+                                .current_bytes
+                                .store(writer.bytes, Ordering::Relaxed);
+                            segment = Some(writer);
+                        }
                         Err(_) => {
                             report.dropped_units += 1;
                             continue;
@@ -171,7 +211,12 @@ pub(super) fn run_writer(
                     // next unit start a fresh one.
                     if let Some(corrupt) = segment.take() {
                         corrupt.abort();
+                        counters.current_bytes.store(0, Ordering::Relaxed);
                     }
+                } else if let Some(writer) = segment.as_ref() {
+                    counters
+                        .current_bytes
+                        .store(writer.bytes, Ordering::Relaxed);
                 }
             }
             Command::Shutdown(reply) => {
@@ -180,6 +225,7 @@ pub(super) fn run_writer(
                         Ok(bytes) => {
                             report.written_bytes = report.written_bytes.saturating_add(bytes);
                             report.finalized_segments += 1;
+                            counters.finish_segment(bytes);
                         }
                         Err(error) => {
                             let _ = reply.send(Err(error));

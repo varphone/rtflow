@@ -104,9 +104,18 @@ impl RecordingSupervisor {
                 active: session.recorder.is_some(),
                 started_at: session.started_at,
                 directory: session.directory.display().to_string(),
-                segments: session.segments,
-                bytes: session.bytes,
-                dropped: session.dropped,
+                segments: session
+                    .recorder
+                    .as_ref()
+                    .map_or(0, |recorder| recorder.progress().segments),
+                bytes: session
+                    .recorder
+                    .as_ref()
+                    .map_or(0, |recorder| recorder.progress().bytes),
+                dropped: session
+                    .recorder
+                    .as_ref()
+                    .map_or(0, |recorder| recorder.progress().dropped_units),
                 last_error: session.last_error.clone(),
             })
             .collect()

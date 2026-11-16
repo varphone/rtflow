@@ -81,4 +81,5 @@ mod sink;
 
 pub use catalog::{RecordingCatalog, SegmentInfo};
 pub use reader::RecordingDemuxer;
-pub use sink::{RecordingSink, SegmentRecorder};
+#[allow(unused_imports)]
+pub use sink::{RecordingProgress, RecordingSink, SegmentRecorder};
