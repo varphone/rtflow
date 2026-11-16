@@ -118,7 +118,6 @@ impl Store {
             .ok_or(StoreError::SecretKeyMismatch)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn info(&self) -> StoreResult<StoreInfo> {
         let connection = self.connection();
         let schema_version: u32 =
@@ -131,7 +130,6 @@ impl Store {
         })
     }
 
-    #[allow(dead_code)]
     pub(crate) fn backup(&self, destination: &Path) -> StoreResult<()> {
         let destination = destination.to_string_lossy();
         self.connection()

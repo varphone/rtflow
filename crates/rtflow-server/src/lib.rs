@@ -20,3 +20,19 @@ mod srt_supervisor;
 pub mod vod;
 
 pub use config::{Config, ConfigError};
+
+
+/// Storage metadata for CLI/diagnostics (does not start the server).
+pub fn storage_info(config: &Config) -> Result<(u32, u64), String> {
+    let store = store::Store::open(&config.storage, &config.server.state_dir)
+        .map_err(|error| error.to_string())?;
+    let info = store.info().map_err(|error| error.to_string())?;
+    Ok((info.schema_version, info.bytes))
+}
+
+/// Consistent SQLite backup (`VACUUM INTO`), creating the DB if needed.
+pub fn storage_backup(config: &Config, path: &std::path::Path) -> Result<(), String> {
+    let store = store::Store::open(&config.storage, &config.server.state_dir)
+        .map_err(|error| error.to_string())?;
+    store.backup(path).map_err(|error| error.to_string())
+}

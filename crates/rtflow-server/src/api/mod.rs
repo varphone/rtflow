@@ -360,6 +360,26 @@ pub(crate) async fn register_api_routes(
     .await;
     http.add_route(
         Method::Get,
+        "/admin/api/v1/config",
+        api_json(state.clone(), |state, _req| async move {
+            let toml = state
+                .config
+                .redacted()
+                .to_toml()
+                .map_err(|error| (500, error.to_string()))?;
+            let info = state.store.info().map_err(|error| (500, error.to_string()))?;
+            Ok(json!({
+                "toml": toml,
+                "storage": {
+                    "schema_version": info.schema_version,
+                    "bytes": info.bytes,
+                },
+            }))
+        }),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
         "/admin/api/v1/storage",
         api_json(state.clone(), |state, _req| async move {
             let info = state

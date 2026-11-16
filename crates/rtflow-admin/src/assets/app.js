@@ -18,6 +18,7 @@
     proxyConfigs: [],
     srtPulls: [],
     srtPushes: [],
+    configToml: "",
     overview: {},
     system: {},
     query: "",
@@ -450,6 +451,7 @@
         <td>${num(item.attempts)}</td>
         <td>${item.last_error ? esc(item.last_error) : "—"}</td>
         <td class="row-actions">
+          <button class="btn small" data-action="edit-proxy" data-path="${esc(item.path)}">编辑</button>
           <button class="btn small" data-action="restart-proxy" data-path="${esc(item.path)}">重启</button>
           <button class="btn small danger" data-action="delete-proxy" data-path="${esc(item.path)}">删除</button>
         </td>
@@ -463,7 +465,10 @@
         <td>${item.connected ? '<span class="badge ok">已连接</span>' : "—"}</td>
         <td>${bytes(item.bytes || 0)}</td>
         <td>${item.last_error ? esc(item.last_error) : "—"}</td>
-        <td class="row-actions"><button class="btn small danger" data-action="delete-srt" data-direction="${direction}" data-id="${esc(item.id)}">删除</button></td>
+        <td class="row-actions">
+          <button class="btn small" data-action="edit-srt" data-direction="${direction}" data-id="${esc(item.id)}">编辑</button>
+          <button class="btn small danger" data-action="delete-srt" data-direction="${direction}" data-id="${esc(item.id)}">删除</button>
+        </td>
       </tr>`).join("");
     return `
       <div class="stack">
@@ -516,13 +521,21 @@
             <tbody>${srtRows(state.srtPushes, "pushes") || '<tr><td colspan="8" class="empty-cell">未配置 SRT 推流</td></tr>'}</tbody>
           </table></div>
         </section>
+        <section class="panel">
+          <div class="panel-head"><h3>服务配置</h3><span class="sub">TOML · 只读</span></div>
+          <div class="panel-body">
+            <p class="note">监听、TLS、日志、鉴权、限额等仅通过 <code>rtflow.toml</code> 修改；控制台不写服务配置。修改后发送 SIGHUP 或重启。</p>
+            <pre class="code" style="max-height:420px;overflow:auto">${esc(state.configToml)}</pre>
+          </div>
+        </section>
       </div>`;
   }
 
   async function loadControl() {
-    const [paths, keys, recordings, proxies, proxyConfigs, pulls, pushes] = await Promise.all([
+    const [paths, keys, recordings, proxies, proxyConfigs, pulls, pushes, config] = await Promise.all([
       api("/paths"), api("/keys"), api("/recordings"), api("/proxies"),
       apiV1("/proxies/config"), apiV1("/srt/pulls"), apiV1("/srt/pushes"),
+      apiV1("/config"),
     ]);
     state.paths = Array.isArray(paths) ? paths : (paths.items || []);
     state.keys = Array.isArray(keys) ? keys : (keys.items || []);
@@ -531,6 +544,7 @@
     state.proxyConfigs = proxyConfigs.mounts || [];
     state.srtPulls = pulls.items || [];
     state.srtPushes = pushes.items || [];
+    state.configToml = config.toml || "";
   }
 
   async function createPath() {
@@ -705,18 +719,52 @@
     }
   }
 
-  async function createProxy() {
-    const path = prompt("代理路径（例如 /cameras/front）");
-    if (!path) return;
-    const url = prompt("上游 RTSP URL");
-    if (!url) return;
-    try {
-      await apiV1("/proxies", { method: "POST", body: JSON.stringify({
-        path, upstreams: [{ url, transport: "tcp" }] }) });
-      toast("代理已创建", "ok"); await loadControl(); render();
-    } catch (error) { toast(error.message, "bad"); }
+  function openProxyForm(existing) {
+    const mount = existing || { path: "", mode: "on-demand", idle_grace: null, description_refresh: null,
+      upstreams: [{ url: "", transport: "tcp", username: "", password: "" }] };
+    const upstream = (mount.upstreams && mount.upstreams[0]) || {};
+    openModal(existing ? "编辑代理" : "新增代理", `
+      <form id="proxy-form" class="stack">
+        <label>路径<input class="input" name="path" required value="${esc(mount.path)}" ${existing ? "disabled" : ""} placeholder="/cameras/front"></label>
+        <label>模式<select class="input" name="mode">
+          <option value="on-demand" ${mount.mode === "on-demand" ? "selected" : ""}>按需</option>
+          <option value="always" ${mount.mode === "always" ? "selected" : ""}>常连</option>
+        </select></label>
+        <label>上游 URL<input class="input" name="url" required value="${esc(upstream.url || "")}" placeholder="rtsp://192.0.2.10/live"></label>
+        <label>传输<select class="input" name="transport">
+          <option value="tcp" ${upstream.transport === "tcp" ? "selected" : ""}>TCP</option>
+          <option value="udp" ${upstream.transport === "udp" ? "selected" : ""}>UDP</option>
+          <option value="auto" ${upstream.transport === "auto" ? "selected" : ""}>Auto</option>
+        </select></label>
+        <label>用户名<input class="input" name="username" value="${esc(upstream.username || "")}"></label>
+        <label>密码<input class="input" name="password" type="password" placeholder="${existing ? "留空表示清除" : ""}"></label>
+        <label>空闲断开<input class="input" name="idle_grace" value="${mount.idle_grace_ms ? Math.round(mount.idle_grace_ms / 1000) + "s" : ""}" placeholder="5s"></label>
+        <div class="actions"><button class="btn primary" type="submit">保存</button><button class="btn" type="button" data-action="close-modal">取消</button></div>
+      </form>`);
+    const form = document.getElementById("proxy-form");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const body = {
+        path: existing ? mount.path : data.get("path"),
+        enabled: true,
+        mode: data.get("mode"),
+        idle_grace: data.get("idle_grace") || null,
+        upstreams: [{
+          url: data.get("url"),
+          transport: data.get("transport"),
+          username: data.get("username") || null,
+          password: data.get("password") || null,
+        }],
+      };
+      try {
+        await apiV1("/proxies", { method: existing ? "PATCH" : "POST", body: JSON.stringify(body) });
+        closeModal(); toast("代理已保存", "ok"); await loadControl(); render();
+      } catch (error) { toast(error.message, "bad"); }
+    });
   }
 
+  async function createProxy() { openProxyForm(null); }
   async function restartProxy(path) {
     try {
       await apiV1("/proxies/restart?path=" + encodeURIComponent(path), { method: "POST" });
@@ -732,22 +780,43 @@
     } catch (error) { toast(error.message, "bad"); }
   }
 
-  async function createSrt(direction) {
-    const remote = prompt("远端 host:port");
-    if (!remote) return;
-    const mount = prompt(direction === "push" ? "源 mount（例如 /live/cam）" : "目标 mount（可空）", "/live/cam");
-    if (direction === "push" && !mount) return;
-    const streamId = prompt("Stream ID（可空）", "");
-    const passphrase = prompt("Passphrase（10..80 字节，可空）", "");
-    const body = { remote, stream_id: streamId || null, mount: mount || null,
-      passphrase: passphrase || null, pbkeylen: 0, enabled: true };
-    try {
+  function openSrtForm(direction, existing) {
+    const item = existing || { name: "", enabled: true, remote: "", stream_id: "", mount: direction === "push" ? "/live/cam" : "", pbkeylen: 0, latency_ms: null };
+    openModal(existing ? "编辑 SRT" : (direction === "push" ? "新增 SRT 推流" : "新增 SRT 拉流"), `
+      <form id="srt-form" class="stack">
+        <label>名称<input class="input" name="name" value="${esc(item.name || "")}" placeholder="可选"></label>
+        <label>远端 host:port<input class="input" name="remote" required value="${esc(item.remote || "")}"></label>
+        <label>Stream ID<input class="input" name="stream_id" value="${esc(item.stream_id || "")}"></label>
+        <label>${direction === "push" ? "源 mount" : "目标 mount"}<input class="input" name="mount" value="${esc(item.mount || "")}"></label>
+        <label>Passphrase（10..80 字节，留空不加密）<input class="input" name="passphrase" type="password" placeholder="${existing ? "留空保持不变" : ""}"></label>
+        <label><input type="checkbox" name="enabled" ${item.enabled ? "checked" : ""}> 启用</label>
+        <div class="actions"><button class="btn primary" type="submit">保存</button><button class="btn" type="button" data-action="close-modal">取消</button></div>
+      </form>`);
+    const form = document.getElementById("srt-form");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const body = {
+        name: data.get("name") || "",
+        enabled: data.get("enabled") === "on",
+        remote: data.get("remote"),
+        stream_id: data.get("stream_id") || null,
+        mount: data.get("mount") || null,
+        pbkeylen: item.pbkeylen || 0,
+        latency_ms: item.latency_ms || null,
+      };
+      const passphrase = data.get("passphrase");
+      if (passphrase || !existing) body.passphrase = passphrase || null;
       const route = direction === "push" ? "pushes" : "pulls";
-      await apiV1("/srt/" + route, { method: "POST", body: JSON.stringify(body) });
-      toast("SRT 端点已创建", "ok"); await loadControl(); render();
-    } catch (error) { toast(error.message, "bad"); }
+      try {
+        await apiV1("/srt/" + route + (existing ? "/" + encodeURIComponent(item.id) : ""),
+          { method: existing ? "PATCH" : "POST", body: JSON.stringify(body) });
+        closeModal(); toast("SRT 端点已保存", "ok"); await loadControl(); render();
+      } catch (error) { toast(error.message, "bad"); }
+    });
   }
 
+  async function createSrt(direction) { openSrtForm(direction, null); }
   async function deleteSrt(direction, id) {
     if (!confirm(`删除 SRT 端点 ${id}？`)) return;
     try {
@@ -785,9 +854,15 @@
     if (action === "retry" || action === "refresh") { state.loading = true; state.error = ""; render(); try { await loadAll(); } catch (error) { state.error = error.message; } state.loading = false; render(); return; }
     if (action === "close-modal" || action === "modal-backdrop") { if (event.target === actionEl) closeModal(); return; }
     if (action === "create-proxy") return createProxy();
+    if (action === "edit-proxy") return openProxyForm(state.proxyConfigs.find((m) => m.path === actionEl.dataset.path));
     if (action === "restart-proxy") return restartProxy(actionEl.dataset.path);
     if (action === "delete-proxy") return deleteProxy(actionEl.dataset.path);
     if (action === "create-srt") return createSrt(actionEl.dataset.direction);
+    if (action === "edit-srt") {
+      const direction = actionEl.dataset.direction === "pushes" ? "push" : "pull";
+      const list = direction === "push" ? state.srtPushes : state.srtPulls;
+      return openSrtForm(direction, list.find((item) => item.id === actionEl.dataset.id));
+    }
     if (action === "delete-srt") return deleteSrt(actionEl.dataset.direction, actionEl.dataset.id);
     if (action === "play") {
       const kind = actionEl.dataset.kind;

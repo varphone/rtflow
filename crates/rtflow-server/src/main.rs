@@ -25,6 +25,12 @@ struct Args {
     /// Override the configured log level.
     #[arg(long)]
     log_level: Option<String>,
+    /// Print SQLite schema version/size and exit.
+    #[arg(long)]
+    db_info: bool,
+    /// Write a consistent SQLite backup and exit.
+    #[arg(long, value_name = "FILE")]
+    db_backup: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -61,6 +67,34 @@ async fn main() -> ExitCode {
     };
     if args.check_config {
         println!("{}: ok", config_path.display());
+        return ExitCode::SUCCESS;
+    }
+    if args.db_info {
+        match rtflow_server::storage_info(&config) {
+            Ok((version, bytes)) => {
+                println!(
+                    "database: {} (schema {version}, {bytes} bytes)",
+                    config
+                        .storage
+                        .database_path(&config.server.state_dir)
+                        .display()
+                );
+            }
+            Err(error) => {
+                eprintln!("database error: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+        return ExitCode::SUCCESS;
+    }
+    if let Some(path) = &args.db_backup {
+        match rtflow_server::storage_backup(&config, path) {
+            Ok(()) => println!("backup written to {}", path.display()),
+            Err(error) => {
+                eprintln!("backup failed: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
         return ExitCode::SUCCESS;
     }
     if args.print_config {
