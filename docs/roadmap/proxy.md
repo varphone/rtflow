@@ -43,7 +43,8 @@
 
 ## M5 — 互操作与收尾
 
-- [ ] ffmpeg/GStreamer 上下游互操作、50 代理/200 读者、8h soak。
+- [x] GStreamer 拉取代理 mount 的互操作测试（`proxy_gstreamer.rs`）。
+- [ ] 50 代理/200 读者、8h soak。
 - [x] server 配置 → 代理 mount → HLS 端到端测试（`proxy_config.rs`）。
 - [ ] 文档、迁移说明、CHANGELOG。
 
