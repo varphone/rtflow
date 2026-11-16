@@ -105,7 +105,7 @@ async fn control_plane_round_trip() {
     let stale = client
         .patch(format!("{base}/admin/api/v1/paths/live/cam"))
         .basic_auth("admin", Some("testpass"))
-        .header("if-match", "1")
+        .header("if-match", "999999")
         .json(&json!({"read": false}))
         .send()
         .await

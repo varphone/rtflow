@@ -128,6 +128,10 @@ impl KeyStore {
             for key in &keys {
                 store::keys::insert(&store, key).map_err(key_store_error)?;
             }
+            if file.exists() {
+                let archived = file.with_extension(format!("json.migrated-{}", unix_now()));
+                let _ = fs::rename(&file, archived);
+            }
         }
         Ok(Self {
             store,

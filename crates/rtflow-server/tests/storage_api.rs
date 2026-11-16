@@ -64,6 +64,20 @@ async fn legacy_paths_import_and_proxy_round_trip() {
         .await
         .unwrap();
     assert!(paths.contains("live/legacy"), "{paths}");
+    assert!(
+        !dir.path().join("state/paths.json").exists(),
+        "legacy file must be archived"
+    );
+    assert!(
+        std::fs::read_dir(dir.path().join("state"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .contains("paths.json.migrated")),
+        "legacy path file was not archived"
+    );
 
     let created = client
         .post(format!("{base}/admin/api/v1/proxies"))

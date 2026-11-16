@@ -291,6 +291,17 @@ impl ServerApp {
         } else {
             config.proxy.mounts = stored_proxies;
         }
+        let overlay = config.server.state_dir.join("proxies.toml");
+        if overlay.exists() {
+            let archived = overlay.with_extension(format!(
+                "toml.migrated-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            ));
+            let _ = std::fs::rename(&overlay, archived);
+        }
         let config = Arc::new(config);
         let metrics = Arc::new(MetricsRegistry::default());
         let mut mounts = MountRegistry::new(4096);

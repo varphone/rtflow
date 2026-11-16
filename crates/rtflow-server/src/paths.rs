@@ -210,6 +210,11 @@ impl PathStore {
                 store::paths::insert(&store, &record).map_err(path_store_error)?;
                 records.insert(record.name.clone(), record);
             }
+            let legacy_file = config.server.state_dir.join(STORE_FILE);
+            if legacy_file.exists() {
+                let archived = legacy_file.with_extension(format!("json.migrated-{}", unix_now()));
+                let _ = fs::rename(&legacy_file, archived);
+            }
         }
         let mut rules = config.paths.clone();
         if rules.is_empty() {

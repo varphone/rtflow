@@ -5,8 +5,12 @@ use std::sync::Arc;
 
 fn auth() -> AppAuth {
     let mut config = Config::default();
-    config.server.state_dir =
-        std::env::temp_dir().join(format!("rtflow-auth-{}", std::process::id()));
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    config.server.state_dir = std::env::temp_dir().join(format!(
+        "rtflow-auth-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     config.auth.mode = AuthMode::Basic;
     config.auth.users.push(crate::config::UserConfig {
         username: "u".into(),

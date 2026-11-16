@@ -264,12 +264,14 @@ pub(crate) async fn register_api_routes(
                     return Err((404, "path not found".to_string()));
                 };
                 let expected = expected.trim().trim_matches('"');
-                if expected != record.updated_at.to_string() {
+                if expected != record.updated_at.to_string()
+                    && expected != record.revision.to_string()
+                {
                     return Err((
                         412,
                         format!(
-                            "precondition failed: current version is {}",
-                            record.updated_at
+                            "precondition failed: current revision is {}",
+                            record.revision
                         ),
                     ));
                 }

@@ -158,6 +158,13 @@ impl Store {
             )));
         }
         if current < schema::VERSION {
+            if current > 0 {
+                let backup = self.path.with_extension(format!("db.bak.v{current}"));
+                if !backup.exists() {
+                    let destination = backup.to_string_lossy();
+                    let _ = connection.execute("VACUUM INTO ?1", [destination.as_ref()]);
+                }
+            }
             let transaction = connection.transaction()?;
             transaction.execute_batch(schema::MIGRATION_V1)?;
             transaction.pragma_update(None, "user_version", schema::VERSION)?;
