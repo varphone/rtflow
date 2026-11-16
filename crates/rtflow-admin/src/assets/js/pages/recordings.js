@@ -126,27 +126,50 @@ export async function render(params) {
 
 
 function openRecordingDetail(item, ctx) {
+  let timer = null;
   openDrawer({
     title: item.path,
     description: item.active ? "录制中的任务" : "已停止的录制任务",
     showSubmit: false,
     body: `<div class="stack">
       <div class="detail-grid">
-        <div class="detail-item"><span>状态</span><strong>${item.active ? "录制中" : "已停止"}</strong></div>
+        <div class="detail-item"><span>状态</span><strong data-rec-detail="status">${item.active ? "录制中" : "已停止"}</strong></div>
         <div class="detail-item"><span>开始时间</span><strong>${esc(dateTime(item.started_at))}</strong></div>
-        <div class="detail-item"><span>分段</span><strong class="mono">${num(item.segments)}</strong></div>
-        <div class="detail-item"><span>已写入</span><strong class="mono">${bytes(item.bytes)}</strong></div>
-        <div class="detail-item"><span>丢弃</span><strong class="mono">${num(item.dropped)}</strong></div>
-        <div class="detail-item"><span>错误</span><strong class="cell-sub">${esc(item.last_error || "—")}</strong></div>
+        <div class="detail-item"><span>分段</span><strong class="mono" data-rec-detail="segments">${num(item.segments)}</strong></div>
+        <div class="detail-item"><span>已写入</span><strong class="mono" data-rec-detail="bytes">${bytes(item.bytes)}</strong></div>
+        <div class="detail-item"><span>丢弃</span><strong class="mono" data-rec-detail="dropped">${num(item.dropped)}</strong></div>
+        <div class="detail-item"><span>错误</span><strong class="cell-sub" data-rec-detail="error">${esc(item.last_error || "—")}</strong></div>
       </div>
       <section class="drawer-section"><h3>录制目录</h3><pre class="code">${esc(item.directory || "—")}</pre></section>
       <div class="actions"><button class="btn small" data-rec-detail-toggle>${item.active ? "停止录制" : "开始录制"}</button>
         <button class="btn small ghost" data-rec-detail-vod>查看点播</button></div>
     </div>`,
+    onClose() { if (timer) clearInterval(timer); },
     onMount(root) {
+      let active = item.active;
+      const update = async () => {
+        if (document.hidden) return;
+        let current;
+        try { current = (await api("/recordings")).find((entry) => entry.path === item.path); } catch (_) { return; }
+        const set = (name, value) => { const node = root.querySelector(`[data-rec-detail="${name}"]`); if (node) node.textContent = value; };
+        if (!current) {
+          set("status", "已结束");
+          active = false;
+          root.querySelector("[data-rec-detail-toggle]").textContent = "开始录制";
+          return;
+        }
+        active = current.active;
+        set("status", active ? "录制中" : "已停止");
+        set("segments", num(current.segments));
+        set("bytes", bytes(current.bytes));
+        set("dropped", num(current.dropped));
+        set("error", current.last_error || "—");
+        root.querySelector("[data-rec-detail-toggle]").textContent = active ? "停止录制" : "开始录制";
+      };
+      timer = setInterval(update, 2000);
       const close = () => root.querySelector("[data-close-drawer]")?.click();
       root.querySelector("[data-rec-detail-toggle]").onclick = async () => {
-        const action = item.active ? "stop" : "start";
+        const action = active ? "stop" : "start";
         try { await api(`/recordings/${action}`, { method: "POST", body: { path: item.path } }); toast("操作已提交", "ok"); close(); ctx.reload(); }
         catch (error) { toast(error.message, "bad"); }
       };
