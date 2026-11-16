@@ -153,9 +153,10 @@ function renderShell() {
       </nav>`).join("")}
       <div class="sidebar-foot"><span>rtflow ${esc(state.session?.version || "")}</span><span>${state.session?.readonly ? "只读模式" : "管理模式"}</span></div>
     </aside>
+    <button class="sidebar-backdrop" data-sidebar-backdrop aria-label="关闭菜单"></button>
     <div class="main">
       <header class="topbar">
-        <button class="btn ghost small menu-btn" data-menu aria-label="打开菜单">${icon("menu")}</button>
+        <button class="btn ghost small menu-btn" data-menu aria-label="打开菜单" aria-controls="sidebar" aria-expanded="false">${icon("menu")}</button>
         <div class="crumbs" id="crumbs"></div>
         <div class="top-actions">
           <button class="command-trigger" data-command-open aria-label="打开命令面板">${icon("search")}<span>搜索</span><kbd>Ctrl K</kbd></button>
@@ -175,8 +176,17 @@ function renderShell() {
   </div>`;
   app.querySelectorAll("[data-route]").forEach((link) => link.addEventListener("click", () => {
     document.getElementById("sidebar").classList.remove("open");
+    document.body.classList.remove("nav-open");
   }));
-  app.querySelector("[data-menu]").onclick = () => document.getElementById("sidebar").classList.toggle("open");
+  const sidebar = document.getElementById("sidebar");
+  const setSidebar = (open) => {
+    sidebar.classList.toggle("open", open);
+    app.querySelector("[data-menu]").setAttribute("aria-expanded", String(open));
+    document.body.classList.toggle("nav-open", open);
+  };
+  app.querySelector("[data-menu]").onclick = () => setSidebar(!sidebar.classList.contains("open"));
+  app.querySelector("[data-sidebar-backdrop]").onclick = () => setSidebar(false);
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") setSidebar(false); });
   app.querySelector("[data-command-open]").onclick = () => openPalette();
   const popover = app.querySelector("[data-user-popover]");
   const userButton = app.querySelector("[data-user-menu]");
