@@ -14,6 +14,7 @@
     paths: [],
     keys: [],
     recordings: [],
+    proxies: [],
     overview: {},
     system: {},
     query: "",
@@ -417,6 +418,16 @@
           <button class="btn small" data-action="stop-rec" data-path="${esc(item.path)}">停止</button>
         </td>
       </tr>`).join("");
+    const proxies = state.proxies.map((item) => `
+      <tr>
+        <td><code>${esc(item.path)}</code></td>
+        <td>${esc(item.state)}</td>
+        <td class="mono">${esc(item.upstream)}</td>
+        <td>${num(item.subscribers)}</td>
+        <td>${num(item.tracks)}</td>
+        <td>${num(item.attempts)}</td>
+        <td>${item.last_error ? esc(item.last_error) : "—"}</td>
+      </tr>`).join("");
     return `
       <div class="stack">
         <section class="panel">
@@ -442,14 +453,22 @@
             <tbody>${recordings || '<tr><td colspan="6" class="empty-cell">当前没有录制任务</td></tr>'}</tbody>
           </table></div>
         </section>
+        <section class="panel">
+          <div class="panel-head"><h3>RTSP 代理</h3><span class="sub">状态只读</span></div>
+          <div class="table-wrap"><table class="data">
+            <thead><tr><th>路径</th><th>状态</th><th>上游</th><th>订阅</th><th>轨道</th><th>重试</th><th>错误</th></tr></thead>
+            <tbody>${proxies || '<tr><td colspan="7" class="empty-cell">未配置代理</td></tr>'}</tbody>
+          </table></div>
+        </section>
       </div>`;
   }
 
   async function loadControl() {
-    const [paths, keys, recordings] = await Promise.all([api("/paths"), api("/keys"), api("/recordings")]);
+    const [paths, keys, recordings, proxies] = await Promise.all([api("/paths"), api("/keys"), api("/recordings"), api("/proxies")]);
     state.paths = Array.isArray(paths) ? paths : (paths.items || []);
     state.keys = Array.isArray(keys) ? keys : (keys.items || []);
     state.recordings = Array.isArray(recordings) ? recordings : (recordings.items || []);
+    state.proxies = Array.isArray(proxies) ? proxies : (proxies.proxies || []);
   }
 
   async function createPath() {

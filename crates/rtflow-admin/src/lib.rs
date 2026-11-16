@@ -61,6 +61,10 @@ pub trait ControlPlane: Send + Sync + 'static {
     fn issue_key(&self, body: serde_json::Value) -> Result<serde_json::Value, String>;
     fn revoke_key(&self, kid: &str) -> Result<(), String>;
     fn recordings(&self) -> serde_json::Value;
+    /// RTSP proxy mounts (read-only snapshot for the console).
+    fn proxies(&self) -> serde_json::Value {
+        serde_json::json!({ "proxies": [] })
+    }
     fn start_recording<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<(), String>>;
     fn stop_recording<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<(), String>>;
 }

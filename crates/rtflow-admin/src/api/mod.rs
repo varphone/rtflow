@@ -1,10 +1,12 @@
 //! JSON API, authentication and SPA asset handlers.
+mod proxies;
 mod views;
 
 use super::{
     AdminState,
     auth::{clear_cookie, constant_time_eq, cookie_header, session_cookie},
 };
+use proxies::control_proxies_handler;
 use rtflow_http::{Handler, HttpRequest, HttpServer, Method, ResponseWriter};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -702,6 +704,12 @@ pub(super) async fn register(http: &HttpServer, state: Arc<AdminState>) {
         Method::Delete,
         &format!("{base}/api/keys"),
         control_keys_write_handler(state.clone(), "revoke"),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
+        &format!("{base}/api/proxies"),
+        control_proxies_handler(state.clone()),
     )
     .await;
     http.add_route(

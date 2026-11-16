@@ -13,6 +13,7 @@ pub(crate) struct ControlBridge {
     pub(crate) keys: Arc<KeyStore>,
     pub(crate) recording: Arc<RecordingSupervisor>,
     pub(crate) mounts: Arc<MountRegistry>,
+    pub(crate) proxies: Arc<rtflow::server::ProxyService>,
 }
 
 #[derive(serde::Deserialize)]
@@ -84,6 +85,27 @@ impl rtflow::admin::ControlPlane for ControlBridge {
 
     fn recordings(&self) -> serde_json::Value {
         serde_json::to_value(self.recording.status()).unwrap_or_default()
+    }
+
+    fn proxies(&self) -> serde_json::Value {
+        let proxies: Vec<_> = self
+            .proxies
+            .statuses()
+            .into_iter()
+            .map(|status| {
+                serde_json::json!({
+                    "path": status.path.as_ref(),
+                    "state": status.state,
+                    "subscribers": status.subscribers,
+                    "bytes": status.bytes,
+                    "tracks": status.tracks,
+                    "upstream": status.upstream,
+                    "attempts": status.attempts,
+                    "last_error": status.last_error,
+                })
+            })
+            .collect();
+        serde_json::json!({ "proxies": proxies })
     }
 
     fn start_recording<'a>(
