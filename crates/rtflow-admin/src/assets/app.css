@@ -388,8 +388,9 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 
   .top-actions { position: relative; gap: 2px; }
   .top-actions .btn { padding: 6px; }
-  .command-trigger { padding: 6px; }
+  .command-trigger { padding: 7px; }
   .command-trigger span, .command-trigger kbd { display: none; }
+  .command-trigger .icon { width: 16px; height: 16px; }
   .content { padding: 14px 14px 36px; }
   .page-head h1 { font-size: 18px; }
   .stat-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -402,6 +403,9 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
   table.data td:nth-child(n+3):not(:last-child) { display: none; }
   table.data th:last-child, table.data td:last-child { display: table-cell; }
   table.data { min-width: 0; }
+  table.data.live-table th:nth-child(3), table.data.live-table td:nth-child(3) { display: table-cell; }
+  table.data.audit-table th:nth-child(3), table.data.audit-table td:nth-child(3) { display: table-cell; }
+  table.data.live-table .row-actions [data-action="detail"], table.data.live-table .row-actions [data-action="play-ll"] { display: none; }
   .quick-actions { grid-template-columns: 1fr 1fr; }
   .row-actions { flex-wrap: wrap; }
   .drawer { width: 100%; }

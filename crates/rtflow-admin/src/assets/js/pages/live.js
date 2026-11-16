@@ -152,7 +152,7 @@ export async function render(params) {
 }
 
 function table(items, selected) {
-  return `<div class="table-wrap"><table class="data"><thead><tr><th class="select-col"><input type="checkbox" data-select-all aria-label="选择全部"></th><th>流</th><th>状态</th><th>视频</th><th>音频</th><th>订阅</th><th>接收 / 丢弃</th><th></th></tr></thead><tbody>
+  return `<div class="table-wrap"><table class="data live-table"><thead><tr><th class="select-col"><input type="checkbox" data-select-all aria-label="选择全部"></th><th>流</th><th>状态</th><th>视频</th><th>音频</th><th>订阅</th><th>接收 / 丢弃</th><th></th></tr></thead><tbody>
     ${items.map((stream) => `<tr data-stream="${esc(stream.path)}" class="${selected.has(stream.path) ? "selected" : ""}">
       <td class="select-col"><input type="checkbox" data-select="${esc(stream.path)}" ${selected.has(stream.path) ? "checked" : ""} aria-label="选择 ${esc(stream.name)}"></td>
       <td><button class="link-cell" data-action="detail" data-path="${esc(stream.path)}">${esc(stream.name)}</button><div class="cell-sub mono">${esc(stream.path)}</div></td>
