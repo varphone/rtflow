@@ -302,6 +302,13 @@ impl ServerApp {
         let mut cancels = Vec::new();
         let mut tasks = Vec::new();
 
+        // SRT pull (caller) sources run for the lifetime of the server.
+        tasks.extend(crate::srt_pull::spawn(
+            config.clone(),
+            mounts.clone(),
+            cancel.clone(),
+        ));
+
         let rtsp = if config.rtsp.enabled {
             let mut rtsp_config = rtflow::server::ServerConfig::new(config.rtsp.listen);
             rtsp_config.session_timeout = config.rtsp.session_timeout;

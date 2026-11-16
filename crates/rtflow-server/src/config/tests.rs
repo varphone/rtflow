@@ -74,6 +74,25 @@ fn srt_passphrase_is_validated() {
 }
 
 #[test]
+fn srt_pull_entries_are_validated() {
+    let mut config = Config::default();
+    config.srt.pull.push(SrtPull {
+        remote: "127.0.0.1:9000".into(),
+        stream_id: Some("live/cam".into()),
+        ..SrtPull::default()
+    });
+    assert!(config.validate().is_ok());
+    config.srt.pull[0].remote = "not-an-address".into();
+    assert!(config.validate().is_err());
+    config.srt.pull[0].remote = "127.0.0.1:9000".into();
+    config.srt.pull[0].mount = Some("live/cam".into());
+    assert!(config.validate().is_err());
+    config.srt.pull[0].mount = Some("/live/cam".into());
+    config.srt.pull[0].passphrase = Some("short".into());
+    assert!(config.validate().is_err());
+}
+
+#[test]
 fn comments_do_not_require_env_values() {
     assert_eq!(
         expand_env("# optional ${MISSING_FOR_TEST}\n").unwrap(),

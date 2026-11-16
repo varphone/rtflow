@@ -18,6 +18,8 @@
 
 ### Added
 
+- SRT 新增 caller（拉流）角色与 `SrtCaller` API；`rtflow-server` 支持
+  `[[srt.pull]]` 主动拉取 SRT 源并注册为可播放/可录制 mount（断线指数退避）。
 - SRT 支持 HaiCrypt AES-CTR 加密（passphrase/pbkeylen/enforced_encryption），
   监听端解包 KMREQ、回显 KMRSP、解密数据并处理运行中密钥刷新；错误口令与
   明文对端按规范拒绝。

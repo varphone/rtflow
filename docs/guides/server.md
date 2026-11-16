@@ -34,6 +34,22 @@ ffmpeg -re -i input.mp4 -c copy -f mpegts \
 SRT 与 libsrt 系工具（ffmpeg、OBS、srt-live-transmit）互通：HSv5 握手、
 HSREQ/HSRSP 延迟协商、Stream ID、ACK/ACKACK/NAK、keepalive、TLPKTDROP。
 
+### SRT 拉流（server 作为 caller）
+
+```toml
+[[srt.pull]]
+remote = "192.0.2.10:9000"
+stream_id = "live/camera1"
+mount = "/live/camera1"          # 默认取 Stream ID 的 r= 资源
+passphrase = "secretpass12345"   # 默认继承 [srt].passphrase
+pbkeylen = 16
+latency_ms = 120
+```
+
+服务端主动连接远端 SRT listener，按 TS demux 结果注册发布 mount，之后
+HLS/DASH/FLV/RTSP 播放与录制流程与推流一致；断线按 1s→30s 指数退避重连，
+连接成功后退避复位。pull 任务随服务端 SIGTERM 一起取消。
+
 ### SRT 加密（HaiCrypt AES-CTR）
 
 ```toml

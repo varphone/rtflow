@@ -155,6 +155,8 @@ pub struct SrtSection {
     pub max_connections: usize,
     /// HaiCrypt passphrase (10..80 bytes); empty disables SRT encryption.
     pub passphrase: Option<String>,
+    /// Pull sources: connect as SRT caller and publish into mounts.
+    pub pull: Vec<SrtPull>,
     /// AES key length in bytes: 0 (auto → 16), 16, 24 or 32.
     pub pbkeylen: u32,
     /// Reject peers whose encryption settings differ (libsrt default).
@@ -175,6 +177,7 @@ impl Default for SrtSection {
             mtu: 1500,
             max_connections: 10,
             passphrase: None,
+            pull: Vec::new(),
             pbkeylen: 0,
             enforced_encryption: true,
             allowed_stream_ids: Vec::new(),
@@ -192,6 +195,24 @@ impl Default for WebrtcSection {
     fn default() -> Self {
         Self { enabled: true }
     }
+}
+
+/// One SRT pull (caller) source.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct SrtPull {
+    /// Remote listener, `host:port`.
+    pub remote: String,
+    /// Stream ID sent in the handshake.
+    pub stream_id: Option<String>,
+    /// Mount path override; defaults to the Stream ID resource.
+    pub mount: Option<String>,
+    /// Passphrase override; falls back to `[srt].passphrase`.
+    pub passphrase: Option<String>,
+    /// AES key length (0 → `[srt].pbkeylen`).
+    pub pbkeylen: u32,
+    /// Receiver latency override.
+    pub latency_ms: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -552,6 +573,35 @@ impl Config {
             return Err(ConfigError::Invalid(
                 "srt.passphrase must be 10..80 bytes".into(),
             ));
+        }
+        for pull in &self.srt.pull {
+            if pull.remote.parse::<SocketAddr>().is_err() {
+                return Err(ConfigError::Invalid(format!(
+                    "srt.pull remote {:?} is not host:port",
+                    pull.remote
+                )));
+            }
+            if pull
+                .mount
+                .as_deref()
+                .is_some_and(|mount| !mount.starts_with('/'))
+            {
+                return Err(ConfigError::Invalid(
+                    "srt.pull mount must start with '/'".into(),
+                ));
+            }
+            if let Some(passphrase) = &pull.passphrase
+                && !(10..=80).contains(&passphrase.len())
+            {
+                return Err(ConfigError::Invalid(
+                    "srt.pull passphrase must be 10..80 bytes".into(),
+                ));
+            }
+            if !matches!(pull.pbkeylen, 0 | 16 | 24 | 32) {
+                return Err(ConfigError::Invalid(
+                    "srt.pull pbkeylen must be 0, 16, 24 or 32".into(),
+                ));
+            }
         }
         if !matches!(self.srt.pbkeylen, 0 | 16 | 24 | 32) {
             return Err(ConfigError::Invalid(

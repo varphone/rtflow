@@ -460,6 +460,38 @@ impl SessionCrypto {
         self.state
     }
 
+    /// Initiator side: generate the salt and even SEK, build the KMREQ that
+    /// must ride in the CONCLUSION request, and install the key locally so
+    /// incoming data can be decrypted. Returns `(crypto, kmreq_bytes)`.
+    pub fn generate_initiator(
+        passphrase: &[u8],
+        key_len: KeyLength,
+    ) -> Result<(Self, Vec<u8>), CryptoError> {
+        if !(10..=80).contains(&passphrase.len()) {
+            return Err(CryptoError::InvalidPassphrase);
+        }
+        let mut salt = [0u8; KM_SALT_LEN];
+        let mut sek = vec![0u8; key_len.bytes()];
+        getrandom::getrandom(&mut salt).map_err(|_| CryptoError::BadKm("rng"))?;
+        getrandom::getrandom(&mut sek).map_err(|_| CryptoError::BadKm("rng"))?;
+        let kek = derive_kek(passphrase, &salt, key_len)?;
+        let km = KmMessage::build(KmKeys::Even, key_len, salt, &sek, &[], &kek)?;
+        let ctr = AesCtr::new(&sek)?;
+        let mut crypto = Self {
+            passphrase: passphrase.to_vec(),
+            state: KmState::Secured,
+            even: Some(KeySlot {
+                key: sek,
+                salt,
+                ctr,
+            }),
+            odd: None,
+        };
+        // Keep the passphrase for a future refresh response path.
+        let _ = &mut crypto.passphrase;
+        Ok((crypto, km))
+    }
+
     /// Install the keys from a KMREQ. Returns the KMRSP payload: the exact
     /// received bytes on success, or the 1-word little-endian state on
     /// failure (used when encryption is not enforced).

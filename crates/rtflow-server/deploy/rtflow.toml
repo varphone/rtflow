@@ -40,7 +40,16 @@ max_connections = 10
 # passphrase = "${RTFLOW_SRT_PASSPHRASE}"
 # pbkeylen = 16
 enforced_encryption = true
-allowed_stream_ids = []  # empty = open; list exact stream ids to restrict
+allowed_stream_ids = []
+
+# Pull sources (server as SRT caller). Each entry reconnects with backoff.
+# [[srt.pull]]
+# remote = "192.0.2.10:9000"
+# stream_id = "live/camera1"
+# mount = "/live/camera1"          # defaults to the Stream ID resource
+# passphrase = "${RTFLOW_SRT_PASSPHRASE}"  # defaults to [srt].passphrase
+# pbkeylen = 16
+# latency_ms = 120  # empty = open; list exact stream ids to restrict
 # Publish tokens/keys are verified from `streamid` (`live/cam?token=...`)
 # using the [auth] configuration, like RTSP/RTMP/HTTP.
 

@@ -21,6 +21,7 @@ rtflow-rtsp.workspace = true
 aes.workspace = true
 cipher.workspace = true
 hmac.workspace = true
+getrandom.workspace = true
 sha1.workspace = true
 thiserror.workspace = true
 bytes.workspace = true

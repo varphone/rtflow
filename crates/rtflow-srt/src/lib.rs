@@ -5,7 +5,7 @@
 //!
 //! # Features
 //!
-//! - HSv5 caller-listener handshake, byte-compatible with libsrt 1.4/1.5
+//! - HSv5 listener and caller (pull) roles, byte-compatible with libsrt
 //! - HSREQ/HSRSP negotiation (TSBPD latency = max of both sides)
 //! - HaiCrypt AES-CTR encryption (passphrase, 128/192/256-bit keys)
 //! - Stream ID (`#!::r=...` or a plain path, optional `?token=`) routing
@@ -16,9 +16,9 @@
 //!
 //! # Limitations
 //!
-//! - Listener mode only (no caller/rendezvous)
-//! - Key refresh is applied on receipt (mid-stream KMREQ); this listener
-//!   never rekeys its own (unused) TX direction
+//! - No rendezvous mode
+//! - Key refresh is applied on receipt (mid-stream KMREQ); TX rekey is not
+//!   implemented because the listener never sends media
 //! - MPEG-TS payloads only (other payloads are consumed but not exposed)
 //!
 //! # Example
@@ -35,6 +35,7 @@
 //! # Ok(())
 //! # }
 //! ```
+pub mod caller;
 pub mod crypto;
 pub mod handshake;
 pub mod packet;
@@ -81,5 +82,6 @@ mod session;
 #[cfg(test)]
 mod tests;
 
+pub use caller::{SrtCaller, SrtCallerConfig};
 pub use config::{PublishAuthenticator, SrtConfig};
 pub use connection::SrtConnection;
