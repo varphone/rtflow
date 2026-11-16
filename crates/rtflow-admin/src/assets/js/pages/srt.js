@@ -6,7 +6,9 @@ import { openSrtDrawer } from "../forms/srt.js";
 let tab = "pull";
 let query = "";
 
-export async function render(_params, ctx) {
+export async function render(params, ctx) {
+  const linked = params?.get("q");
+  if (linked !== null && linked !== undefined) query = linked;
   const [pulls, pushes] = await Promise.all([apiV1("/srt/pulls"), apiV1("/srt/pushes")]);
   const all = { pull: pulls.items || [], push: pushes.items || [] };
   const initial = view(all);

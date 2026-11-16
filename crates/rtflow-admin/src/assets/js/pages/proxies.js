@@ -7,7 +7,9 @@ let query = "";
 let filter = "all";
 let sort = { field: "path", dir: 1 };
 
-export async function render(_params, ctx) {
+export async function render(params, ctx) {
+  const linked = params?.get("q");
+  if (linked !== null && linked !== undefined) query = linked;
   const [status, config] = await Promise.all([apiV1("/proxies"), apiV1("/proxies/config")]);
   const statuses = status.proxies || [];
   const configs = config.mounts || [];
