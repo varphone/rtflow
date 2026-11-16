@@ -4,6 +4,7 @@ use super::*;
 mod handshake;
 use crate::packet::{
     AckFields, ControlPacket, ack_packet, encode_control_packet, keepalive_packet, nak_packet,
+    shutdown_packet,
 };
 
 impl SrtServer {
@@ -26,12 +27,17 @@ impl SrtServer {
         }
 
         let mut expired = Vec::new();
+        let mut cancelled_mounts = Vec::new();
         for (peer, conn) in connections.iter_mut() {
+            let mount_cancelled = conn
+                .mount
+                .as_ref()
+                .is_some_and(|mount| mount.cancel.is_cancelled());
+            if mount_cancelled {
+                cancelled_mounts.push(*peer);
+            }
             if now.duration_since(conn.last_recv_time) > self.config.peer_idle_timeout
-                || conn
-                    .mount
-                    .as_ref()
-                    .is_some_and(|mount| mount.cancel.is_cancelled())
+                || mount_cancelled
             {
                 expired.push(*peer);
                 continue;
@@ -140,8 +146,13 @@ impl SrtServer {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
 
         for peer in expired {
-            warn!(peer = %peer, "SRT: connection timed out (no keepalive)");
+            warn!(peer = %peer, "SRT: connection timed out or mount removed");
             if let Some(conn) = connections.get(&peer) {
+                if cancelled_mounts.contains(&peer) {
+                    let timestamp = conn.start_time.elapsed().as_micros() as u32;
+                    self.send_control(&shutdown_packet(conn.peer_socket_id, timestamp), peer)
+                        .await;
+                }
                 self.log_connection_stats(conn, peer, "timeout");
                 if conn.mount_registered
                     && let Some(path) = &conn.mount_path
