@@ -54,7 +54,7 @@ export async function render(params) {
       let kind = initialKind;
       let category = initialCategory;
       let page = initialPage;
-      let automatic = true;
+      let automatic = localStorage.getItem("rtflow-auto-audit") !== "off";
       let timer = null;
       const signature = (event) => `${event.ts}|${event.action}|${event.path || ""}|${event.key_id || ""}|${event.peer || ""}`;
       const filtered = () => {
@@ -104,6 +104,7 @@ export async function render(params) {
       };
       const setAuto = (enabled) => {
         automatic = enabled;
+        localStorage.setItem("rtflow-auto-audit", enabled ? "on" : "off");
         auto.textContent = enabled ? "自动刷新：开" : "自动刷新：关";
         auto.classList.toggle("active", enabled);
         if (timer) { clearInterval(timer); timer = null; }
@@ -147,7 +148,7 @@ export async function render(params) {
       root.querySelector("[data-audit-refresh]").onclick = () => refresh();
       root.querySelector("[data-audit-export]").onclick = () => exportCsv(filtered());
       paint();
-      setAuto(true);
+      setAuto(automatic);
       return () => { if (timer) clearInterval(timer); };
     },
   };

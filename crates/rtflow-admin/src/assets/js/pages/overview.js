@@ -85,7 +85,7 @@ export async function render() {
       </div>`,
     mount(root, ctx) {
       let current = data;
-      let automatic = true;
+      let automatic = localStorage.getItem("rtflow-auto-overview") !== "off";
       let timer = null;
       let samples = [];
       let metric = "frames";
@@ -166,6 +166,7 @@ export async function render() {
       };
       const setAuto = (enabled) => {
         automatic = enabled;
+        localStorage.setItem("rtflow-auto-overview", enabled ? "on" : "off");
         const button = root.querySelector("[data-overview-auto]");
         button.textContent = enabled ? "自动刷新：开" : "自动刷新：关";
         button.classList.toggle("active", enabled);
@@ -180,7 +181,7 @@ export async function render() {
         try { await navigator.clipboard.writeText(value); ctx.toast("推流地址已复制", "ok"); }
         catch (_) { ctx.toast("复制失败", "bad"); }
       });
-      setAuto(true);
+      setAuto(automatic);
       return () => { if (timer) clearInterval(timer); };
     },
   };

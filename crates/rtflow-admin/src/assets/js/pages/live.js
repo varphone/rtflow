@@ -37,6 +37,8 @@ export async function render(params) {
       const selected = new Set();
       let liveStreams = streams;
       let visible = [];
+      let automatic = localStorage.getItem("rtflow-auto-live") !== "off";
+      let timer = null;
       const syncBulk = () => {
         bulk.disabled = selected.size === 0;
         bulk.textContent = selected.size ? `断开所选 (${selected.size})` : "断开所选";
@@ -148,6 +150,7 @@ export async function render(params) {
       };
       const setAuto = (enabled) => {
         automatic = enabled;
+        localStorage.setItem("rtflow-auto-live", enabled ? "on" : "off");
         const button = root.querySelector("[data-live-auto]");
         button.textContent = enabled ? "自动刷新：开" : "自动刷新：关";
         button.classList.toggle("active", enabled);
@@ -182,7 +185,7 @@ export async function render(params) {
         }
       });
       paint();
-      setAuto(true);
+      setAuto(automatic);
       return () => { if (timer) clearInterval(timer); };
     },
   };
