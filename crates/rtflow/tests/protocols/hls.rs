@@ -765,9 +765,9 @@ async fn vod_handler_generates_playlist_and_segments_from_file() {
     assert!(init.contains("200 OK"), "{init}");
     let segment = playlist
         .lines()
-        .find(|line| line.ends_with(".m4s") && !line.contains("init"))
+        .find(|line| line.contains(".m4s") && !line.contains("init") && !line.starts_with('#'))
         .expect("segment URI");
-    let segment = get(addr, &format!("/vod/fixture/{segment}")).await;
+    let segment = get(addr, &format!("/vod/fixture/{}", segment.split('?').next().unwrap_or(segment))).await;
     assert!(segment.contains("200 OK"), "{segment}");
     let _ = std::fs::remove_dir_all(cache);
 }

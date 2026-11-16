@@ -31,7 +31,7 @@ pub struct HlsVodConfig {
 
 /// Bump when the generated fMP4 layout/codec handling changes so existing
 /// on-disk VOD caches are regenerated instead of serving stale corrupt data.
-const VOD_CACHE_VERSION: u32 = 2;
+const VOD_CACHE_VERSION: u32 = 3;
 
 /// Caches generated fMP4 files on disk and serializes generation per id.
 pub struct HlsVodManager {
@@ -267,7 +267,17 @@ fn generate(
             segment
         })
         .collect();
-    let body = playlist::write_vod_playlist(&playlist_segments);
+    // Give every regeneration a new URI token: a browser that cached an old
+    // (possibly corrupt) init/segment under the same name must fetch the new
+    // files instead of reusing them.
+    let token = format!(
+        "v={VOD_CACHE_VERSION}-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let body = playlist::write_vod_playlist_at_q(&playlist_segments, "", &token);
     std::fs::write(directory.join("index.m3u8"), body)?;
     Ok(())
 }
