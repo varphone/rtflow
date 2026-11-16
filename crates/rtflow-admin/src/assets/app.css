@@ -300,6 +300,13 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 
 .drawer-body:focus, .modal-body:focus { outline: none; }
 .audit-table { max-height: calc(100vh - 330px); }
+.traffic-panel { margin-bottom: 14px; }
+.traffic-chart { position: relative; height: 92px; margin: 0 14px 10px; border-bottom: 1px solid var(--line-soft); }
+.traffic-chart svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.traffic-line { fill: none; stroke: var(--accent-strong); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.traffic-area { fill: color-mix(in srgb, var(--accent) 18%, transparent); stroke: none; }
+.traffic-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); font-size: 11.5px; }
+.traffic-empty[hidden] { display: none; }
 .attention-item { display: flex; align-items: center; gap: 10px; justify-content: space-between; border: 1px solid var(--line-soft); border-radius: 8px; padding: 9px 10px; }
 .attention-item > div { min-width: 0; }
 .event-row { display: flex; align-items: flex-start; gap: 8px; }
