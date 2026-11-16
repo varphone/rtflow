@@ -25,6 +25,10 @@ pub struct ReceptionSnapshot {
     pub extended_highest_sequence: u32,
     pub interarrival_jitter: u32,
     pub last_rtt: Option<Duration>,
+    /// Full NTP timestamp of the last sender report.
+    pub sender_ntp: Option<u64>,
+    /// RTP timestamp corresponding to the last sender report.
+    pub sender_rtp_timestamp: Option<u32>,
 }
 
 pub struct ReceptionStats {
@@ -44,6 +48,7 @@ pub struct ReceptionStats {
     /// RTP timestamp of the first observed packet.
     first_timestamp: Option<u32>,
     last_sender_report: Option<(u32, Instant)>,
+    sender_sync: Option<(u64, u32)>,
     last_rtt: Option<Duration>,
 }
 
@@ -67,6 +72,7 @@ impl ReceptionStats {
             first_arrival_units: None,
             first_timestamp: None,
             last_sender_report: None,
+            sender_sync: None,
             last_rtt: None,
         })
     }
@@ -127,6 +133,17 @@ impl ReceptionStats {
         self.last_sender_report = Some((ntp_middle_32(ntp), received_at));
     }
 
+    /// Record the wall-clock/ RTP anchor carried by a sender report.
+    pub fn observe_sender_report_sync(
+        &mut self,
+        ntp: u64,
+        rtp_timestamp: u32,
+        received_at: Instant,
+    ) {
+        self.observe_sender_report(ntp, received_at);
+        self.sender_sync = Some((ntp, rtp_timestamp));
+    }
+
     pub fn set_last_rtt(&mut self, value: Duration) {
         self.last_rtt = Some(value);
     }
@@ -140,6 +157,8 @@ impl ReceptionStats {
             extended_highest_sequence: self.extended_highest_sequence(),
             interarrival_jitter: self.jitter.round().clamp(0.0, u32::MAX as f64) as u32,
             last_rtt: self.last_rtt,
+            sender_ntp: self.sender_sync.map(|value| value.0),
+            sender_rtp_timestamp: self.sender_sync.map(|value| value.1),
         }
     }
 
@@ -362,11 +381,20 @@ impl RtcpSession {
             self.collision = true;
         }
         match packet {
-            Packet::SenderReport { ntp, .. } => {
-                self.reception.observe_sender_report(*ntp, received_at);
+            Packet::SenderReport {
+                ntp, rtp_timestamp, ..
+            } => {
+                self.reception
+                    .observe_sender_report_sync(*ntp, *rtp_timestamp, received_at);
             }
-            Packet::SenderReportWithReports { ntp, reports, .. } => {
-                self.reception.observe_sender_report(*ntp, received_at);
+            Packet::SenderReportWithReports {
+                ntp,
+                rtp_timestamp,
+                reports,
+                ..
+            } => {
+                self.reception
+                    .observe_sender_report_sync(*ntp, *rtp_timestamp, received_at);
                 if let Some(rtt) = reports
                     .iter()
                     .find_map(|report| self.rtt.observe_report(report, received_at))

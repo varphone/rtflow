@@ -31,7 +31,9 @@
 - [x] 媒体空闲看门狗可配置（`media_idle_timeout`），去掉逐帧 timeout。
 - [x] `RtspClient::connect_with_description` 快速重连（失败自动回退 DESCRIBE）。
 - [x] 周期性描述刷新（无订阅者时更新 mount 描述）。
-- [ ] RTCP SR NTP↔RTP 映射、RTP 时间戳回绕扩展、重连 A/V 同步。
+- [x] RTCP SR NTP↔RTP 映射，统一多轨 A/V 起点（首次 SR 后重定基准）。
+- [x] RTP 时间戳回绕扩展（depacketizer）。
+- [ ] 重连后 A/V 相对偏移的长期漂移校准。
 - [x] RTSPS/SRTP/跨源 REDIRECT 代理端到端测试（multicast/461 待补）。
 
 ## M4 — 安全与边界

@@ -104,8 +104,14 @@ rtflow_proxy_failovers_total
 | `streaming` 但 HLS 黑屏 | 上游关键帧间隔、`idle_grace` 过短、下游鉴权 |
 | 首帧慢 | 上游 GOP、`description_refresh`、上游 RTSP 握手耗时 |
 
+## A/V 时间轴
+
+代理会周期性读取上游 RTCP Sender Report 的 `(NTP, RTP timestamp)`，把各轨映射到同一
+壁钟基准，统一多轨起点；首次收到 SR 时会重定一次时间轴基准。RTP 时间戳回绕由
+depacketizer 扩展处理。
+
 ## 已知限制
 
-- RTCP SR 的 NTP↔RTP 映射尚未用于多轨 A/V 起点校准；依赖上游 RTP-Info 对齐。
+- 重连后的长期时钟漂移尚未做渐进校准（SR 映射在每次连接内生效）。
 - 透明 RTSP 控制面代理、RTSP-over-HTTP、RTSP 2.0 不在范围内。
 - 代理只处理 RTSP/RTSPS 上游；RTMP/SRT 回源使用各自 `[[rtmp.pull]]`/`[[srt.pull]]`。

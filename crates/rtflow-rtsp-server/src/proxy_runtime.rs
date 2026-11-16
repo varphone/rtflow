@@ -15,6 +15,7 @@ use rtflow_runtime::{TaskSpec, TaskSupervisor};
 /// grace, so a SETUP-phase warmup survives until the session issues PLAY.
 const PROXY_WARMUP_HOLDOFF: std::time::Duration = std::time::Duration::from_secs(2);
 use std::{
+    collections::HashMap,
     sync::{Arc, atomic::Ordering},
     time::{Duration, Instant},
 };
@@ -294,6 +295,9 @@ async fn run_proxy(
                     let mut idle_watchdog = tokio::time::interval(Duration::from_secs(1));
                     idle_watchdog.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                     let mut last_frame = Instant::now();
+                    let mut last_sync = Instant::now();
+                    let mut sync_anchors: SyncAnchors = HashMap::new();
+                    let mut sync_epoch: Option<i128> = None;
                     loop {
                         tokio::select! {
                             _ = server_cancel.cancelled() => {
@@ -342,6 +346,38 @@ async fn run_proxy(
                             frame = session.next() => match frame {
                                 Some(Ok(mut frame)) => {
                                     last_frame = Instant::now();
+                                    if last_sync.elapsed() >= Duration::from_secs(1) {
+                                        let snapshot = session.quality_snapshot().await;
+                                        (sync_anchors, sync_epoch) = sender_sync_anchors(
+                                            &snapshot,
+                                            &expected_description,
+                                        );
+                                        last_sync = Instant::now();
+                                    }
+                                    if let (Some(anchor), Some(epoch)) =
+                                        (sync_anchors.get(&frame.track_id), sync_epoch)
+                                    {
+                                        let (_, _, clock) = *anchor;
+                                        if let Some(pts) = synced_pts(
+                                            *anchor,
+                                            epoch,
+                                            frame.rtp_timestamp,
+                                        ) {
+                                            let dts_delta = frame
+                                                .dts
+                                                .map(|dts| dts.saturating_sub(frame.pts));
+                                            frame.pts = pts;
+                                            frame.dts =
+                                                Some(frame.pts + dts_delta.unwrap_or_default());
+                                            frame.rtp_timestamp = (i128::try_from(
+                                                pts.as_micros(),
+                                            )
+                                            .unwrap_or(0)
+                                                * i128::from(clock)
+                                                / 1_000_000)
+                                                as u32;
+                                        }
+                                    }
                                     if timeline.normalize(&mut frame).is_err() {
                                         mount.stats.add_dropped(1);
                                         break;
@@ -414,5 +450,115 @@ async fn run_proxy(
             }
             _ = tokio::time::sleep(delay) => {}
         }
+    }
+}
+
+fn synced_pts(anchor: (i128, u32, u32), epoch: i128, rtp_timestamp: u32) -> Option<Duration> {
+    let (ntp_us, rtp, clock) = anchor;
+    if clock == 0 {
+        return None;
+    }
+    let delta = rtp_timestamp.wrapping_sub(rtp) as i32 as i128;
+    let wall = ntp_us + delta * 1_000_000 / i128::from(clock);
+    let relative = wall - epoch;
+    (relative >= 0).then(|| Duration::from_micros(relative as u64))
+}
+
+type SyncAnchors = HashMap<u8, (i128, u32, u32)>;
+
+/// Sender-report anchors and the common wall-clock epoch (earliest RTP-0
+/// instant) used to map every track onto one absolute timeline.
+fn sender_sync_anchors(
+    quality: &rtflow_rtsp_client::ClientQualitySnapshot,
+    description: &rtflow_media::MediaDescription,
+) -> (SyncAnchors, Option<i128>) {
+    let mut anchors = HashMap::new();
+    let mut epoch: Option<i128> = None;
+    for (track_id, snapshot) in &quality.tracks {
+        let (Some(ntp), Some(rtp)) = (snapshot.sender_ntp, snapshot.sender_rtp_timestamp) else {
+            continue;
+        };
+        let Some(track) = description
+            .tracks
+            .iter()
+            .find(|track| track.id == *track_id)
+        else {
+            continue;
+        };
+        if track.clock_rate == 0 {
+            continue;
+        }
+        let ntp_us = i128::from(ntp >> 32) * 1_000_000
+            + i128::from(ntp & 0xFFFF_FFFF) * 1_000_000 / (1i128 << 32);
+        let wall_zero = ntp_us - i128::from(rtp) * 1_000_000 / i128::from(track.clock_rate);
+        anchors.insert(*track_id, (ntp_us, rtp, track.clock_rate));
+        epoch = Some(epoch.map_or(wall_zero, |current| current.min(wall_zero)));
+    }
+    (anchors, epoch)
+}
+
+#[cfg(test)]
+mod sync_tests {
+    use super::*;
+    use rtflow_media::{Codec, MediaDescription, MediaKind, TrackDescription};
+    use rtflow_rtcp::ReceptionSnapshot;
+    use rtflow_rtsp_client::ClientQualitySnapshot;
+
+    fn snapshot(ntp: u64, rtp: u32) -> ReceptionSnapshot {
+        ReceptionSnapshot {
+            packets_received: 0,
+            packets_expected: 0,
+            packets_lost: 0,
+            extended_highest_sequence: 0,
+            interarrival_jitter: 0,
+            last_rtt: None,
+            sender_ntp: Some(ntp),
+            sender_rtp_timestamp: Some(rtp),
+        }
+    }
+
+    fn track(id: u8, codec: Codec, rate: u32) -> TrackDescription {
+        TrackDescription {
+            id,
+            kind: if codec == Codec::H264 {
+                MediaKind::Video
+            } else {
+                MediaKind::Audio
+            },
+            codec,
+            clock_rate: rate,
+            channels: None,
+            payload_type: 96 + id,
+            fmtp: None,
+            control: format!("trackID={id}").into(),
+            crypto: None,
+            width: None,
+            height: None,
+            frame_rate: None,
+            direction: None,
+            ptime: None,
+            rtcp: None,
+            bandwidth_as: None,
+            rtx: None,
+        }
+    }
+
+    #[test]
+    fn sender_reports_align_same_wall_instant() {
+        let description = MediaDescription {
+            session_name: "sync".into(),
+            tracks: vec![track(0, Codec::H264, 90_000), track(1, Codec::Pcma, 48_000)],
+            connection: None,
+        };
+        let mut tracks = std::collections::BTreeMap::new();
+        tracks.insert(0, snapshot(1_000_000_000, 90_000));
+        tracks.insert(1, snapshot(1_000_000_000, 48_000));
+        let mut quality = ClientQualitySnapshot::default();
+        quality.tracks = tracks;
+        let (anchors, epoch) = sender_sync_anchors(&quality, &description);
+        let epoch = epoch.expect("epoch");
+        let video = synced_pts(anchors[&0], epoch, 180_000).unwrap();
+        let audio = synced_pts(anchors[&1], epoch, 96_000).unwrap();
+        assert_eq!(video, audio);
     }
 }
