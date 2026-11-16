@@ -1,6 +1,7 @@
 import { api } from "../api.js";
 import { dateTime, empty, esc, iconSvg } from "../format.js";
 
+const PAGE_SIZE = 25;
 const labels = {
   "path.create": "创建路径", "path.update": "更新路径", "path.delete": "删除路径", "path.kick": "断开路径",
   "key.issue": "签发密钥", "key.revoke": "吊销密钥",
@@ -22,40 +23,79 @@ export async function render() {
   return {
     title: "审计日志",
     subtitle: "谁在何时改了什么；配置变更、流控制与认证拒绝。",
-    actions: `<button class="btn small" data-audit-refresh>刷新</button>`,
+    actions: `<button class="btn small ghost" data-audit-auto>自动刷新：开</button><button class="btn small" data-audit-refresh>刷新</button>`,
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" data-audit-search placeholder="搜索动作、路径、操作者或详情"></div>
       <div class="seg"><button data-audit-kind="all" class="active">全部</button><button data-audit-kind="change">变更</button><button data-audit-kind="auth">认证</button></div>
       <span class="meta" data-audit-count>${events.length} 条</span></div>
       ${payload.enabled === false ? `<div class="error-banner">审计日志未启用：在服务配置中设置审计路径后重启。</div>` : ""}
-      <section class="panel"><div class="table-wrap"><table class="data"><thead><tr><th>时间</th><th>动作</th><th>结果</th><th>对象</th><th>操作者</th><th>详情</th></tr></thead><tbody data-audit-rows>${rows(events)}</tbody></table></div></section>`,
+      <section class="panel"><div class="table-wrap audit-table"><table class="data"><thead><tr><th>时间</th><th>动作</th><th>结果</th><th>对象</th><th>操作者</th><th>详情</th></tr></thead><tbody data-audit-rows></tbody></table></div>
+        <div class="pager"><span class="meta" data-audit-range></span><div class="pager-buttons"><button class="btn small ghost" data-audit-prev>上一页</button><span class="meta" data-audit-page></span><button class="btn small ghost" data-audit-next>下一页</button></div></div>
+      </section>`,
     mount(root, ctx) {
       const search = root.querySelector("[data-audit-search]");
       const tbody = root.querySelector("[data-audit-rows]");
       const count = root.querySelector("[data-audit-count]");
+      const range = root.querySelector("[data-audit-range]");
+      const pageLabel = root.querySelector("[data-audit-page]");
+      const prev = root.querySelector("[data-audit-prev]");
+      const next = root.querySelector("[data-audit-next]");
+      const auto = root.querySelector("[data-audit-auto]");
+      let current = events;
       let kind = "all";
-      const paint = () => {
+      let page = 1;
+      let automatic = true;
+      let timer = null;
+      const filtered = () => {
         const q = search.value.trim().toLowerCase();
-        const filtered = events.filter((event) => {
+        return current.filter((event) => {
           if (kind === "auth" && !String(event.action).startsWith("auth.")) return false;
           if (kind === "change" && String(event.action).startsWith("auth.")) return false;
           return !q || `${event.action} ${event.path || ""} ${event.user || ""} ${event.detail || ""} ${event.peer || ""}`.toLowerCase().includes(q);
         });
-        count.textContent = `${filtered.length} 条`;
-        tbody.innerHTML = filtered.length ? rows(filtered) : `<tr><td colspan="6">${empty("没有匹配的审计事件", "调整搜索条件或等待新的操作")}</td></tr>`;
       };
-      search.oninput = paint;
+      const paint = () => {
+        const items = filtered();
+        const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+        page = Math.min(Math.max(1, page), pages);
+        const start = (page - 1) * PAGE_SIZE;
+        const slice = items.slice(start, start + PAGE_SIZE);
+        count.textContent = `${items.length} 条`;
+        range.textContent = items.length ? `${start + 1}–${start + slice.length} / ${items.length}` : "0 条";
+        pageLabel.textContent = `${page} / ${pages}`;
+        prev.disabled = page <= 1;
+        next.disabled = page >= pages;
+        tbody.innerHTML = slice.length ? rows(slice) : `<tr><td colspan="6">${empty("没有匹配的审计事件", "调整搜索条件或等待新的操作")}</td></tr>`;
+      };
+      const refresh = async () => {
+        try { current = (await api("/audit?limit=300")).events || []; } catch (_) { return; }
+        paint();
+      };
+      const setAuto = (enabled) => {
+        automatic = enabled;
+        auto.textContent = enabled ? "自动刷新：开" : "自动刷新：关";
+        auto.classList.toggle("active", enabled);
+        if (timer) { clearInterval(timer); timer = null; }
+        if (enabled) timer = setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+      };
+      search.oninput = () => { page = 1; paint(); };
       root.querySelectorAll("[data-audit-kind]").forEach((button) => button.onclick = () => {
         kind = button.dataset.auditKind;
+        page = 1;
         root.querySelectorAll("[data-audit-kind]").forEach((item) => item.classList.toggle("active", item === button));
         paint();
       });
-      root.querySelector("[data-audit-refresh]").onclick = () => ctx.reload();
+      prev.onclick = () => { page -= 1; paint(); };
+      next.onclick = () => { page += 1; paint(); };
+      auto.onclick = () => setAuto(!automatic);
+      root.querySelector("[data-audit-refresh]").onclick = () => refresh();
+      paint();
+      setAuto(true);
+      return () => { if (timer) clearInterval(timer); };
     },
   };
 }
 
 function rows(events) {
-  if (!events.length) return `<tr><td colspan="6">${empty("暂无审计事件", "配置变更与认证决定会记录在这里")}</td></tr>`;
   return events.map((event) => `<tr>
     <td class="mono cell-sub">${esc(dateTime(event.ts))}</td>
     <td><div class="cell-main">${esc(labels[event.action] || event.action)}</div><div class="cell-sub mono">${esc(event.action)}</div></td>
