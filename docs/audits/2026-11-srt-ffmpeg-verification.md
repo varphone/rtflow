@@ -80,6 +80,18 @@ ffmpeg ... -f mpegts 'srt://127.0.0.1:19101?streamid=live/enc&passphrase=secretp
 ffmpeg -i http://127.0.0.1:18100/hls/live/plain/index.m3u8 -t 3 -f null -
 ```
 
+### 修复后的回归
+
+| 场景 | 结果 |
+| --- | --- |
+| SRT 直播 HLS（48kHz 单声道） | 解码 0 条 non-monotonic；ffprobe 48000Hz/1ch |
+| SRT 录制 → VOD | duration 10.44s（12s 推流、从关键帧起录）；VOD 解码退出 0，avcC 45 字节 |
+| RTMP 录制 → VOD | VOD 解码退出 0，无 start code/invalid data |
+| 纯音频 RTMP 录制 → VOD | 录制正常（不等视频关键帧），VOD 解码退出 0 |
+
+观察：RTMP 录像的 VOD 时长仍偏大（10s 素材约 14.5s），与仓库中已知的 RTMP
+时间戳膨胀（1.5–1.8×）一致，不属于本次 SRT 修复范围。
+
 ## 自动化测试
 
 ```text
