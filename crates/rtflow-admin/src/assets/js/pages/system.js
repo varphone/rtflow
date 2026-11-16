@@ -18,7 +18,9 @@ export async function render() {
           <section class="panel"><div class="panel-head"><h2>运行</h2></div><div class="panel-body"><dl class="kv">
             <dt>版本</dt><dd class="mono">${esc(system.version || "—")}</dd><dt>运行时长</dt><dd>${esc(uptime(system.uptime_seconds))}</dd>
             <dt>在线流</dt><dd class="mono">${Number(system.mounts || 0)}</dd><dt>控制台路径</dt><dd class="mono">${esc(system.base_path || "/admin")}</dd>
-            <dt>HLS 前缀</dt><dd class="mono">${esc(system.hls_prefix || "/hls")}</dd></dl></div></section>
+            <dt>HLS 前缀</dt><dd class="mono">${esc(system.hls_prefix || "/hls")}</dd>
+            <dt>RTSP 基地址</dt><dd class="mono">${esc(system.rtsp_base || "—")}</dd>
+            <dt>RTMP 基地址</dt><dd class="mono">${esc(system.rtmp_base || "—")}</dd></dl></div></section>
           <section class="panel"><div class="panel-head"><h2>存储</h2></div><div class="panel-body"><dl class="kv">
             <dt>Schema</dt><dd class="mono">v${Number(storage.schema_version || 0)}</dd><dt>数据库大小</dt><dd class="mono">${bytes(storage.bytes)}</dd>
             <dt>备份</dt><dd class="mono">rtflow-server --db-backup FILE</dd></dl>
