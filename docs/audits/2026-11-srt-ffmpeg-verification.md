@@ -39,10 +39,29 @@
    - `auth.token_secrets` 少于 32 字节时启动报 `resource limit exceeded: Digest nonce secret`；
    - 配置校验改为明确错误：`auth.token_secrets entries must be at least 32 bytes (got N)`。
 
-## 未修复的观察项（非 SRT）
+## 后续排查与修复（同日）
 
-- HLS 直播解码时 ffmpeg 偶发 “Application provided invalid, non monotonically increasing dts”，出现在 AAC 流；未确认是否既有 HLS 封装问题。
-- 录制生成的 VOD 条目 `duration_seconds` 显示 0.6s，而其 playlist 实际约 15s、ffprobe 14.96s；疑似 VOD 目录元数据问题，与 SRT 无关。
+### HLS 直播 AAC DTS 非单调
+
+- 根因：SRT 的 MPEG-TS demux 把一个音频 PES（含约 9 个 ADTS 帧）当成一个 AccessUnit，
+  HLS 适配层却按 1024 ticks 的单个 AAC 样本处理，时间轴被压缩，段边界出现
+  `10240 >= 1920` 之类回跳。
+- 修复：`ts_demux` 按 ADTS 头拆分帧、去掉 ADTS 头、逐帧递增 PTS，并从 ADTS 解析
+  采样率/声道（此前固定 44100/2，源为 48kHz 时 init 里的 esds 错误）。
+- 同时修正首个音频 PES 早于视频 PES 时 33 位时间戳按有符号差值处理（此前被取模成
+  95443s）。
+- 复测：直播 HLS 解码 0 条 non-monotonic 警告，ffprobe 显示 48000Hz/1ch（源为单声道）。
+
+### VOD duration 与首段不可解码
+
+- `VOD duration_seconds` 只在目录首次出现时写入，录制结束不再刷新 → 一直是首次扫描的
+  0.6s。改为按“目录 + 段数 + 时长”变化刷新条目，最终显示 11.44s，与 playlist 一致。
+- 录制从 mount 中途开始，首帧是 P 帧且无 SPS/PPS；VOD 的 fMP4 init 在首个关键帧切段前
+  生成，avcC 为空，整个 VOD 无法解码。修复：
+  - 录制等待首个视频关键帧再开始；
+  - HLS segmenter 在切段前先提取关键帧的 SPS/PPS/参数集，避免 init 使用空配置。
+- 复测：VOD `ffmpeg -i ... -f null -` 退出 0，无 “No start code / Invalid data”，
+  avcC 长度 45；直播 HLS 仍正常。
 
 ## 复现方式
 

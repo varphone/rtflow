@@ -23,7 +23,7 @@ pub struct VodCatalog {
     manager: Arc<HlsVodManager>,
     root: PathBuf,
     max_sample_size: usize,
-    known: RwLock<HashMap<String, PathBuf>>,
+    known: RwLock<HashMap<String, (PathBuf, usize, Duration)>>,
 }
 
 impl VodCatalog {
@@ -48,7 +48,7 @@ impl VodCatalog {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(id)
-            .cloned()?;
+            .map(|(directory, _, _)| directory.clone())?;
         let relative = directory.strip_prefix(&self.root).ok()?;
         let parts: Vec<String> = relative
             .parent()?
@@ -92,20 +92,29 @@ impl VodCatalog {
             let Ok(source) = source else {
                 continue;
             };
+            let duration = catalog.duration();
             let entry = HlsVodEntry {
                 id: id.clone(),
                 title: relative_title(&self.root, &directory),
-                duration: Some(catalog.duration()),
+                duration: Some(duration),
                 source: Arc::new(source),
             };
-            let previous = self
+            // Keep the entry's duration and playlist current while the
+            // recording is still being written: a rename-only comparison
+            // leaves the first (short) snapshot in the catalog forever.
+            let state = (directory.clone(), catalog.segments.len(), duration);
+            let changed = self
                 .known
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .get(&id)
-                .cloned();
-            if previous.as_deref() != Some(directory.as_path()) {
+                .is_none_or(|previous| previous != &state);
+            if changed {
                 self.manager.upsert_entry(entry);
+                self.known
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(id.clone(), state);
             }
             found.insert(id, directory);
         }
@@ -123,14 +132,12 @@ impl VodCatalog {
         for id in stale {
             self.manager.remove_entry(&id);
         }
-        *self
+        let mut known = self
             .known
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = found;
-        self.known
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .len()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        known.retain(|id, _| found.contains_key(id));
+        known.len()
     }
 
     pub fn remove(&self, id: &str) -> bool {

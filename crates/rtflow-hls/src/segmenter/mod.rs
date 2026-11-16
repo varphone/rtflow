@@ -274,6 +274,14 @@ impl Segmenter {
         if unit.is_keyframe && matches!(unit.codec, Codec::H264 | Codec::H265) {
             tracing::debug!(?pts, ?self.current_segment_pts, "HLS video random-access point");
         }
+        // Learn the codec configuration *before* a possible cut: the first
+        // keyframe of a recording that started mid-GOP both carries the
+        // SPS/PPS and triggers finalization of the previous segment. Building
+        // the init segment first would cache an empty avcC/hvcC.
+        if self.tracks[track_index].codec_config.is_none() {
+            self.tracks[track_index].codec_config =
+                codec_config_from_annex_b(unit.codec, &unit.data);
+        }
         if starts_new_segment {
             self.finalize_segment(pts);
         }
@@ -287,9 +295,6 @@ impl Segmenter {
 
         let track = &mut self.tracks[track_index];
         track.last_pts = Some(pts);
-        if track.codec_config.is_none() {
-            track.codec_config = codec_config_from_annex_b(unit.codec, &unit.data);
-        }
         let dts = unit.dts.unwrap_or(pts);
         let sample_duration = track
             .last_dts

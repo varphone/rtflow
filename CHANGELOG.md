@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- SRT MPEG-TS demux 按 ADTS 拆分音频帧、剥离 ADTS 头并从 ADTS 解析采样率/声道，
+  修复 HLS 直播 AAC DTS 非单调与 48kHz 源被标成 44.1kHz。
+- 录制从首个视频关键帧开始，HLS segmenter 在切段前提取 SPS/PPS，修复中途开始录制
+  时 VOD init 的 avcC 为空、首段无法解码。
+- VOD 目录在录制过程中持续刷新 `duration_seconds`，不再停留在首次扫描的短时长。
+
 ### Changed
 
 - 仓库重构为 Cargo workspace 多 crate 布局：根 `Cargo.toml` 只保留 workspace

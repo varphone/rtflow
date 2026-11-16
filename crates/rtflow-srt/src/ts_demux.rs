@@ -4,6 +4,7 @@
 //! AccessUnits suitable for pushing to a mount.
 use bytes::BytesMut;
 use std::collections::HashMap;
+use std::time::Duration;
 
 use rtflow_media::{AccessUnit, Codec, MediaDescription, MediaKind, TrackDescription};
 
@@ -41,6 +42,9 @@ struct TrackInfo {
     channels: Option<u8>,
     last_pts: Option<u64>,
     last_dts: Option<u64>,
+    /// Codec parameters are known (AAC learns sample rate/channels from its
+    /// first ADTS frame, which may arrive after the video keyframe).
+    configured: bool,
 }
 
 impl TsStreamDemuxer {
@@ -69,7 +73,7 @@ impl TsStreamDemuxer {
 
     /// Get the media description based on discovered tracks.
     pub fn description(&self) -> Option<MediaDescription> {
-        if self.tracks.is_empty() {
+        if self.tracks.is_empty() || self.tracks.values().any(|track| !track.configured) {
             return None;
         }
 
@@ -252,6 +256,7 @@ impl TsStreamDemuxer {
                         channels,
                         last_pts: None,
                         last_dts: None,
+                        configured: !matches!(codec, Codec::Aac),
                     },
                 );
             }
@@ -324,12 +329,55 @@ impl TsStreamDemuxer {
         }
         let origin = self.origin_pts.unwrap();
 
-        let normalized_dts = (dts_ticks + PTS_MODULUS - origin) % PTS_MODULUS;
-        let normalized_pts = (pts_ticks + PTS_MODULUS - origin) % PTS_MODULUS;
+        // Relative to the first PES timestamp, but interpret the 33-bit
+        // difference as signed: the first audio PES can legitimately precede
+        // the first video PES (audio is interleaved slightly ahead). A plain
+        // modular subtraction turns that into a timestamp near 2^33
+        // (≈95443 s), which wrecks downstream segmenters; clamp "before the
+        // origin" to zero instead.
+        let normalized_dts = relative_ticks(dts_ticks, origin);
+        let normalized_pts = relative_ticks(pts_ticks, origin);
 
         let dts_duration = rtflow_media::clock::ticks_to_duration(normalized_dts, 90_000);
         let pts_duration = rtflow_media::clock::ticks_to_duration(normalized_pts, 90_000);
 
+        // AAC PES packets usually carry several ADTS frames; HLS/fMP4 and the
+        // recording writer expect one raw AAC frame per AccessUnit. Emitting
+        // the whole PES as one sample compresses ~9 frames into one 1024-tick
+        // sample and breaks the audio timeline (non-monotonic DTS at segment
+        // boundaries, audible gaps).
+        if track.codec == Codec::Aac
+            && let Some(frames) = split_adts(payload)
+        {
+            let (sample_rate, channels) = (frames.0, frames.1);
+            if track.clock_rate != sample_rate {
+                track.clock_rate = sample_rate;
+                track.channels = Some(channels as u8);
+            }
+            track.configured = true;
+            let mut last_pts = normalized_pts;
+            for (index, raw) in frames.2.into_iter().enumerate() {
+                let offset =
+                    Duration::from_secs_f64(1024.0 * index as f64 / f64::from(sample_rate));
+                let frame_pts = pts_duration + offset;
+                let frame_dts = dts_duration + offset;
+                last_pts = last_pts.saturating_add(1024);
+                self.output.push(AccessUnit {
+                    track_id: track.track_id,
+                    codec: track.codec,
+                    pts: frame_pts,
+                    dts: Some(frame_dts),
+                    rtp_timestamp: (normalized_dts % (u32::MAX as u64)) as u32,
+                    is_keyframe: true,
+                    data: bytes::Bytes::copy_from_slice(raw),
+                });
+            }
+            track.last_pts = Some(last_pts);
+            track.last_dts = Some(last_pts);
+            return;
+        }
+
+        track.configured = true;
         track.last_pts = Some(normalized_pts);
         track.last_dts = Some(normalized_dts);
 
@@ -360,6 +408,66 @@ impl Default for TsStreamDemuxer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Parse ADTS AAC frames from a PES payload.
+///
+/// Returns `(sample_rate, channels, raw_frames)` where each frame has its
+/// ADTS header removed. `None` when no valid ADTS sync word is present.
+fn split_adts(payload: &[u8]) -> Option<(u32, u16, Vec<&[u8]>)> {
+    const SAMPLE_RATES: [u32; 13] = [
+        96_000, 88_200, 64_000, 48_000, 44_100, 32_000, 24_000, 22_050, 16_000, 12_000, 11_025,
+        8_000, 7_350,
+    ];
+    let mut frames = Vec::new();
+    let mut offset = 0;
+    let mut sample_rate = 0;
+    let mut channels = 0;
+    while offset + 7 <= payload.len() {
+        if payload[offset] != 0xFF || payload[offset + 1] & 0xF0 != 0xF0 {
+            break;
+        }
+        let protection_absent = payload[offset + 1] & 0x01;
+        let header_len = if protection_absent == 1 { 7 } else { 9 };
+        if offset + header_len > payload.len() {
+            break;
+        }
+        let profile = (payload[offset + 2] >> 6) & 0x03;
+        let rate_index = ((payload[offset + 2] >> 2) & 0x0F) as usize;
+        let channel_config = ((payload[offset + 2] & 0x01) << 2) | (payload[offset + 3] >> 6);
+        let frame_len = ((usize::from(payload[offset + 3] & 0x03)) << 11)
+            | (usize::from(payload[offset + 4]) << 3)
+            | (usize::from(payload[offset + 5]) >> 5);
+        if rate_index >= SAMPLE_RATES.len()
+            || frame_len < header_len
+            || offset + frame_len > payload.len()
+        {
+            break;
+        }
+        if sample_rate == 0 {
+            sample_rate = SAMPLE_RATES[rate_index];
+            channels = u32::from(channel_config);
+        }
+        // Only AAC-LC (profile 1 in ADTS's 2-bit field) is supported by the
+        // downstream fMP4/TS muxers here, matching the HLS pipeline.
+        if profile == 1 {
+            frames.push(&payload[offset + header_len..offset + frame_len]);
+        }
+        offset += frame_len;
+    }
+    if frames.is_empty() || sample_rate == 0 {
+        return None;
+    }
+    Some((sample_rate, channels.max(1) as u16, frames))
+}
+
+fn relative_ticks(ticks: u64, origin: u64) -> u64 {
+    const HALF: u64 = PTS_MODULUS / 2;
+    let delta = (ticks + PTS_MODULUS - origin) % PTS_MODULUS;
+    // A delta in the upper half is a (small) negative offset: the PES
+    // precedes the origin. Clamp it to zero; the alternative is a timestamp
+    // almost one full 33-bit wrap in the future.
+    if delta > HALF { 0 } else { delta }
 }
 
 fn parse_timestamp(data: &[u8]) -> u64 {
@@ -448,6 +556,47 @@ mod tests {
         let data = [0x21, 0x00, 0x05, 0xBF, 0x21];
         let ts = parse_timestamp(&data);
         assert_eq!(ts, 90000);
+    }
+
+    #[test]
+    fn aac_pes_is_split_into_raw_frames() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/h264-aac.ts");
+        let data = std::fs::read(path).expect("fixture");
+        let mut demuxer = TsStreamDemuxer::new();
+        for chunk in data.chunks(188) {
+            demuxer.push(chunk);
+        }
+        let units = demuxer.take_units();
+        let audio: Vec<_> = units
+            .iter()
+            .filter(|unit| unit.codec == Codec::Aac)
+            .collect();
+        assert!(
+            audio.len() >= 8,
+            "expected split AAC frames, got {}",
+            audio.len()
+        );
+        for unit in &audio {
+            assert_ne!(unit.data[0], 0xFF, "ADTS header must be stripped");
+        }
+        for pair in audio.windows(2) {
+            assert!(pair[1].pts > pair[0].pts, "AAC timestamps must advance");
+        }
+        let description = demuxer.description().expect("description");
+        let track = description
+            .tracks
+            .iter()
+            .find(|track| track.codec == Codec::Aac)
+            .expect("audio track");
+        assert_eq!(track.clock_rate, 48_000);
+    }
+
+    #[test]
+    fn timestamps_before_origin_are_clamped() {
+        assert_eq!(relative_ticks(126_000, 127_920), 0);
+        assert_eq!(relative_ticks(127_920, 127_920), 0);
+        assert_eq!(relative_ticks(129_840, 127_920), 1_920);
     }
 
     #[test]

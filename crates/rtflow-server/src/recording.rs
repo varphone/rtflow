@@ -258,6 +258,10 @@ impl RecordingSupervisor {
         if description.tracks.is_empty() {
             return Err("mount has no tracks".into());
         }
+        let has_video = description
+            .tracks
+            .iter()
+            .any(|track| track.kind == rtflow::media::MediaKind::Video);
         let started_at = unix_now();
         let directory = recording_directory(&self.policy(), path, unix_millis());
         let recording_config = RecordingConfig {
@@ -278,7 +282,22 @@ impl RecordingSupervisor {
         let feed_cancel = cancel.clone();
         let feed_path = path.to_owned();
         let feed = tokio::spawn(async move {
+            // A recording that starts mid-GOP begins with P-frames and no
+            // SPS/PPS: its first VOD segment is undecodable and the fMP4 init
+            // has an empty avcC. Wait for the next video keyframe instead.
+            let mut started = !has_video;
             for unit in startup {
+                if !started {
+                    if !unit.is_keyframe
+                        || !matches!(
+                            unit.codec,
+                            rtflow::media::Codec::H264 | rtflow::media::Codec::H265
+                        )
+                    {
+                        continue;
+                    }
+                    started = true;
+                }
                 if sink.try_record((*unit).clone()) != rtflow::storage::RecordOutcome::Accepted {
                     tracing::debug!(path = %feed_path, "recording startup frame dropped");
                 }
@@ -289,6 +308,12 @@ impl RecordingSupervisor {
                     _ = feed_cancel.cancelled() => break,
                     result = receiver.recv() => match result {
                         Ok(unit) => {
+                            if !started {
+                                if !unit.is_keyframe || !matches!(unit.codec, rtflow::media::Codec::H264 | rtflow::media::Codec::H265) {
+                                    continue;
+                                }
+                                started = true;
+                            }
                             if sink.try_record((*unit).clone()) == rtflow::storage::RecordOutcome::QueueFull {
                                 tracing::warn!(path = %feed_path, "recording queue full; dropped frame");
                             }
