@@ -131,8 +131,11 @@ async fn run_proxy(
         finish_proxy(&mount, &upstream, ProxyState::Stopped);
         return Ok(());
     };
-    let Ok(mut timeline) = TimelineNormalizer::new(&expected_description, upstream.continuity)
-    else {
+    let mut continuity = upstream.continuity;
+    // PTS continuity across reconnects is handled below with one global shift
+    // so Sender-Report track offsets survive the new epoch.
+    continuity.preserve_presentation_time = false;
+    let Ok(mut timeline) = TimelineNormalizer::new(&expected_description, continuity) else {
         finish_proxy(&mount, &upstream, ProxyState::Stopped);
         return Ok(());
     };
@@ -141,6 +144,7 @@ async fn run_proxy(
     let selector = PolicySelector {
         strategy: upstream.failover.strategy,
     };
+    let mut last_output_pts: HashMap<u8, Duration> = HashMap::new();
     // TODO(client-roadmap M3): this hand-rolled backoff/failover duplicates
     // `RtspClient::connect_reconnecting`; once the client emits connect/
     // backoff events, evaluate converging on the shared reconnect API.
@@ -298,6 +302,7 @@ async fn run_proxy(
                     let mut last_sync = Instant::now();
                     let mut sync_anchors: SyncAnchors = HashMap::new();
                     let mut sync_epoch: Option<i128> = None;
+                    let mut epoch_shift: Option<i128> = None;
                     loop {
                         tokio::select! {
                             _ = server_cancel.cancelled() => {
@@ -378,10 +383,31 @@ async fn run_proxy(
                                                 as u32;
                                         }
                                     }
+                                    let shift = *epoch_shift.get_or_insert_with(|| {
+                                        let base = last_output_pts
+                                            .values()
+                                            .max()
+                                            .copied()
+                                            .unwrap_or(Duration::ZERO);
+                                        let desired = if last_output_pts.is_empty() {
+                                            frame.pts
+                                        } else {
+                                            base + Duration::from_millis(1)
+                                        };
+                                        i128::try_from(desired.as_micros()).unwrap_or(i128::MAX)
+                                            - i128::try_from(frame.pts.as_micros()).unwrap_or(i128::MAX)
+                                    });
+                                    if shift != 0 {
+                                        frame.pts = shift_duration(frame.pts, shift);
+                                        if let Some(dts) = frame.dts {
+                                            frame.dts = Some(shift_duration(dts, shift));
+                                        }
+                                    }
                                     if timeline.normalize(&mut frame).is_err() {
                                         mount.stats.add_dropped(1);
                                         break;
                                     }
+                                    last_output_pts.insert(frame.track_id, frame.pts);
                                     if mount.publish_cached(frame).is_ok() {
                                         mount.stats.add_accepted(1);
                                     } else {
@@ -462,6 +488,12 @@ fn synced_pts(anchor: (i128, u32, u32), epoch: i128, rtp_timestamp: u32) -> Opti
     let wall = ntp_us + delta * 1_000_000 / i128::from(clock);
     let relative = wall - epoch;
     (relative >= 0).then(|| Duration::from_micros(relative as u64))
+}
+
+fn shift_duration(duration: Duration, delta_us: i128) -> Duration {
+    let current = i128::try_from(duration.as_micros()).unwrap_or(i128::MAX);
+    let clamped = (current + delta_us).clamp(0, i128::from(u64::MAX));
+    Duration::from_micros(clamped as u64)
 }
 
 type SyncAnchors = HashMap<u8, (i128, u32, u32)>;

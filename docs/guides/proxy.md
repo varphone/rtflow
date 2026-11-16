@@ -107,8 +107,9 @@ rtflow_proxy_failovers_total
 ## A/V 时间轴
 
 代理会周期性读取上游 RTCP Sender Report 的 `(NTP, RTP timestamp)`，把各轨映射到同一
-壁钟基准，统一多轨起点；首次收到 SR 时会重定一次时间轴基准。RTP 时间戳回绕由
-depacketizer 扩展处理。
+壁钟基准，统一多轨起点；首次收到 SR 时会重定一次时间轴基准。重连时使用一个全局
+时间偏移接续旧时间轴，保留 SR 推导出的音视频相对偏移，不会让各轨各自续接而丢失
+A/V 对齐。RTP 时间戳回绕由 depacketizer 扩展处理。
 
 ## 已知限制
 
