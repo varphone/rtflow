@@ -24,7 +24,7 @@ export async function render() {
   return {
     title: "审计日志",
     subtitle: "谁在何时改了什么；配置变更、流控制与认证拒绝。",
-    actions: `<button class="btn small ghost" data-audit-auto>自动刷新：开</button><button class="btn small" data-audit-refresh>刷新</button>`,
+    actions: `<button class="btn small ghost" data-audit-auto>自动刷新：开</button><button class="btn small ghost" data-audit-export>导出 CSV</button><button class="btn small" data-audit-refresh>刷新</button>`,
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" data-audit-search placeholder="搜索动作、路径、操作者或详情"></div>
       <div class="seg"><button data-audit-kind="all" class="active">全部</button><button data-audit-kind="change">变更</button><button data-audit-kind="auth">认证</button></div>
       <span class="meta" data-audit-count>${events.length} 条</span></div>
@@ -92,6 +92,7 @@ export async function render() {
       next.onclick = () => { page += 1; paint(); };
       auto.onclick = () => setAuto(!automatic);
       root.querySelector("[data-audit-refresh]").onclick = () => refresh();
+      root.querySelector("[data-audit-export]").onclick = () => exportCsv(filtered());
       paint();
       setAuto(true);
       return () => { if (timer) clearInterval(timer); };
@@ -150,4 +151,26 @@ function openAuditEvent(event) {
       };
     },
   });
+}
+
+
+function exportCsv(events) {
+  if (!events.length) return;
+  const quote = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const header = ["time", "action", "result", "user", "role", "protocol", "path", "key_id", "peer", "detail"];
+  const lines = [header.join(",")];
+  for (const event of events) {
+    const time = event.ts ? new Date(Number(event.ts) * 1000).toISOString() : "";
+    lines.push([time, event.action, event.result, event.user, event.role, event.protocol, event.path, event.key_id, event.peer, event.detail].map(quote).join(","));
+  }
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `audit-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  toast(`已导出 ${events.length} 条`, "ok");
 }
