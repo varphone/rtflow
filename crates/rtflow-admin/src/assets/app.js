@@ -271,34 +271,12 @@ async function navigate(options = {}) {
   }
 }
 
-async function openPalette() {
-  let streams = [], vods = [], paths = [];
-  try {
-    [streams, vods, paths] = await Promise.all([
-      api("/streams").then((payload) => payload.items || payload || []),
-      api("/vods").then((payload) => payload.items || payload || []),
-      apiV1("/paths/config").then((payload) => Array.isArray(payload) ? payload : payload.items || []),
-    ]);
-  } catch (_) { /* static commands still work */ }
+function openPalette() {
   const pages = Object.entries(routes).map(([route, info]) => ({
     label: info.label, hint: `${info.group} / ${info.label}`, icon: "→", group: "页面",
     keywords: route,
     run: () => { location.hash = `#/${route}`; },
   }));
-  const resources = [
-    ...streams.slice(0, 8).map((stream) => ({
-      label: `流 · ${stream.name}`, hint: `${stream.path} · ${stream.video?.codec || "媒体"}`, icon: "▷", group: "直播流", keywords: "live stream",
-      run: () => { location.hash = `#/live?q=${encodeURIComponent(stream.path)}`; },
-    })),
-    ...paths.slice(0, 6).map((path) => ({
-      label: `路径 · /${path.name}`, hint: "配置 / 路径", icon: "⌁", group: "路径", keywords: "path config",
-      run: () => { location.hash = `#/config/paths?q=${encodeURIComponent(path.name)}`; },
-    })),
-    ...vods.slice(0, 6).map((vod) => ({
-      label: `点播 · ${vod.title}`, hint: "运行 / 点播", icon: "▤", group: "点播", keywords: "vod recording",
-      run: () => { location.hash = `#/vod?q=${encodeURIComponent(vod.title)}`; },
-    })),
-  ];
   const actions = [
     { label: "刷新当前页面", hint: "重新加载当前数据", icon: "↻", shortcut: "R", group: "操作", run: () => navigate({ silent: true }) },
     { label: "切换深浅主题", hint: "在深色与浅色之间切换", icon: "◐", group: "操作", run: () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light") },
@@ -315,10 +293,33 @@ async function openPalette() {
       state.session = null; renderLogin();
     } },
   ];
-  openCommandPalette([...pages, ...resources, ...actions]);
-
+  const palette = openCommandPalette([...pages, ...actions]);
+  (async () => {
+    let streams = [], vods = [], paths = [];
+    try {
+      [streams, vods, paths] = await Promise.all([
+        api("/streams").then((payload) => payload.items || payload || []),
+        api("/vods").then((payload) => payload.items || payload || []),
+        apiV1("/paths/config").then((payload) => Array.isArray(payload) ? payload : payload.items || []),
+      ]);
+    } catch (_) { return; }
+    const resources = [
+      ...streams.slice(0, 8).map((stream) => ({
+        label: `流 · ${stream.name}`, hint: `${stream.path} · ${stream.video?.codec || "媒体"}`, icon: "▷", group: "直播流", keywords: "live stream",
+        run: () => { location.hash = `#/live?q=${encodeURIComponent(stream.path)}`; },
+      })),
+      ...paths.slice(0, 6).map((path) => ({
+        label: `路径 · /${path.name}`, hint: "配置 / 路径", icon: "⌁", group: "路径", keywords: "path config",
+        run: () => { location.hash = `#/config/paths?q=${encodeURIComponent(path.name)}`; },
+      })),
+      ...vods.slice(0, 6).map((vod) => ({
+        label: `点播 · ${vod.title}`, hint: "运行 / 点播", icon: "▤", group: "点播", keywords: "vod recording",
+        run: () => { location.hash = `#/vod?q=${encodeURIComponent(vod.title)}`; },
+      })),
+    ];
+    palette.setCommands([...pages, ...resources, ...actions]);
+  })();
 }
-
 window.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();

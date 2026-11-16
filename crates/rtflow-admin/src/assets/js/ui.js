@@ -87,9 +87,11 @@ export function openCommandPalette(commands) {
     </div></div>`;
   const input = root.querySelector("#command-search");
   const list = root.querySelector("#command-list");
+  let all = commands;
   let filtered = commands;
   let selected = 0;
-  const close = () => { root.innerHTML = ""; };
+  let closed = false;
+  const close = () => { closed = true; root.innerHTML = ""; };
   const run = (command) => { close(); command.run?.(); };
   const paint = () => {
     if (!filtered.length) { list.innerHTML = `<div class="command-empty">没有匹配项</div>`; return; }
@@ -111,7 +113,7 @@ export function openCommandPalette(commands) {
   };
   const filter = () => {
     const query = input.value.trim().toLowerCase();
-    filtered = !query ? commands : commands.filter((command) =>
+    filtered = !query ? all : all.filter((command) =>
       `${command.label} ${command.hint || ""} ${command.keywords || ""}`.toLowerCase().includes(query));
     selected = 0; paint();
   };
@@ -126,6 +128,7 @@ export function openCommandPalette(commands) {
     if (event.target.dataset.paletteBackdrop !== undefined) close();
   });
   filter(); input.focus();
+  return { setCommands(next) { if (closed) return; all = next; filter(); } };
 }
 
 export function openDrawer({ title, description = "", body, submitLabel = "保存", onSubmit, onMount, onClose, showSubmit = true }) {
