@@ -34,7 +34,7 @@
 - [x] RTCP SR NTP↔RTP 映射，统一多轨 A/V 起点（首次 SR 后重定基准）。
 - [x] RTP 时间戳回绕扩展（depacketizer）。
 - [ ] 重连后 A/V 相对偏移的长期漂移校准。
-- [x] RTSPS/SRTP/跨源 REDIRECT/461 回退代理端到端测试（multicast 待补）。
+- [x] RTSPS/SRTP/multicast/跨源 REDIRECT/461 回退代理端到端测试。
 
 ## M4 — 安全与边界
 
