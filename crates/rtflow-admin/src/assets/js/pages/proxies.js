@@ -29,7 +29,7 @@ export async function render(params, ctx) {
     html: `<div class="toolbar"><div class="search"><input class="input" data-proxy-search value="${esc(query)}" placeholder="搜索路径或上游"></div>
       <div class="seg">${["all", "streaming", "idle", "backoff", "describing"].map((state) => `<button data-proxy-filter="${state}" class="${filter === state ? "active" : ""}">${state === "all" ? "全部" : state}</button>`).join("")}</div>
       <span class="meta" data-proxy-count>${initial.length} 条 · ${initial.filter((item) => item.state === "streaming").length} streaming</span></div>
-      <section class="panel" data-proxy-panel>${initial.length ? table(initial) : empty("暂无代理", "新增一个 RTSP 拉流代理")}</section>`,
+      <section class="panel" data-proxy-panel>${initial.length ? table(initial) : empty("暂无代理", "新增一个 RTSP 拉流代理", "inbox", `<a class="btn small" href="#/config/proxies?new=1">新增代理</a>`)}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-proxy-panel]");
       const count = root.querySelector("[data-proxy-count]");

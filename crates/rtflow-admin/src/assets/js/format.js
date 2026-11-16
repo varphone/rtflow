@@ -52,8 +52,8 @@ export function stateBadge(state) {
   return `<span class="badge ${cls}">${esc(state || "—")}</span>`;
 }
 
-export function empty(title, hint, icon = "inbox") {
-  return `<div class="empty">${iconSvg(icon)}<h3>${esc(title)}</h3><div class="faint">${esc(hint)}</div></div>`;
+export function empty(title, hint, icon = "inbox", action = "") {
+  return `<div class="empty">${iconSvg(icon)}<h3>${esc(title)}</h3><div class="faint">${esc(hint)}</div>${action ? `<div class="actions" style="justify-content:center;margin-top:14px">${action}</div>` : ""}</div>`;
 }
 
 export function iconSvg(name) {

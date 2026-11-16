@@ -22,7 +22,7 @@ export async function render(params, ctx) {
     subtitle: "签发一次性 secret，可限定角色、协议与路径。",
     actions: `<button class="btn small primary" data-action="issue">签发密钥</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search"><input class="input" data-key-search value="${esc(query)}" placeholder="搜索 Key ID 或名称"></div><span class="meta" data-key-count>${initial.length} 条 · ${initial.filter((item) => item.enabled && !isExpired(item)).length} 有效</span></div>
-      <section class="panel" data-key-panel>${initial.length ? table(initial) : empty("暂未签发密钥", "点击“签发密钥”创建第一条")}</section>`,
+      <section class="panel" data-key-panel>${initial.length ? table(initial) : empty("暂未签发密钥", "点击“签发密钥”创建第一条", "inbox", `<a class="btn small" href="#/config/keys?new=1">签发密钥</a>`)}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-key-panel]");
       const count = root.querySelector("[data-key-count]");
