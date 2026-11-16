@@ -8,6 +8,7 @@ export function icon(name) {
     proxy: '<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="17" r="2"/>',
     srt: '<path d="M3 12h18M7 8v8M17 8v8"/><path d="M3 7l4 5-4 5M21 7l-4 5 4 5"/>',
     record: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor"/>',
+    audit: '<path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
     system: '<rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
     menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',

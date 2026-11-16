@@ -644,6 +644,7 @@ impl ServerApp {
                         recording: recording.clone(),
                         mounts: mounts.clone(),
                         proxies: proxies.clone(),
+                        audit: audit.clone(),
                     }));
             Some(Arc::new(Admin::new(admin_config, mounts.clone())?))
         } else {

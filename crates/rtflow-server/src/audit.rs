@@ -151,6 +151,31 @@ impl AuditLog {
     pub fn path(&self) -> &Path {
         &self.file
     }
+
+    /// Newest-first audit events, reading rotated files oldest to newest.
+    /// Malformed lines are skipped so one partial write cannot hide history.
+    pub fn recent(&self, limit: usize) -> Vec<serde_json::Value> {
+        let mut files: Vec<PathBuf> = (1..self.max_files)
+            .rev()
+            .map(|index| rotated_path(&self.file, index))
+            .filter(|path| path.is_file())
+            .collect();
+        files.push(self.file.clone());
+        let mut events = Vec::new();
+        for path in files {
+            let Ok(text) = fs::read_to_string(path) else {
+                continue;
+            };
+            for line in text.lines() {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+                    events.push(value);
+                }
+            }
+        }
+        events.reverse();
+        events.truncate(limit.min(1000));
+        events
+    }
 }
 
 fn rotated_path(file: &Path, index: usize) -> PathBuf {
@@ -178,6 +203,9 @@ mod tests {
         let text = fs::read_to_string(log.path()).unwrap();
         assert!(text.contains("\"action\":\"path.create\""));
         assert!(dir.join("audit.log.1").exists());
+        let recent = log.recent(5);
+        assert_eq!(recent.len(), 5);
+        assert!(recent[0]["ts"].as_u64().unwrap() >= recent[4]["ts"].as_u64().unwrap());
         let _ = fs::remove_dir_all(dir);
     }
 }

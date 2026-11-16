@@ -15,6 +15,7 @@ use views::{Overview, streams, vods};
 
 const COOKIE: &str = "rtflow_admin";
 mod assets;
+mod audit;
 
 struct Auth {
     token: String,
@@ -727,6 +728,12 @@ pub(super) async fn register(http: &HttpServer, state: Arc<AdminState>) {
         Method::Post,
         &format!("{base}/api/vods/{{id}}/refresh"),
         vods_refresh_handler(state.clone()),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
+        &format!("{base}/api/audit"),
+        audit::audit_handler(state.clone()),
     )
     .await;
 

@@ -53,6 +53,9 @@
 
 ### Added
 
+- 管理台新增审计日志页（`/audit`），读取最近 300 条控制面/认证事件，支持搜索、
+  变更/认证分类与结果标记。
+
 - 业务数据改用 SQLite（`state/rtflow.db`，WAL）：路径、推流密钥、RTSP 代理、
   SRT pull/push、幂等键；TOML 服务配置保持不变，旧 JSON/TOML 业务数据首次启动
   一次性导入。秘密字段 AES-256-GCM 加密，DB/主密钥 0600。

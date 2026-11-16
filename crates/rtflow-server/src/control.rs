@@ -1,7 +1,7 @@
 //! Admin control-plane bridge and framework event sink.
 use crate::{
-    discovery::DiscoveryService, hooks::HookClient, keys::KeyStore, paths::PathStore,
-    recording::RecordingSupervisor,
+    audit::AuditLog, discovery::DiscoveryService, hooks::HookClient, keys::KeyStore,
+    paths::PathStore, recording::RecordingSupervisor,
 };
 use rtflow::MountRegistry;
 use std::sync::Arc;
@@ -14,6 +14,7 @@ pub(crate) struct ControlBridge {
     pub(crate) recording: Arc<RecordingSupervisor>,
     pub(crate) mounts: Arc<MountRegistry>,
     pub(crate) proxies: Arc<rtflow::server::ProxyService>,
+    pub(crate) audit: Option<Arc<AuditLog>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -85,6 +86,13 @@ impl rtflow::admin::ControlPlane for ControlBridge {
 
     fn recordings(&self) -> serde_json::Value {
         serde_json::to_value(self.recording.status()).unwrap_or_default()
+    }
+
+    fn audit_events(&self, limit: usize) -> serde_json::Value {
+        match &self.audit {
+            Some(log) => serde_json::json!({ "events": log.recent(limit) }),
+            None => serde_json::json!({ "events": [], "enabled": false }),
+        }
     }
 
     fn proxies(&self) -> serde_json::Value {

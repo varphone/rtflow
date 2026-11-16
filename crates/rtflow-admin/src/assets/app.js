@@ -11,6 +11,7 @@ import * as proxies from "./js/pages/proxies.js";
 import * as srt from "./js/pages/srt.js";
 import * as recordings from "./js/pages/recordings.js";
 import * as system from "./js/pages/system.js";
+import * as audit from "./js/pages/audit.js";
 
 const BASE = window.__ADMIN_BASE__ || "/admin";
 const app = document.getElementById("app");
@@ -25,6 +26,7 @@ const routes = {
   "config/srt": { page: srt, group: "配置", label: "SRT" },
   "config/recordings": { page: recordings, group: "配置", label: "录制" },
   system: { page: system, group: "系统", label: "系统" },
+  audit: { page: audit, group: "系统", label: "审计日志" },
 };
 const state = { session: null, route: "overview", loading: false, counts: { live: 0, proxies: 0, srt: 0 } };
 let pageCleanup = null;
@@ -34,9 +36,9 @@ let navSeq = 0;
 const navGroups = [
   ["运行", [["overview", "概览"], ["live", "直播流"], ["vod", "点播"]]],
   ["配置", [["config/paths", "路径"], ["config/keys", "推流密钥"], ["config/proxies", "RTSP 代理"], ["config/srt", "SRT"], ["config/recordings", "录制"]]],
-  ["系统", [["system", "系统"]]],
+  ["系统", [["system", "系统"], ["audit", "审计日志"]]],
 ];
-const navIcons = { overview: "overview", live: "live", vod: "vod", "config/paths": "paths", "config/keys": "keys", "config/proxies": "proxy", "config/srt": "srt", "config/recordings": "record", system: "system" };
+const navIcons = { overview: "overview", live: "live", vod: "vod", "config/paths": "paths", "config/keys": "keys", "config/proxies": "proxy", "config/srt": "srt", "config/recordings": "record", system: "system", audit: "audit" };
 
 async function refreshCounts() {
   try {

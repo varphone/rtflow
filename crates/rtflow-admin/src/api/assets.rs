@@ -99,6 +99,11 @@ pub(super) const ASSETS: &[Asset] = &[
         "text/javascript; charset=utf-8"
     ),
     asset!(
+        "js/pages/audit.js",
+        "../assets/js/pages/audit.js",
+        "text/javascript; charset=utf-8"
+    ),
+    asset!(
         "js/forms/path.js",
         "../assets/js/forms/path.js",
         "text/javascript; charset=utf-8"
