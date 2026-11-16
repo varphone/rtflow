@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import { dateTime, empty, esc, iconSvg } from "../format.js";
+import { openDrawer } from "../ui.js";
 
 const PAGE_SIZE = 25;
 const labels = {
@@ -28,7 +29,7 @@ export async function render() {
       <div class="seg"><button data-audit-kind="all" class="active">全部</button><button data-audit-kind="change">变更</button><button data-audit-kind="auth">认证</button></div>
       <span class="meta" data-audit-count>${events.length} 条</span></div>
       ${payload.enabled === false ? `<div class="error-banner">审计日志未启用：在服务配置中设置审计路径后重启。</div>` : ""}
-      <section class="panel"><div class="table-wrap audit-table"><table class="data"><thead><tr><th>时间</th><th>动作</th><th>结果</th><th>对象</th><th>操作者</th><th>详情</th></tr></thead><tbody data-audit-rows></tbody></table></div>
+      <section class="panel"><div class="table-wrap audit-table"><table class="data"><thead><tr><th>时间</th><th>动作</th><th>结果</th><th>对象</th><th>操作者</th><th>详情</th><th></th></tr></thead><tbody data-audit-rows></tbody></table></div>
         <div class="pager"><span class="meta" data-audit-range></span><div class="pager-buttons"><button class="btn small ghost" data-audit-prev>上一页</button><span class="meta" data-audit-page></span><button class="btn small ghost" data-audit-next>下一页</button></div></div>
       </section>`,
     mount(root, ctx) {
@@ -64,7 +65,10 @@ export async function render() {
         pageLabel.textContent = `${page} / ${pages}`;
         prev.disabled = page <= 1;
         next.disabled = page >= pages;
-        tbody.innerHTML = slice.length ? rows(slice) : `<tr><td colspan="6">${empty("没有匹配的审计事件", "调整搜索条件或等待新的操作")}</td></tr>`;
+        tbody.innerHTML = slice.length ? rows(slice) : `<tr><td colspan="7">${empty("没有匹配的审计事件", "调整搜索条件或等待新的操作")}</td></tr>`;
+        tbody.querySelectorAll("[data-audit-detail]").forEach((button, index) => {
+          button.onclick = () => openAuditEvent(slice[index]);
+        });
       };
       const refresh = async () => {
         try { current = (await api("/audit?limit=300")).events || []; } catch (_) { return; }
@@ -103,5 +107,30 @@ function rows(events) {
     <td><div class="cell-main mono">${esc(detail(event.path || event.key_id || event.detail))}</div><div class="cell-sub">${esc(event.protocol || "")}</div></td>
     <td><div class="cell-main">${esc(detail(event.user || event.role))}</div><div class="cell-sub mono">${esc(event.peer || "")}</div></td>
     <td class="cell-sub">${esc(detail(event.detail))}</td>
+    <td><button class="btn small ghost" data-audit-detail>详情</button></td>
   </tr>`).join("");
+}
+
+
+function openAuditEvent(event) {
+  const fields = [
+    ["时间", dateTime(event.ts)],
+    ["动作", `${labels[event.action] || event.action} (${event.action})`],
+    ["结果", event.result || "—"],
+    ["用户", event.user || event.role || "—"],
+    ["协议", event.protocol || "—"],
+    ["路径", event.path || "—"],
+    ["Key ID", event.key_id || "—"],
+    ["来源", event.peer || "—"],
+    ["详情", event.detail || "—"],
+  ];
+  openDrawer({
+    title: "审计事件",
+    description: `${labels[event.action] || event.action} · ${dateTime(event.ts)}`,
+    showSubmit: false,
+    body: `<div class="stack">
+      <div class="detail-grid">${fields.map(([label, value]) => `<div class="detail-item"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("")}</div>
+      <section class="drawer-section"><h3>原始记录</h3><pre class="code">${esc(JSON.stringify(event, null, 2))}</pre></section>
+    </div>`,
+  });
 }
