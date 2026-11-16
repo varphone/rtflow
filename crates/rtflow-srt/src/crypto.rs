@@ -557,6 +557,26 @@ impl SessionCrypto {
         (self.state, message.to_vec())
     }
 
+    /// Encrypt a data payload with the current even key (sender role).
+    pub fn encrypt(&self, sequence: u32, payload: &mut [u8]) -> bool {
+        let Some(slot) = self.even.as_ref().or(self.odd.as_ref()) else {
+            return false;
+        };
+        slot.ctr.apply(&slot.salt, sequence, payload);
+        true
+    }
+
+    /// KK flag to put on packets encrypted by [`Self::encrypt`].
+    pub fn key_flags(&self) -> u8 {
+        if self.even.is_some() {
+            1
+        } else if self.odd.is_some() {
+            2
+        } else {
+            0
+        }
+    }
+
     /// Decrypt a data payload. Returns `None` when no usable key exists.
     pub fn decrypt(&self, sequence: u32, key_flags: u8, payload: &mut [u8]) -> bool {
         let slot = match key_flags & 0x03 {

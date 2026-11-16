@@ -50,6 +50,24 @@ latency_ms = 120
 HLS/DASH/FLV/RTSP 播放与录制流程与推流一致；断线按 1s→30s 指数退避重连，
 连接成功后退避复位。pull 任务随服务端 SIGTERM 一起取消。
 
+### SRT 输出（server 作为 caller/sender）
+
+```toml
+[[srt.push]]
+mount = "/live/camera1"          # 已存在的发布 mount
+remote = "192.0.2.20:9000"
+stream_id = "live/camera1"       # 默认取 mount 去掉前导 "/"
+passphrase = "secretpass12345"   # 默认继承 [srt].passphrase
+pbkeylen = 16
+latency_ms = 120
+```
+
+- 从 mount 订阅 AccessUnit，按 H.264/H.265/AAC 复用为 MPEG-TS
+  （PAT/PMT 周期重复、连续计数器、统一时间基），经 `SrtSender` 推送；
+- 等待源 mount 就绪，从首个视频关键帧开始发送；
+- 连接失败/中断按 1s→30s 指数退避重连，随 SIGTERM 取消；
+- 支持 passphrase 加密（KMREQ/KK/AES-CTR）。
+
 ### SRT 加密（HaiCrypt AES-CTR）
 
 ```toml

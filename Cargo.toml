@@ -76,6 +76,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-log = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+broadcast-common = { version = "12", default-features = false, features = ["std"] }
 transmux = { version = "0.31", default-features = false, features = ["std"] }
 url = "2.5"
 webrtc = { version = "0.20" }

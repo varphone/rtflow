@@ -40,6 +40,8 @@ pub struct SrtCallerConfig {
     pub flow_window: u32,
     pub tlpktdrop: bool,
     pub tsbpd_max_buffered: usize,
+    /// SRT payload per data packet for the sender role (default 1316 = 7×188).
+    pub payload_size: usize,
 }
 
 impl Default for SrtCallerConfig {
@@ -56,6 +58,7 @@ impl Default for SrtCallerConfig {
             flow_window: 8192,
             tlpktdrop: true,
             tsbpd_max_buffered: crate::tsbpd::DEFAULT_MAX_BUFFERED,
+            payload_size: 1316,
         }
     }
 }
@@ -88,163 +91,204 @@ pub struct SrtCaller {
     stream_id: Option<String>,
 }
 
+/// Result of the HSv5 caller handshake, shared by the receiver (caller) and
+/// the sender.
+pub(crate) struct HandshakeOutcome {
+    pub(crate) socket: UdpSocket,
+    pub(crate) remote: SocketAddr,
+    pub(crate) local_id: u32,
+    pub(crate) peer_id: u32,
+    pub(crate) crypto: Option<SessionCrypto>,
+    pub(crate) latency_ms: u32,
+    pub(crate) timestamp: u32,
+    pub(crate) initial_sequence: u32,
+    pub(crate) stream_id: Option<String>,
+}
+
+/// Perform the HSv5 caller handshake (induction + conclusion).
+pub(crate) async fn connect_handshake(config: &SrtCallerConfig) -> Result<HandshakeOutcome> {
+    let bind: SocketAddr = if config.remote.is_ipv4() {
+        "0.0.0.0:0".parse().expect("valid")
+    } else {
+        "[::]:0".parse().expect("valid")
+    };
+    let socket = UdpSocket::bind(bind)
+        .await
+        .map_err(|error| Error::Srt(format!("caller bind: {error}")))?;
+    let local_id = random_id();
+    let deadline = Instant::now() + config.connect_timeout;
+
+    // --- INDUCTION -> response -------------------------------------
+    let induction = Handshake {
+        version: SRT_VERSION_4,
+        encryption: 0,
+        extension_field: 2,
+        initial_sequence: 0,
+        mtu: config.mtu,
+        flow_window: config.flow_window,
+        handshake_type: HandshakeType::Induction,
+        socket_id: local_id,
+        cookie: 0,
+        peer_ip: [0u8; 16],
+        extensions: Vec::new(),
+    };
+    let packet = control(&induction, 0, 0);
+    let mut buffer = vec![0u8; 2048];
+    let response = 'induction: loop {
+        send_control(&socket, &packet, config.remote).await?;
+        let retry_deadline = (Instant::now() + Duration::from_millis(250)).min(deadline);
+        loop {
+            if Instant::now() >= deadline {
+                return Err(Error::Srt("SRT caller: handshake timeout".into()));
+            }
+            match recv_control(&socket, &mut buffer, retry_deadline).await? {
+                Some((ControlType::Handshake, data, _)) => {
+                    if let Some(handshake) = parse_handshake(&data)
+                        && handshake.handshake_type == HandshakeType::Induction
+                        && handshake.version == SRT_VERSION_5
+                        && handshake.extension_field == SRT_MAGIC
+                    {
+                        break 'induction handshake;
+                    }
+                }
+                Some(_) => continue,
+                None => break, // retransmit the induction
+            }
+        }
+    };
+    let cookie = response.cookie;
+    debug!(remote = %config.remote, cookie, "SRT caller: induction complete");
+
+    // --- CONCLUSION request ----------------------------------------
+    let mut extensions = vec![HsExtension::HsReq(HsExtFields {
+        srt_version: SRT_VERSION,
+        flags: HsFlags::live_defaults(),
+        recv_latency_ms: config.latency_ms.min(u32::from(u16::MAX)) as u16,
+        send_latency_ms: 0,
+    })];
+    if let Some(stream_id) = &config.stream_id {
+        extensions.push(HsExtension::StreamId(stream_id.clone()));
+    }
+    let mut crypto = None;
+    let mut kmreq = None;
+    if let Some(passphrase) = &config.passphrase {
+        let key_len = match config.pbkeylen {
+            24 => KeyLength::Aes192,
+            32 => KeyLength::Aes256,
+            _ => KeyLength::Aes128,
+        };
+        let (context, message) = SessionCrypto::generate_initiator(passphrase.as_bytes(), key_len)
+            .map_err(|error| Error::Srt(format!("SRT caller crypto: {error}")))?;
+        crypto = Some(context);
+        kmreq = Some(message.clone());
+        extensions.push(HsExtension::KmReq(message));
+    }
+    let conclusion = Handshake {
+        version: SRT_VERSION_5,
+        encryption: match config.pbkeylen {
+            24 => 3,
+            32 => 4,
+            _ if config.passphrase.is_some() => 2,
+            _ => 0,
+        },
+        extension_field: 0,
+        initial_sequence: random_id() & 0x7FFF_FFFF,
+        mtu: config.mtu,
+        flow_window: config.flow_window,
+        handshake_type: HandshakeType::Conclusion,
+        socket_id: local_id,
+        cookie,
+        peer_ip: [0u8; 16],
+        extensions,
+    };
+    let packet = control(&conclusion, 0, 1000);
+    let (peer_id, latency_ms, timestamp) = 'conclusion: loop {
+        send_control(&socket, &packet, config.remote).await?;
+        let retry_deadline = (Instant::now() + Duration::from_millis(250)).min(deadline);
+        loop {
+            if Instant::now() >= deadline {
+                return Err(Error::Srt("SRT caller: conclusion timeout".into()));
+            }
+            match recv_control(&socket, &mut buffer, retry_deadline).await? {
+                Some((ControlType::Handshake, data, timestamp)) => {
+                    let Some(handshake) = parse_handshake(&data) else {
+                        continue;
+                    };
+                    match handshake.handshake_type {
+                        HandshakeType::Conclusion => {
+                            if let Some(message) = &kmreq {
+                                let response =
+                                    handshake.extensions.iter().find_map(|ext| match ext {
+                                        HsExtension::KmRsp(payload) => Some(payload.clone()),
+                                        _ => None,
+                                    });
+                                match response {
+                                    Some(payload) if &payload == message => {}
+                                    Some(payload) if payload.len() == 4 => {
+                                        let state = u32::from_le_bytes([
+                                            payload[0], payload[1], payload[2], payload[3],
+                                        ]);
+                                        return Err(Error::Srt(format!(
+                                            "SRT caller: encryption rejected (state {state})"
+                                        )));
+                                    }
+                                    _ => {
+                                        return Err(Error::Srt(
+                                            "SRT caller: KMRSP missing or mismatched".into(),
+                                        ));
+                                    }
+                                }
+                            }
+                            let peer = handshake.socket_id;
+                            let mut latency = config.latency_ms;
+                            if let Some(caps) = handshake.hs_ext() {
+                                latency = latency.max(u32::from(caps.send_latency_ms));
+                            }
+                            break 'conclusion (peer, latency, timestamp);
+                        }
+                        HandshakeType::Rejection(code) => {
+                            return Err(Error::Srt(format!(
+                                "SRT caller: connection rejected (code {code})"
+                            )));
+                        }
+                        _ => continue,
+                    }
+                }
+                Some(_) => continue,
+                None => break, // retransmit the conclusion
+            }
+        }
+    };
+
+    Ok(HandshakeOutcome {
+        socket,
+        remote: config.remote,
+        local_id,
+        peer_id,
+        crypto,
+        latency_ms,
+        timestamp,
+        initial_sequence: conclusion.initial_sequence,
+        stream_id: config.stream_id.clone(),
+    })
+}
+
 impl SrtCaller {
     /// Connect to an SRT listener and complete the HSv5 handshake.
     pub async fn connect(config: SrtCallerConfig) -> Result<Self> {
-        let bind: SocketAddr = if config.remote.is_ipv4() {
-            "0.0.0.0:0".parse().expect("valid")
-        } else {
-            "[::]:0".parse().expect("valid")
-        };
-        let socket = UdpSocket::bind(bind)
-            .await
-            .map_err(|error| Error::Srt(format!("caller bind: {error}")))?;
-        let local_id = random_id();
-        let deadline = Instant::now() + config.connect_timeout;
-
-        // --- INDUCTION -> response -------------------------------------
-        let induction = Handshake {
-            version: SRT_VERSION_4,
-            encryption: 0,
-            extension_field: 2,
-            initial_sequence: 0,
-            mtu: config.mtu,
-            flow_window: config.flow_window,
-            handshake_type: HandshakeType::Induction,
-            socket_id: local_id,
-            cookie: 0,
-            peer_ip: [0u8; 16],
-            extensions: Vec::new(),
-        };
-        let packet = control(&induction, 0, 0);
-        let mut buffer = vec![0u8; 2048];
-        let response = 'induction: loop {
-            send_control(&socket, &packet, config.remote).await?;
-            let retry_deadline = (Instant::now() + Duration::from_millis(250)).min(deadline);
-            loop {
-                if Instant::now() >= deadline {
-                    return Err(Error::Srt("SRT caller: handshake timeout".into()));
-                }
-                match recv_control(&socket, &mut buffer, retry_deadline).await? {
-                    Some((ControlType::Handshake, data, _)) => {
-                        if let Some(handshake) = parse_handshake(&data)
-                            && handshake.handshake_type == HandshakeType::Induction
-                            && handshake.version == SRT_VERSION_5
-                            && handshake.extension_field == SRT_MAGIC
-                        {
-                            break 'induction handshake;
-                        }
-                    }
-                    Some(_) => continue,
-                    None => break, // retransmit the induction
-                }
-            }
-        };
-        let cookie = response.cookie;
-        debug!(remote = %config.remote, cookie, "SRT caller: induction complete");
-
-        // --- CONCLUSION request ----------------------------------------
-        let mut extensions = vec![HsExtension::HsReq(HsExtFields {
-            srt_version: SRT_VERSION,
-            flags: HsFlags::live_defaults(),
-            recv_latency_ms: config.latency_ms.min(u32::from(u16::MAX)) as u16,
-            send_latency_ms: 0,
-        })];
-        if let Some(stream_id) = &config.stream_id {
-            extensions.push(HsExtension::StreamId(stream_id.clone()));
-        }
-        let mut crypto = None;
-        let mut kmreq = None;
-        if let Some(passphrase) = &config.passphrase {
-            let key_len = match config.pbkeylen {
-                24 => KeyLength::Aes192,
-                32 => KeyLength::Aes256,
-                _ => KeyLength::Aes128,
-            };
-            let (context, message) =
-                SessionCrypto::generate_initiator(passphrase.as_bytes(), key_len)
-                    .map_err(|error| Error::Srt(format!("SRT caller crypto: {error}")))?;
-            crypto = Some(context);
-            kmreq = Some(message.clone());
-            extensions.push(HsExtension::KmReq(message));
-        }
-        let conclusion = Handshake {
-            version: SRT_VERSION_5,
-            encryption: match config.pbkeylen {
-                24 => 3,
-                32 => 4,
-                _ if config.passphrase.is_some() => 2,
-                _ => 0,
-            },
-            extension_field: 0,
-            initial_sequence: random_id() & 0x7FFF_FFFF,
-            mtu: config.mtu,
-            flow_window: config.flow_window,
-            handshake_type: HandshakeType::Conclusion,
-            socket_id: local_id,
-            cookie,
-            peer_ip: [0u8; 16],
-            extensions,
-        };
-        let packet = control(&conclusion, 0, 1000);
-        let (peer_id, latency_ms, timestamp) = 'conclusion: loop {
-            send_control(&socket, &packet, config.remote).await?;
-            let retry_deadline = (Instant::now() + Duration::from_millis(250)).min(deadline);
-            loop {
-                if Instant::now() >= deadline {
-                    return Err(Error::Srt("SRT caller: conclusion timeout".into()));
-                }
-                match recv_control(&socket, &mut buffer, retry_deadline).await? {
-                    Some((ControlType::Handshake, data, timestamp)) => {
-                        let Some(handshake) = parse_handshake(&data) else {
-                            continue;
-                        };
-                        match handshake.handshake_type {
-                            HandshakeType::Conclusion => {
-                                if let Some(message) = &kmreq {
-                                    let response =
-                                        handshake.extensions.iter().find_map(|ext| match ext {
-                                            HsExtension::KmRsp(payload) => Some(payload.clone()),
-                                            _ => None,
-                                        });
-                                    match response {
-                                        Some(payload) if &payload == message => {}
-                                        Some(payload) if payload.len() == 4 => {
-                                            let state = u32::from_le_bytes([
-                                                payload[0], payload[1], payload[2], payload[3],
-                                            ]);
-                                            return Err(Error::Srt(format!(
-                                                "SRT caller: encryption rejected (state {state})"
-                                            )));
-                                        }
-                                        _ => {
-                                            return Err(Error::Srt(
-                                                "SRT caller: KMRSP missing or mismatched".into(),
-                                            ));
-                                        }
-                                    }
-                                }
-                                let peer = handshake.socket_id;
-                                let mut latency = config.latency_ms;
-                                if let Some(caps) = handshake.hs_ext() {
-                                    latency = latency.max(u32::from(caps.send_latency_ms));
-                                }
-                                break 'conclusion (peer, latency, timestamp);
-                            }
-                            HandshakeType::Rejection(code) => {
-                                return Err(Error::Srt(format!(
-                                    "SRT caller: connection rejected (code {code})"
-                                )));
-                            }
-                            _ => continue,
-                        }
-                    }
-                    Some(_) => continue,
-                    None => break, // retransmit the conclusion
-                }
-            }
-        };
-
+        let outcome = connect_handshake(&config).await?;
+        let HandshakeOutcome {
+            socket,
+            remote,
+            local_id,
+            peer_id,
+            crypto,
+            latency_ms,
+            timestamp,
+            initial_sequence: _,
+            stream_id,
+        } = outcome;
+        let _ = timestamp;
         let mut tsbpd = TsbpdBuffer::new(latency_ms, config.tsbpd_max_buffered);
         tsbpd.set_tlpktdrop(config.tlpktdrop);
         tsbpd.set_time_base(Instant::now(), timestamp);
@@ -258,7 +302,7 @@ impl SrtCaller {
         );
         Ok(Self {
             socket,
-            remote: config.remote,
+            remote,
             local_id,
             peer_id,
             tsbpd,
@@ -280,7 +324,7 @@ impl SrtCaller {
             latency_ms,
             peer_idle_timeout: config.peer_idle_timeout,
             last_skipped: 0,
-            stream_id: config.stream_id.clone(),
+            stream_id,
         })
     }
 
@@ -308,6 +352,7 @@ impl SrtCaller {
             rtt_us: self.rtt_us,
             packets_received: self.packets_received,
             bytes_received: self.bytes_received,
+            bytes_sent: 0,
             delivered: stats.delivered,
             skipped: stats.skipped,
             loss_events: stats.loss_events,

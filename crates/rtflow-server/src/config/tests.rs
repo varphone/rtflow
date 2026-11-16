@@ -93,6 +93,22 @@ fn srt_pull_entries_are_validated() {
 }
 
 #[test]
+fn srt_push_entries_are_validated() {
+    let mut config = Config::default();
+    config.srt.push.push(SrtPush {
+        mount: "/live/cam".into(),
+        remote: "127.0.0.1:9000".into(),
+        ..SrtPush::default()
+    });
+    assert!(config.validate().is_ok());
+    config.srt.push[0].mount = "live/cam".into();
+    assert!(config.validate().is_err());
+    config.srt.push[0].mount = "/live/cam".into();
+    config.srt.push[0].remote = "nope".into();
+    assert!(config.validate().is_err());
+}
+
+#[test]
 fn comments_do_not_require_env_values() {
     assert_eq!(
         expand_env("# optional ${MISSING_FOR_TEST}\n").unwrap(),

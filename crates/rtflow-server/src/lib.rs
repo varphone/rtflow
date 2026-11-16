@@ -13,6 +13,7 @@ pub mod paths;
 pub mod recording;
 pub mod server;
 pub mod srt_pull;
+pub mod srt_push;
 pub mod vod;
 
 pub use config::{Config, ConfigError};

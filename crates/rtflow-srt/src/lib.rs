@@ -5,7 +5,8 @@
 //!
 //! # Features
 //!
-//! - HSv5 listener and caller (pull) roles, byte-compatible with libsrt
+//! - HSv5 listener, caller (pull) and sender (push) roles, byte-compatible
+//!   with libsrt
 //! - HSREQ/HSRSP negotiation (TSBPD latency = max of both sides)
 //! - HaiCrypt AES-CTR encryption (passphrase, 128/192/256-bit keys)
 //! - Stream ID (`#!::r=...` or a plain path, optional `?token=`) routing
@@ -39,6 +40,7 @@ pub mod caller;
 pub mod crypto;
 pub mod handshake;
 pub mod packet;
+pub mod sender;
 pub mod ts_demux;
 pub mod tsbpd;
 
@@ -79,6 +81,8 @@ pub struct SrtConnectionStats {
     pub rtt_us: u32,
     pub packets_received: u64,
     pub bytes_received: u64,
+    /// Bytes sent (sender role only).
+    pub bytes_sent: u64,
     pub delivered: u64,
     pub skipped: u64,
     pub loss_events: u64,
@@ -108,3 +112,4 @@ mod tests;
 pub use caller::{SrtCaller, SrtCallerConfig};
 pub use config::{PublishAuthenticator, SrtConfig};
 pub use connection::SrtConnection;
+pub use sender::SrtSender;

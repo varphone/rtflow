@@ -49,6 +49,16 @@ allowed_stream_ids = []
 # mount = "/live/camera1"          # defaults to the Stream ID resource
 # passphrase = "${RTFLOW_SRT_PASSPHRASE}"  # defaults to [srt].passphrase
 # pbkeylen = 16
+# latency_ms = 120
+
+# Push destinations (server as SRT caller/sender). Mounts are muxed to
+# MPEG-TS (H.264/H.265/AAC) and reconnect with backoff.
+# [[srt.push]]
+# mount = "/live/camera1"
+# remote = "192.0.2.20:9000"
+# stream_id = "live/camera1"       # defaults to the mount path without "/"
+# passphrase = "${RTFLOW_SRT_PASSPHRASE}"
+# pbkeylen = 16
 # latency_ms = 120  # empty = open; list exact stream ids to restrict
 # Publish tokens/keys are verified from `streamid` (`live/cam?token=...`)
 # using the [auth] configuration, like RTSP/RTMP/HTTP.

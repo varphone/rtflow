@@ -4,6 +4,9 @@
 //! operator needs. Unknown keys are rejected so a typo fails at startup
 //! instead of silently disabling a feature.
 use serde::{Deserialize, Serialize};
+
+mod srt;
+pub use srt::{SrtPull, SrtPush, SrtSection};
 use std::{
     collections::BTreeMap,
     net::SocketAddr,
@@ -142,51 +145,6 @@ impl Default for RtmpSection {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
-pub struct SrtSection {
-    pub enabled: bool,
-    pub listen: SocketAddr,
-    /// Receiver TSBPD latency; the connection uses max(this, peer value).
-    pub latency_ms: u32,
-    #[serde(with = "humantime_serde")]
-    pub peer_idle_timeout: Duration,
-    /// Drop packets that missed their play time.
-    pub tlpktdrop: bool,
-    pub mtu: u32,
-    pub max_connections: usize,
-    /// HaiCrypt passphrase (10..80 bytes); empty disables SRT encryption.
-    pub passphrase: Option<String>,
-    /// Pull sources: connect as SRT caller and publish into mounts.
-    pub pull: Vec<SrtPull>,
-    /// AES key length in bytes: 0 (auto → 16), 16, 24 or 32.
-    pub pbkeylen: u32,
-    /// Reject peers whose encryption settings differ (libsrt default).
-    pub enforced_encryption: bool,
-    /// Optional SRT stream-id allowlist. Empty keeps SRT open; use signed
-    /// keys/tokens at the application layer where possible.
-    pub allowed_stream_ids: Vec<String>,
-}
-
-impl Default for SrtSection {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            listen: "0.0.0.0:9000".parse().expect("valid default"),
-            latency_ms: 120,
-            peer_idle_timeout: Duration::from_secs(30),
-            tlpktdrop: true,
-            mtu: 1500,
-            max_connections: 10,
-            passphrase: None,
-            pull: Vec::new(),
-            pbkeylen: 0,
-            enforced_encryption: true,
-            allowed_stream_ids: Vec::new(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
 pub struct WebrtcSection {
     pub enabled: bool,
 }
@@ -195,24 +153,6 @@ impl Default for WebrtcSection {
     fn default() -> Self {
         Self { enabled: true }
     }
-}
-
-/// One SRT pull (caller) source.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
-pub struct SrtPull {
-    /// Remote listener, `host:port`.
-    pub remote: String,
-    /// Stream ID sent in the handshake.
-    pub stream_id: Option<String>,
-    /// Mount path override; defaults to the Stream ID resource.
-    pub mount: Option<String>,
-    /// Passphrase override; falls back to `[srt].passphrase`.
-    pub passphrase: Option<String>,
-    /// AES key length (0 → `[srt].pbkeylen`).
-    pub pbkeylen: u32,
-    /// Receiver latency override.
-    pub latency_ms: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -600,6 +540,31 @@ impl Config {
             if !matches!(pull.pbkeylen, 0 | 16 | 24 | 32) {
                 return Err(ConfigError::Invalid(
                     "srt.pull pbkeylen must be 0, 16, 24 or 32".into(),
+                ));
+            }
+        }
+        for push in &self.srt.push {
+            if !push.mount.starts_with('/') {
+                return Err(ConfigError::Invalid(
+                    "srt.push mount must start with '/'".into(),
+                ));
+            }
+            if push.remote.parse::<SocketAddr>().is_err() {
+                return Err(ConfigError::Invalid(format!(
+                    "srt.push remote {:?} is not host:port",
+                    push.remote
+                )));
+            }
+            if let Some(passphrase) = &push.passphrase
+                && !(10..=80).contains(&passphrase.len())
+            {
+                return Err(ConfigError::Invalid(
+                    "srt.push passphrase must be 10..80 bytes".into(),
+                ));
+            }
+            if !matches!(push.pbkeylen, 0 | 16 | 24 | 32) {
+                return Err(ConfigError::Invalid(
+                    "srt.push pbkeylen must be 0, 16, 24 or 32".into(),
                 ));
             }
         }

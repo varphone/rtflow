@@ -116,6 +116,7 @@ impl SrtServer {
                     rtt_us: conn.rtt_us,
                     packets_received: conn.packets_received,
                     bytes_received: conn.bytes_received,
+                    bytes_sent: 0,
                     delivered: stats.delivered,
                     skipped: stats.skipped,
                     loss_events: stats.loss_events,

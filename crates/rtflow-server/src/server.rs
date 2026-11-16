@@ -310,6 +310,11 @@ impl ServerApp {
             cancel.clone(),
             srt_pull_status.clone(),
         ));
+        tasks.extend(crate::srt_push::spawn(
+            config.clone(),
+            mounts.clone(),
+            cancel.clone(),
+        ));
 
         let rtsp = if config.rtsp.enabled {
             let mut rtsp_config = rtflow::server::ServerConfig::new(config.rtsp.listen);
