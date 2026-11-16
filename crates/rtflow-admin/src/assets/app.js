@@ -75,8 +75,6 @@ function density() { return localStorage.getItem("rtflow-density") || "comfortab
 function applyDensity(value) {
   document.documentElement.dataset.density = value;
   localStorage.setItem("rtflow-density", value);
-  const button = document.querySelector("[data-density-toggle]");
-  if (button) button.title = value === "compact" ? "切换为舒适密度" : "切换为紧凑密度";
 }
 applyDensity(density());
 
@@ -144,10 +142,14 @@ function renderShell() {
         <div class="top-actions">
           <button class="command-trigger" data-command-open aria-label="打开命令面板">${icon("search")}<span>搜索</span><kbd>Ctrl K</kbd></button>
           <span class="health"><span class="dot ok"></span>运行中</span>
-          <button class="btn ghost small" data-density-toggle aria-label="切换表格密度" title="切换表格密度">${icon("density")}</button>
-          <button class="btn ghost small" data-theme-toggle aria-label="切换主题">${icon("sun")}</button>
-          <span class="user-chip"><span class="avatar">${esc((state.session?.username || "A").slice(0, 1).toUpperCase())}</span><span>${esc(state.session?.username || "admin")}</span></span>
-          <button class="btn ghost small" data-logout aria-label="退出登录">${icon("logout")}</button>
+          <button class="user-chip" data-user-menu aria-haspopup="menu"><span class="avatar">${esc((state.session?.username || "A").slice(0, 1).toUpperCase())}</span><span>${esc(state.session?.username || "admin")}</span><span class="chev">▾</span></button>
+          <div class="user-popover" data-user-popover hidden>
+            <div class="user-popover-head"><b>${esc(state.session?.username || "admin")}</b><span>${state.session?.readonly ? "只读模式" : "管理员"}</span></div>
+            <button data-user-theme><span>外观</span><b data-label-theme></b></button>
+            <button data-user-density><span>表格密度</span><b data-label-density></b></button>
+            <button data-user-time><span>时间显示</span><b data-label-time></b></button>
+            <button data-user-logout class="danger"><span>退出登录</span></button>
+          </div>
         </div>
       </header>
       <main class="content" id="content"><div id="page-content"></div></main>
@@ -158,9 +160,25 @@ function renderShell() {
   }));
   app.querySelector("[data-menu]").onclick = () => document.getElementById("sidebar").classList.toggle("open");
   app.querySelector("[data-command-open]").onclick = () => openPalette();
-  app.querySelector("[data-theme-toggle]").onclick = () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
-  app.querySelector("[data-density-toggle]").onclick = () => applyDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact");
-  app.querySelector("[data-logout]").onclick = async () => {
+  const popover = app.querySelector("[data-user-popover]");
+  const userButton = app.querySelector("[data-user-menu]");
+  const syncMenu = () => {
+    const themeLabel = app.querySelector("[data-label-theme]");
+    const densityLabel = app.querySelector("[data-label-density]");
+    const timeLabel = app.querySelector("[data-label-time]");
+    if (themeLabel) themeLabel.textContent = document.documentElement.dataset.theme === "light" ? "浅色" : "深色";
+    if (densityLabel) densityLabel.textContent = document.documentElement.dataset.density === "compact" ? "紧凑" : "舒适";
+    if (timeLabel) timeLabel.textContent = localStorage.getItem("rtflow-time") === "relative" ? "相对" : "绝对";
+  };
+  const closeMenu = () => { popover.hidden = true; userButton.setAttribute("aria-expanded", "false"); };
+  userButton.onclick = (event) => { event.stopPropagation(); popover.hidden = !popover.hidden; userButton.setAttribute("aria-expanded", String(!popover.hidden)); syncMenu(); };
+  popover.onclick = (event) => event.stopPropagation();
+  document.addEventListener("click", () => closeMenu());
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeMenu(); });
+  app.querySelector("[data-user-theme]").onclick = () => { applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"); syncMenu(); };
+  app.querySelector("[data-user-density]").onclick = () => { applyDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact"); syncMenu(); };
+  app.querySelector("[data-user-time]").onclick = () => { localStorage.setItem("rtflow-time", localStorage.getItem("rtflow-time") === "relative" ? "absolute" : "relative"); closeMenu(); navigate({ silent: true }); };
+  app.querySelector("[data-user-logout]").onclick = async () => {
     try { await api("/logout", { method: "POST" }); } catch (_) {}
     state.session = null;
     renderLogin();

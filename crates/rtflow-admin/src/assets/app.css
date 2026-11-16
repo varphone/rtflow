@@ -129,10 +129,21 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .crumbs { display: flex; align-items: center; gap: 6px; color: var(--faint); font-size: 12.5px; margin-right: auto; }
 .crumbs b { color: var(--text); font-weight: 600; }
-.top-actions { display: flex; align-items: center; gap: 6px; }
+.top-actions { position: relative; display: flex; align-items: center; gap: 6px; }
 .health { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; }
 .health .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
 .health .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 15%, transparent); }
+.user-popover { position: absolute; right: 0; top: 42px; width: 230px; background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); z-index: 60; padding: 6px; }
+.user-popover[hidden] { display: none; }
+.user-popover-head { display: grid; gap: 2px; padding: 8px 9px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.user-popover-head b { font-size: 13px; }
+.user-popover-head span { color: var(--faint); font-size: 11px; }
+.user-popover button { display: flex; align-items: center; justify-content: space-between; width: 100%; border: 0; background: transparent; color: var(--text); padding: 8px 9px; border-radius: 6px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.user-popover button:hover { background: var(--surface-2); }
+.user-popover button b { color: var(--muted); font-weight: 500; font-size: 11.5px; }
+.user-popover button.danger { color: var(--bad); }
+.user-popover button.danger:hover { background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.user-chip .chev { color: var(--faint); font-size: 9px; }
 .user-chip { display: flex; align-items: center; gap: 7px; padding: 3px 8px 3px 4px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; }
 .avatar { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-strong); color: #fff; font-weight: 700; font-size: 11px; }
 .menu-btn { display: none; }
@@ -342,8 +353,9 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
   .crumbs b { overflow: hidden; text-overflow: ellipsis; }
   .health { display: none; }
   .user-chip { padding: 3px; }
-  .user-chip > span:last-child { display: none; }
-  .top-actions { gap: 2px; }
+  .user-chip > span:nth-child(2), .user-chip .chev { display: none; }
+
+  .top-actions { position: relative; gap: 2px; }
   .top-actions .btn { padding: 6px; }
   .command-trigger { padding: 6px; }
   .command-trigger span, .command-trigger kbd { display: none; }
