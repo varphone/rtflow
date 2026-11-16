@@ -168,3 +168,59 @@ async fn srt_sender_reaches_internal_listener() {
     let _ = sender.close().await;
     cancel.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn srt_sender_rekeys_without_data_loss() {
+    let mounts = std::sync::Arc::new(MountRegistry::new(10));
+    let server = SrtServer::with_config(
+        SrtConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            latency_ms: 120,
+            passphrase: Some("secretpass12345".into()),
+            pbkeylen: 16,
+            ..SrtConfig::default()
+        },
+        mounts.clone(),
+    )
+    .await
+    .unwrap();
+    let stats = server.stats_handle();
+    let addr = server.local_addr().unwrap();
+    let cancel = server.cancellation_token();
+    tokio::spawn(server.run());
+
+    let mut sender = SrtSender::connect(SrtCallerConfig {
+        remote: addr,
+        stream_id: Some("live/rekey".into()),
+        passphrase: Some("secretpass12345".into()),
+        pbkeylen: 16,
+        key_refresh_packets: 20,
+        ..SrtCallerConfig::default()
+    })
+    .await
+    .expect("sender connects");
+
+    for _ in 0..5 {
+        send_fixture(&mut sender).await;
+        let _ = sender.tick().await;
+    }
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let _ = sender.tick().await;
+        let current = stats.read().unwrap().clone();
+        if current
+            .first()
+            .is_some_and(|s| s.bytes_received >= 4 * 8084)
+            && mounts.get_handle("/live/rekey").is_some()
+        {
+            break;
+        }
+    }
+    let current = stats.read().unwrap().clone();
+    let entry = current.first().expect("connection stats");
+    assert!(entry.bytes_received >= 4 * 8084, "{entry:?}");
+    assert_eq!(entry.undecryptable, 0, "{entry:?}");
+    assert!(mounts.get_handle("/live/rekey").is_some());
+    let _ = sender.close().await;
+    cancel.cancel();
+}

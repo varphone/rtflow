@@ -6,10 +6,11 @@
 use crate::SrtConnectionStats;
 use crate::caller::{SrtCallerConfig, connect_handshake};
 use crate::crypto::SessionCrypto;
+use crate::handshake::SRT_CMD_KMREQ;
 use crate::packet::{
     ControlPacket, ControlType, DataPacket, SrtPacket, ackack_packet, encode_control_packet,
     encode_data_packet, keepalive_packet, parse_ack, parse_nak_loss_list, parse_packet_borrowed,
-    shutdown_packet,
+    shutdown_packet, user_defined_packet,
 };
 use bytes::Bytes;
 use rtflow_core::error::{Error, Result};
@@ -51,6 +52,8 @@ pub struct SrtSender {
     stream_id: Option<String>,
     latency_ms: u32,
     max_inflight: usize,
+    key_refresh_packets: u32,
+    key_packets: u32,
 }
 
 const MAX_SEND_BUFFER: usize = 8192;
@@ -91,6 +94,8 @@ impl SrtSender {
             stream_id: config.stream_id.clone(),
             latency_ms: config.latency_ms,
             max_inflight: config.flow_window.clamp(64, 8192) as usize,
+            key_refresh_packets: config.key_refresh_packets,
+            key_packets: 0,
         };
         // Consume any immediate handshake leftovers (e.g. duplicate conclusion).
         sender.poll_inbound().await?;
@@ -139,6 +144,13 @@ impl SrtSender {
                 payload: chunk.to_vec(),
             });
             self.trim_buffer();
+            self.key_packets = self.key_packets.wrapping_add(1);
+            if self.key_refresh_packets > 0
+                && self.key_packets >= self.key_refresh_packets
+                && self.crypto.is_some()
+            {
+                self.refresh_key().await?;
+            }
         }
         Ok(())
     }
@@ -160,6 +172,28 @@ impl SrtSender {
             }
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
+        Ok(())
+    }
+
+    async fn refresh_key(&mut self) -> Result<()> {
+        let Some(crypto) = self.crypto.as_mut() else {
+            return Ok(());
+        };
+        let message = match crypto.refresh() {
+            Ok(message) => message,
+            Err(error) => {
+                debug!(%error, "SRT sender: key refresh skipped");
+                self.key_packets = 0;
+                return Ok(());
+            }
+        };
+        crypto.switch_to_odd();
+        self.key_packets = 0;
+        let timestamp = self.started.elapsed().as_micros() as u32;
+        let packet =
+            user_defined_packet(SRT_CMD_KMREQ, Bytes::from(message), self.peer_id, timestamp);
+        self.send_control(&packet).await;
+        info!(peer = %self.remote, "SRT sender: key refreshed");
         Ok(())
     }
 
@@ -313,6 +347,11 @@ impl SrtSender {
             ControlType::PeerError => {
                 self.closed = true;
                 return Err(Error::Closed);
+            }
+            ControlType::UserDefined => {
+                // KMRSP for our refresh; nothing to switch until the next
+                // scheduled refresh.
+                debug!(peer = %self.remote, subtype = ctrl.type_specific, "SRT sender: KM response");
             }
             ControlType::AckAck | ControlType::DropReq | ControlType::Handshake => {}
             _ => {

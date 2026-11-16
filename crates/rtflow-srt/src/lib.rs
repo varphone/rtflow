@@ -18,8 +18,8 @@
 //! # Limitations
 //!
 //! - No rendezvous mode
-//! - Key refresh is applied on receipt (mid-stream KMREQ); TX rekey is not
-//!   implemented because the listener never sends media
+//! - Key refresh is supported on receipt (mid-stream KMREQ) and by the
+//!   sender (`SrtCallerConfig::key_refresh_packets`)
 //! - MPEG-TS payloads only (other payloads are consumed but not exposed)
 //!
 //! # Example

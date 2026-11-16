@@ -440,6 +440,8 @@ pub struct SessionCrypto {
     state: KmState,
     even: Option<KeySlot>,
     odd: Option<KeySlot>,
+    /// Sender preference after a key refresh (odd key).
+    prefer_odd: bool,
 }
 
 impl SessionCrypto {
@@ -453,6 +455,7 @@ impl SessionCrypto {
             state: KmState::Securing,
             even: None,
             odd: None,
+            prefer_odd: false,
         })
     }
 
@@ -486,6 +489,7 @@ impl SessionCrypto {
                 ctr,
             }),
             odd: None,
+            prefer_odd: false,
         };
         // Keep the passphrase for a future refresh response path.
         let _ = &mut crypto.passphrase;
@@ -557,9 +561,45 @@ impl SessionCrypto {
         (self.state, message.to_vec())
     }
 
-    /// Encrypt a data payload with the current even key (sender role).
+    /// Generate and install a fresh odd key, reusing the current salt, and
+    /// return the KMREQ that must be sent before switching.
+    pub fn refresh(&mut self) -> Result<Vec<u8>, CryptoError> {
+        let slot = self
+            .even
+            .as_ref()
+            .or(self.odd.as_ref())
+            .ok_or(CryptoError::BadKm("no key to refresh"))?;
+        let salt = slot.salt;
+        let key_len =
+            KeyLength::from_bytes(slot.key.len()).ok_or(CryptoError::BadKm("key length"))?;
+        let mut sek = vec![0u8; key_len.bytes()];
+        getrandom::getrandom(&mut sek).map_err(|_| CryptoError::BadKm("rng"))?;
+        let kek = derive_kek(&self.passphrase, &salt, key_len)?;
+        let km = KmMessage::build(KmKeys::Odd, key_len, salt, &[], &sek, &kek)?;
+        let ctr = AesCtr::new(&sek)?;
+        self.odd = Some(KeySlot {
+            key: sek,
+            salt,
+            ctr,
+        });
+        Ok(km)
+    }
+
+    /// Switch outgoing encryption to the refreshed odd key.
+    pub fn switch_to_odd(&mut self) {
+        if self.odd.is_some() {
+            self.prefer_odd = true;
+        }
+    }
+
+    /// Encrypt a data payload with the current key (sender role).
     pub fn encrypt(&self, sequence: u32, payload: &mut [u8]) -> bool {
-        let Some(slot) = self.even.as_ref().or(self.odd.as_ref()) else {
+        let slot = if self.prefer_odd {
+            self.odd.as_ref().or(self.even.as_ref())
+        } else {
+            self.even.as_ref().or(self.odd.as_ref())
+        };
+        let Some(slot) = slot else {
             return false;
         };
         slot.ctr.apply(&slot.salt, sequence, payload);
@@ -568,7 +608,9 @@ impl SessionCrypto {
 
     /// KK flag to put on packets encrypted by [`Self::encrypt`].
     pub fn key_flags(&self) -> u8 {
-        if self.even.is_some() {
+        if self.prefer_odd && self.odd.is_some() {
+            2
+        } else if self.even.is_some() {
             1
         } else if self.odd.is_some() {
             2

@@ -42,6 +42,8 @@ pub struct SrtCallerConfig {
     pub tsbpd_max_buffered: usize,
     /// SRT payload per data packet for the sender role (default 1316 = 7×188).
     pub payload_size: usize,
+    /// Sender key refresh interval in data packets (0 disables rekeying).
+    pub key_refresh_packets: u32,
 }
 
 impl Default for SrtCallerConfig {
@@ -59,6 +61,7 @@ impl Default for SrtCallerConfig {
             tlpktdrop: true,
             tsbpd_max_buffered: crate::tsbpd::DEFAULT_MAX_BUFFERED,
             payload_size: 1316,
+            key_refresh_packets: 0,
         }
     }
 }
