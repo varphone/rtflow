@@ -19,6 +19,8 @@ use tokio_util::sync::CancellationToken;
 pub struct ProxyPolicy {
     pub allow_private_networks: bool,
     pub allowed_hosts: Vec<String>,
+    pub max_upstreams: usize,
+    pub describe_concurrency: usize,
 }
 
 impl Default for ProxyPolicy {
@@ -26,6 +28,8 @@ impl Default for ProxyPolicy {
         Self {
             allow_private_networks: true,
             allowed_hosts: Vec::new(),
+            max_upstreams: 4,
+            describe_concurrency: 8,
         }
     }
 }
@@ -76,6 +80,7 @@ pub struct ProxyService {
     cancel: CancellationToken,
     default_grace: Duration,
     policy: ProxyPolicy,
+    describe_slots: Arc<tokio::sync::Semaphore>,
     entries: Mutex<HashMap<Arc<str>, Arc<Mutex<Entry>>>>,
 }
 
@@ -107,6 +112,9 @@ impl ProxyService {
             supervisor,
             cancel,
             default_grace: no_subscriber_grace,
+            describe_slots: Arc::new(tokio::sync::Semaphore::new(
+                policy.describe_concurrency.max(1),
+            )),
             policy,
             entries: Mutex::new(HashMap::new()),
         })
@@ -124,6 +132,9 @@ impl ProxyService {
         validate_path(&path)?;
         if upstream.endpoints().is_empty() {
             return Err(rtflow_core::error::Error::Limit("proxy upstreams"));
+        }
+        if upstream.endpoints().len() > self.policy.max_upstreams {
+            return Err(rtflow_core::error::Error::Limit("proxy upstream count"));
         }
         if upstream.cached_description.is_none() {
             upstream.cached_description = Some(describe_upstream(&upstream, &self.policy).await?);
@@ -174,6 +185,9 @@ impl ProxyService {
         validate_path(&path)?;
         if upstream.endpoints().is_empty() {
             return Err(rtflow_core::error::Error::Limit("proxy upstreams"));
+        }
+        if upstream.endpoints().len() > self.policy.max_upstreams {
+            return Err(rtflow_core::error::Error::Limit("proxy upstream count"));
         }
         let mut entries = self
             .entries
@@ -238,7 +252,14 @@ impl ProxyService {
                     entry.cancel.clone(),
                 )
             };
-            match describe_upstream(&upstream, &self.policy).await {
+            let slot = self
+                .describe_slots
+                .acquire()
+                .await
+                .map_err(|_| rtflow_core::error::Error::Limit("proxy describe slots"))?;
+            let described = describe_upstream(&upstream, &self.policy).await;
+            drop(slot);
+            match described {
                 Ok(description) => {
                     upstream.cached_description = Some(description);
                     let config = MountConfig::Proxy {

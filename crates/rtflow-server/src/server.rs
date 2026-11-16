@@ -329,6 +329,8 @@ impl ServerApp {
             rtflow::server::ProxyPolicy {
                 allow_private_networks: config.proxy.allow_private_networks,
                 allowed_hosts: config.proxy.allowed_hosts.clone(),
+                max_upstreams: config.proxy.max_upstreams_per_proxy,
+                describe_concurrency: config.proxy.describe_concurrency,
             },
         );
         let mut cancels = Vec::new();

@@ -11,6 +11,8 @@ pub struct ProxySection {
     #[serde(with = "humantime_serde")]
     pub idle_grace: Duration,
     pub max_proxies: usize,
+    pub max_upstreams_per_proxy: usize,
+    pub describe_concurrency: usize,
     pub allow_private_networks: bool,
     pub allowed_hosts: Vec<String>,
     pub redirect_policy: RedirectPolicy,
@@ -25,6 +27,8 @@ impl Default for ProxySection {
             enabled: true,
             idle_grace: Duration::from_secs(5),
             max_proxies: 128,
+            max_upstreams_per_proxy: 4,
+            describe_concurrency: 8,
             allow_private_networks: true,
             allowed_hosts: Vec::new(),
             redirect_policy: RedirectPolicy::SameOrigin,
@@ -238,6 +242,16 @@ impl ProxySection {
         }
         if self.max_proxies == 0 {
             return Err(ConfigError::Invalid("proxy.max_proxies is zero".into()));
+        }
+        if self.describe_concurrency == 0 {
+            return Err(ConfigError::Invalid(
+                "proxy.describe_concurrency is zero".into(),
+            ));
+        }
+        if self.max_upstreams_per_proxy == 0 {
+            return Err(ConfigError::Invalid(
+                "proxy.max_upstreams_per_proxy is zero".into(),
+            ));
         }
         for pattern in &self.allowed_hosts {
             validate_host_pattern(pattern)?;
