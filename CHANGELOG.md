@@ -30,6 +30,8 @@
 
 ### Changed
 
+- 登录密码支持显示/隐藏切换，带 aria-label 与焦点保持。
+
 - 排序表头同步 aria-sort，toast 增加 role=status/aria-live。
 
 - 点播/录制空状态提供跳转到录制或路径配置的入口。

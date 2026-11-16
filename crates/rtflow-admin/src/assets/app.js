@@ -113,13 +113,22 @@ function renderLogin(message = "") {
       <form id="login-form" class="stack">
         ${message ? `<div class="form-error">${esc(message)}</div>` : ""}
         <div class="field"><label for="login-user">用户名</label><input class="input" id="login-user" name="username" autocomplete="username" required autofocus></div>
-        <div class="field"><label for="login-pass">密码</label><input class="input" id="login-pass" name="password" type="password" autocomplete="current-password" required></div>
+        <div class="field"><label for="login-pass">密码</label><div class="password-field"><input class="input" id="login-pass" name="password" type="password" autocomplete="current-password" required><button type="button" class="password-toggle" data-toggle-password aria-label="显示密码">${icon("eye")}</button></div></div>
         <button class="btn primary block" type="submit">登录</button>
       </form>
       <div class="login-foot">rtflow admin</div>
     </section>
   </div></main>`;
   const form = document.getElementById("login-form");
+  const password = form.querySelector("#login-pass");
+  const toggle = form.querySelector("[data-toggle-password]");
+  toggle.onclick = () => {
+    const show = password.type === "password";
+    password.type = show ? "text" : "password";
+    toggle.innerHTML = icon(show ? "eyeOff" : "eye");
+    toggle.setAttribute("aria-label", show ? "隐藏密码" : "显示密码");
+    password.focus();
+  };
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = form.querySelector("button");

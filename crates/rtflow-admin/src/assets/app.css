@@ -369,6 +369,11 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 .login-card h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -.02em; }
 .login-card p.sub { margin: 0 0 22px; color: var(--muted); font-size: 12.5px; }
 .login-mobile-brand { display: none; }
+.password-field { position: relative; }
+.password-field .input { padding-right: 38px; }
+.password-toggle { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); border: 0; background: transparent; color: var(--faint); padding: 5px; cursor: pointer; display: grid; place-items: center; border-radius: 5px; }
+.password-toggle:hover { color: var(--text); background: var(--surface-2); }
+.password-toggle .icon { width: 16px; height: 16px; }
 .login-foot { color: var(--faint); font-size: 11px; margin-top: 20px; text-align: center; }
 @media (max-width: 760px) {
   .login-shell { grid-template-columns: 1fr; }
