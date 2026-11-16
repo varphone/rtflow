@@ -57,6 +57,7 @@ transport = "tcp"          # auto | udp | tcp
 username = "admin"
 password = "${CAMERA_PASSWORD}"
 request_timeout = "5s"
+media_idle_timeout = "15s"
 ```
 
 代理在首个订阅者（RTSP/HLS/FLV 任一协议）出现时连接上游，最后一个订阅者离开并超过

@@ -82,6 +82,8 @@ pub struct ProxyUpstream {
     pub password: Option<String>,
     #[serde(with = "humantime_serde")]
     pub request_timeout: Duration,
+    #[serde(with = "humantime_serde")]
+    pub media_idle_timeout: Duration,
 }
 
 impl Default for ProxyUpstream {
@@ -92,6 +94,7 @@ impl Default for ProxyUpstream {
             username: None,
             password: None,
             request_timeout: Duration::from_secs(5),
+            media_idle_timeout: Duration::from_secs(15),
         }
     }
 }
@@ -135,6 +138,7 @@ impl ProxyMount {
             rtflow::mount::upstream::UpstreamConfig::new(config.url.clone(), config.transport);
         upstream.credentials = config.credentials.take();
         upstream.request_timeout = config.request_timeout;
+        upstream.media_idle_timeout = config.media_idle_timeout;
         for endpoint in self.upstreams.iter().skip(1) {
             upstream.add_fallback(endpoint.endpoint()?);
         }
@@ -155,9 +159,13 @@ impl ProxyUpstream {
         if self.request_timeout.is_zero() {
             return Err("proxy upstream request_timeout is zero".into());
         }
+        if self.media_idle_timeout.is_zero() {
+            return Err("proxy upstream media_idle_timeout is zero".into());
+        }
         let mut endpoint =
             rtflow::mount::upstream::UpstreamEndpoint::new(url, self.transport.to_upstream());
         endpoint.request_timeout = self.request_timeout;
+        endpoint.media_idle_timeout = self.media_idle_timeout;
         if let (Some(username), Some(password)) = (&self.username, &self.password) {
             endpoint.credentials = Some(rtflow::auth::Credentials {
                 username: username.clone(),

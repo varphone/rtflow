@@ -24,6 +24,7 @@ pub struct UpstreamEndpoint {
     pub transport: UpstreamTransport,
     pub credentials: Option<Credentials>,
     pub request_timeout: Duration,
+    pub media_idle_timeout: Duration,
     pub jitter: JitterBufferConfig,
     #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
@@ -36,6 +37,7 @@ impl UpstreamEndpoint {
             transport,
             credentials: None,
             request_timeout: Duration::from_secs(5),
+            media_idle_timeout: Duration::from_secs(15),
             jitter: JitterBufferConfig::default(),
             #[cfg(feature = "tls")]
             tls: None,
@@ -219,6 +221,7 @@ pub struct UpstreamConfig {
     pub credentials: Option<Credentials>,
     pub reconnect: ReconnectPolicy,
     pub request_timeout: Duration,
+    pub media_idle_timeout: Duration,
     pub jitter: JitterBufferConfig,
     #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
@@ -237,6 +240,7 @@ impl UpstreamConfig {
             credentials: None,
             reconnect: ReconnectPolicy::default(),
             request_timeout: Duration::from_secs(5),
+            media_idle_timeout: Duration::from_secs(15),
             jitter: JitterBufferConfig::default(),
             #[cfg(feature = "tls")]
             tls: None,
@@ -258,6 +262,7 @@ impl UpstreamConfig {
             transport: self.transport,
             credentials: self.credentials.clone(),
             request_timeout: self.request_timeout,
+            media_idle_timeout: self.media_idle_timeout,
             jitter: self.jitter.clone(),
             #[cfg(feature = "tls")]
             tls: self.tls.clone(),
@@ -304,6 +309,7 @@ impl TryFrom<ProxyRoute> for UpstreamConfig {
         let mut config = Self::new(primary.url, primary.transport);
         config.credentials = primary.credentials;
         config.request_timeout = primary.request_timeout;
+        config.media_idle_timeout = primary.media_idle_timeout;
         config.jitter = primary.jitter;
         #[cfg(feature = "tls")]
         {

@@ -16,7 +16,7 @@ use rtflow_runtime::{TaskSpec, TaskSupervisor};
 const PROXY_WARMUP_HOLDOFF: std::time::Duration = std::time::Duration::from_secs(2);
 use std::{
     sync::{Arc, atomic::Ordering},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -270,6 +270,9 @@ async fn run_proxy(
                         .min(Duration::from_millis(250))
                         .max(Duration::from_millis(10));
                     let mut idle_check = tokio::time::interval(interval_duration);
+                    let mut idle_watchdog = tokio::time::interval(Duration::from_secs(1));
+                    idle_watchdog.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    let mut last_frame = Instant::now();
                     loop {
                         tokio::select! {
                             _ = server_cancel.cancelled() => {
@@ -300,13 +303,10 @@ async fn run_proxy(
                             }
                             // A half-open upstream (peer died without FIN)
                             // leaves `session.next()` pending forever; a
-                            // media idle timeout turns that into a stream
+                            // media idle watchdog turns that into a stream
                             // failure so the retry/failover path runs.
-                            frame = tokio::time::timeout(
-                                endpoint.request_timeout.saturating_mul(2).max(Duration::from_secs(10)),
-                                session.next(),
-                            ) => match frame {
-                                Err(_) => {
+                            _ = idle_watchdog.tick() => {
+                                if last_frame.elapsed() >= endpoint.media_idle_timeout {
                                     failure_code = rtflow_core::error::ErrorCode::UpstreamUnavailable;
                                     emit(
                                         &mount.event_sink,
@@ -317,7 +317,10 @@ async fn run_proxy(
                                     );
                                     break;
                                 }
-                                Ok(Some(Ok(mut frame))) => {
+                            }
+                            frame = session.next() => match frame {
+                                Some(Ok(mut frame)) => {
+                                    last_frame = Instant::now();
                                     if timeline.normalize(&mut frame).is_err() {
                                         mount.stats.add_dropped(1);
                                         break;
@@ -328,7 +331,7 @@ async fn run_proxy(
                                         mount.stats.add_dropped(1);
                                     }
                                 }
-                                Ok(Some(Err(error))) => {
+                                Some(Err(error)) => {
                                     failure_code = error.code();
                                     emit(
                                         &mount.event_sink,
@@ -339,7 +342,7 @@ async fn run_proxy(
                                     );
                                     break;
                                 }
-                                Ok(None) => break,
+                                None => break,
                             }
                         }
                     }

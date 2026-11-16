@@ -28,7 +28,7 @@
 
 ## M3 — 运行时与时间轴
 
-- [ ] 媒体空闲看门狗可配置，去掉逐帧 timeout。
+- [x] 媒体空闲看门狗可配置（`media_idle_timeout`），去掉逐帧 timeout。
 - [ ] `RtspClient::connect_with_description` 快速重连；描述刷新。
 - [ ] RTCP SR NTP↔RTP 映射、RTP 时间戳回绕扩展、重连 A/V 同步。
 - [ ] RTSPS/SRTP/multicast/461 回退/redirect 代理测试矩阵。
