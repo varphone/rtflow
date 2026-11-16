@@ -304,6 +304,7 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 }
 
 .drawer-body:focus, .modal-body:focus { outline: none; }
+.player-status-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
 .audit-table { max-height: calc(100vh - 330px); }
 .traffic-panel { margin-bottom: 14px; }
 .traffic-chart { position: relative; height: 92px; margin: 0 14px 10px; border-bottom: 1px solid var(--line-soft); }

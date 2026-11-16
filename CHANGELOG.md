@@ -30,6 +30,8 @@
 
 ### Changed
 
+- 播放器致命错误显示“重试”按钮，重新创建 hls.js 实例。
+
 - 关闭播放器时销毁 hls.js、清空 video src，避免后台继续拉流。
 
 - 路径详情新增 RTSP 访问地址，系统 API 暴露 public_rtsp。
