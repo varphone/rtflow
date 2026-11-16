@@ -20,6 +20,10 @@ pub struct DataPacket {
     pub timestamp: u32,
     /// Destination socket ID.
     pub socket_id: u32,
+    /// Order flag: deliver messages in order when set.
+    pub ordered: bool,
+    /// Retransmitted flag (set by the sender on retransmissions).
+    pub retransmitted: bool,
     /// Payload data.
     pub payload: Bytes,
 }
@@ -32,6 +36,7 @@ pub enum ControlType {
     Keepalive = 0x0001,
     Ack = 0x0002,
     Nak = 0x0003,
+    CongestionWarning = 0x0004,
     Shutdown = 0x0005,
     AckAck = 0x0006,
     DropReq = 0x0007,
@@ -46,6 +51,7 @@ impl ControlType {
             0x0001 => Some(Self::Keepalive),
             0x0002 => Some(Self::Ack),
             0x0003 => Some(Self::Nak),
+            0x0004 => Some(Self::CongestionWarning),
             0x0005 => Some(Self::Shutdown),
             0x0006 => Some(Self::AckAck),
             0x0007 => Some(Self::DropReq),
@@ -122,6 +128,8 @@ pub fn parse_packet_borrowed(data: Bytes) -> Option<SrtPacket> {
             SrtPacket::Data(DataPacket {
                 sequence: f.sequence,
                 position: f.position,
+                ordered: f.ordered,
+                retransmitted: f.retransmitted,
                 message_number: f.message_number,
                 timestamp: f.timestamp,
                 socket_id: f.socket_id,
@@ -134,6 +142,8 @@ pub fn parse_packet_borrowed(data: Bytes) -> Option<SrtPacket> {
 struct DataFields {
     sequence: u32,
     position: u8,
+    ordered: bool,
+    retransmitted: bool,
     message_number: u32,
     timestamp: u32,
     socket_id: u32,
@@ -151,6 +161,8 @@ fn parse_data_fields(data: &[u8], first_word: u32) -> Option<(DataFields, &[u8])
     let sequence = first_word & 0x7FFF_FFFF;
     let second_word = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
     let position = ((second_word >> 30) & 0x03) as u8;
+    let ordered = (second_word >> 29) & 1 == 1;
+    let retransmitted = (second_word >> 26) & 1 == 1;
     let message_number = second_word & 0x03FF_FFFF;
     let timestamp = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
     let socket_id = u32::from_be_bytes([data[12], data[13], data[14], data[15]]);
@@ -158,6 +170,8 @@ fn parse_data_fields(data: &[u8], first_word: u32) -> Option<(DataFields, &[u8])
         DataFields {
             sequence,
             position,
+            ordered,
+            retransmitted,
             message_number,
             timestamp,
             socket_id,
@@ -190,6 +204,8 @@ fn parse_data_packet(data: &[u8], first_word: u32) -> Option<SrtPacket> {
     Some(SrtPacket::Data(DataPacket {
         sequence: f.sequence,
         position: f.position,
+        ordered: f.ordered,
+        retransmitted: f.retransmitted,
         message_number: f.message_number,
         timestamp: f.timestamp,
         socket_id: f.socket_id,
@@ -216,7 +232,13 @@ pub fn encode_data_packet(pkt: &DataPacket) -> BytesMut {
     let first_word = pkt.sequence & 0x7FFF_FFFF; // data packet: bit 31 = 0
     buf.put_u32(first_word);
 
-    let second_word = ((pkt.position as u32) << 30) | (pkt.message_number & 0x03FF_FFFF);
+    let mut second_word = ((pkt.position as u32) << 30) | (pkt.message_number & 0x03FF_FFFF);
+    if pkt.ordered {
+        second_word |= 1 << 29;
+    }
+    if pkt.retransmitted {
+        second_word |= 1 << 26;
+    }
     buf.put_u32(second_word);
 
     buf.put_u32(pkt.timestamp);
@@ -253,31 +275,114 @@ pub fn keepalive_packet(socket_id: u32, timestamp: u32) -> ControlPacket {
     }
 }
 
-/// Build an ACK control packet.
-pub fn ack_packet(ack_seq: u32, ack_number: u32, socket_id: u32, timestamp: u32) -> ControlPacket {
-    let mut data = BytesMut::with_capacity(4);
-    data.put_u32(ack_number);
+/// Fields carried by a full ACK control packet.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AckFields {
+    /// Acknowledgement Number (monotonic, starts at 1).
+    pub ack_sequence: u32,
+    /// First unacknowledged data packet sequence number.
+    pub last_ack_sequence: u32,
+    /// Round-trip time estimate, microseconds.
+    pub rtt_us: u32,
+    /// RTT variance, microseconds.
+    pub rtt_var_us: u32,
+    /// Available receiver buffer, packets.
+    pub available_buffer: u32,
+    /// Packet receiving rate, packets/second.
+    pub packet_rate: u32,
+    /// Estimated link capacity, packets/second.
+    pub link_capacity: u32,
+    /// Receiving rate, bytes/second.
+    pub byte_rate: u32,
+}
+
+/// Build a full ACK control packet (7 CIF words, as libsrt sends).
+pub fn ack_packet(fields: &AckFields, socket_id: u32, timestamp: u32) -> ControlPacket {
+    let mut data = BytesMut::with_capacity(28);
+    data.put_u32(fields.last_ack_sequence & 0x7FFF_FFFF);
+    data.put_u32(fields.rtt_us);
+    data.put_u32(fields.rtt_var_us);
+    data.put_u32(fields.available_buffer);
+    data.put_u32(fields.packet_rate);
+    data.put_u32(fields.link_capacity);
+    data.put_u32(fields.byte_rate);
     ControlPacket {
         control_type: ControlType::Ack,
-        // Per SRT spec the type-specific field carries the ACK sequence
-        // counter; the confirmed sequence goes in the payload.
-        type_specific: ack_seq as u16,
-        additional_info: 0,
+        // The 16-bit subtype is reserved for ACK packets.
+        type_specific: 0,
+        additional_info: fields.ack_sequence,
         timestamp,
         socket_id,
         data: data.freeze(),
     }
 }
 
-/// Build an ACKACK control packet.
-pub fn ackack_packet(ack_number: u32, socket_id: u32, timestamp: u32) -> ControlPacket {
+/// Parse an ACK control packet (full, small or light).
+pub fn parse_ack(packet: &ControlPacket) -> Option<AckFields> {
+    if packet.control_type != ControlType::Ack || packet.data.len() < 4 {
+        return None;
+    }
+    let word = |index: usize| -> Option<u32> {
+        let start = index * 4;
+        packet
+            .data
+            .get(start..start + 4)
+            .map(|bytes| u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    };
+    Some(AckFields {
+        ack_sequence: packet.additional_info,
+        last_ack_sequence: word(0)? & 0x7FFF_FFFF,
+        rtt_us: word(1).unwrap_or(0),
+        rtt_var_us: word(2).unwrap_or(0),
+        available_buffer: word(3).unwrap_or(0),
+        packet_rate: word(4).unwrap_or(0),
+        link_capacity: word(5).unwrap_or(0),
+        byte_rate: word(6).unwrap_or(0),
+    })
+}
+
+/// Build an ACKACK control packet acknowledging the given ACK sequence.
+pub fn ackack_packet(ack_sequence: u32, socket_id: u32, timestamp: u32) -> ControlPacket {
     ControlPacket {
         control_type: ControlType::AckAck,
         type_specific: 0,
-        additional_info: ack_number,
+        additional_info: ack_sequence,
         timestamp,
         socket_id,
         data: Bytes::new(),
+    }
+}
+
+/// Build a SHUTDOWN control packet.
+pub fn shutdown_packet(socket_id: u32, timestamp: u32) -> ControlPacket {
+    ControlPacket {
+        control_type: ControlType::Shutdown,
+        type_specific: 0,
+        additional_info: 0,
+        timestamp,
+        socket_id,
+        data: Bytes::new(),
+    }
+}
+
+/// Build a DROPREQ control packet (sender → receiver).
+pub fn drop_request_packet(
+    message_number: u32,
+    first_sequence: u32,
+    last_sequence: u32,
+    socket_id: u32,
+    timestamp: u32,
+) -> ControlPacket {
+    let mut data = BytesMut::with_capacity(8);
+    data.put_u32(first_sequence & 0x7FFF_FFFF);
+    data.put_u32(last_sequence & 0x7FFF_FFFF);
+    ControlPacket {
+        control_type: ControlType::DropReq,
+        type_specific: 0,
+        additional_info: message_number,
+        timestamp,
+        socket_id,
+        data: data.freeze(),
     }
 }
 
@@ -341,6 +446,8 @@ mod tests {
             message_number: 42,
             timestamp: 1000000,
             socket_id: 0xDEADBEEF,
+            ordered: true,
+            retransmitted: false,
             payload: Bytes::from(vec![1, 2, 3, 4, 5]),
         };
 

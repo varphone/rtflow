@@ -5,16 +5,20 @@
 //!
 //! # Features
 //!
-//! - HSv5 handshake (induction + conclusion)
-//! - Data packet reception with sequence tracking
-//! - MPEG-TS demuxing to AccessUnit
-//! - Integration with shared mount registry
+//! - HSv5 caller-listener handshake, byte-compatible with libsrt 1.4/1.5
+//! - HSREQ/HSRSP negotiation (TSBPD latency = max of both sides)
+//! - Stream ID (`#!::r=...` or a plain path, optional `?token=`) routing
+//! - Full ACK / ACKACK with RTT estimation, NAK loss reports, keepalive,
+//!   shutdown and DROPREQ handling
+//! - TSBPD delivery with TLPKTDROP and fake ACKs for skipped packets
+//! - MPEG-TS demuxing to AccessUnit and mount registration
 //!
 //! # Limitations
 //!
 //! - Listener mode only (no caller/rendezvous)
-//! - No encryption (KM handshake skipped)
-//! - Simplified ARQ (loss detection without retransmit requests)
+//! - No encryption: connections advertising a cipher are rejected with
+//!   `SRT_REJ_CRYPTO`
+//! - MPEG-TS payloads only (other payloads are consumed but not exposed)
 //!
 //! # Example
 //!
@@ -36,12 +40,13 @@ pub mod ts_demux;
 pub mod tsbpd;
 
 use handshake::{
-    HandshakeType, conclusion_response, generate_cookie, handshake_control_packet,
-    induction_response, parse_handshake,
+    Handshake, HandshakeType, HsExtFields, HsExtension, HsFlags, SRT_CMD_FILTER, SRT_CMD_GROUP,
+    SRT_VERSION, SRT_VERSION_4, SRT_VERSION_5, conclusion_response, generate_cookie,
+    handshake_control_packet, induction_response, parse_handshake, reject, rejection_response,
 };
 use packet::{
-    ControlType, SrtPacket, ack_packet, encode_control_packet, keepalive_packet, nak_packet,
-    parse_packet_borrowed,
+    AckFields, ControlPacket, ControlType, SrtPacket, ack_packet, encode_control_packet,
+    keepalive_packet, nak_packet, parse_packet_borrowed, shutdown_packet,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -61,7 +66,15 @@ pub struct SrtServer {
     config: SrtConfig,
     cancel: CancellationToken,
     /// SYN cookies issued during induction, pending conclusion verification.
-    pending_cookies: std::sync::Mutex<HashMap<SocketAddr, (u32, Instant)>>,
+    pending_cookies: std::sync::Mutex<HashMap<SocketAddr, PendingCookie>>,
+}
+
+/// Handshake state kept between the induction and conclusion messages.
+pub(crate) struct PendingCookie {
+    pub(crate) cookie: u32,
+    pub(crate) listener_socket_id: u32,
+    pub(crate) caller_socket_id: u32,
+    pub(crate) issued_at: Instant,
 }
 
 /// How long an issued SYN cookie stays valid before it must be redeemed.

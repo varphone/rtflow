@@ -18,6 +18,10 @@
 
 ### Added
 
+- SRT 协议与 libsrt 系工具（ffmpeg/OBS）互通：修正握手类型/字段、HSREQ/HSRSP、
+  Stream ID（含字节序与 `#!::` 解析）、完整 ACK/ACKACK/RTT、NAK、keepalive、
+  shutdown、DROPREQ；TSBPD 使用协商延迟并支持 TLPKTDROP 跳包与 fake ACK；
+  被拒绝的连接返回 `1000+reason` 而非静默超时；fuzz 修复并新增 SRT 目标。
 - SRT 推流支持 HMAC token/流密钥校验；HTTP 内置 HTTPS；RTSP 会话结束触发
   `on_play_done` 钩子；RTMP 流密钥 `max_connections` 生效；控制 API 支持
   会话 cookie、Basic 与 Bearer token 三种认证。

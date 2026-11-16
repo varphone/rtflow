@@ -31,6 +31,11 @@ listen = "0.0.0.0:1935"
 [srt]
 enabled = true
 listen = "0.0.0.0:9000"
+latency_ms = 120
+peer_idle_timeout = "30s"
+tlpktdrop = true
+mtu = 1500
+max_connections = 10
 allowed_stream_ids = []  # empty = open; list exact stream ids to restrict
 # Publish tokens/keys are verified from `streamid` (`live/cam?token=...`)
 # using the [auth] configuration, like RTSP/RTMP/HTTP.

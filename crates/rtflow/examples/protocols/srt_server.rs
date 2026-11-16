@@ -29,9 +29,9 @@ struct Args {
     /// Expected codecs from the publisher.
     #[arg(long, value_delimiter = ',', default_values = ["h264", "aac"])]
     codecs: Vec<CodecArg>,
-    /// TSBPD delay in milliseconds.
+    /// TSBPD latency in milliseconds.
     #[arg(long, default_value_t = 120)]
-    tsbpd_delay_ms: u32,
+    latency_ms: u32,
 }
 
 #[tokio::main]
@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // SRT server (ingest)
     let srt_config = rtflow::srt::SrtConfig {
         bind_addr: args.srt_listen,
-        tsbpd_delay_ms: args.tsbpd_delay_ms,
+        latency_ms: args.latency_ms,
         ..Default::default()
     };
     let srt_server = SrtServer::with_config(srt_config, mounts.clone()).await?;
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== SRT Server ===");
     println!("SRT listen:   {} (UDP)", srt_addr);
     println!("RTSP listen:  {}", rtsp_addr);
-    println!("TSBPD delay:  {}ms", args.tsbpd_delay_ms);
+    println!("TSBPD latency: {}ms", args.latency_ms);
     println!();
     println!("Publish via FFmpeg:");
     println!(

@@ -145,6 +145,14 @@ impl Default for RtmpSection {
 pub struct SrtSection {
     pub enabled: bool,
     pub listen: SocketAddr,
+    /// Receiver TSBPD latency; the connection uses max(this, peer value).
+    pub latency_ms: u32,
+    #[serde(with = "humantime_serde")]
+    pub peer_idle_timeout: Duration,
+    /// Drop packets that missed their play time.
+    pub tlpktdrop: bool,
+    pub mtu: u32,
+    pub max_connections: usize,
     /// Optional SRT stream-id allowlist. Empty keeps SRT open; use signed
     /// keys/tokens at the application layer where possible.
     pub allowed_stream_ids: Vec<String>,
@@ -155,6 +163,11 @@ impl Default for SrtSection {
         Self {
             enabled: true,
             listen: "0.0.0.0:9000".parse().expect("valid default"),
+            latency_ms: 120,
+            peer_idle_timeout: Duration::from_secs(30),
+            tlpktdrop: true,
+            mtu: 1500,
+            max_connections: 10,
             allowed_stream_ids: Vec::new(),
         }
     }

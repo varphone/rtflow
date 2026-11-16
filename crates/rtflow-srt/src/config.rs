@@ -1,5 +1,6 @@
 use super::*;
 
+/// SRT listener configuration.
 #[derive(Clone, Debug)]
 pub struct SrtConfig {
     /// Bind address.
@@ -8,25 +9,33 @@ pub struct SrtConfig {
     pub max_connections: usize,
     /// Receive buffer size.
     pub recv_buffer_size: usize,
-    /// TSBPD delay in milliseconds.
-    pub tsbpd_delay_ms: u32,
-    /// Hard cap on TSBPD reorder-buffer packets (memory bound for
-    /// small-RAM IPC; see `TsbpdBuffer::new`). Excess arrivals are
-    /// dropped instead of growing the reorder map.
-    pub tsbpd_max_buffered: usize,
-    /// ACK interval in milliseconds.
+    /// Receiver TSBPD latency in milliseconds. The effective latency of a
+    /// connection is `max(this, peer_receiver_latency)`; `0` accepts the
+    /// peer's value (and 0 in both directions disables the buffer delay).
+    pub latency_ms: u32,
+    /// Advertised MTU.
+    pub mtu: u32,
+    /// Advertised flow window (packets in flight).
+    pub flow_window: u32,
+    /// Drop packets that missed their play time (TLPKTDROP).
+    pub tlpktdrop: bool,
+    /// Keepalive interval when no other packet has been sent.
+    pub keepalive_interval: Duration,
+    /// Disconnect a peer that sent nothing for this long.
+    pub peer_idle_timeout: Duration,
+    /// ACK interval (full ACK cadence).
     pub ack_interval_ms: u64,
-    /// Keepalive timeout (disconnect after this without keepalive).
-    pub keepalive_timeout: Duration,
+    /// NAK interval (loss reports).
+    pub nak_interval_ms: u64,
+    /// Hard cap on TSBPD reorder-buffer packets.
+    pub tsbpd_max_buffered: usize,
     /// Optional metrics registry for protocol-level counters.
     #[cfg(feature = "metrics")]
     pub metrics: Option<Arc<rtflow_core::metrics::MetricsRegistry>>,
     /// Allowed stream ids for publish (SRT `streamid` parameter). Empty
-    /// means open mode (any stream id may publish); otherwise a caller
-    /// whose stream id is not listed is rejected at handshake time.
+    /// means open mode.
     pub allowed_stream_ids: Vec<String>,
     /// Optional publish authorization (HMAC token, API key, path policy).
-    /// Consulted after the stream-id allow-list.
     pub authenticator: Option<Arc<dyn PublishAuthenticator>>,
 }
 
@@ -44,11 +53,16 @@ impl Default for SrtConfig {
         Self {
             bind_addr: "0.0.0.0:9000".parse().unwrap(),
             max_connections: 10,
-            recv_buffer_size: 8192 * 188, // ~8192 TS packets
-            tsbpd_delay_ms: tsbpd::DEFAULT_TSBPD_DELAY_MS,
-            tsbpd_max_buffered: tsbpd::DEFAULT_MAX_BUFFERED,
+            recv_buffer_size: 8192 * 188,
+            latency_ms: 120,
+            mtu: 1500,
+            flow_window: 8192,
+            tlpktdrop: true,
+            keepalive_interval: Duration::from_secs(1),
+            peer_idle_timeout: Duration::from_secs(30),
             ack_interval_ms: 10,
-            keepalive_timeout: Duration::from_secs(30),
+            nak_interval_ms: 20,
+            tsbpd_max_buffered: tsbpd::DEFAULT_MAX_BUFFERED,
             #[cfg(feature = "metrics")]
             metrics: None,
             allowed_stream_ids: Vec::new(),

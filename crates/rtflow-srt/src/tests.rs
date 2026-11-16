@@ -1,4 +1,4 @@
-use super::session::parse_stream_id;
+use super::session::parse_stream_id_string;
 use super::*;
 use std::time::Duration;
 
@@ -23,36 +23,18 @@ async fn server_binds_and_shuts_down() {
 }
 
 #[test]
-fn parse_stream_id_with_resource() {
-    // Build a fake handshake with SID extension
-    let mut hs = vec![0u8; 48]; // header
-    // SID: "#!::u=publisher,r=live/cam1" = 28 bytes, pad to 28 (7 words)
-    let sid = b"#!::u=publisher,r=live/cam1";
-    let padded_len = (sid.len() + 3) & !3; // round up to 4
-    let words = (padded_len / 4) as u16;
-    hs.extend_from_slice(&5u16.to_be_bytes()); // type = SRT_CMD_SID
-    hs.extend_from_slice(&words.to_be_bytes()); // length in words
-    hs.extend_from_slice(sid);
-    hs.extend_from_slice(&vec![0u8; padded_len - sid.len()]); // null padding
-
-    let result = parse_stream_id(&hs);
-    assert_eq!(result, Some("live/cam1".to_string()));
-}
-
-#[test]
-fn parse_stream_id_plain() {
-    let mut hs = vec![0u8; 48];
-    hs.extend_from_slice(&5u16.to_be_bytes());
-    hs.extend_from_slice(&2u16.to_be_bytes()); // 2 words = 8 bytes
-    let sid = b"stream1\0"; // 8 bytes
-    hs.extend_from_slice(sid);
-
-    let result = parse_stream_id(&hs);
-    assert_eq!(result, Some("stream1".to_string()));
-}
-
-#[test]
-fn parse_stream_id_none() {
-    let hs = vec![0u8; 48]; // no extensions
-    assert_eq!(parse_stream_id(&hs), None);
+fn stream_id_resource_is_extracted() {
+    assert_eq!(
+        parse_stream_id_string("#!::u=publisher,r=live/cam1"),
+        "live/cam1"
+    );
+    assert_eq!(
+        parse_stream_id_string("live/cam?token=abc"),
+        "live/cam?token=abc"
+    );
+    assert_eq!(
+        parse_stream_id_string("#!::r=live/cam?key=x,h=host"),
+        "live/cam?key=x"
+    );
+    assert_eq!(parse_stream_id_string("#!::u=user"), "u=user");
 }

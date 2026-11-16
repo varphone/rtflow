@@ -25,9 +25,15 @@ ffmpeg -re -i input.mp4 -c copy -f flv rtmp://host:1935/live/cam
 # RTSP
 ffmpeg -re -i input.mp4 -c copy -f rtsp rtsp://host:8554/live/cam
 
-# SRT
+# SRT（streamid 可带认证参数）
 ffmpeg -re -i input.mp4 -c copy -f mpegts 'srt://host:9000?streamid=live/cam'
+ffmpeg -re -i input.mp4 -c copy -f mpegts \
+  'srt://host:9000?streamid=live/cam?key=<kid>.<secret>'
 ```
+
+SRT 与 libsrt 系工具（ffmpeg、OBS、srt-live-transmit）互通：HSv5 握手、
+HSREQ/HSRSP 延迟协商、Stream ID、ACK/ACKACK/NAK、keepalive、TLPKTDROP。
+加密（AES）尚未实现，携带 passphrase 的连接会收到 `SRT_REJ_CRYPTO` 拒绝。
 
 ## 播放
 

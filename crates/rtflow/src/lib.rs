@@ -37,6 +37,8 @@ pub use rtflow_admin as admin;
 pub use rtflow_core as core;
 #[cfg(feature = "file-storage")]
 pub use rtflow_file as file;
+#[cfg(feature = "framing")]
+pub use rtflow_framing as framing;
 pub use rtflow_gateway as gateway;
 #[cfg(feature = "logging")]
 pub mod logging;

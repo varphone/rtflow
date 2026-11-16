@@ -48,6 +48,8 @@ hls = ["http", "mp4", "dep:rtflow-hls"]
 dash = ["hls", "dep:rtflow-dash"]
 rtmp = ["dep:rtflow-rtmp"]
 srt = ["dep:rtflow-srt"]
+# Low-level RTSP/interleaved framer (exposed for fuzzing and tooling).
+framing = ["dep:rtflow-framing"]
 webrtc = ["http", "dep:rtflow-webrtc"]
 srtp = ["dep:rtflow-srtp", "rtflow-rtsp/srtp", "rtflow-rtsp-client/srtp", "rtflow-rtsp-server/srtp"]
 multicast = [

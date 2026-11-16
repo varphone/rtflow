@@ -8,10 +8,11 @@
 //! - Stream ID routing
 //! - Keepalive timeout disconnect
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use rtflow::mount::MountRegistry;
 use rtflow::srt::handshake::{
-    Handshake, HandshakeType, SRT_VERSION_4, SRT_VERSION_5, encode_handshake, parse_handshake,
+    Handshake, HandshakeType, HsExtFields, HsExtension, HsFlags, SRT_MAGIC, SRT_VERSION,
+    SRT_VERSION_4, SRT_VERSION_5, encode_handshake, parse_handshake,
 };
 use rtflow::srt::packet::{
     ControlPacket, ControlType, DataPacket, SrtPacket, encode_control_packet, encode_data_packet,
@@ -42,7 +43,7 @@ fn build_induction_request(socket_id: u32) -> Handshake {
     Handshake {
         version: SRT_VERSION_4,
         encryption: 0,
-        extension: 0x0002,
+        extension_field: 2,
         initial_sequence: 0,
         mtu: 1500,
         flow_window: 8192,
@@ -50,9 +51,7 @@ fn build_induction_request(socket_id: u32) -> Handshake {
         socket_id,
         cookie: 0,
         peer_ip: [0u8; 16],
-        srt_socket_id: socket_id,
-        srt_version: SRT_VERSION_5,
-        srt_flags: 0,
+        extensions: Vec::new(),
     }
 }
 
@@ -63,43 +62,31 @@ fn build_conclusion_request(
     initial_seq: u32,
     stream_id: Option<&str>,
 ) -> Bytes {
-    let mut buf = BytesMut::with_capacity(128);
-
-    // Fixed 48-byte handshake header
-    buf.put_u32(SRT_VERSION_5); // version
-    buf.put_u16(0); // encryption
-    buf.put_u16(0x0002); // extension (HS_EXT_HSREQ)
-    buf.put_u32(initial_seq); // initial sequence
-    buf.put_u32(1500); // MTU
-    buf.put_u32(8192); // flow window
-    buf.put_u32(HandshakeType::Conclusion as u32); // handshake type
-    buf.put_u32(socket_id); // socket ID
-    buf.put_u32(cookie); // cookie from induction
-    buf.put_slice(&[0u8; 16]); // peer IP
-
-    // SRT_CMD_HSREQ extension (type=1, 4 words)
-    buf.put_u16(0x0001); // ext type
-    buf.put_u16(4); // ext size in 32-bit words
-    buf.put_u32(0x4A17); // SRT magic
-    buf.put_u32(SRT_VERSION_5); // SRT version
-    buf.put_u32(0x0000_00BF); // SRT flags
-    buf.put_u32(0x0000_0078); // TSBPD delay: 120ms
-
-    // SRT_CMD_SID extension (type=5) if stream_id provided
-    if let Some(sid) = stream_id {
-        let sid_bytes = sid.as_bytes();
-        let padded_len = (sid_bytes.len() + 3) & !3; // round up to 4-byte boundary
-        let words = (padded_len / 4) as u16;
-        buf.put_u16(0x0005); // SRT_CMD_SID
-        buf.put_u16(words);
-        buf.put_slice(sid_bytes);
-        // Null padding
-        for _ in 0..(padded_len - sid_bytes.len()) {
-            buf.put_u8(0);
-        }
-    }
-
-    buf.freeze()
+    let handshake = Handshake {
+        version: SRT_VERSION_5,
+        encryption: 0,
+        extension_field: 0,
+        initial_sequence: initial_seq,
+        mtu: 1500,
+        flow_window: 8192,
+        handshake_type: HandshakeType::Conclusion,
+        socket_id,
+        cookie,
+        peer_ip: [0u8; 16],
+        extensions: {
+            let mut extensions = vec![HsExtension::HsReq(HsExtFields {
+                srt_version: SRT_VERSION,
+                flags: HsFlags::live_defaults(),
+                recv_latency_ms: 120,
+                send_latency_ms: 0,
+            })];
+            if let Some(stream_id) = stream_id {
+                extensions.push(HsExtension::StreamId(stream_id.to_owned()));
+            }
+            extensions
+        },
+    };
+    encode_handshake(&handshake)
 }
 
 /// Send a conclusion request with raw bytes (for custom extensions).
@@ -355,11 +342,15 @@ async fn perform_handshake(
         .unwrap();
 
     let resp = parse_packet(&buf[..n]).expect("failed to parse induction response");
-    let (cookie, server_socket_id) = match resp {
+    let (cookie, _server_socket_id) = match resp {
         SrtPacket::Control(ctrl) => {
             assert_eq!(ctrl.control_type, ControlType::Handshake);
             let hs = parse_handshake(&ctrl.data).expect("failed to parse handshake");
             assert_eq!(hs.handshake_type, HandshakeType::Induction);
+            assert_eq!(hs.version, SRT_VERSION_5);
+            assert_eq!(hs.extension_field, SRT_MAGIC);
+            // libsrt keeps the caller's socket id in the induction response.
+            assert_eq!(hs.socket_id, caller_socket_id);
             (hs.cookie, hs.socket_id)
         }
         _ => panic!("expected control packet for induction response"),
@@ -369,7 +360,8 @@ async fn perform_handshake(
     let initial_seq = 1000u32;
     let conclusion_data =
         build_conclusion_request(caller_socket_id, cookie, initial_seq, stream_id);
-    let wire = conclusion_to_wire(conclusion_data, server_socket_id, 1000);
+    // The caller sends the conclusion to socket id 0 (connection request).
+    let wire = conclusion_to_wire(conclusion_data, 0, 1000);
     sock.send_to(&wire, server_addr).await.unwrap();
 
     // Receive conclusion response
@@ -382,13 +374,14 @@ async fn perform_handshake(
     match resp {
         SrtPacket::Control(ctrl) => {
             assert_eq!(ctrl.control_type, ControlType::Handshake);
+            assert_eq!(ctrl.socket_id, caller_socket_id);
             let hs = parse_handshake(&ctrl.data).expect("failed to parse conclusion handshake");
             assert_eq!(hs.handshake_type, HandshakeType::Conclusion);
+            assert_ne!(hs.socket_id, 0);
+            (hs.socket_id, initial_seq)
         }
         _ => panic!("expected control packet for conclusion response"),
     }
-
-    (server_socket_id, initial_seq)
 }
 
 /// Send TS data as SRT data packets.
@@ -406,6 +399,8 @@ async fn send_ts_data(
             message_number: (i + 1) as u32,
             timestamp: (i as u32) * 1000, // 1ms apart
             socket_id: dest_socket_id,
+            ordered: true,
+            retransmitted: false,
             payload: Bytes::copy_from_slice(ts_pkt),
         };
         let wire = encode_data_packet(&data_pkt);
@@ -422,7 +417,7 @@ async fn srt_handshake_completes() {
     let mounts = Arc::new(MountRegistry::new(10));
     let config = SrtConfig {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
-        tsbpd_delay_ms: 0,
+        latency_ms: 0,
         ..Default::default()
     };
     let server = SrtServer::with_config(config, mounts).await.unwrap();
@@ -444,7 +439,7 @@ async fn srt_ts_ingest_creates_mount() {
     let mounts = Arc::new(MountRegistry::new(10));
     let config = SrtConfig {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
-        tsbpd_delay_ms: 0,
+        latency_ms: 0,
         ..Default::default()
     };
     let server = SrtServer::with_config(config, mounts.clone())
@@ -484,7 +479,7 @@ async fn srt_stream_id_routing() {
     let mounts = Arc::new(MountRegistry::new(10));
     let config = SrtConfig {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
-        tsbpd_delay_ms: 0,
+        latency_ms: 0,
         ..Default::default()
     };
     let server = SrtServer::with_config(config, mounts.clone())
@@ -526,8 +521,8 @@ async fn srt_keepalive_timeout_disconnects() {
     let mounts = Arc::new(MountRegistry::new(10));
     let config = SrtConfig {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
-        tsbpd_delay_ms: 0,
-        keepalive_timeout: Duration::from_millis(100), // Very short timeout
+        latency_ms: 0,
+        peer_idle_timeout: Duration::from_secs(1), // Short timeout
         ..Default::default()
     };
     let server = SrtServer::with_config(config, mounts.clone())
@@ -549,12 +544,12 @@ async fn srt_keepalive_timeout_disconnects() {
     let ts_packets: Vec<&[u8]> = vec![&pat, &pmt, &pes1, &pes2];
     send_ts_data(&sock, server_addr, server_sid, initial_seq, &ts_packets).await;
 
-    // Wait for mount to appear
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Wait for mount to appear (the negotiated latency is 120ms).
+    tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(!mounts.snapshots().is_empty(), "Mount should exist");
 
-    // Now stop sending anything (no keepalives) and wait for timeout
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Now stop sending anything (no keepalives) and wait for timeout.
+    tokio::time::sleep(Duration::from_millis(1200)).await;
 
     // The connection timed out, so its publisher mount must be unregistered
     // (otherwise distinct stream paths would leak registry slots forever).
@@ -571,6 +566,8 @@ async fn srt_keepalive_timeout_disconnects() {
         message_number: 99,
         timestamp: 50000,
         socket_id: server_sid,
+        ordered: true,
+        retransmitted: false,
         payload: Bytes::from_static(&[0x47; 188]),
     };
     let wire = encode_data_packet(&data_pkt);

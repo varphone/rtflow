@@ -65,8 +65,12 @@ pub struct TsbpdBuffer {
     delivered_count: u64,
     /// Count of packets dropped (too late).
     dropped_count: u64,
-    /// Count of loss events detected.
+    /// Loss events detected.
     loss_events: u64,
+    /// Count of packets skipped by TLPKTDROP.
+    skipped_count: u64,
+    /// Whether TLPKTDROP skips packets whose play time passed.
+    tlpktdrop: bool,
 }
 
 impl TsbpdBuffer {
@@ -87,12 +91,32 @@ impl TsbpdBuffer {
             delivered_count: 0,
             dropped_count: 0,
             loss_events: 0,
+            skipped_count: 0,
+            tlpktdrop: true,
         }
     }
 
     /// Create with default delay (120ms).
     pub fn with_default_delay() -> Self {
         Self::new(DEFAULT_TSBPD_DELAY_MS, DEFAULT_MAX_BUFFERED)
+    }
+
+    /// Enable or disable TLPKTDROP (default enabled).
+    pub fn set_tlpktdrop(&mut self, enabled: bool) {
+        self.tlpktdrop = enabled;
+    }
+
+    /// Anchor the sender clock: `TsbpdTimeBase = now - handshake_timestamp`.
+    ///
+    /// `handshake_timestamp` is the timestamp field of the CONCLUSION
+    /// control packet, in microseconds since the caller started its
+    /// connection. A zero timestamp falls back to the first data packet.
+    pub fn set_time_base(&mut self, now: Instant, handshake_timestamp: u32) {
+        if handshake_timestamp == 0 {
+            return;
+        }
+        self.base_local = now.checked_sub(Duration::from_micros(u64::from(handshake_timestamp)));
+        self.base_extended_ts = None;
     }
 
     /// Initialize the buffer with the first expected sequence number.
@@ -210,9 +234,15 @@ impl TsbpdBuffer {
                     break; // not yet time
                 }
             } else if seq_after(seq, self.next_deliver_seq) {
-                // There's a gap. Check if we've waited too long (2x delay timeout)
-                let age = now.duration_since(packet.arrival_time);
-                if age >= self.delay * 2 {
+                // There is a gap. With TLPKTDROP the missing packets are
+                // skipped once the next available packet reached its play
+                // time; without it, fall back to a 2x delay timeout.
+                let late = if self.tlpktdrop {
+                    now >= packet.deliver_at
+                } else {
+                    now.duration_since(packet.arrival_time) >= self.delay * 2
+                };
+                if late {
                     let gap = seq_distance(self.next_deliver_seq, seq);
                     if gap > MAX_GAP_SKIP {
                         // Defensive: an anomalous far-jump packet must not
@@ -221,9 +251,10 @@ impl TsbpdBuffer {
                         self.dropped_count += 1;
                         continue;
                     }
-                    // Skip the gap: advance cursor and count loss
+                    // Skip the gap: advance cursor and count loss.
                     self.loss_events += 1;
-                    self.dropped_count += gap as u64;
+                    self.skipped_count = self.skipped_count.saturating_add(u64::from(gap));
+                    self.dropped_count += u64::from(gap);
                     self.next_deliver_seq = seq;
                     // Loop again to deliver this packet
                 } else {
@@ -260,12 +291,45 @@ impl TsbpdBuffer {
         losses
     }
 
-    /// Get the ACK number: the last delivered sequence. SRT peers free
-    /// their retransmission buffers for everything up to and including the
-    /// ACK number, so reporting `next_deliver_seq` here would drop one
-    /// packet's worth of retransmit coverage on a loss.
+    /// Reorder-buffer capacity in packets.
+    pub fn capacity(&self) -> usize {
+        self.max_buffered
+    }
+
+    /// Drop buffered packets in `[first, last]` (DROPREQ). If the range covers
+    /// the delivery cursor, advance past it so the stream resumes.
+    pub fn drop_range(&mut self, first: u32, last: u32) {
+        let mut seq = first;
+        loop {
+            self.buffer.remove(&seq);
+            if seq == last {
+                break;
+            }
+            seq = seq.wrapping_add(1);
+        }
+        if seq_before(self.next_deliver_seq, first) || self.next_deliver_seq == first {
+            let skipped = seq_distance(self.next_deliver_seq, last.wrapping_add(1));
+            self.next_deliver_seq = last.wrapping_add(1);
+            self.skipped_count = self.skipped_count.saturating_add(u64::from(skipped));
+            self.dropped_count = self.dropped_count.saturating_add(u64::from(skipped));
+        }
+        if seq_after(self.next_deliver_seq, self.highest_received) {
+            self.highest_received = self.next_deliver_seq;
+        }
+    }
+
+    /// First unacknowledged sequence number (the SRT ACK field).
+    ///
+    /// Advanced only when packets are delivered or skipped, so a missing
+    /// packet keeps the sender's retransmission window open until TLPKTDROP
+    /// decides it is too late.
     pub fn ack_number(&self) -> u32 {
-        self.next_deliver_seq.wrapping_sub(1)
+        self.next_deliver_seq
+    }
+
+    /// Packets skipped by TLPKTDROP since the connection started.
+    pub fn skipped_count(&self) -> u64 {
+        self.skipped_count
     }
 
     /// Number of packets currently buffered.
@@ -280,6 +344,7 @@ impl TsbpdBuffer {
             delivered: self.delivered_count,
             dropped: self.dropped_count,
             loss_events: self.loss_events,
+            skipped: self.skipped_count,
         }
     }
 }
@@ -291,6 +356,7 @@ pub struct TsbpdStats {
     pub delivered: u64,
     pub dropped: u64,
     pub loss_events: u64,
+    pub skipped: u64,
 }
 
 // --- Sequence number arithmetic (handles wrapping) ---
@@ -333,7 +399,8 @@ mod tests {
         assert_eq!(ready[0].sequence, 100);
         assert_eq!(ready[1].sequence, 101);
         assert_eq!(ready[2].sequence, 102);
-        assert_eq!(buf.ack_number(), 102);
+        // The ACK field is the first unacknowledged sequence.
+        assert_eq!(buf.ack_number(), 103);
     }
 
     #[test]

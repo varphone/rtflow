@@ -358,6 +358,11 @@ impl ServerApp {
         let (srt_addr, srt_cancel) = if config.srt.enabled {
             let srt_config = SrtConfig {
                 bind_addr: config.srt.listen,
+                latency_ms: config.srt.latency_ms,
+                peer_idle_timeout: config.srt.peer_idle_timeout,
+                tlpktdrop: config.srt.tlpktdrop,
+                mtu: config.srt.mtu,
+                max_connections: config.srt.max_connections,
                 allowed_stream_ids: config.srt.allowed_stream_ids.clone(),
                 authenticator: Some(Arc::new(SrtAuth { auth: auth.clone() })),
                 ..SrtConfig::default()
