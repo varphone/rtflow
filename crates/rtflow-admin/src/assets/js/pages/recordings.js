@@ -52,7 +52,7 @@ export async function render(params) {
     actions: `<button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search"><input class="input" data-rec-search value="${esc(query)}" placeholder="搜索录制路径"></div>
       <div class="seg"><button data-rec-status="all" class="${status === "all" ? "active" : ""}">全部</button><button data-rec-status="active" class="${status === "active" ? "active" : ""}">录制中</button><button data-rec-status="inactive" class="${status === "inactive" ? "active" : ""}">已停止</button></div>
-      <span class="meta" data-rec-count>${initial.length} 条</span></div>
+      <span class="meta" data-rec-count>${initial.length} 条 · ${initial.filter((item) => item.active).length} 录制中</span></div>
       <section class="panel">${initial.length ? table(initial) : empty("暂无录制任务", "在路径中开启录制，或等待发布者上线")}</section>`,
     mount(root, ctx) {
       const search = root.querySelector("[data-rec-search]");
@@ -62,7 +62,7 @@ export async function render(params) {
       const sync = () => root.querySelectorAll("[data-rec-status]").forEach((button) => button.classList.toggle("active", button.dataset.recStatus === status));
       const paint = () => {
         visible = view();
-        count.textContent = `${visible.length} 条`;
+        count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.active).length} 录制中`;
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选");
         sync();
       };
@@ -74,7 +74,7 @@ export async function render(params) {
         const nextPaths = next.map((item) => item.path);
         if (!tbody || existing.length !== nextPaths.length || existing.some((path, index) => path !== nextPaths[index])) {
           visible = next;
-          count.textContent = `${visible.length} 条`;
+          count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.active).length} 录制中`;
           panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选");
           sync();
           return;
