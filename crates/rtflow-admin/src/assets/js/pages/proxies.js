@@ -8,8 +8,15 @@ let filter = "all";
 let sort = { field: "path", dir: 1 };
 
 export async function render(params, ctx) {
-  const linked = params?.get("q");
-  if (linked !== null && linked !== undefined) query = linked;
+  query = params?.get("q") || "";
+  const linkedState = params?.get("state");
+  filter = ["all", "streaming", "idle", "backoff", "describing"].includes(linkedState) ? linkedState : "all";
+  const field = params?.get("sort");
+  if (["path", "state", "attempts"].includes(field)) {
+    sort = { field, dir: params?.get("dir") === "-1" ? -1 : 1 };
+  } else {
+    sort = { field: "path", dir: 1 };
+  }
   const [status, config] = await Promise.all([apiV1("/proxies"), apiV1("/proxies/config")]);
   const statuses = status.proxies || [];
   const configs = config.mounts || [];
@@ -34,8 +41,17 @@ export async function render(params, ctx) {
         root.querySelectorAll("[data-proxy-filter]").forEach((button) => button.classList.toggle("active", button.dataset.proxyFilter === filter));
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的代理", "调整搜索或状态筛选");
       };
-      search.oninput = () => { query = search.value; paint(); };
-      root.querySelectorAll("[data-proxy-filter]").forEach((button) => button.onclick = () => { filter = button.dataset.proxyFilter; paint(); });
+      const syncUrl = () => {
+        const params = new URLSearchParams();
+        if (query.trim()) params.set("q", query.trim());
+        if (filter !== "all") params.set("state", filter);
+        if (sort.field !== "path" || sort.dir !== 1) params.set("sort", sort.field);
+        if (sort.dir === -1) params.set("dir", "-1");
+        const qs = params.toString();
+        history.replaceState(null, "", `#/config/proxies${qs ? `?${qs}` : ""}`);
+      };
+      search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      root.querySelectorAll("[data-proxy-filter]").forEach((button) => button.onclick = () => { filter = button.dataset.proxyFilter; paint(); syncUrl(); });
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
       root.querySelector("[data-action=create]").onclick = () => openProxyDrawer(null, () => ctx.reload());
       root.addEventListener("click", async (event) => {
@@ -44,6 +60,7 @@ export async function render(params, ctx) {
           const field = sorter.dataset.sort;
           sort = { field, dir: sort.field === field ? -sort.dir : 1 };
           paint();
+          syncUrl();
           return;
         }
         const target = event.target.closest("[data-action]");

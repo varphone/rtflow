@@ -7,8 +7,13 @@ let query = "";
 let sort = { field: "name", dir: 1 };
 
 export async function render(params, ctx) {
-  const linked = params?.get("q");
-  if (linked !== null && linked !== undefined) query = linked;
+  query = params?.get("q") || "";
+  const field = params?.get("sort");
+  if (["name", "source", "max_readers", "updated_at"].includes(field)) {
+    sort = { field, dir: params?.get("dir") === "-1" ? -1 : 1 };
+  } else {
+    sort = { field: "name", dir: 1 };
+  }
   const [paths, system] = await Promise.all([apiV1("/paths/config"), api("/system")]);
   const all = Array.isArray(paths) ? paths : paths.items || [];
   const initial = view(all);
@@ -28,7 +33,15 @@ export async function render(params, ctx) {
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.enabled).length} 启用`;
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的路径", "调整搜索条件或新建路径");
       };
-      search.oninput = () => { query = search.value; paint(); };
+      const syncUrl = () => {
+        const params = new URLSearchParams();
+        if (query.trim()) params.set("q", query.trim());
+        if (sort.field !== "name" || sort.dir !== 1) params.set("sort", sort.field);
+        if (sort.dir === -1) params.set("dir", "-1");
+        const qs = params.toString();
+        history.replaceState(null, "", `#/config/paths${qs ? `?${qs}` : ""}`);
+      };
+      search.oninput = () => { query = search.value; paint(); syncUrl(); };
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
       root.querySelector("[data-action=create]").onclick = () => openPathDrawer(null, () => ctx.reload());
       root.addEventListener("click", async (event) => {
@@ -37,6 +50,7 @@ export async function render(params, ctx) {
           const field = sorter.dataset.sort;
           sort = { field, dir: sort.field === field ? -sort.dir : 1 };
           paint();
+          syncUrl();
           return;
         }
         const target = event.target.closest("[data-action]");
