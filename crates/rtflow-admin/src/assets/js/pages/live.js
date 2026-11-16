@@ -19,7 +19,7 @@ export async function render(params) {
     html: `<div class="toolbar">
       <div class="search">${iconSvg("search")}<input class="input" data-live-search value="${esc(query)}" placeholder="搜索名称、路径或编码"></div>
       <div class="seg"><button data-live-status="all">全部</button><button data-live-status="live">直播中</button><button data-live-status="idle">待机</button></div>
-      <span class="meta" data-live-count></span>
+      <span class="meta" data-live-count></span><span class="meta" data-live-updated></span>
       <button class="btn small danger" data-bulk-kick disabled>断开所选</button></div>
       <section class="panel" data-live-panel></section>`,
     mount(root, ctx) {
@@ -53,8 +53,10 @@ export async function render(params) {
           return (a < b ? -1 : a > b ? 1 : 0) * sort.dir;
         });
       };
+      const markUpdated = () => { const node = root.querySelector("[data-live-updated]"); if (node) node.textContent = `更新于 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`; };
       const paint = () => {
         visible = view();
+        markUpdated();
         count.textContent = `${visible.length} 条`;
         panel.innerHTML = visible.length ? table(visible, selected) : empty("没有匹配的流", "调整筛选条件或等待推流");
         const all = panel.querySelector("[data-select-all]");
@@ -125,6 +127,7 @@ export async function render(params) {
           row.querySelector('[data-cell="metrics"]').innerHTML = `<span style="color:var(--ok)">${num(stream.accepted_frames)}</span> / <span style="color:var(--bad)">${num(stream.dropped_frames)}</span>`;
         }
         visible = filtered;
+        markUpdated();
       };
       const setAuto = (enabled) => {
         automatic = enabled;

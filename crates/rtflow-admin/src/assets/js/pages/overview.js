@@ -46,7 +46,7 @@ export async function render() {
   return {
     title: "概览",
     subtitle: "运行状态、异常与活跃流。",
-    actions: `<button class="btn small ghost active" data-overview-auto>自动刷新：开</button><button class="btn small" data-overview-refresh>刷新</button>`,
+    actions: `<span class="meta" data-ov-updated>更新于 --</span><button class="btn small ghost active" data-overview-auto>自动刷新：开</button><button class="btn small" data-overview-refresh>刷新</button>`,
     html: `
       <div class="stat-grid">
         <div class="stat"><div class="label">在线流</div><div class="value" data-ov="mounts">${num(data.overview.mounts)}</div><div class="hint"><span data-ov="publishers">${num(data.overview.publishers)}</span> 个发布中</div></div>
@@ -132,6 +132,8 @@ export async function render() {
         root.querySelectorAll("[data-trend-metric]").forEach((item) => item.classList.toggle("active", item === button));
         drawTrend();
       });
+      const markUpdated = () => { const node = root.querySelector("[data-ov-updated]"); if (node) node.textContent = `更新于 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`; };
+      markUpdated();
       pushSample(data.overview);
       const refresh = async () => {
         let next;
@@ -156,6 +158,7 @@ export async function render() {
         set("packets", num(next.overview.rtp_packets));
         set("active-count", `${view.active.length} 条`);
         set("changes-count", `${view.changes.length} 项`);
+        markUpdated();
         pushSample(next.overview);
         root.querySelector("[data-ov-active]").innerHTML = activeHtml(view.active, next.system);
         root.querySelector("[data-ov-attention]").innerHTML = attentionHtml(view.attention);
