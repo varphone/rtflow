@@ -23,6 +23,7 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
                     .iter()
                     .map(|mount| serde_json::json!({
                         "path": mount.path,
+                        "revision": crate::store::proxies::revision(&state.store, &mount.path).ok().flatten(),
                         "enabled": mount.enabled,
                         "mode": mount.mode,
                         "idle_grace_ms": mount.idle_grace.map(|value| value.as_millis() as u64),
@@ -47,7 +48,8 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
         api_write(state.clone(), |state, req| async move {
             let mount: crate::config::ProxyMount = serde_json::from_slice(&req.body)
                 .map_err(|error| (400, format!("invalid body: {error}")))?;
-            proxy_upsert(&state, mount, false)
+            let expected = expected_revision(&req)?;
+            proxy_upsert(&state, mount, false, expected)
         }),
     )
     .await;
@@ -57,7 +59,8 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
         api_write(state.clone(), |state, req| async move {
             let mount: crate::config::ProxyMount = serde_json::from_slice(&req.body)
                 .map_err(|error| (400, format!("invalid body: {error}")))?;
-            proxy_upsert(&state, mount, true)
+            let expected = expected_revision(&req)?;
+            proxy_upsert(&state, mount, true, expected)
         }),
     )
     .await;
@@ -73,6 +76,14 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
             } else {
                 format!("/{path}")
             };
+            let expected = expected_revision(&req)?;
+            if let Some(expected) = expected {
+                let current = crate::store::proxies::revision(&state.store, &path)
+                    .map_err(|error| (500, error.to_string()))?;
+                if current != Some(expected) {
+                    return Err((412, "precondition failed".into()));
+                }
+            }
             let existed = state
                 .proxy_config
                 .write()
@@ -178,6 +189,7 @@ fn proxy_upsert(
     state: &ApiState,
     mount: crate::config::ProxyMount,
     replace: bool,
+    expected: Option<u64>,
 ) -> Result<serde_json::Value, (u16, String)> {
     mount.validate().map_err(|error| (400, error))?;
     let path = mount.path.clone();
@@ -195,6 +207,9 @@ fn proxy_upsert(
         let revision = crate::store::proxies::revision(&state.store, &path)
             .map_err(|error| (500, error.to_string()))?
             .ok_or((404, "proxy not found".into()))?;
+        if expected.is_some_and(|expected| expected != revision) {
+            return Err((412, "precondition failed".into()));
+        }
         crate::store::proxies::update(&state.store, &mount, revision)
             .map_err(|error| (500, error.to_string()))?;
     } else {

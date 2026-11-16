@@ -241,6 +241,7 @@ impl SrtSupervisor {
             let mut value = json!({
                 "id": record.id,
                 "name": record.name,
+                "revision": record.revision,
                 "role": if direction == SrtDirection::Pull { "caller" } else { "sender" },
                 "direction": if direction == SrtDirection::Pull { "pull" } else { "push" },
                 "enabled": record.enabled,

@@ -48,7 +48,8 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
         api_write(state.clone(), |state, req| async move {
             let body: SrtBody = serde_json::from_slice(&req.body)
                 .map_err(|error| (400, format!("invalid body: {error}")))?;
-            srt_upsert(&state, body, SrtDirection::Pull, false).await
+            let expected = expected_revision(&req)?;
+            srt_upsert(&state, body, SrtDirection::Pull, false, expected).await
         }),
     )
     .await;
@@ -62,7 +63,8 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
             let mut body: SrtBody = serde_json::from_slice(&req.body)
                 .map_err(|error| (400, format!("invalid body: {error}")))?;
             body.id = Some(id.to_owned());
-            srt_upsert(&state, body, SrtDirection::Pull, true).await
+            let expected = expected_revision(&req)?;
+            srt_upsert(&state, body, SrtDirection::Pull, true, expected).await
         }),
     )
     .await;
@@ -73,6 +75,20 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
             let Some(id) = req.path.strip_prefix("/admin/api/v1/srt/pulls/") else {
                 return Err((400, "missing SRT endpoint id".into()));
             };
+            if let Some(expected) = expected_revision(&req)? {
+                let current = crate::store::srt::revision(&state.store, id)
+                    .map_err(|error| (500, error.to_string()))?;
+                if current != Some(expected) {
+                    return Err((412, "precondition failed".into()));
+                }
+            }
+            if let Some(expected) = expected_revision(&req)? {
+                let current = crate::store::srt::revision(&state.store, id)
+                    .map_err(|error| (500, error.to_string()))?;
+                if current != Some(expected) {
+                    return Err((412, "precondition failed".into()));
+                }
+            }
             state.srt.delete(id).map_err(|error| (404, error))?;
             audit(&state, AuditEvent::new("srt.delete", "ok").detail(id));
             Ok(json!({"deleted": id}))
@@ -94,7 +110,8 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
         api_write(state.clone(), |state, req| async move {
             let body: SrtBody = serde_json::from_slice(&req.body)
                 .map_err(|error| (400, format!("invalid body: {error}")))?;
-            srt_upsert(&state, body, SrtDirection::Push, false).await
+            let expected = expected_revision(&req)?;
+            srt_upsert(&state, body, SrtDirection::Push, false, expected).await
         }),
     )
     .await;
@@ -108,7 +125,8 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
             let mut body: SrtBody = serde_json::from_slice(&req.body)
                 .map_err(|error| (400, format!("invalid body: {error}")))?;
             body.id = Some(id.to_owned());
-            srt_upsert(&state, body, SrtDirection::Push, true).await
+            let expected = expected_revision(&req)?;
+            srt_upsert(&state, body, SrtDirection::Push, true, expected).await
         }),
     )
     .await;
@@ -119,6 +137,13 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
             let Some(id) = req.path.strip_prefix("/admin/api/v1/srt/pushes/") else {
                 return Err((400, "missing SRT endpoint id".into()));
             };
+            if let Some(expected) = expected_revision(&req)? {
+                let current = crate::store::srt::revision(&state.store, id)
+                    .map_err(|error| (500, error.to_string()))?;
+                if current != Some(expected) {
+                    return Err((412, "precondition failed".into()));
+                }
+            }
             state.srt.delete(id).map_err(|error| (404, error))?;
             audit(&state, AuditEvent::new("srt.delete", "ok").detail(id));
             Ok(json!({"deleted": id}))
@@ -132,6 +157,7 @@ async fn srt_upsert(
     body: SrtBody,
     direction: SrtDirection,
     replace: bool,
+    expected: Option<u64>,
 ) -> Result<serde_json::Value, (u16, String)> {
     if body.remote.parse::<std::net::SocketAddr>().is_err() {
         return Err((400, "remote must be host:port".into()));
@@ -180,6 +206,13 @@ async fn srt_upsert(
         latency_ms: body.latency_ms,
         revision: 1,
     };
+    if let Some(expected) = expected {
+        let current = crate::store::srt::revision(&state.store, &id)
+            .map_err(|error| (500, error.to_string()))?;
+        if current != Some(expected) {
+            return Err((412, "precondition failed".into()));
+        }
+    }
     state
         .srt
         .upsert(record, replace)
