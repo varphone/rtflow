@@ -5,7 +5,7 @@
 ## 已实现能力
 
 - RTSP 客户端：OPTIONS、DESCRIBE、多轨 SETUP、PLAY、PAUSE、TEARDOWN、GET_PARAMETER 自动保活。
-- RTSP 服务端：本地源、外部发布源、自动 SDP 探测的按需拉流代理；会话状态和超时、连接数上限、鉴权、UDP 端口范围。`ServerConfig::dynamic_publishers` 显式开启后，ANNOUNCE 可为未预注册路径自动创建 Publisher mount。
+- RTSP 服务端：本地源、外部发布源、自动 SDP 探测的按需拉流代理（配置/管理 API/控制台/SRTP/RTSPS）；会话状态和超时、连接数上限、鉴权、UDP 端口范围。`ServerConfig::dynamic_publishers` 显式开启后，ANNOUNCE 可为未预注册路径自动创建 Publisher mount。
 - 传输：RTP/RTCP over UDP、TCP interleaved、`rtcp-mux`（单端口/单 channel）、
   组播与 `RTP/SAVP`（SRTP/SRTCP）；Transport 的 destination/source/mode 会解析并回显；客户端默认仅在传输能力/网络失败时从 UDP 回退 TCP interleaved；服务端发布端按 Peer IP 锁定来源、校验 Payload Type/SSRC，UDP/TCP 发布方向均调度 compound RTCP RR/SDES；发布端 SR 计入统计。
 - 客户端重连：`RtspClient::connect_reconnecting` 配合 `ClientReconnectPolicy` 提供显式启用的断线退避重连；普通 `connect` 保持一次性连接和直接报错语义。
