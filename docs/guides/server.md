@@ -126,6 +126,12 @@ curl -u admin:password -X DELETE http://127.0.0.1:8080/admin/api/v1/keys/<kid>
 | `rtflow_recording_bytes_total` | 活跃录制已写字节 |
 | `rtflow_auth_failures_total` | 被拒绝的认证决策 |
 | `rtflow_hook_failures_total` | 认证钩子失败次数 |
+| `rtflow_srt_connections_total` | SRT 连接总数 |
+| `rtflow_srt_streams_active` | 活跃 SRT 流 |
+| `rtflow_srt_rtt_microseconds` | SRT RTT 估计 |
+| `rtflow_srt_loss_packets_total` | SRT 丢包数 |
+| `rtflow_srt_skipped_packets_total` | TLPKTDROP 跳包数 |
+| `rtflow_srt_handshake_failures_total` | 被拒绝的 SRT 握手 |
 
 `/stats` 保留 JSON 形式，供管理台与脚本使用。
 
