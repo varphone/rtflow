@@ -65,6 +65,7 @@ struct Entry {
     state: EntryState,
     grace: Duration,
     always: bool,
+    refresh: Option<Duration>,
     cancel: CancellationToken,
 }
 
@@ -150,6 +151,7 @@ impl ProxyService {
                     },
                     grace: self.default_grace,
                     always: false,
+                    refresh: None,
                     cancel: CancellationToken::new(),
                 })),
             );
@@ -167,6 +169,7 @@ impl ProxyService {
         options: MountOptions,
         grace: Option<Duration>,
         always: bool,
+        refresh: Option<Duration>,
     ) -> rtflow_core::error::Result<()> {
         validate_path(&path)?;
         if upstream.endpoints().is_empty() {
@@ -191,6 +194,7 @@ impl ProxyService {
             },
             grace: grace.unwrap_or(self.default_grace),
             always,
+            refresh,
             cancel: CancellationToken::new(),
         }));
         entries.insert(path.clone(), entry.clone());
@@ -215,7 +219,7 @@ impl ProxyService {
             if self.cancel.is_cancelled() {
                 return Ok(());
             }
-            let (mut upstream, options, grace, always, entry_cancel) = {
+            let (mut upstream, options, grace, always, refresh, entry_cancel) = {
                 let mut entry = entry
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -230,6 +234,7 @@ impl ProxyService {
                     entry.options.clone(),
                     entry.grace,
                     entry.always,
+                    entry.refresh,
                     entry.cancel.clone(),
                 )
             };
@@ -242,13 +247,19 @@ impl ProxyService {
                     match self.mounts.register_with(path.clone(), config, options) {
                         Ok(handle) => {
                             self.start_watch(&handle, grace, always);
-                            let mut entry = entry
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
-                            entry.state.phase = Phase::Registered;
-                            entry.state.last_error = None;
-                            entry.state.retry_at = None;
-                            entry.mount = Some(handle);
+                            {
+                                let mut guard = entry
+                                    .lock()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                                guard.upstream.cached_description = Some(handle.description());
+                                guard.state.phase = Phase::Registered;
+                                guard.state.last_error = None;
+                                guard.state.retry_at = None;
+                                guard.mount = Some(handle.clone());
+                            }
+                            if let Some(interval) = refresh {
+                                self.start_refresh(path.clone(), entry.clone(), interval);
+                            }
                             return Ok(());
                         }
                         Err(error) => {
@@ -281,6 +292,64 @@ impl ProxyService {
                 _ = tokio::time::sleep(delay) => {}
             }
         }
+    }
+
+    fn start_refresh(&self, path: Arc<str>, entry: Arc<Mutex<Entry>>, interval: Duration) {
+        let policy = self.policy.clone();
+        self.supervisor.clone().spawn(
+            rtflow_runtime::TaskSpec::new(
+                format!("proxy-refresh-{path}"),
+                rtflow_core::error::Operation::ProxyConnect,
+            ),
+            async move {
+                loop {
+                    let cancel = entry
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .cancel
+                        .clone();
+                    tokio::select! {
+                        _ = cancel.cancelled() => return Ok(()),
+                        _ = tokio::time::sleep(interval) => {}
+                    }
+                    let upstream = entry
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .upstream
+                        .clone();
+                    let Ok(description) = describe_upstream(&upstream, &policy).await else {
+                        continue;
+                    };
+                    let (Some(mount), subscribers) = ({
+                        let entry = entry
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        let subscribers = entry
+                            .mount
+                            .as_ref()
+                            .map(|mount| {
+                                let snapshot = mount.snapshot();
+                                snapshot.subscriber_count.max(snapshot.broadcast_receivers)
+                            })
+                            .unwrap_or(0);
+                        (entry.mount.clone(), subscribers)
+                    }) else {
+                        continue;
+                    };
+                    if subscribers == 0
+                        && mount.description() != description
+                        && mount.update_description(description.clone()).is_ok()
+                    {
+                        entry
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .upstream
+                            .cached_description = Some(description);
+                        tracing::info!(path = %path, "proxy description refreshed");
+                    }
+                }
+            },
+        );
     }
 
     fn start_watch(&self, handle: &MountHandle, grace: Duration, always: bool) {

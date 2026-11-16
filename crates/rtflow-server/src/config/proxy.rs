@@ -14,6 +14,8 @@ pub struct ProxySection {
     pub allow_private_networks: bool,
     pub allowed_hosts: Vec<String>,
     pub redirect_policy: RedirectPolicy,
+    #[serde(with = "humantime_serde")]
+    pub description_refresh: Duration,
     pub mounts: Vec<ProxyMount>,
 }
 
@@ -26,6 +28,7 @@ impl Default for ProxySection {
             allow_private_networks: true,
             allowed_hosts: Vec::new(),
             redirect_policy: RedirectPolicy::SameOrigin,
+            description_refresh: Duration::from_secs(300),
             mounts: Vec::new(),
         }
     }
@@ -40,6 +43,8 @@ pub struct ProxyMount {
     pub mode: ProxyMode,
     #[serde(default, with = "humantime_serde")]
     pub idle_grace: Option<Duration>,
+    #[serde(default, with = "humantime_serde")]
+    pub description_refresh: Option<Duration>,
     pub upstreams: Vec<ProxyUpstream>,
 }
 
@@ -83,6 +88,7 @@ impl Default for ProxyMount {
             enabled: true,
             mode: ProxyMode::default(),
             idle_grace: None,
+            description_refresh: None,
             upstreams: Vec::new(),
         }
     }
@@ -146,6 +152,12 @@ impl ProxyMount {
         }
         if self.idle_grace.is_some_and(|grace| grace.is_zero()) {
             return Err("proxy idle_grace is zero".into());
+        }
+        if self
+            .description_refresh
+            .is_some_and(|refresh| refresh.is_zero())
+        {
+            return Err("proxy description_refresh is zero".into());
         }
         for upstream in &self.upstreams {
             upstream.endpoint()?;
@@ -218,6 +230,11 @@ impl ProxySection {
         }
         if self.idle_grace.is_zero() {
             return Err(ConfigError::Invalid("proxy.idle_grace is zero".into()));
+        }
+        if self.description_refresh.is_zero() {
+            return Err(ConfigError::Invalid(
+                "proxy.description_refresh is zero".into(),
+            ));
         }
         if self.max_proxies == 0 {
             return Err(ConfigError::Invalid("proxy.max_proxies is zero".into()));

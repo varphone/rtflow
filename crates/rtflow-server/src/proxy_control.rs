@@ -39,6 +39,9 @@ pub(crate) fn register_configured(
             options,
             mount.idle_grace,
             mount.mode.is_always(),
+            mount
+                .description_refresh
+                .or(Some(config.description_refresh)),
         ) {
             tracing::warn!(path = %mount.path, %error, "proxy config rejected");
         }
@@ -104,6 +107,7 @@ pub(crate) fn apply_reload(
             options,
             mount.idle_grace,
             mount.mode.is_always(),
+            mount.description_refresh.or(Some(new.description_refresh)),
         );
         changed = true;
     }

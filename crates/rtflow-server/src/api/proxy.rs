@@ -176,6 +176,13 @@ fn proxy_upsert(
             options,
             mount.idle_grace,
             mount.mode.is_always(),
+            mount.description_refresh.or(Some(
+                state
+                    .proxy_config
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .description_refresh,
+            )),
         )
         .map_err(|error| (500, error.to_string()))?;
     audit(state, AuditEvent::new("proxy.upsert", "ok").path(&path));
@@ -206,6 +213,13 @@ fn proxy_restart(
             options,
             mount.idle_grace,
             mount.mode.is_always(),
+            mount.description_refresh.or(Some(
+                state
+                    .proxy_config
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .description_refresh,
+            )),
         )
         .map_err(|error| (500, error.to_string()))?;
     audit(

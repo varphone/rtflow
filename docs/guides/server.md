@@ -50,6 +50,7 @@ idle_grace = "5s"
 max_proxies = 128
 allow_private_networks = true   # 公网部署可关；关闭时拒绝私网/loopback 上游
 allowed_hosts = []              # 空=不限；支持 host、host:port、*.domain、CIDR
+description_refresh = "300s"    # 空闲时周期性重新 DESCRIBE
 redirect_policy = "same-origin" # none | same-origin | any
 
 [[proxy.mounts]]
