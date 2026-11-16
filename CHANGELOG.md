@@ -12,6 +12,9 @@
 - 录制从首个视频关键帧开始，HLS segmenter 在切段前提取 SPS/PPS，修复中途开始录制
   时 VOD init 的 avcC 为空、首段无法解码。
 - VOD 目录在录制过程中持续刷新 `duration_seconds`，不再停留在首次扫描的短时长。
+- RTMP chunk 解析器在 payload 未完整时提前提交 timestamp delta，TCP 分段会重复
+  累加，导致音频时间戳/录像时长膨胀（10s 录成 14.5s）。改为整块到齐后再提交，
+  并补充逐字节 feed 回归测试。
 
 ### Changed
 

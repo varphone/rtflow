@@ -192,16 +192,14 @@ impl Dechunker {
         if self.pending.is_empty() {
             return Err(ChunkError::NeedMoreData);
         }
-
         let data = &self.pending[..];
         let mut pos = 0;
 
-        // Basic header
+        // Basic header.
         let first = data[pos];
         pos += 1;
         let fmt = (first >> 6) & 0x03;
         let mut csid = (first & 0x3F) as u32;
-
         if csid == 0 {
             if pos >= data.len() {
                 return Err(ChunkError::NeedMoreData);
@@ -216,164 +214,186 @@ impl Dechunker {
             pos += 2;
         }
 
-        // Message header size depends on fmt
-        let header_size = match fmt {
-            0 => 11,
-            1 => 7,
-            2 => 3,
-            _ => 0,
-        };
+        // Parse the message header into locals first. Nothing is committed to
+        // the chunk-stream state until the whole chunk payload is available:
+        // committing a timestamp delta and then returning NeedMoreData makes
+        // the next poll apply the same delta again, which inflates timestamps
+        // according to how TCP happened to split the stream.
+        let mut new_message = true;
+        let mut timestamp = 0u32;
+        let mut delta = 0u32;
+        let mut msg_length: Option<u32> = None;
+        let mut msg_type: Option<u8> = None;
+        let mut msg_stream_id: Option<u32> = None;
+        let mut extended = false;
 
-        if pos + header_size > data.len() {
+        match fmt {
+            0 => {
+                if pos + 11 > data.len() {
+                    return Err(ChunkError::NeedMoreData);
+                }
+                let b = &data[pos..pos + 11];
+                let ts = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+                msg_length = Some(((b[3] as u32) << 16) | ((b[4] as u32) << 8) | (b[5] as u32));
+                msg_type = Some(b[6]);
+                msg_stream_id = Some(u32::from_le_bytes([b[7], b[8], b[9], b[10]]));
+                pos += 11;
+                if ts == 0xFFFFFF {
+                    if pos + 4 > data.len() {
+                        return Err(ChunkError::NeedMoreData);
+                    }
+                    timestamp = u32::from_be_bytes([
+                        data[pos],
+                        data[pos + 1],
+                        data[pos + 2],
+                        data[pos + 3],
+                    ]);
+                    pos += 4;
+                    extended = true;
+                } else {
+                    timestamp = ts;
+                }
+                delta = 0;
+            }
+            1 => {
+                if pos + 7 > data.len() {
+                    return Err(ChunkError::NeedMoreData);
+                }
+                let b = &data[pos..pos + 7];
+                delta = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+                msg_length = Some(((b[3] as u32) << 16) | ((b[4] as u32) << 8) | (b[5] as u32));
+                msg_type = Some(b[6]);
+                pos += 7;
+                if delta == 0xFFFFFF {
+                    if pos + 4 > data.len() {
+                        return Err(ChunkError::NeedMoreData);
+                    }
+                    delta = u32::from_be_bytes([
+                        data[pos],
+                        data[pos + 1],
+                        data[pos + 2],
+                        data[pos + 3],
+                    ]);
+                    pos += 4;
+                    extended = true;
+                }
+            }
+            2 => {
+                if pos + 3 > data.len() {
+                    return Err(ChunkError::NeedMoreData);
+                }
+                let b = &data[pos..pos + 3];
+                delta = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+                pos += 3;
+                if delta == 0xFFFFFF {
+                    if pos + 4 > data.len() {
+                        return Err(ChunkError::NeedMoreData);
+                    }
+                    delta = u32::from_be_bytes([
+                        data[pos],
+                        data[pos + 1],
+                        data[pos + 2],
+                        data[pos + 3],
+                    ]);
+                    pos += 4;
+                    extended = true;
+                }
+            }
+            _ => {
+                // fmt 3: either a continuation chunk or a new message reusing
+                // the previous header. Only a new message advances the
+                // timestamp by the stored delta.
+                new_message = self
+                    .streams
+                    .get(&csid)
+                    .is_none_or(|state| !state.in_message);
+                if new_message && let Some(state) = self.streams.get(&csid) {
+                    delta = state.timestamp_delta;
+                }
+                if self
+                    .streams
+                    .get(&csid)
+                    .is_some_and(|state| state.extended_timestamp)
+                {
+                    if pos + 4 > data.len() {
+                        return Err(ChunkError::NeedMoreData);
+                    }
+                    pos += 4;
+                    extended = true;
+                }
+            }
+        }
+
+        let state = self.streams.get(&csid);
+        if fmt >= 2 && state.is_none() {
+            // fmt 2/3 without a prior type 0/1 header is unrecoverable.
+            return Err(ChunkError::Protocol);
+        }
+        if !new_message && state.is_none() {
+            return Err(ChunkError::Protocol);
+        }
+        let msg_length = msg_length
+            .or_else(|| state.map(|state| state.msg_length))
+            .ok_or(ChunkError::Protocol)?;
+        let msg_type = msg_type
+            .or_else(|| state.map(|state| state.msg_type))
+            .ok_or(ChunkError::Protocol)?;
+        let msg_stream_id = msg_stream_id
+            .or_else(|| state.map(|state| state.msg_stream_id))
+            .ok_or(ChunkError::Protocol)?;
+        let buffered = if new_message {
+            0
+        } else {
+            state.map(|state| state.buffer.len() as u32).unwrap_or(0)
+        };
+        let remaining = msg_length.saturating_sub(buffered);
+        let take = remaining.min(self.chunk_size);
+        if pos + take as usize > data.len() {
             return Err(ChunkError::NeedMoreData);
         }
+        let payload_chunk = data[pos..pos + take as usize].to_vec();
+        let consumed = pos + take as usize;
 
-        let header_start = pos;
-        pos += header_size;
-
-        // Check for extended timestamp. A type 3 chunk carries one when the
-        // most recent type 0/1/2 header on the same chunk stream advertised
-        // it (RTMP 2012 §5.3.1.3; SRS handles this too).
-        let needs_extended = if fmt == 3 {
-            self.streams
-                .get(&csid)
-                .is_some_and(|state| state.extended_timestamp)
-        } else if header_size > 0 {
-            let ts_field = match fmt {
-                0 => {
-                    let b = &data[header_start..header_start + 3];
-                    ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32)
-                }
-                1 | 2 => {
-                    let b = &data[header_start..header_start + 3];
-                    ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32)
-                }
-                _ => 0,
-            };
-            ts_field == 0xFFFFFF
-        } else {
-            false
-        };
-
-        if needs_extended {
-            if pos + 4 > data.len() {
-                return Err(ChunkError::NeedMoreData);
-            }
-            pos += 4;
-        }
-
-        // Get or create chunk stream state
         if !self.streams.contains_key(&csid) && self.streams.len() >= MAX_CHUNK_STREAMS {
             self.overflowed = true;
             return Err(ChunkError::Protocol);
         }
         let state = self.streams.entry(csid).or_default();
-
-        // Parse header fields
-        match fmt {
-            0 => {
-                let b = &data[header_start..header_start + 11];
-                let ts = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
-                state.msg_length = ((b[3] as u32) << 16) | ((b[4] as u32) << 8) | (b[5] as u32);
-                state.msg_type = b[6];
-                state.msg_stream_id = u32::from_le_bytes([b[7], b[8], b[9], b[10]]);
-                if ts == 0xFFFFFF {
-                    let ext = &data[header_start + 11..header_start + 15];
-                    state.timestamp = u32::from_be_bytes([ext[0], ext[1], ext[2], ext[3]]);
-                    state.extended_timestamp = true;
-                    // fmt0 carries an absolute timestamp: the delta from any
-                    // previous fmt1/2/3 header must not leak into the next
-                    // delta-based header.
-                    state.timestamp_delta = 0;
-                } else {
-                    state.timestamp = ts;
-                    state.timestamp_delta = 0;
-                    state.extended_timestamp = false;
-                }
-                self.buffered = self.buffered.saturating_sub(state.buffer.len());
-                state.buffer.clear();
-                state.in_message = true;
+        if new_message {
+            self.buffered = self.buffered.saturating_sub(state.buffer.len());
+            state.buffer.clear();
+            state.msg_length = msg_length;
+            state.msg_type = msg_type;
+            state.msg_stream_id = msg_stream_id;
+            state.in_message = true;
+            if fmt == 0 {
+                state.timestamp = timestamp;
+                state.timestamp_delta = 0;
+            } else {
+                state.timestamp_delta = delta;
+                state.timestamp = state.timestamp.wrapping_add(delta);
             }
-            1 => {
-                let b = &data[header_start..header_start + 7];
-                let delta = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
-                state.msg_length = ((b[3] as u32) << 16) | ((b[4] as u32) << 8) | (b[5] as u32);
-                state.msg_type = b[6];
-                if delta == 0xFFFFFF {
-                    let ext = &data[header_start + 7..header_start + 11];
-                    state.timestamp_delta = u32::from_be_bytes([ext[0], ext[1], ext[2], ext[3]]);
-                    state.extended_timestamp = true;
-                } else {
-                    state.timestamp_delta = delta;
-                    state.extended_timestamp = false;
-                }
-                state.timestamp = state.timestamp.wrapping_add(state.timestamp_delta);
-                self.buffered = self.buffered.saturating_sub(state.buffer.len());
-                state.buffer.clear();
-                state.in_message = true;
-            }
-            2 => {
-                let b = &data[header_start..header_start + 3];
-                let delta = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
-                if delta == 0xFFFFFF {
-                    let ext = &data[header_start + 3..header_start + 7];
-                    state.timestamp_delta = u32::from_be_bytes([ext[0], ext[1], ext[2], ext[3]]);
-                    state.extended_timestamp = true;
-                } else {
-                    state.timestamp_delta = delta;
-                    state.extended_timestamp = false;
-                }
-                state.timestamp = state.timestamp.wrapping_add(state.timestamp_delta);
-                self.buffered = self.buffered.saturating_sub(state.buffer.len());
-                state.buffer.clear();
-                state.in_message = true;
-            }
-            _ => {
-                // fmt 3: continuation or a new message reusing the previous
-                // header's type/length/delta.
-                if !state.in_message {
-                    state.timestamp = state.timestamp.wrapping_add(state.timestamp_delta);
-                    state.in_message = true;
-                }
-            }
+            state.extended_timestamp = extended;
+        } else if extended {
+            state.extended_timestamp = true;
         }
+        state.buffer.extend_from_slice(&payload_chunk);
+        self.buffered = self.buffered.saturating_add(take as usize);
+        let _ = self.pending.split_to(consumed);
 
-        // Calculate how many payload bytes are in this chunk
-        let remaining_msg = state.msg_length.saturating_sub(state.buffer.len() as u32);
-        let chunk_payload_len = remaining_msg.min(self.chunk_size);
-
-        if pos + chunk_payload_len as usize > data.len() {
-            return Err(ChunkError::NeedMoreData);
-        }
-
-        if self.buffered.saturating_add(chunk_payload_len as usize) > MAX_REASSEMBLY_BYTES {
-            self.overflowed = true;
-            return Err(ChunkError::Protocol);
-        }
-        state
-            .buffer
-            .extend_from_slice(&data[pos..pos + chunk_payload_len as usize]);
-        self.buffered = self.buffered.saturating_add(chunk_payload_len as usize);
-        pos += chunk_payload_len as usize;
-
-        // Consume processed bytes
-        let _ = self.pending.split_to(pos);
-
-        // Check if message is complete
         if state.buffer.len() as u32 >= state.msg_length {
             self.buffered = self.buffered.saturating_sub(state.buffer.len());
             state.in_message = false;
             let payload = state.buffer.split().freeze();
-            let msg = RtmpMessage {
+            Ok(Some(RtmpMessage {
                 chunk_stream_id: csid,
                 timestamp: state.timestamp,
                 msg_type: state.msg_type,
                 msg_stream_id: state.msg_stream_id,
                 payload,
-            };
-            Ok(Some(msg))
+            }))
         } else {
-            Ok(None) // chunk consumed, message incomplete
+            Ok(None)
         }
     }
 }
@@ -600,6 +620,62 @@ mod tests {
         assert_eq!(messages[0].msg_type, MessageType::CommandAmf0 as u8);
         assert_eq!(messages[0].msg_stream_id, 1);
         assert_eq!(messages[0].payload.len(), 300);
+    }
+
+    #[test]
+    fn fmt3_new_messages_advance_by_delta() {
+        let payload = vec![0u8; 20];
+        let mut encoded = bytes::BytesMut::new();
+        // fmt0, csid 4, ts 0, len 20, type audio, stream 1
+        encoded.extend_from_slice(&[0x04, 0, 0, 0, 0, 0, 20, 8, 0, 0, 0, 1]);
+        encoded.extend_from_slice(&payload);
+        // fmt1, delta 21
+        encoded.extend_from_slice(&[0x44, 0, 0, 21, 0, 0, 20, 8]);
+        encoded.extend_from_slice(&payload);
+        // fmt3 x2
+        encoded.extend_from_slice(&[0xC4]);
+        encoded.extend_from_slice(&payload);
+        encoded.extend_from_slice(&[0xC4]);
+        encoded.extend_from_slice(&payload);
+
+        let mut dechunker = Dechunker::new();
+        dechunker.feed(&encoded);
+        let messages = dechunker.poll_messages();
+        let stamps: Vec<u32> = messages.iter().map(|m| m.timestamp).collect();
+        assert_eq!(stamps, vec![0, 21, 42, 63]);
+    }
+
+    #[test]
+    fn incremental_feed_preserves_timestamps() {
+        let payload = vec![0u8; 20];
+        let mut encoded = bytes::BytesMut::new();
+        encoded.extend_from_slice(&[0x04, 0, 0, 0, 0, 0, 20, 8, 0, 0, 0, 1]);
+        encoded.extend_from_slice(&payload);
+        encoded.extend_from_slice(&[0x44, 0, 0, 21, 0, 0, 20, 8]);
+        encoded.extend_from_slice(&payload);
+        for _ in 0..5 {
+            encoded.extend_from_slice(&[0xC4]);
+            encoded.extend_from_slice(&payload);
+        }
+
+        // TCP may split headers and payloads at any byte boundary. The
+        // dechunker must not commit a timestamp delta before the whole chunk
+        // is available, or it applies the same delta again on the next poll.
+        for step in [1usize, 3, 7, encoded.len()] {
+            let mut dechunker = Dechunker::new();
+            let mut messages = Vec::new();
+            for part in encoded.chunks(step) {
+                dechunker.feed(part);
+                messages.extend(dechunker.poll_messages());
+            }
+            let stamps: Vec<u32> = messages.iter().map(|m| m.timestamp).collect();
+            assert_eq!(
+                stamps,
+                vec![0, 21, 42, 63, 84, 105, 126],
+                "incremental feed step {step}"
+            );
+            assert_eq!(messages.len(), 7);
+        }
     }
 
     #[test]

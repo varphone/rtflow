@@ -89,8 +89,19 @@ ffmpeg -i http://127.0.0.1:18100/hls/live/plain/index.m3u8 -t 3 -f null -
 | RTMP 录制 → VOD | VOD 解码退出 0，无 start code/invalid data |
 | 纯音频 RTMP 录制 → VOD | 录制正常（不等视频关键帧），VOD 解码退出 0 |
 
-观察：RTMP 录像的 VOD 时长仍偏大（10s 素材约 14.5s），与仓库中已知的 RTMP
-时间戳膨胀（1.5–1.8×）一致，不属于本次 SRT 修复范围。
+### RTMP 录像时长偏大（进一步根因）
+
+此前把“10s 素材录成 14.5s”归因于 RTMP 时间戳膨胀，实测发现根因在
+`rtflow-rtmp` 的 chunk 解析器：
+
+- 解析 fmt0/1/2 头时先提交 timestamp/delta，再检查整个 chunk 的 payload 是否
+  已到齐；TCP 分段导致 `NeedMoreData` 时状态不回滚，下一次 poll 会把同一个
+  delta 再加一遍。
+- 结果音频时间戳随 TCP 切分方式膨胀（字节流离线回放正确，线上按 7/100/1000
+  字节分段分别放大到 76s/7s/2.5s），录像 PTS 跨度随之变大。
+- 修复：先把头部解析到局部变量，确认 payload 完整后再提交状态与消费字节；
+  新增“逐字节/小块 feed 时间戳不变”的回归测试。
+- 复测：10s RTMP 推流 VOD 时长 9.98s，6s 纯音频 VOD 5.50s，解码退出 0。
 
 ## 自动化测试
 
