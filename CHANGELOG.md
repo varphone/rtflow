@@ -7,6 +7,9 @@
 
 ### Fixed
 
+- 点播 HLS 默认生成 MPEG-TS（fMP4 不可用时回退），修复 Firefox MSE
+  `bufferAppendError`；兼容 Edge/Chrome。
+
 - HLS/VOD 转换跳过连续 Annex-B 起始码产生的空 NAL，避免 fMP4 样本写入 0 长度，
   修复 RTSP 录制点播 `bufferAppendError`/“不支持的视频格式”。
 

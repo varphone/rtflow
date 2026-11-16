@@ -211,7 +211,6 @@ fn segment_ring_eviction() {
     }
 
     assert_eq!(ring.len(), 2);
-    // Should have evicted segments 0, 1, 2
     assert!(ring.get(0).is_none());
     assert!(ring.get(1).is_none());
     assert!(ring.get(2).is_none());
@@ -322,7 +321,6 @@ fn segmenter_keyframe_alignment() {
     let mut segmenter = Segmenter::new(config, &desc);
     let mut rx = segmenter.subscribe();
 
-    // Push frames: keyframe, inter, inter, keyframe (at segment boundary)
     for i in 0..12 {
         let is_key = i % 6 == 0;
         let data = if is_key {
@@ -357,8 +355,6 @@ fn segmenter_keyframe_alignment() {
 
 #[test]
 fn segmenter_rotates_audio_only_stream_by_time() {
-    // Audio-only streams never carry a video keyframe; segments must still
-    // be produced by the time-based hard cut instead of buffering forever.
     let desc = MediaDescription {
         session_name: Arc::from("audio"),
         tracks: vec![TrackDescription {
@@ -434,7 +430,6 @@ fn segmenter_survives_av_clock_drift() {
     let mut rx = segmenter.subscribe();
     let mut segments = Vec::new();
 
-    // 4000 frames: video reaches ~133 s, audio ~80 s — the baselines drift
     // ~53 s apart, far beyond the 30 s reset threshold.
     for index in 0..4000u64 {
         let video_pts = Duration::from_micros(index * 1_000_000 / 30);
@@ -753,13 +748,18 @@ async fn vod_handler_generates_playlist_and_segments_from_file() {
     assert!(playlist.contains("200 OK"), "{playlist}");
     assert!(playlist.contains("#EXT-X-PLAYLIST-TYPE:VOD"), "{playlist}");
     assert!(playlist.contains("#EXT-X-ENDLIST"), "{playlist}");
-    assert!(playlist.contains("init.m4s"), "{playlist}");
-    let init = get(addr, "/vod/fixture/init.m4s").await;
-    assert!(init.contains("200 OK"), "{init}");
     let segment = playlist
         .lines()
-        .find(|line| line.contains(".m4s") && !line.contains("init") && !line.starts_with('#'))
+        .find(|line| {
+            (line.contains(".m4s") || line.contains(".ts"))
+                && !line.contains("init")
+                && !line.starts_with('#')
+        })
         .expect("segment URI");
+    if playlist.contains("init.m4s") {
+        let init = get(addr, "/vod/fixture/init.m4s").await;
+        assert!(init.contains("200 OK"), "{init}");
+    }
     let segment = get(
         addr,
         &format!(

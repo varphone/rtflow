@@ -31,7 +31,7 @@ pub struct HlsVodConfig {
 
 /// Bump when the generated fMP4 layout/codec handling changes so existing
 /// on-disk VOD caches are regenerated instead of serving stale corrupt data.
-const VOD_CACHE_VERSION: u32 = 3;
+const VOD_CACHE_VERSION: u32 = 4;
 
 /// Caches generated fMP4 files on disk and serializes generation per id.
 pub struct HlsVodManager {
@@ -220,7 +220,10 @@ fn generate(
         "HLS VOD generation started"
     );
     let mut demuxer = source.open()?;
-    let mut segmenter = Segmenter::new(
+    // MPEG-TS is the most interoperable HLS container (Firefox MSE rejects
+    // this project's fMP4 init/sample layout). Fall back to fMP4 when the
+    // description has no codec configuration for the TS pipeline.
+    let mut segmenter = Segmenter::new_mpegts(
         SegmenterConfig {
             segment_duration: config.segment_duration,
             lookback_count: 1,
@@ -249,14 +252,20 @@ fn generate(
             "VOD {title} produced no segments"
         )));
     }
-    let init = completed
+    let mpeg_ts = completed
         .first()
-        .map(|segment| segment.init.clone())
-        .unwrap_or_default();
-    std::fs::write(directory.join("init.m4s"), &init)?;
+        .is_some_and(|segment| segment.format == crate::segmenter::SegmentFormat::MpegTs);
+    if !mpeg_ts {
+        let init = completed
+            .first()
+            .map(|segment| segment.init.clone())
+            .unwrap_or_default();
+        std::fs::write(directory.join("init.m4s"), &init)?;
+    }
+    let extension = if mpeg_ts { "ts" } else { "m4s" };
     for segment in &completed {
         std::fs::write(
-            directory.join(format!("{}.m4s", segment.sequence)),
+            directory.join(format!("{}.{extension}", segment.sequence)),
             &segment.data,
         )?;
     }
@@ -291,7 +300,7 @@ fn parse(path: &str) -> Option<(&str, &str)> {
         return Some((id, "init"));
     }
     let (id, file) = rest.rsplit_once('/')?;
-    if file.ends_with(".m4s") {
+    if file.ends_with(".m4s") || file.ends_with(".ts") {
         return Some((id, "segment"));
     }
     None
@@ -371,6 +380,8 @@ pub fn create_hls_vod_handler(manager: Arc<HlsVodManager>) -> Handler {
                         Ok(Some(body)) => {
                             let content_type = if kind == "init" {
                                 "video/mp4"
+                            } else if name.ends_with(".ts") {
+                                "video/mp2t"
                             } else {
                                 "video/iso.segment"
                             };
