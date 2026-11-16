@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import { dateTime, duration, empty, esc, iconSvg } from "../format.js";
+import { openDrawer } from "../ui.js";
 import { confirmDialog, toast } from "../ui.js";
 import { playUrl } from "../player.js";
 
@@ -74,7 +75,8 @@ export async function render(params) {
         const target = event.target.closest("[data-action]");
         if (!target) return;
         const vod = visible.find((item) => item.id === target.dataset.id);
-        if (target.dataset.action === "play" && vod) playUrl(vod.playlist, vod.title, { vod: true });
+        if (target.dataset.action === "detail" && vod) openVodDetail(vod, ctx);
+        else if (target.dataset.action === "play" && vod) playUrl(vod.playlist, vod.title, { vod: true });
         else if (target.dataset.action === "copy") {
           try { await navigator.clipboard.writeText(target.dataset.url); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
         } else if (target.dataset.action === "refresh-vod" && vod) {
@@ -97,11 +99,44 @@ function cards(items, selected) {
     return `<article class="vod-card ${selected.has(vod.id) ? "selected" : ""}">
       <label class="vod-check"><input type="checkbox" data-vod-select="${esc(vod.id)}" ${selected.has(vod.id) ? "checked" : ""} aria-label="选择 ${esc(vod.title)}"></label>
       <div class="vod-thumb"><span class="vod-play">${iconSvg("play")}</span><span class="vod-duration">${vod.duration_ms ? duration(vod.duration_ms) : "生成中"}</span></div>
-      <div class="vod-title"><h3>${esc(vod.title)}</h3><div class="cell-sub mono">${esc(vod.id)}</div></div>
+      <div class="vod-title"><h3><button class="link-cell" data-action="detail" data-id="${esc(vod.id)}">${esc(vod.title)}</button></h3><div class="cell-sub mono">${esc(vod.id)}</div></div>
       <div class="vod-meta"><span class="badge codec">HLS</span>${stamp > 1e12 ? `<span class="cell-sub">${esc(dateTime(stamp / 1000))}</span>` : ""}</div>
       <div class="vod-actions"><button class="btn small primary" data-action="play" data-id="${esc(vod.id)}">播放</button>
-        <button class="btn small" data-action="copy" data-url="${esc(vod.playlist)}">复制地址</button>
+        <button class="btn small ghost" data-action="detail" data-id="${esc(vod.id)}">详情</button>
+        <button class="btn small" data-action="copy" data-url="${esc(location.origin + vod.playlist)}">复制地址</button>
         <button class="btn small ghost" data-action="refresh-vod" data-id="${esc(vod.id)}">刷新缓存</button></div>
     </article>`;
   }).join("")}</div>`;
+}
+
+
+function openVodDetail(vod, ctx) {
+  const stamp = Number(String(vod.id).split("@").pop());
+  const recorded = stamp > 1e12 ? dateTime(stamp / 1000) : "—";
+  openDrawer({
+    title: vod.title,
+    description: "HLS 点播资源详情。",
+    showSubmit: false,
+    body: `<div class="stack">
+      <div class="detail-grid">
+        <div class="detail-item"><span>时长</span><strong class="mono">${vod.duration_ms ? duration(vod.duration_ms) : "生成中"}</strong></div>
+        <div class="detail-item"><span>录制时间</span><strong>${esc(recorded)}</strong></div>
+        <div class="detail-item"><span>格式</span><strong>HLS · MPEG-TS</strong></div>
+        <div class="detail-item"><span>资源 ID</span><strong class="mono">${esc(vod.id)}</strong></div>
+      </div>
+      <section class="drawer-section"><h3>播放地址</h3><div class="endpoint"><span class="endpoint-label">HLS</span><code>${esc(location.origin + vod.playlist)}</code><button class="btn small ghost" data-vod-copy>复制</button></div></section>
+      <div class="actions"><button class="btn small primary" data-vod-play>播放</button><button class="btn small ghost" data-vod-refresh>刷新生成缓存</button></div>
+    </div>`,
+    onMount(root) {
+      const close = () => root.querySelector("[data-close-drawer]")?.click();
+      root.querySelector("[data-vod-copy]").onclick = async () => {
+        try { await navigator.clipboard.writeText(location.origin + vod.playlist); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      };
+      root.querySelector("[data-vod-play]").onclick = () => { close(); playUrl(vod.playlist, vod.title, { vod: true }); };
+      root.querySelector("[data-vod-refresh]").onclick = async () => {
+        try { await api(`/vods/${encodeURIComponent(vod.id)}/refresh`, { method: "POST" }); toast("缓存已清除，下次播放重新生成", "ok"); close(); ctx.reload(); }
+        catch (error) { toast(error.message, "bad"); }
+      };
+    },
+  });
 }
