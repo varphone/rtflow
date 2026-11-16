@@ -31,6 +31,7 @@ export async function render(params) {
       const sorter = root.querySelector("[data-vod-sort]");
       const bulk = root.querySelector("[data-vod-bulk]");
       const selected = new Set();
+      let allVods = vods;
       let visible = initial;
       const sync = () => {
         bulk.disabled = selected.size === 0;
@@ -40,7 +41,7 @@ export async function render(params) {
         selectAll.indeterminate = picked > 0 && picked < visible.length;
       };
       const paint = () => {
-        visible = filter(vods, search.value);
+        visible = filter(allVods, search.value);
         count.textContent = `${visible.length} 条`;
         results.innerHTML = visible.length ? cards(visible, selected) : empty("没有匹配的点播", "调整搜索条件");
         sync();
@@ -88,6 +89,23 @@ export async function render(params) {
           catch (error) { toast(error.message, "bad"); }
         }
       });
+      const cacheTimer = setInterval(async () => {
+        if (document.hidden) return;
+        let next;
+        try { next = (await api("/vods")).items || []; } catch (_) { return; }
+        const before = allVods.map((item) => item.id).join("|");
+        const after = next.map((item) => item.id).join("|");
+        allVods = next;
+        if (before !== after) { paint(); return; }
+        for (const item of next) {
+          const card = results.querySelector(`[data-vod-card="${CSS.escape(item.id)}"]`);
+          const badge = card?.querySelector("[data-vod-cache]");
+          if (!badge) continue;
+          badge.textContent = item.cached ? "已缓存" : "未缓存";
+          badge.classList.toggle("ok", item.cached);
+        }
+      }, 10000);
+      return () => clearInterval(cacheTimer);
     },
   };
 }
@@ -105,11 +123,11 @@ function filter(vods, value) {
 function cards(items, selected) {
   return `<div class="vod-grid">${items.map((vod) => {
     const stamp = Number(String(vod.id).split("@").pop());
-    return `<article class="vod-card ${selected.has(vod.id) ? "selected" : ""}">
+    return `<article class="vod-card ${selected.has(vod.id) ? "selected" : ""}" data-vod-card="${esc(vod.id)}">
       <label class="vod-check"><input type="checkbox" data-vod-select="${esc(vod.id)}" ${selected.has(vod.id) ? "checked" : ""} aria-label="选择 ${esc(vod.title)}"></label>
       <div class="vod-thumb"><span class="vod-play">${iconSvg("play")}</span><span class="vod-duration">${vod.duration_ms ? duration(vod.duration_ms) : "生成中"}</span></div>
       <div class="vod-title"><h3><button class="link-cell" data-action="detail" data-id="${esc(vod.id)}">${esc(vod.title)}</button></h3><div class="cell-sub mono">${esc(vod.id)}</div></div>
-      <div class="vod-meta"><span class="badge codec">HLS</span><span class="badge ${vod.cached ? "ok" : ""}">${vod.cached ? "已缓存" : "未缓存"}</span>${stamp > 1e12 ? `<span class="cell-sub">${esc(dateTime(stamp / 1000))}</span>` : ""}</div>
+      <div class="vod-meta"><span class="badge codec">HLS</span><span class="badge ${vod.cached ? "ok" : ""}" data-vod-cache>${vod.cached ? "已缓存" : "未缓存"}</span>${stamp > 1e12 ? `<span class="cell-sub">${esc(dateTime(stamp / 1000))}</span>` : ""}</div>
       <div class="vod-actions"><button class="btn small primary" data-action="play" data-id="${esc(vod.id)}">播放</button>
         <button class="btn small ghost" data-action="detail" data-id="${esc(vod.id)}">详情</button>
         <button class="btn small" data-action="copy" data-url="${esc(location.origin + vod.playlist)}">复制地址</button>
