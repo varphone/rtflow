@@ -29,6 +29,10 @@ pub struct HlsVodConfig {
     pub cache_dir: PathBuf,
 }
 
+/// Bump when the generated fMP4 layout/codec handling changes so existing
+/// on-disk VOD caches are regenerated instead of serving stale corrupt data.
+const VOD_CACHE_VERSION: u32 = 2;
+
 /// Caches generated fMP4 files on disk and serializes generation per id.
 pub struct HlsVodManager {
     entries: RwLock<HashMap<String, HlsVodEntry>>,
@@ -140,7 +144,7 @@ impl HlsVodManager {
             }
             match fingerprint.as_deref() {
                 Some(expected) => std::fs::read_to_string(directory.join(".fingerprint"))
-                    .is_ok_and(|stored| stored == expected),
+                    .is_ok_and(|stored| stored == format!("{VOD_CACHE_VERSION}:{expected}")),
                 None => true,
             }
         };
@@ -168,7 +172,10 @@ impl HlsVodManager {
                 return Err(error);
             }
             if let Some(fingerprint) = fingerprint {
-                let _ = std::fs::write(temporary_for_cleanup.join(".fingerprint"), fingerprint);
+                let _ = std::fs::write(
+                    temporary_for_cleanup.join(".fingerprint"),
+                    format!("{VOD_CACHE_VERSION}:{fingerprint}"),
+                );
             }
             if let Err(error) = std::fs::rename(&temporary_for_cleanup, &target) {
                 let _ = std::fs::remove_dir_all(&temporary_for_cleanup);
