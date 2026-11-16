@@ -115,3 +115,13 @@ depacketizer 扩展处理。
 - 重连后的长期时钟漂移尚未做渐进校准（SR 映射在每次连接内生效）。
 - 透明 RTSP 控制面代理、RTSP-over-HTTP、RTSP 2.0 不在范围内。
 - 代理只处理 RTSP/RTSPS 上游；RTMP/SRT 回源使用各自 `[[rtmp.pull]]`/`[[srt.pull]]`。
+
+## 规模/稳定性测试
+
+```bash
+PROXY_SOAK_SECS=28800 PROXY_SOAK_MOUNTS=50 \
+  cargo test -p rtflow-server --test proxy_soak -- --ignored --nocapture
+```
+
+默认 10 个代理、60 秒；可通过环境变量调整。测试并发拉取所有代理的 HLS playlist，
+统计成功/失败，并在失败超过 10% 时失败。

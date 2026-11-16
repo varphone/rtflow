@@ -48,7 +48,8 @@
 - [x] GStreamer 拉取代理 mount 的互操作测试（`proxy_gstreamer.rs`）。
 - [x] 10 代理 + 10 路 HLS 的自动化冒烟（`proxy_scale.rs`）。
 - [x] 50 代理 + 200 路 HLS 短时冒烟（第二次遍历 200/200，RSS ~212MB）。
-- [ ] 8h soak。
+- [x] 可配置 soak 测试工具（`proxy_soak.rs`，默认 60s，可跑 8h）。
+- [ ] 8h soak 实际执行。
 - [x] server 配置 → 代理 mount → HLS 端到端测试（`proxy_config.rs`）。
 - [ ] 文档、迁移说明、CHANGELOG。
 

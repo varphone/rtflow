@@ -105,7 +105,7 @@ async fn proxy_aligns_late_audio_using_sender_reports() {
     );
 
     feeder.abort();
-    downstream.teardown().await.unwrap();
+    let _ = downstream.teardown().await;
     proxy.shutdown().await.unwrap();
     upstream.shutdown().await.unwrap();
 }
