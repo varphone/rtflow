@@ -124,7 +124,7 @@ export function openCommandPalette(commands) {
   filter(); input.focus();
 }
 
-export function openDrawer({ title, description = "", body, submitLabel = "保存", onSubmit, onMount, showSubmit = true }) {
+export function openDrawer({ title, description = "", body, submitLabel = "保存", onSubmit, onMount, onClose, showSubmit = true }) {
   const root = modalRoot();
   root.innerHTML = `<div class="drawer-backdrop" data-drawer-backdrop>
     <aside class="drawer" role="dialog" aria-modal="true" aria-label="${esc(title)}">
@@ -136,7 +136,13 @@ export function openDrawer({ title, description = "", body, submitLabel = "保�
       </form>
     </aside></div>`;
   let dirty = false;
-  const forceClose = () => { root.innerHTML = ""; };
+  let closed = false;
+  const forceClose = () => {
+    if (closed) return;
+    closed = true;
+    onClose?.();
+    root.innerHTML = "";
+  };
   const close = () => {
     if (dirty && !window.confirm("有未保存的修改，确定放弃？")) return;
     forceClose();

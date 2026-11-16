@@ -172,18 +172,18 @@ function detail(stream) {
   const endpoint = (label, url) => `<div class="endpoint"><span class="endpoint-label">${esc(label)}</span><code>${esc(url)}</code><button class="btn small ghost" data-copy="${esc(url)}">复制</button></div>`;
   return `<div class="stack">
     <div class="detail-grid">
-      <div class="detail-item"><span>状态</span><strong>${stream.publisher ? "发布中" : "待机"}</strong></div>
+      <div class="detail-item"><span>状态</span><strong data-detail="status">${stream.publisher ? "发布中" : "待机"}</strong></div>
       <div class="detail-item"><span>路径</span><strong class="mono">${esc(stream.path)}</strong></div>
       <div class="detail-item"><span>协议</span><strong>${esc((stream.protocols || []).join(" · ") || "—")}</strong></div>
-      <div class="detail-item"><span>订阅连接</span><strong class="mono">${num(stream.subscribers)}</strong></div>
+      <div class="detail-item"><span>订阅连接</span><strong class="mono" data-detail="subscribers">${num(stream.subscribers)}</strong></div>
     </div>
     <section class="drawer-section"><h3>媒体轨道</h3><div class="detail-grid">
       <div class="detail-item"><span>视频</span><strong>${esc(stream.video?.codec || "—")} · ${esc(resolution(stream.video))}</strong><small>${esc(fps(stream.video))}</small></div>
       <div class="detail-item"><span>音频</span><strong>${esc(audioLabel(stream.audio))}</strong><small>${stream.audio?.sample_rate ? `${num(stream.audio.sample_rate)} Hz` : "—"}</small></div>
-      <div class="detail-item"><span>接收帧</span><strong class="mono">${num(stream.accepted_frames)}</strong></div>
-      <div class="detail-item"><span>丢弃帧</span><strong class="mono" style="color:${stream.dropped_frames ? "var(--bad)" : "inherit"}">${num(stream.dropped_frames)}</strong></div>
-      <div class="detail-item"><span>RTP 包</span><strong class="mono">${num(stream.rtp_packets)}</strong></div>
-      <div class="detail-item"><span>RTP 流量</span><strong class="mono">${bytes(stream.rtp_octets)}</strong></div>
+      <div class="detail-item"><span>接收帧</span><strong class="mono" data-detail="accepted">${num(stream.accepted_frames)}</strong></div>
+      <div class="detail-item"><span>丢弃帧</span><strong class="mono" data-detail="dropped" style="color:${stream.dropped_frames ? "var(--bad)" : "inherit"}">${num(stream.dropped_frames)}</strong></div>
+      <div class="detail-item"><span>RTP 包</span><strong class="mono" data-detail="packets">${num(stream.rtp_packets)}</strong></div>
+      <div class="detail-item"><span>RTP 流量</span><strong class="mono" data-detail="octets">${bytes(stream.rtp_octets)}</strong></div>
     </div></section>
     <section class="drawer-section"><h3>播放地址</h3>${endpoint("HLS", stream.hls_url)}${endpoint("LL-HLS", stream.ll_hls_url)}${endpoint("RTMP", stream.rtmp_url)}</section>
     <div class="actions"><button class="btn small" data-detail-play="hls">预览 HLS</button><button class="btn small" data-detail-play="ll">预览 LL-HLS</button><button class="btn small danger" data-detail-kick>断开此流</button></div>
@@ -191,12 +191,35 @@ function detail(stream) {
 }
 
 function openDetail(stream, ctx) {
+  let timer = null;
   openDrawer({
     title: stream.name,
     description: stream.path,
     body: detail(stream),
     showSubmit: false,
+    onClose() { if (timer) clearInterval(timer); },
     onMount(root) {
+      const update = async () => {
+        if (document.hidden) return;
+        let current;
+        try {
+          const payload = await api("/streams");
+          current = (payload.items || payload).find((item) => item.path === stream.path);
+        } catch (_) { return; }
+        if (!current) {
+          const status = root.querySelector('[data-detail="status"]');
+          if (status) status.textContent = "已离线";
+          return;
+        }
+        const set = (name, value) => { const node = root.querySelector(`[data-detail="${name}"]`); if (node) node.textContent = value; };
+        set("status", current.publisher ? "发布中" : "待机");
+        set("subscribers", num(current.subscribers));
+        set("accepted", num(current.accepted_frames));
+        set("dropped", num(current.dropped_frames));
+        set("packets", num(current.rtp_packets));
+        set("octets", bytes(current.rtp_octets));
+      };
+      timer = setInterval(update, 3000);
       root.querySelectorAll("[data-copy]").forEach((button) => button.onclick = async () => {
         try { await navigator.clipboard.writeText(button.dataset.copy); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       });
