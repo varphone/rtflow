@@ -230,7 +230,7 @@ function detail(stream) {
       <div class="detail-item"><span>RTP 包</span><strong class="mono" data-detail="packets">${num(stream.rtp_packets)}</strong></div>
       <div class="detail-item"><span>RTP 流量</span><strong class="mono" data-detail="octets">${bytes(stream.rtp_octets)}</strong></div>
     </div></section>
-    <section class="drawer-section"><h3>播放地址</h3>${endpoint("HLS", stream.hls_url)}${endpoint("LL-HLS", stream.ll_hls_url)}${endpoint("RTMP", stream.rtmp_url)}</section>
+    <section class="drawer-section"><h3>播放地址</h3>${endpoint("HLS", stream.hls_url)}${endpoint("LL-HLS", stream.ll_hls_url)}${endpoint("RTSP", stream.rtsp_url)}${endpoint("RTMP", stream.rtmp_url)}</section>
     <div class="actions"><button class="btn small" data-detail-play="hls">预览 HLS</button><button class="btn small" data-detail-play="ll">预览 LL-HLS</button><button class="btn small danger" data-detail-kick>断开此流</button></div>
   </div>`;
 }

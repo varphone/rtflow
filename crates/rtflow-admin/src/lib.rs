@@ -40,6 +40,8 @@ pub struct AdminConfig {
     pub ll_hls_prefix: String,
     /// Public RTMP base used for ingest hints, e.g. `rtmp://host:1935`.
     pub rtmp_base: Option<String>,
+    /// Public RTSP base used for playback hints, e.g. `rtsp://host:8554`.
+    pub rtsp_base: Option<String>,
     pub(crate) vod: Option<Arc<rtflow_hls::vod::HlsVodManager>>,
     pub(crate) control: Option<Arc<dyn ControlPlane>>,
 }
@@ -89,6 +91,7 @@ impl AdminConfig {
             hls_prefix: "/hls".to_owned(),
             ll_hls_prefix: "/llhls".to_owned(),
             rtmp_base: None,
+            rtsp_base: None,
             vod: None,
             control: None,
         };
@@ -127,6 +130,11 @@ impl AdminConfig {
 
     pub fn with_ll_hls_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.ll_hls_prefix = prefix.into();
+        self
+    }
+
+    pub fn with_rtsp_base(mut self, base: impl Into<String>) -> Self {
+        self.rtsp_base = Some(base.into());
         self
     }
 

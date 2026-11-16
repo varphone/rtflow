@@ -29,6 +29,7 @@ pub(super) struct StreamView {
     pub hls_url: String,
     pub ll_hls_url: String,
     pub rtmp_url: String,
+    pub rtsp_url: String,
     pub protocols: Vec<&'static str>,
 }
 
@@ -87,6 +88,15 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
             .unwrap_or("rtmp://127.0.0.1:1935"),
         path
     );
+    let rtsp_url = format!(
+        "{}{}",
+        state
+            .config
+            .rtsp_base
+            .as_deref()
+            .unwrap_or("rtsp://127.0.0.1:8554"),
+        path
+    );
     let _ = base;
     Some(StreamView {
         path: path.to_owned(),
@@ -102,6 +112,7 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
         hls_url,
         ll_hls_url,
         rtmp_url,
+        rtsp_url,
         protocols: vec!["HLS", "RTSP"],
     })
 }

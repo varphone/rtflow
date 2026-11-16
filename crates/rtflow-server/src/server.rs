@@ -3,7 +3,7 @@ use crate::{
     audit::AuditLog,
     auth::AppAuth,
     config::Config,
-    discovery::{Discovery, DiscoveryService, PathStatus, public_rtmp},
+    discovery::{Discovery, DiscoveryService, PathStatus, public_rtmp, public_rtsp},
     hooks::HookClient,
     keys::{IssuedKey, KeySpec, KeyStatus, KeyStore},
     paths::{PathRecord, PathSpec, PathStore},
@@ -635,6 +635,9 @@ impl ServerApp {
                     .with_ll_hls_prefix("/llhls")
                     .with_rtmp_base(
                         public_rtmp(&config).unwrap_or_else(|| "rtmp://127.0.0.1:1935".into()),
+                    )
+                    .with_rtsp_base(
+                        public_rtsp(&config).unwrap_or_else(|| "rtsp://127.0.0.1:8554".into()),
                     )
                     .with_vod(vod_manager.clone())
                     .with_control(Arc::new(crate::control::ControlBridge {
