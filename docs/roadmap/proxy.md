@@ -17,7 +17,8 @@
 - [x] SIGHUP 代理配置 diff（新增/删除/修改）。
 - [x] per-mount `idle_grace`、常连模式（always）。
 - [x] `restart_pending`（有订阅者时延迟切换，空闲后重建）。
-- [ ] 已发现描述缓存（重启后上游离线仍可注册）。
+- [x] 描述缓存：成功 DESCRIBE 写入 `state_dir/proxy-descriptions/*.sdp`（0600），
+      重启时上游离线也能先注册 mount。
 
 ## M2 — 动态管理与可观测
 

@@ -323,7 +323,7 @@ impl ServerApp {
         let cancel = CancellationToken::new();
         let proxy_supervisor = rtflow::runtime::TaskSupervisor::new(event_sink.clone());
         let proxy_config = Arc::new(std::sync::RwLock::new(config.proxy.clone()));
-        let proxies = rtflow::server::ProxyService::new_with_policy(
+        let proxies = rtflow::server::ProxyService::new_with_policy_and_cache(
             mounts.clone(),
             proxy_supervisor,
             cancel.clone(),
@@ -334,6 +334,7 @@ impl ServerApp {
                 max_upstreams: config.proxy.max_upstreams_per_proxy,
                 describe_concurrency: config.proxy.describe_concurrency,
             },
+            Some(config.server.state_dir.join("proxy-descriptions")),
         );
         let mut cancels = Vec::new();
         let mut tasks = Vec::new();

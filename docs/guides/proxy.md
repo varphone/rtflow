@@ -55,6 +55,8 @@ describing → idle → connecting → streaming
 - 媒体空闲超过 `media_idle_timeout`（半开连接）触发失败并重连/切换 fallback。
 - 重连优先使用缓存 SDP（`connect_with_description`），失败自动回退完整 DESCRIBE。
 - 无订阅者时按 `description_refresh` 重新探测，轨道变化会更新 mount 描述。
+- 成功 DESCRIBE 会把 SDP 缓存到 `state_dir/proxy-descriptions/`（0600）；服务重启时
+  上游离线也会先用缓存 SDP 注册 mount，后台继续重试。
 
 ## 状态与管理 API
 
