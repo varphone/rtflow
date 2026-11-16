@@ -1,4 +1,6 @@
 //! HTTP control-plane API (paths, keys, recordings, VOD, discovery).
+mod helper;
+use helper::expected_revision;
 mod proxy;
 mod srt;
 mod status;
@@ -205,6 +207,14 @@ pub(crate) async fn register_api_routes(
         "/admin/api/v1/paths",
         api_json(state.clone(), |state, _req| async move {
             Ok(serde_json::to_value(state.discovery.list()).unwrap_or_default())
+        }),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
+        "/admin/api/v1/paths/config",
+        api_json(state.clone(), |state, _req| async move {
+            Ok(serde_json::to_value(state.paths.list()).unwrap_or_default())
         }),
     )
     .await;
@@ -557,18 +567,6 @@ struct ApiState {
     idempotency: std::sync::Mutex<
         std::collections::HashMap<String, (std::time::Instant, u16, serde_json::Value)>,
     >,
-}
-
-fn expected_revision(req: &HttpRequest) -> Result<Option<u64>, (u16, String)> {
-    match req.header("if-match") {
-        None => Ok(None),
-        Some(value) => value
-            .trim()
-            .trim_matches('"')
-            .parse::<u64>()
-            .map(Some)
-            .map_err(|_| (400, "If-Match must be a revision number".into())),
-    }
 }
 
 fn audit(state: &ApiState, event: AuditEvent) {

@@ -14,10 +14,7 @@ use std::sync::Arc;
 use views::{Overview, streams, vods};
 
 const COOKIE: &str = "rtflow_admin";
-const INDEX_HTML: &str = include_str!("../assets/index.html");
-const APP_CSS: &str = include_str!("../assets/app.css");
-const APP_JS: &str = include_str!("../assets/app.js");
-const HLS_JS: &str = include_str!("../assets/hls.min.js");
+mod assets;
 
 struct Auth {
     token: String,
@@ -135,7 +132,7 @@ fn html_escape(value: &str) -> String {
 
 fn index_handler(state: Arc<AdminState>) -> Handler {
     Arc::new(move |_req, mut writer: ResponseWriter<_>| {
-        let body = INDEX_HTML
+        let body = assets::INDEX_HTML
             .replace("__BASE__", &state.config.base_path)
             .replace("__TITLE__", &html_escape(&state.config.title));
         Box::pin(async move {
@@ -159,7 +156,7 @@ fn index_handler(state: Arc<AdminState>) -> Handler {
 }
 
 fn asset_handler(
-    asset: &'static str,
+    asset: &'static [u8],
     content_type: &'static str,
     cache_control: &'static str,
 ) -> Handler {
@@ -177,7 +174,7 @@ fn asset_handler(
                     ],
                 )
                 .await?;
-            writer.write_raw(asset.as_bytes()).await?;
+            writer.write_raw(asset).await?;
             writer.flush().await?;
             Ok(writer)
         })
@@ -597,25 +594,14 @@ pub(super) async fn register(http: &HttpServer, state: Arc<AdminState>) {
     http.add_route(Method::Get, &format!("{base}/"), index.clone())
         .await;
 
-    http.add_route(
-        Method::Get,
-        &format!("{base}/assets/app.css"),
-        asset_handler(APP_CSS, "text/css; charset=utf-8", "no-cache"),
-    )
-    .await;
-    http.add_route(
-        Method::Get,
-        &format!("{base}/assets/app.js"),
-        asset_handler(APP_JS, "text/javascript; charset=utf-8", "no-cache"),
-    )
-    .await;
-    http.add_route(
-        Method::Get,
-        &format!("{base}/assets/hls.min.js"),
-        asset_handler(HLS_JS, "text/javascript; charset=utf-8", "no-cache"),
-    )
-    .await;
-
+    for asset in assets::ASSETS {
+        http.add_route(
+            Method::Get,
+            &format!("{base}/assets/{}", asset.path),
+            asset_handler(asset.bytes, asset.content_type, "no-cache"),
+        )
+        .await;
+    }
     http.add_route(
         Method::Post,
         &format!("{base}/api/login"),
@@ -752,6 +738,9 @@ pub(super) async fn register(http: &HttpServer, state: Arc<AdminState>) {
             if req
                 .path
                 .starts_with(&format!("{}/api/", state.config.base_path))
+                || req
+                    .path
+                    .starts_with(&format!("{}/assets/", state.config.base_path))
             {
                 let body = br#"{"error":"api_not_found"}"#;
                 let length = body.len().to_string();
@@ -768,7 +757,7 @@ pub(super) async fn register(http: &HttpServer, state: Arc<AdminState>) {
                 writer.write_raw(body).await?;
                 return Ok(writer);
             }
-            let body = INDEX_HTML
+            let body = assets::INDEX_HTML
                 .replace("__BASE__", &state.config.base_path)
                 .replace("__TITLE__", &html_escape(&state.config.title));
             let length = body.len().to_string();

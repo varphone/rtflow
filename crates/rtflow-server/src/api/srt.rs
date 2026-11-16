@@ -15,6 +15,12 @@ struct SrtBody {
     passphrase: Option<String>,
     pbkeylen: u32,
     latency_ms: Option<u32>,
+    #[serde(default = "keep_passphrase")]
+    preserve_passphrase: bool,
+}
+
+fn keep_passphrase() -> bool {
+    true
 }
 
 impl Default for SrtBody {
@@ -29,6 +35,7 @@ impl Default for SrtBody {
             passphrase: None,
             pbkeylen: 0,
             latency_ms: None,
+            preserve_passphrase: true,
         }
     }
 }
@@ -178,7 +185,7 @@ async fn srt_upsert(
     if !matches!(body.pbkeylen, 0 | 16 | 24 | 32) {
         return Err((400, "pbkeylen must be 0, 16, 24 or 32".into()));
     }
-    let id = body.id.unwrap_or_else(|| {
+    let id = body.id.clone().unwrap_or_else(|| {
         let mut bytes = [0u8; 8];
         let _ = getrandom::getrandom(&mut bytes);
         format!(
@@ -189,6 +196,13 @@ async fn srt_upsert(
                 .collect::<String>()
         )
     });
+    let mut passphrase = body.passphrase;
+    if replace && passphrase.is_none() && body.preserve_passphrase {
+        passphrase = crate::store::srt::load_all(&state.store)
+            .ok()
+            .and_then(|records| records.into_iter().find(|record| record.id == id))
+            .and_then(|record| record.passphrase);
+    }
     let record = SrtRecord {
         id: id.clone(),
         name: if body.name.is_empty() {
@@ -201,7 +215,7 @@ async fn srt_upsert(
         remote: body.remote,
         stream_id: body.stream_id,
         mount: body.mount,
-        passphrase: body.passphrase,
+        passphrase,
         pbkeylen: body.pbkeylen,
         latency_ms: body.latency_ms,
         revision: 1,

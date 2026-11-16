@@ -18,6 +18,10 @@
 
 ### Changed
 
+- 管理控制台重构：分组侧栏、hash 路由、独立业务页面、抽屉表单、搜索/筛选、
+  状态与异常聚合、只读服务配置页、深浅主题切换；前端拆分为原生 ES modules，
+  无构建链依赖。
+
 - 仓库重构为 Cargo workspace 多 crate 布局：根 `Cargo.toml` 只保留 workspace
   配置，源码迁入 `crates/<name>/src/`；`tests/`、`examples/`、`benches/` 随之
   迁入 `crates/rtflow/`，`support/` 变为 `crates/rtflow-testkit`。

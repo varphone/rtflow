@@ -192,6 +192,7 @@ fn proxy_upsert(
     expected: Option<u64>,
 ) -> Result<serde_json::Value, (u16, String)> {
     mount.validate().map_err(|error| (400, error))?;
+    let mut mount = mount;
     let path = mount.path.clone();
     let existed = state
         .proxy_config
@@ -204,6 +205,26 @@ fn proxy_upsert(
         return Err((409, "proxy already exists".into()));
     }
     if existed {
+        let previous = state
+            .proxy_config
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .mounts
+            .iter()
+            .find(|entry| entry.path == path)
+            .cloned();
+        if let Some(previous) = previous {
+            for upstream in &mut mount.upstreams {
+                if upstream.password.is_none()
+                    && let Some(old) = previous
+                        .upstreams
+                        .iter()
+                        .find(|old| old.url == upstream.url)
+                {
+                    upstream.password = old.password.clone();
+                }
+            }
+        }
         let revision = crate::store::proxies::revision(&state.store, &path)
             .map_err(|error| (500, error.to_string()))?
             .ok_or((404, "proxy not found".into()))?;
