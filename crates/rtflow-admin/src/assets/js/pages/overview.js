@@ -61,7 +61,7 @@ export async function render() {
         <a class="quick-action" href="#/system"><span class="kicker">诊断</span><strong>服务与存储</strong><small>TOML、DB schema、版本</small></a>
       </div>
       <section class="panel traffic-panel">
-        <div class="panel-head"><h2>接收帧速率</h2><span class="meta"><span data-trend-rate>—</span> · 近 2 分钟</span><span class="meta" data-trend-peak style="margin-left:auto"></span></div>
+        <div class="panel-head"><h2 data-trend-title>接收帧速率</h2><div class="seg" style="margin-left:8px"><button data-trend-metric="frames" class="active">帧率</button><button data-trend-metric="subscribers">订阅</button></div><span class="meta"><span data-trend-rate>—</span> · 近 2 分钟</span><span class="meta" data-trend-peak style="margin-left:auto"></span></div>
         <div class="traffic-chart"><svg viewBox="0 0 1000 90" preserveAspectRatio="none" aria-hidden="true"><path class="traffic-area" data-trend-area></path><path class="traffic-line" data-trend-line></path></svg><span class="traffic-empty" data-trend-empty>等待流量…</span></div>
       </section>
       <div class="two-col">
@@ -88,33 +88,50 @@ export async function render() {
       let automatic = true;
       let timer = null;
       let samples = [];
+      let metric = "frames";
       let previous = { frames: Number(data.overview.accepted_frames || 0), at: Date.now() };
-      const pushSample = (overview) => {
-        const now = Date.now();
-        const frames = Number(overview.accepted_frames || 0);
-        const seconds = Math.max(1, (now - previous.at) / 1000);
-        const rate = Math.max(0, (frames - previous.frames) / seconds);
-        previous = { frames, at: now };
-        samples.push(rate);
-        if (samples.length > 15) samples.shift();
+      const drawTrend = () => {
         const line = root.querySelector("[data-trend-line]");
         const area = root.querySelector("[data-trend-area]");
         const rateLabel = root.querySelector("[data-trend-rate]");
         const peakLabel = root.querySelector("[data-trend-peak]");
         const empty = root.querySelector("[data-trend-empty]");
-        const peak = Math.max(...samples, 1);
-        if (rateLabel) rateLabel.textContent = `${rate.toFixed(0)} fps`;
-        if (peakLabel) peakLabel.textContent = `峰值 ${Math.max(...samples, 0).toFixed(0)} fps`;
-        if (empty) empty.hidden = samples.some((value) => value > 0);
-        if (!line || !area || samples.length < 2) return;
-        const points = samples.map((value, index) => {
-          const x = (index / (samples.length - 1)) * 1000;
+        const title = root.querySelector("[data-trend-title]");
+        const values = samples.map((sample) => sample[metric]);
+        const suffix = metric === "frames" ? " fps" : "";
+        if (rateLabel) rateLabel.textContent = `${(values[values.length - 1] || 0).toFixed(0)}${suffix}`;
+        if (peakLabel) peakLabel.textContent = `峰值 ${Math.max(...values, 0).toFixed(0)}${suffix}`;
+        if (title) title.textContent = metric === "frames" ? "接收帧速率" : "订阅连接";
+        if (empty) {
+          empty.textContent = metric === "frames" ? "等待流量…" : "等待订阅…";
+          empty.hidden = values.some((value) => value > 0);
+        }
+        if (!line || !area || values.length < 2) { line?.setAttribute("d", ""); area?.setAttribute("d", ""); return; }
+        const max = Math.max(...values, 0);
+        const peak = Math.max(max * 1.25, metric === "subscribers" ? 2 : 1);
+        const points = values.map((value, index) => {
+          const x = (index / (values.length - 1)) * 1000;
           const y = 82 - (value / peak) * 68;
           return `${x.toFixed(1)},${y.toFixed(1)}`;
         });
         line.setAttribute("d", `M${points.join(" L")}`);
         area.setAttribute("d", `M0,90 L${points.join(" L")} L1000,90 Z`);
       };
+      const pushSample = (overview) => {
+        const now = Date.now();
+        const frames = Number(overview.accepted_frames || 0);
+        const seconds = Math.max(1, (now - previous.at) / 1000);
+        const rate = Math.max(0, (frames - previous.frames) / seconds);
+        previous = { frames, at: now };
+        samples.push({ frames: rate, subscribers: Number(overview.subscribers || 0) });
+        if (samples.length > 15) samples.shift();
+        drawTrend();
+      };
+      root.querySelectorAll("[data-trend-metric]").forEach((button) => button.onclick = () => {
+        metric = button.dataset.trendMetric;
+        root.querySelectorAll("[data-trend-metric]").forEach((item) => item.classList.toggle("active", item === button));
+        drawTrend();
+      });
       pushSample(data.overview);
       const refresh = async () => {
         let next;
