@@ -65,6 +65,8 @@ pub struct ServerHandle {
     discovery: Arc<DiscoveryService>,
     vod: Arc<VodCatalog>,
     proxies: Arc<rtflow::server::ProxyService>,
+    proxy_event_sink: Arc<dyn rtflow::EventSink>,
+    proxy_config: Arc<std::sync::RwLock<crate::config::ProxySection>>,
     config: Arc<Config>,
 }
 
@@ -112,6 +114,16 @@ impl ServerHandle {
         self.discovery.reload(Arc::new(config.clone()));
         report.applied.push("discovery");
 
+        let old_proxy = &self.config.proxy;
+        let new_proxy = &config.proxy;
+        if self.apply_proxy_reload(old_proxy, new_proxy) {
+            report.applied.push("proxy");
+        }
+        *self
+            .proxy_config
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = config.proxy.clone();
+
         let old = &self.config;
         if old.rtsp.listen != config.rtsp.listen || old.rtsp.enabled != config.rtsp.enabled {
             report.restart_required.push("rtsp listen/enabled");
@@ -145,6 +157,69 @@ impl ServerHandle {
             report.restart_required.push("admin credentials");
         }
         Ok(report)
+    }
+
+    fn apply_proxy_reload(
+        &self,
+        old: &crate::config::ProxySection,
+        new: &crate::config::ProxySection,
+    ) -> bool {
+        let mut changed = false;
+        let old_mounts: std::collections::BTreeMap<_, _> = old
+            .mounts
+            .iter()
+            .map(|mount| (mount.path.as_str(), mount))
+            .collect();
+        let new_mounts: std::collections::BTreeMap<_, _> = new
+            .mounts
+            .iter()
+            .map(|mount| (mount.path.as_str(), mount))
+            .collect();
+        for path in old_mounts.keys() {
+            if !new.enabled || !new_mounts.contains_key(path) {
+                self.proxies.remove(path);
+                changed = true;
+            }
+        }
+        if !new.enabled {
+            return changed;
+        }
+        for (path, mount) in &new_mounts {
+            if !mount.enabled {
+                if old_mounts.contains_key(path) {
+                    self.proxies.remove(path);
+                    changed = true;
+                }
+                continue;
+            }
+            let unchanged = old.enabled
+                && old_mounts
+                    .get(path)
+                    .is_some_and(|previous| *previous == *mount);
+            if unchanged {
+                continue;
+            }
+            self.proxies.remove(path);
+            let Ok(upstream) = mount.upstream_config() else {
+                continue;
+            };
+            let startup_cache = upstream.startup_cache;
+            let options = rtflow::mount::MountOptions::builder()
+                .event_sink(self.proxy_event_sink.clone())
+                .startup_cache_config(startup_cache)
+                .cancel(self.cancel.child_token())
+                .build();
+            let path: std::sync::Arc<str> = std::sync::Arc::from(*path);
+            let _ = self.proxies.ensure(
+                path,
+                upstream,
+                options,
+                mount.idle_grace,
+                mount.mode.is_always(),
+            );
+            changed = true;
+        }
+        changed
     }
 
     pub async fn wait_for_signal(self, config_path: Option<PathBuf>) {
@@ -302,6 +377,7 @@ impl ServerApp {
 
         let cancel = CancellationToken::new();
         let proxy_supervisor = rtflow::runtime::TaskSupervisor::new(event_sink.clone());
+        let proxy_config = Arc::new(std::sync::RwLock::new(config.proxy.clone()));
         let proxies = rtflow::server::ProxyService::new(
             mounts.clone(),
             proxy_supervisor,
@@ -621,6 +697,9 @@ impl ServerApp {
             srt_pull_status.clone(),
             srt_push_status.clone(),
             proxies.clone(),
+            proxy_config.clone(),
+            event_sink.clone(),
+            cancel.clone(),
         )
         .await;
         // The console's catch-all assets route must be registered after the
@@ -692,33 +771,54 @@ impl ServerApp {
                 if !mount.enabled {
                     continue;
                 }
-                let proxies = proxies.clone();
-                let event_sink = event_sink.clone();
-                let cancel = cancel.clone();
-                let mount = mount.clone();
-                tasks.push(tokio::spawn(async move {
-                    let path: std::sync::Arc<str> = std::sync::Arc::from(mount.path.as_str());
-                    let upstream = match mount.upstream_config() {
-                        Ok(upstream) => upstream,
-                        Err(error) => {
-                            tracing::warn!(path = %mount.path, %error, "proxy config rejected");
-                            return;
-                        }
-                    };
-                    let startup_cache = upstream.startup_cache;
-                    let options = rtflow::mount::MountOptions::builder()
-                        .event_sink(event_sink)
-                        .startup_cache_config(startup_cache)
-                        .cancel(cancel.child_token())
-                        .build();
-                    match proxies.register(path.clone(), upstream, options).await {
-                        Ok(_) => tracing::info!(path = %path, "proxy mount registered"),
-                        Err(error) => {
-                            tracing::warn!(path = %path, %error, "proxy mount registration failed");
+                let path: std::sync::Arc<str> = std::sync::Arc::from(mount.path.as_str());
+                let upstream = match mount.upstream_config() {
+                    Ok(upstream) => upstream,
+                    Err(error) => {
+                        tracing::warn!(path = %mount.path, %error, "proxy config rejected");
+                        continue;
+                    }
+                };
+                let startup_cache = upstream.startup_cache;
+                let options = rtflow::mount::MountOptions::builder()
+                    .event_sink(event_sink.clone())
+                    .startup_cache_config(startup_cache)
+                    .cancel(cancel.child_token())
+                    .build();
+                if let Err(error) = proxies.ensure(
+                    path.clone(),
+                    upstream,
+                    options,
+                    mount.idle_grace,
+                    mount.mode.is_always(),
+                ) {
+                    tracing::warn!(path = %path, %error, "proxy config rejected");
+                }
+            }
+        }
+
+        {
+            let proxies = proxies.clone();
+            let metrics = metrics.clone();
+            let cancel = cancel.clone();
+            tasks.push(tokio::spawn(async move {
+                use std::sync::atomic::Ordering;
+                let mut tick = tokio::time::interval(Duration::from_secs(1));
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tokio::select! {
+                        _ = cancel.cancelled() => break,
+                        _ = tick.tick() => {
+                            let statuses = proxies.statuses();
+                            metrics.proxy_configured.store(statuses.len() as i64, Ordering::Relaxed);
+                            metrics.proxy_streaming.store(
+                                statuses.iter().filter(|s| s.state == "streaming").count() as i64,
+                                Ordering::Relaxed,
+                            );
                         }
                     }
-                }));
-            }
+                }
+            }));
         }
 
         let rtsp_addr = rtsp.as_ref().map(|server| server.local_addr());
@@ -747,6 +847,8 @@ impl ServerApp {
             discovery,
             vod,
             proxies,
+            proxy_event_sink: event_sink,
+            proxy_config,
             config,
         })
     }

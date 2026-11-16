@@ -149,6 +149,18 @@ fn metrics_response(registry: &MetricsRegistry) -> String {
         "Total proxy reconnect attempts",
         registry.proxy_reconnects.load(Ordering::Relaxed),
     );
+    write_gauge(
+        &mut out,
+        "rtflow_proxy_configured",
+        "Configured RTSP proxy mounts",
+        registry.proxy_configured.load(Ordering::Relaxed),
+    );
+    write_gauge(
+        &mut out,
+        "rtflow_proxy_streaming",
+        "RTSP proxy mounts currently streaming",
+        registry.proxy_streaming.load(Ordering::Relaxed),
+    );
     write_counter(
         &mut out,
         "rtflow_proxy_failovers_total",

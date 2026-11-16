@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 mod proxy;
 mod srt;
-pub use proxy::{ProxyMount, ProxySection, ProxyTransport, ProxyUpstream};
+pub use proxy::{ProxyMode, ProxyMount, ProxySection, ProxyTransport, ProxyUpstream};
 pub use srt::{SrtPull, SrtPush, SrtSection};
 use std::{
     collections::BTreeMap,

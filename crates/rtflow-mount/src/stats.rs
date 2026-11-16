@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone, Debug, Default)]
 pub struct StreamStats {
     pub accepted_frames: u64,
+    pub published_bytes: u64,
     pub dropped_frames: u64,
     pub subscribers: usize,
     pub rtp_packets: u64,
@@ -38,6 +39,7 @@ pub struct MountSnapshot {
 #[derive(Default)]
 pub struct StreamCounters {
     pub accepted_frames: AtomicU64,
+    pub published_bytes: AtomicU64,
     pub dropped_frames: AtomicU64,
     pub rtp_packets: AtomicU64,
     pub rtp_octets: AtomicU64,
@@ -53,6 +55,10 @@ impl StreamCounters {
     /// Mirror frame counters into a global metrics registry (once per mount).
     pub fn attach_global(&mut self, registry: Arc<rtflow_core::metrics::MetricsRegistry>) {
         self.global = Some(registry);
+    }
+
+    pub fn add_published_bytes(&self, value: u64) {
+        self.published_bytes.fetch_add(value, Ordering::Relaxed);
     }
 
     pub fn add_accepted(&self, value: u64) {
@@ -94,6 +100,7 @@ impl StreamCounters {
     pub fn snapshot(&self, subscribers: usize) -> StreamStats {
         StreamStats {
             accepted_frames: self.accepted_frames.load(Ordering::Relaxed),
+            published_bytes: self.published_bytes.load(Ordering::Relaxed),
             dropped_frames: self.dropped_frames.load(Ordering::Relaxed),
             subscribers,
             rtp_packets: self.rtp_packets.load(Ordering::Relaxed),

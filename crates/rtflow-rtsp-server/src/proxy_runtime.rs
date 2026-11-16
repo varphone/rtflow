@@ -28,6 +28,7 @@ pub(super) fn watch_proxy(
     server_cancel: CancellationToken,
     supervisor: TaskSupervisor,
     no_subscriber_grace: Duration,
+    always: bool,
 ) {
     let task_name = format!("proxy-watch-{}", mount.id);
     supervisor.clone().spawn(
@@ -40,12 +41,13 @@ pub(super) fn watch_proxy(
                     _ = server_cancel.cancelled() => return Ok(()),
                     _ = mount.cancel.cancelled() => return Ok(()),
                     _ = tick.tick() => {
-                        if mount.frames.receiver_count() > 0 {
+                        if always || mount.frames.receiver_count() > 0 {
                             start_proxy_if_idle(
                                 mount.clone(),
                                 server_cancel.clone(),
                                 supervisor.clone(),
                                 no_subscriber_grace,
+                                always,
                             );
                         }
                     }
@@ -60,6 +62,7 @@ pub(super) fn start_proxy_if_idle(
     server_cancel: CancellationToken,
     supervisor: TaskSupervisor,
     no_subscriber_grace: Duration,
+    always: bool,
 ) {
     if let MountConfig::Proxy { upstream } = &mount.config
         && mount
@@ -74,6 +77,7 @@ pub(super) fn start_proxy_if_idle(
             server_cancel,
             supervisor,
             no_subscriber_grace,
+            always,
         );
     }
 }
@@ -102,11 +106,12 @@ fn spawn_proxy(
     server_cancel: CancellationToken,
     supervisor: TaskSupervisor,
     no_subscriber_grace: Duration,
+    always: bool,
 ) {
     let task_name = format!("proxy-{}", mount.id);
     supervisor.spawn(
         TaskSpec::new(task_name, Operation::ProxyConnect),
-        async move { run_proxy(mount, upstream, server_cancel, no_subscriber_grace).await },
+        async move { run_proxy(mount, upstream, server_cancel, no_subscriber_grace, always).await },
     );
 }
 
@@ -115,6 +120,7 @@ async fn run_proxy(
     upstream: UpstreamConfig,
     server_cancel: CancellationToken,
     no_subscriber_grace: Duration,
+    always: bool,
 ) -> rtflow_core::error::Result<()> {
     let _guard = ProxyRunGuard {
         mount: mount.clone(),
@@ -152,7 +158,7 @@ async fn run_proxy(
                     std::time::Instant::now() + PROXY_WARMUP_HOLDOFF
                 }
             });
-            if idle_since.elapsed() >= no_subscriber_grace {
+            if !always && idle_since.elapsed() >= no_subscriber_grace {
                 finish_proxy(&mount, &upstream, ProxyState::Idle);
                 return Ok(());
             }
@@ -283,7 +289,7 @@ async fn run_proxy(
                                             std::time::Instant::now() + PROXY_WARMUP_HOLDOFF
                                         }
                                     });
-                                    if since.elapsed() >= no_subscriber_grace {
+                                    if !always && since.elapsed() >= no_subscriber_grace {
                                         finish_proxy(&mount, &upstream, ProxyState::Idle);
                                         return Ok(());
                                     }

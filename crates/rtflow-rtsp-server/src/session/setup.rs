@@ -395,6 +395,7 @@ pub(super) async fn handle_setup(
             state.cancel.clone(),
             state.supervisor.clone(),
             state.config.no_subscriber_grace,
+            false,
         );
         return Ok(());
     }
@@ -535,6 +536,7 @@ pub(super) async fn handle_setup(
         state.cancel.clone(),
         state.supervisor.clone(),
         state.config.no_subscriber_grace,
+        false,
     );
     Ok(())
 }

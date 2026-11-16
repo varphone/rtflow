@@ -13,15 +13,16 @@
 
 ## M1 剩余
 
-- [ ] 描述失败自动重试/退避（当前注册失败只记日志）。
-- [ ] SIGHUP 代理配置 diff（新增/删除/修改）。
-- [ ] per-mount `idle_grace`、常连模式（always）、`restart_pending`。
+- [x] 描述失败自动重试/退避（`ProxyService::ensure` 后台 worker）。
+- [x] SIGHUP 代理配置 diff（新增/删除/修改）。
+- [x] per-mount `idle_grace`、常连模式（always）。
+- [ ] `restart_pending`（有订阅者时延迟切换）。
 - [ ] 已发现描述缓存（重启后上游离线仍可注册）。
 
 ## M2 — 动态管理与可观测
 
-- [ ] admin CRUD、restart、probe。
-- [ ] 审计事件与代理指标（configured/streaming/connecting/failures/bytes）。
+- [x] admin CRUD、restart（probe 未实现）。
+- [x] 审计事件与代理指标（configured/streaming）。
 - [ ] 管理页代理页签。
 - [ ] 运行时配置持久化（可选，0600）。
 
@@ -45,6 +46,6 @@
 
 ## 已知缺口
 
-- 代理只读状态 API 尚无 CRUD；失败注册不会自动重试。
+- 运行时 CRUD 只改内存，不写回配置文件；`probe` 尚未实现。
 - 代理媒体统计的 `bytes` 目前来自 mount `rtp_octets`，代理发布路径未累计字节（显示 0），M2 补 `published_bytes`。
 - 代理 HLS 播放曾观察到重复 DTS 警告，列入 M3 时间轴专项。

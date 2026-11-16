@@ -69,8 +69,28 @@ GET /api/v1/proxies          # 公开发现权限
 GET /admin/api/v1/proxies    # admin
 ```
 
-返回代理路径、状态（idle/connecting/streaming/backoff）、订阅者、轨道数、上游主机
-（已脱敏）、重试次数与下次重试时间。
+返回代理路径、状态（describing/idle/connecting/streaming/backoff）、订阅者、轨道数、
+上游主机（已脱敏）、重试次数、下次重试时间与最后一次错误。
+
+运行中管理（admin）：
+
+```bash
+# 新增
+curl -u admin:pass -X POST http://127.0.0.1:8080/admin/api/v1/proxies \
+  -H 'content-type: application/json' \
+  -d '{"path":"/cameras/front","mode":"on-demand","upstreams":[
+        {"url":"rtsp://192.0.2.10/live","transport":"tcp"}]}'
+
+# 修改（body 为完整 ProxyMount，path 必须与 URL 一致）
+curl -u admin:pass -X PATCH http://127.0.0.1:8080/admin/api/v1/proxies \
+  -H 'content-type: application/json' -d '...'
+
+# 重启 / 删除（path 使用 URL 编码）
+curl -u admin:pass -X POST 'http://127.0.0.1:8080/admin/api/v1/proxies/restart?path=%2Fcameras%2Ffront'
+curl -u admin:pass -X DELETE 'http://127.0.0.1:8080/admin/api/v1/proxies?path=%2Fcameras%2Ffront'
+```
+
+上游离线时状态为 `backoff`，按抖动退避自动重试；SIGHUP 会对比配置文件增删改代理。
 
 ### SRT 拉流（server 作为 caller）
 

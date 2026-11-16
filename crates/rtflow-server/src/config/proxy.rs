@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Top-level `[proxy]` section.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ProxySection {
     pub enabled: bool,
@@ -24,14 +24,30 @@ impl Default for ProxySection {
 }
 
 /// One configured proxy mount.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ProxyMount {
     pub path: String,
     pub enabled: bool,
+    pub mode: ProxyMode,
     #[serde(default, with = "humantime_serde")]
     pub idle_grace: Option<Duration>,
     pub upstreams: Vec<ProxyUpstream>,
+}
+
+/// Proxy connection mode.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProxyMode {
+    #[default]
+    OnDemand,
+    Always,
+}
+
+impl ProxyMode {
+    pub fn is_always(self) -> bool {
+        matches!(self, Self::Always)
+    }
 }
 
 impl Default for ProxyMount {
@@ -39,6 +55,7 @@ impl Default for ProxyMount {
         Self {
             path: String::new(),
             enabled: true,
+            mode: ProxyMode::default(),
             idle_grace: None,
             upstreams: Vec::new(),
         }
@@ -56,7 +73,7 @@ pub enum ProxyTransport {
 }
 
 /// One upstream RTSP endpoint.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ProxyUpstream {
     pub url: String,
@@ -90,6 +107,23 @@ impl ProxyTransport {
 }
 
 impl ProxyMount {
+    /// Validate this mount independently (used by the runtime admin API).
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.path.starts_with('/') || self.path == "/" {
+            return Err("proxy path must start with '/' and not be root".into());
+        }
+        if self.upstreams.is_empty() {
+            return Err("proxy mount has no upstreams".into());
+        }
+        if self.idle_grace.is_some_and(|grace| grace.is_zero()) {
+            return Err("proxy idle_grace is zero".into());
+        }
+        for upstream in &self.upstreams {
+            upstream.endpoint()?;
+        }
+        Ok(())
+    }
+
     /// Build the runtime upstream configuration.
     pub fn upstream_config(&self) -> Result<rtflow::mount::upstream::UpstreamConfig, String> {
         let first = self
@@ -144,34 +178,15 @@ impl ProxySection {
         }
         let mut paths = std::collections::HashSet::new();
         for (index, mount) in self.mounts.iter().enumerate() {
-            if !mount.path.starts_with('/') || mount.path == "/" {
-                return Err(ConfigError::Invalid(format!(
-                    "proxy.mounts[{index}].path must start with '/' and not be root"
-                )));
-            }
             if !paths.insert(mount.path.clone()) {
                 return Err(ConfigError::Invalid(format!(
                     "duplicate proxy mount {}",
                     mount.path
                 )));
             }
-            if mount.upstreams.is_empty() {
-                return Err(ConfigError::Invalid(format!(
-                    "proxy.mounts[{index}] has no upstreams"
-                )));
-            }
-            if mount.idle_grace.is_some_and(|grace| grace.is_zero()) {
-                return Err(ConfigError::Invalid(format!(
-                    "proxy.mounts[{index}].idle_grace is zero"
-                )));
-            }
-            for (upstream_index, upstream) in mount.upstreams.iter().enumerate() {
-                upstream.endpoint().map_err(|error| {
-                    ConfigError::Invalid(format!(
-                        "proxy.mounts[{index}].upstreams[{upstream_index}]: {error}"
-                    ))
-                })?;
-            }
+            mount
+                .validate()
+                .map_err(|error| ConfigError::Invalid(format!("proxy.mounts[{index}]: {error}")))?;
         }
         Ok(())
     }

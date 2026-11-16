@@ -142,6 +142,8 @@ impl Mount {
                 cache.push(frame.clone());
             }
         }
+        self.stats
+            .add_published_bytes(u64::try_from(frame.data.len()).unwrap_or(u64::MAX));
         self.update_bootstrap(&frame);
         let result = self
             .frames

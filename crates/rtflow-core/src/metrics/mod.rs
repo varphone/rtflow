@@ -56,6 +56,10 @@ pub struct MetricsRegistry {
     // Proxy
     pub proxy_reconnects: AtomicU64,
     pub proxy_failovers: AtomicU64,
+    /// Configured proxy mounts.
+    pub proxy_configured: AtomicI64,
+    /// Proxy mounts currently streaming.
+    pub proxy_streaming: AtomicI64,
 
     // Client (outbound RTSP play sessions)
     pub client_sessions_total: AtomicU64,
@@ -116,6 +120,8 @@ impl MetricsRegistry {
             errors_by_code: std::array::from_fn(|_| AtomicU64::new(0)),
             proxy_reconnects: AtomicU64::new(0),
             proxy_failovers: AtomicU64::new(0),
+            proxy_configured: AtomicI64::new(0),
+            proxy_streaming: AtomicI64::new(0),
             client_sessions_total: AtomicU64::new(0),
             client_sessions_active: AtomicI64::new(0),
             client_reconnect_attempts: AtomicU64::new(0),

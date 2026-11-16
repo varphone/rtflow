@@ -293,6 +293,7 @@ pub(super) async fn handle_play(
                 state.cancel.clone(),
                 state.supervisor.clone(),
                 state.config.no_subscriber_grace,
+                false,
             );
         }
         for (mount, socket, rtp_target, rtcp_target, track) in setups.iter().cloned() {
@@ -347,6 +348,7 @@ pub(super) async fn handle_play(
                 state.cancel.clone(),
                 state.supervisor.clone(),
                 state.config.no_subscriber_grace,
+                false,
             );
         }
         if let (Some(source), Some(output)) = (vod_source, vod_output) {

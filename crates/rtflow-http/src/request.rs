@@ -162,12 +162,49 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
     None
 }
 
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                output.push(b' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                let hex = |byte: u8| match byte {
+                    b'0'..=b'9' => Some(byte - b'0'),
+                    b'a'..=b'f' => Some(byte - b'a' + 10),
+                    b'A'..=b'F' => Some(byte - b'A' + 10),
+                    _ => None,
+                };
+                match (hex(bytes[index + 1]), hex(bytes[index + 2])) {
+                    (Some(high), Some(low)) => {
+                        output.push((high << 4) | low);
+                        index += 3;
+                    }
+                    _ => {
+                        output.push(bytes[index]);
+                        index += 1;
+                    }
+                }
+            }
+            byte => {
+                output.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&output).into_owned()
+}
+
 fn parse_path_query(raw: &str) -> (String, HashMap<String, String>) {
     if let Some((path, qs)) = raw.split_once('?') {
         let query = qs
             .split('&')
             .filter_map(|p| p.split_once('='))
-            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .map(|(k, v)| (percent_decode(k), percent_decode(v)))
             .collect();
         (path.to_string(), query)
     } else {
