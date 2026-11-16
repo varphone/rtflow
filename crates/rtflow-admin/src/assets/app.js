@@ -28,6 +28,8 @@ const routes = {
 };
 const state = { session: null, route: "overview", loading: false };
 let pageCleanup = null;
+let pageController = null;
+let navSeq = 0;
 
 const navGroups = [
   ["运行", [["overview", "概览"], ["live", "直播流"], ["vod", "点播"]]],
@@ -141,22 +143,36 @@ function setCrumbs(route) {
 async function navigate(options = {}) {
   if (!state.session) return;
   if (pageCleanup) { try { pageCleanup(); } catch (_) {} pageCleanup = null; }
+  pageController?.abort();
+  pageController = new AbortController();
+  const sequence = ++navSeq;
   const route = currentRoute();
+  const routeChanged = state.route !== route;
   state.route = route;
   setCrumbs(route);
-  const target = content();
-  if (!target) return;
-  const focus = options.keepFocus && document.activeElement && target.contains(document.activeElement)
+  const previous = content();
+  if (!previous) return;
+  const focus = options.keepFocus && document.activeElement && previous.contains(document.activeElement)
     ? { placeholder: document.activeElement.placeholder, start: document.activeElement.selectionStart }
     : null;
-  if (!options.silent) target.innerHTML = `<div class="stack"><div class="skeleton" style="height:72px"></div><div class="skeleton" style="height:300px"></div></div>`;
+  if (!options.silent && (routeChanged || !previous.querySelector("[data-page]"))) {
+    previous.innerHTML = `<div class="stack"><div class="skeleton" style="height:72px"></div><div class="skeleton" style="height:300px"></div></div>`;
+  }
+  const scrollTop = previous.scrollTop;
   const ctx = {
-    reload: (opts = {}) => navigate(Object.assign({ keepFocus: true }, opts)),
+    reload: (opts = {}) => navigate(Object.assign({ keepFocus: true, silent: true }, opts)),
+    signal: pageController.signal,
     toast,
   };
   try {
     const view = await routes[route].page.render(new URLSearchParams((location.hash.split("?")[1] || "")), ctx);
-    target.innerHTML = `<div class="page-head"><div><h1>${esc(view.title)}</h1>${view.subtitle ? `<p>${esc(view.subtitle)}</p>` : ""}</div>${view.actions ? `<div class="actions">${view.actions}</div>` : ""}</div>${view.html || ""}`;
+    if (sequence !== navSeq) return;
+    const target = document.createElement("div");
+    target.id = "page-content";
+    target.innerHTML = `<div data-page><div class="page-head"><div><h1>${esc(view.title)}</h1>${view.subtitle ? `<p>${esc(view.subtitle)}</p>` : ""}</div>${view.actions ? `<div class="actions">${view.actions}</div>` : ""}</div>${view.html || ""}</div>`;
+    if (previous.isConnected) previous.replaceWith(target);
+    else document.getElementById("content")?.appendChild(target);
+    target.scrollTop = scrollTop;
     const cleanup = view.mount?.(target, ctx);
     if (typeof cleanup === "function") pageCleanup = cleanup;
     if (focus?.placeholder) {
@@ -164,8 +180,8 @@ async function navigate(options = {}) {
       if (input) { input.focus(); try { input.setSelectionRange(focus.start, focus.start); } catch (_) {} }
     }
   } catch (error) {
-    target.innerHTML = `<div class="error-banner">${esc(error.message)}<button class="btn small" data-retry>重试</button></div>`;
-    target.querySelector("[data-retry]").onclick = () => navigate();
+    previous.innerHTML = `<div class="error-banner">${esc(error.message)}<button class="btn small" data-retry>重试</button></div>`;
+    previous.querySelector("[data-retry]").onclick = () => navigate();
   }
 }
 
