@@ -395,6 +395,7 @@ impl SrtSender {
             delivered: self.packets_sent,
             skipped: 0,
             loss_events: self.retransmits,
+            retransmitted: 0,
             undecryptable: 0,
             duration_secs: self.started.elapsed().as_secs(),
             srt_version: 0,

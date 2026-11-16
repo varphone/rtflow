@@ -33,6 +33,8 @@ pub struct SrtConnection {
     pub(super) publisher: Option<rtflow_mount::LocalPublisher>,
     /// AES-CTR receiver state when the connection is encrypted.
     pub(super) crypto: Option<crate::crypto::SessionCrypto>,
+    /// Retransmitted packets received.
+    pub(super) retransmitted: u64,
     /// Packets dropped because they were not decryptable.
     pub(super) undecryptable: u64,
     /// Raw Stream ID from the handshake (may carry `?token=...`).

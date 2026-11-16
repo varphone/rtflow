@@ -110,6 +110,13 @@ impl SrtServer {
                         conn.rtt_var_us = (conn.rtt_var_us * 3 + delta) / 4;
                         conn.rtt_us = (conn.rtt_us * 7 + sample) / 8;
                     }
+                    #[cfg(feature = "metrics")]
+                    if let Some(metrics) = &self.config.metrics {
+                        use std::sync::atomic::Ordering;
+                        metrics
+                            .srt_rtt_us
+                            .store(u64::from(conn.rtt_us), Ordering::Relaxed);
+                    }
                     debug!(peer = %peer, rtt_us = conn.rtt_us, "SRT: ACKACK");
                 }
             }
@@ -583,6 +590,7 @@ impl SrtServer {
                 mount: None,
                 publisher: None,
                 crypto: crypto_ctx,
+                retransmitted: 0,
                 undecryptable: 0,
                 stream_id: stream_id.clone(),
                 peer_caps: info,

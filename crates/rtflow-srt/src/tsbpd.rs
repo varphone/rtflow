@@ -115,8 +115,16 @@ impl TsbpdBuffer {
         if handshake_timestamp == 0 {
             return;
         }
-        self.base_local = now.checked_sub(Duration::from_micros(u64::from(handshake_timestamp)));
-        self.base_extended_ts = None;
+        // Delivery time is `now + (packet_ts - handshake_ts) + delay`: the
+        // handshake timestamp and the data timestamps share the sender's
+        // clock, so both sides of the difference use the same origin. The
+        // previous `base_local = now - handshake_ts` form subtracted the
+        // handshake offset twice, which made packets look late on arrival and
+        // defeated both the reorder buffer and ARQ.
+        self.base_local = Some(now);
+        self.base_extended_ts = Some(u64::from(handshake_timestamp));
+        self.last_timestamp = handshake_timestamp;
+        self.extended_timestamp = u64::from(handshake_timestamp);
     }
 
     /// Initialize the buffer with the first expected sequence number.
@@ -474,5 +482,27 @@ mod tests {
         assert!(seq_before(0xFFFF_FFFF, 0));
         assert!(!seq_after(5, 5)); // equal
         assert_eq!(seq_distance(0xFFFF_FFFE, 1), 3); // wrap distance
+    }
+
+    #[test]
+    fn handshake_time_base_waits_for_tsbpd() {
+        let mut buffer = TsbpdBuffer::new(50, 128);
+        buffer.set_time_base(Instant::now(), 5_000_000);
+        buffer.init(1);
+        buffer.push(1, bytes::Bytes::from_static(b"x"), 5_000_000, false);
+        assert!(
+            buffer.pop_ready().is_empty(),
+            "a packet at the handshake timestamp must still wait one TSBPD delay"
+        );
+    }
+
+    #[test]
+    fn gaps_are_reported_for_nak() {
+        let mut buffer = TsbpdBuffer::new(50, 128);
+        buffer.set_time_base(Instant::now(), 5_000_000);
+        buffer.init(1);
+        buffer.push(1, bytes::Bytes::from_static(b"a"), 5_000_000, false);
+        buffer.push(3, bytes::Bytes::from_static(b"c"), 5_040_000, false);
+        assert_eq!(buffer.detect_losses(), vec![(2, 2)]);
     }
 }

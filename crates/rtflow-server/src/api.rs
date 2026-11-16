@@ -521,6 +521,7 @@ fn srt_status_json(state: &ApiState) -> serde_json::Value {
                         "delivered": entry.delivered,
                         "skipped": entry.skipped,
                         "losses": entry.loss_events,
+                        "retransmitted": entry.retransmitted,
                         "undecryptable": entry.undecryptable,
                         "duration_secs": entry.duration_secs,
                         "srt_version": format!("{:#x}", entry.srt_version),

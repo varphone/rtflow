@@ -165,7 +165,8 @@ async fn run_push(
                     entry.encrypted = sender.encrypted();
                     entry.last_error = None;
                 });
-                if let Err(error) = pump(&mut sender, &handle, cancel.clone()).await {
+                if let Err(error) = pump(&mut sender, &handle, cancel.clone(), &status, index).await
+                {
                     tracing::warn!(%error, mount = %push.mount, "SRT push: stream ended");
                     update_status(&status, index, |entry| {
                         entry.last_error = Some(error.to_string());
@@ -200,6 +201,8 @@ async fn pump(
     sender: &mut SrtSender,
     mount: &MountHandle,
     cancel: CancellationToken,
+    status: &Arc<std::sync::Mutex<Vec<SrtPushStatus>>>,
+    index: usize,
 ) -> rtflow::Result<()> {
     let description = mount.description();
     let mut muxer = TsMuxer::new(&description).ok_or_else(|| {
@@ -253,6 +256,11 @@ async fn pump(
         let bytes = muxer.push(&unit)?;
         if !bytes.is_empty() {
             sender.send(&bytes).await?;
+            let stats = sender.stats();
+            update_status(status, index, |entry| {
+                entry.bytes_sent = stats.bytes_sent;
+                entry.rtt_us = stats.rtt_us;
+            });
         }
         // Process ACK/NAK without blocking the media path.
         sender.tick().await?;

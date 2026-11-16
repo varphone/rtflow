@@ -69,10 +69,12 @@ impl SrtServer {
 
             // Loss reports (NAK) for gaps that may still be recovered.
             let losses = conn.tsbpd.detect_losses();
+            if !losses.is_empty() {
+                debug!(peer = %peer, ranges = losses.len(), first = losses[0].0, last = losses[0].1, since_nak_ms = now.duration_since(conn.last_nak_time).as_millis(), "SRT: loss detected");
+            }
             if !losses.is_empty()
                 && now.duration_since(conn.last_nak_time).as_millis()
                     >= u128::from(self.config.nak_interval_ms)
-                && losses != conn.last_nak_losses
             {
                 let nak = nak_packet(&losses, conn.peer_socket_id, timestamp);
                 self.send_control(&nak, *peer).await;
@@ -120,6 +122,7 @@ impl SrtServer {
                     delivered: stats.delivered,
                     skipped: stats.skipped,
                     loss_events: stats.loss_events,
+                    retransmitted: conn.retransmitted,
                     undecryptable: conn.undecryptable,
                     duration_secs: conn.start_time.elapsed().as_secs(),
                     srt_version: conn.peer_caps.srt_version,
@@ -197,6 +200,9 @@ impl SrtServer {
         }
         // The destination socket id must be the one we assigned in the
         // conclusion response; anything else belongs to another connection.
+        if data_pkt.retransmitted {
+            conn.retransmitted += 1;
+        }
         if data_pkt.socket_id != conn.local_socket_id {
             debug!(
                 peer = %peer,

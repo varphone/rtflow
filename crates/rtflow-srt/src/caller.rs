@@ -359,6 +359,7 @@ impl SrtCaller {
             delivered: stats.delivered,
             skipped: stats.skipped,
             loss_events: stats.loss_events,
+            retransmitted: 0,
             undecryptable: 0,
             duration_secs: self.started.elapsed().as_secs(),
             srt_version: 0,

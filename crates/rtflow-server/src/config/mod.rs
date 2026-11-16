@@ -576,10 +576,18 @@ impl Config {
         if self.hooks.timeout.is_zero() {
             return Err(ConfigError::Invalid("hooks.timeout is zero".into()));
         }
-        if self.auth.mode == AuthMode::Token && self.auth.token_secrets.is_empty() {
-            return Err(ConfigError::Invalid(
-                "auth.token_secrets is required when auth.mode = \"token\"".into(),
-            ));
+        if self.auth.mode == AuthMode::Token {
+            if self.auth.token_secrets.is_empty() {
+                return Err(ConfigError::Invalid(
+                    "auth.token_secrets is required when auth.mode = \"token\"".into(),
+                ));
+            }
+            if let Some(secret) = self.auth.token_secrets.iter().find(|s| s.len() < 32) {
+                return Err(ConfigError::Invalid(format!(
+                    "auth.token_secrets entries must be at least 32 bytes (got {})",
+                    secret.len()
+                )));
+            }
         }
         if self.auth.mode != AuthMode::None
             && self.auth.users.is_empty()

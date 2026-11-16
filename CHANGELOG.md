@@ -56,6 +56,11 @@
 
 ### Fixed
 
+- SRT TSBPD 时间基重复扣除握手时间戳，导致数据包到达即被判过期：抖动缓冲
+  和 ARQ 实际失效。修正后丢包可经 NAK/重传恢复（10% 丢包下 0 跳过）。
+- `auth.token_secrets` 少于 32 字节时给出明确配置错误，避免启动期
+  "resource limit exceeded: Digest nonce secret"。
+
 - HLS 直播改为 MPEG-TS（`transmux::StreamingTsHlsSegmenter`）：按关键帧
   切段、每段自带 PAT/PMT、跨段 continuity counter，Firefox/Edge 的
   hls.js 均可持续播放；VOD/静态 HLS 仍使用 fMP4。
@@ -97,6 +102,11 @@
 - `FileVodSource`；`live_vod_gateway` 示例（RTMP + HLS + admin 控制台）。
 
 ### Fixed
+
+- SRT TSBPD 时间基重复扣除握手时间戳，导致数据包到达即被判过期：抖动缓冲
+  和 ARQ 实际失效。修正后丢包可经 NAK/重传恢复（10% 丢包下 0 跳过）。
+- `auth.token_secrets` 少于 32 字节时给出明确配置错误，避免启动期
+  "resource limit exceeded: Digest nonce secret"。
 
 - RTMP 视频帧统一转为 Annex-B 后进入数据面，HLS/RTSP 可正确消费；
   RTMP 拉流输出时再转回 AVCC。修复 HLS 直播出现
@@ -188,6 +198,11 @@
   CONTRIBUTING、SECURITY、`deny.toml`。
 
 ### Fixed
+
+- SRT TSBPD 时间基重复扣除握手时间戳，导致数据包到达即被判过期：抖动缓冲
+  和 ARQ 实际失效。修正后丢包可经 NAK/重传恢复（10% 丢包下 0 跳过）。
+- `auth.token_secrets` 少于 32 字节时给出明确配置错误，避免启动期
+  "resource limit exceeded: Digest nonce secret"。
 
 - RTSP：`Content-Base` 非绝对 URI、`Proxy-Require` 未处理、SDP track 无上限、
   客户端 interleaved RTCP 写无超时、服务端 UDP 接收多一次拷贝。

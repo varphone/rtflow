@@ -90,6 +90,7 @@ pub struct SrtConnectionStats {
     pub delivered: u64,
     pub skipped: u64,
     pub loss_events: u64,
+    pub retransmitted: u64,
     pub undecryptable: u64,
     pub duration_secs: u64,
     pub srt_version: u32,

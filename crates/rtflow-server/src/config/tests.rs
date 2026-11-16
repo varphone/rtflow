@@ -109,6 +109,16 @@ fn srt_push_entries_are_validated() {
 }
 
 #[test]
+fn token_secrets_need_32_bytes() {
+    let mut config = Config::default();
+    config.auth.mode = AuthMode::Token;
+    config.auth.token_secrets = vec!["short".into()];
+    assert!(config.validate().is_err());
+    config.auth.token_secrets = vec!["0123456789abcdef0123456789abcdef".into()];
+    assert!(config.validate().is_ok());
+}
+
+#[test]
 fn comments_do_not_require_env_values() {
     assert_eq!(
         expand_env("# optional ${MISSING_FOR_TEST}\n").unwrap(),
