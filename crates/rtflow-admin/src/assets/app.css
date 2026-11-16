@@ -246,6 +246,7 @@ table.data tbody tr:hover { background: var(--surface-2); }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; word-break: break-word; }
 .note { color: var(--muted); font-size: 12px; line-height: 1.7; }
+pre.code.wrap { white-space: pre-wrap; word-break: break-all; }
 pre.code { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 11px; overflow: auto; font-size: 11.5px; margin: 0; }
 .feature-list { display: flex; flex-wrap: wrap; gap: 5px; }
 

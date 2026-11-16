@@ -160,7 +160,7 @@ function openRecordingDetail(item, ctx) {
         <div class="detail-item"><span>丢弃</span><strong class="mono" data-rec-detail="dropped">${num(item.dropped)}</strong></div>
         <div class="detail-item"><span>错误</span><strong class="cell-sub" data-rec-detail="error">${esc(item.last_error || "—")}</strong></div>
       </div>
-      <section class="drawer-section"><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">录制目录</h3><button class="btn small ghost" data-rec-copy style="margin-left:auto">复制</button></div><pre class="code">${esc(item.directory || "—")}</pre></section>
+      <section class="drawer-section"><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">录制目录</h3><button class="btn small ghost" data-rec-copy style="margin-left:auto">复制</button></div><pre class="code wrap">${esc(item.directory || "—")}</pre></section>
       <div class="actions"><button class="btn small" data-rec-detail-toggle>${item.active ? "停止录制" : "开始录制"}</button>
         <button class="btn small ghost" data-rec-detail-vod>查看点播</button></div>
     </div>`,
