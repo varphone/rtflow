@@ -32,6 +32,12 @@ pub(super) fn annex_b_to_length_prefixed(codec: Codec, data: &Bytes) -> Bytes {
     }
     let mut output = BytesMut::with_capacity(data.len());
     for nal in nals {
+        if nal.is_empty() {
+            // Consecutive Annex-B start codes from a publisher can yield an
+            // empty NAL. Writing a zero length prefix makes every decoder
+            // reject the following samples ("Invalid NAL unit size 0").
+            continue;
+        }
         let parameter_set = match codec {
             Codec::H264 => nal.first().is_some_and(|byte| matches!(byte & 0x1f, 7 | 8)),
             Codec::H265 => nal
@@ -124,4 +130,19 @@ pub(super) fn build_avcc(sps: &[u8], pps: &[u8]) -> Option<Bytes> {
 
 pub(super) fn build_hvcc(vps: &[u8], sps: &[u8], pps: &[u8]) -> Option<Bytes> {
     rtflow_media::bitstream::build_hevc_config_record(vps, sps, pps)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::segmenter::Codec;
+    use bytes::Bytes;
+
+    #[test]
+    fn skips_empty_annex_b_nal_units() {
+        let data = Bytes::from_static(&[0, 0, 0, 1, 0, 0, 0, 1, 0x65, 0x88, 0x84]);
+        let output = annex_b_to_length_prefixed(Codec::H264, &data);
+        assert_eq!(&output[..4], &[0, 0, 0, 3]);
+        assert_eq!(&output[4..], &[0x65, 0x88, 0x84]);
+    }
 }
