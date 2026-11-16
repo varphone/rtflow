@@ -293,6 +293,14 @@ impl ProxyService {
         );
     }
 
+    /// Probe an upstream without registering or disturbing a running mount.
+    pub async fn probe(
+        &self,
+        upstream: &UpstreamConfig,
+    ) -> rtflow_core::error::Result<rtflow_media::MediaDescription> {
+        describe_upstream(upstream, &self.policy).await
+    }
+
     /// Start watchers for proxy mounts that already exist in the registry
     /// (gateway-style registration before the RTSP server binds).
     pub fn watch_existing(&self) {

@@ -89,6 +89,56 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
         }),
     )
     .await;
+    http.add_route(
+        Method::Post,
+        "/admin/api/v1/proxies/probe",
+        api_write(state.clone(), |state, req| async move {
+            let Some(path) = req.query.get("path").cloned() else {
+                return Err((400, "missing path query parameter".to_string()));
+            };
+            let path = if path.starts_with('/') {
+                path
+            } else {
+                format!("/{path}")
+            };
+            let mount = state
+                .proxy_config
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .mounts
+                .iter()
+                .find(|mount| mount.path == path)
+                .cloned()
+                .ok_or((404, "proxy not found".to_string()))?;
+            let redirect = state
+                .proxy_config
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .redirect_policy;
+            let upstream = mount
+                .upstream_config_with(redirect)
+                .map_err(|error| (400, error))?;
+            let description = state
+                .proxies
+                .probe(&upstream)
+                .await
+                .map_err(|error| (502, error.to_string()))?;
+            Ok(serde_json::json!({
+                "path": path,
+                "session_name": description.session_name.as_ref(),
+                "tracks": description.tracks.iter().map(|track| {
+                    serde_json::json!({
+                        "id": track.id,
+                        "codec": format!("{:?}", track.codec),
+                        "kind": format!("{:?}", track.kind),
+                        "clock_rate": track.clock_rate,
+                        "channels": track.channels,
+                    })
+                }).collect::<Vec<_>>(),
+            }))
+        }),
+    )
+    .await;
 }
 
 fn proxy_upsert(

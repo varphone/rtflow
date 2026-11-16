@@ -92,6 +92,9 @@ curl -u admin:pass -X POST http://127.0.0.1:8080/admin/api/v1/proxies \
 curl -u admin:pass -X PATCH http://127.0.0.1:8080/admin/api/v1/proxies \
   -H 'content-type: application/json' -d '...'
 
+# 探测上游 SDP（不注册/不影响运行中的代理）
+curl -u admin:pass -X POST 'http://127.0.0.1:8080/admin/api/v1/proxies/probe?path=%2Fcameras%2Ffront'
+
 # 重启 / 删除（path 使用 URL 编码）
 curl -u admin:pass -X POST 'http://127.0.0.1:8080/admin/api/v1/proxies/restart?path=%2Fcameras%2Ffront'
 curl -u admin:pass -X DELETE 'http://127.0.0.1:8080/admin/api/v1/proxies?path=%2Fcameras%2Ffront'
