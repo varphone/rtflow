@@ -18,16 +18,20 @@ const resultBadge = (result) => {
   return `<span class="badge ${cls}">${esc(result || "—")}</span>`;
 };
 
-export async function render() {
+export async function render(params) {
   const payload = await api("/audit?limit=300");
   const events = payload.events || [];
+  const initialQuery = params?.get("q") || "";
+  const initialKind = ["all", "change", "auth"].includes(params?.get("kind")) ? params.get("kind") : "all";
+  const initialCategory = ["all", "path", "key", "proxy", "srt", "record", "auth"].includes(params?.get("type")) ? params.get("type") : "all";
+  const initialPage = Math.max(1, Number(params?.get("page") || 1) || 1);
   return {
     title: "审计日志",
     subtitle: "谁在何时改了什么；配置变更、流控制与认证拒绝。",
     actions: `<button class="btn small ghost" data-audit-auto>自动刷新：开</button><button class="btn small ghost" data-audit-export>导出 CSV</button><button class="btn small" data-audit-refresh>刷新</button>`,
-    html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" data-audit-search placeholder="搜索动作、路径、操作者或详情"></div>
-      <div class="seg"><button data-audit-kind="all" class="active">全部</button><button data-audit-kind="change">变更</button><button data-audit-kind="auth">认证</button></div>
-      <select class="input" data-audit-category aria-label="事件类型" style="width:auto"><option value="all">全部类型</option><option value="path">路径</option><option value="key">密钥</option><option value="proxy">代理</option><option value="srt">SRT</option><option value="record">录制</option><option value="auth">认证</option></select>
+    html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" data-audit-search value="${esc(initialQuery)}" placeholder="搜索动作、路径、操作者或详情"></div>
+      <div class="seg"><button data-audit-kind="all" class="${initialKind === "all" ? "active" : ""}">全部</button><button data-audit-kind="change" class="${initialKind === "change" ? "active" : ""}">变更</button><button data-audit-kind="auth" class="${initialKind === "auth" ? "active" : ""}">认证</button></div>
+      <select class="input" data-audit-category aria-label="事件类型" style="width:auto"><option value="all" ${initialCategory === "all" ? "selected" : ""}>全部类型</option><option value="path" ${initialCategory === "path" ? "selected" : ""}>路径</option><option value="key" ${initialCategory === "key" ? "selected" : ""}>密钥</option><option value="proxy" ${initialCategory === "proxy" ? "selected" : ""}>代理</option><option value="srt" ${initialCategory === "srt" ? "selected" : ""}>SRT</option><option value="record" ${initialCategory === "record" ? "selected" : ""}>录制</option><option value="auth" ${initialCategory === "auth" ? "selected" : ""}>认证</option></select>
       <span class="meta" data-audit-count>${events.length} 条</span>
       <button class="btn small ghost" data-audit-new hidden></button></div>
       ${payload.enabled === false ? `<div class="error-banner">审计日志未启用：在服务配置中设置审计路径后重启。</div>` : ""}
@@ -47,9 +51,9 @@ export async function render() {
       let current = events;
       let pending = null;
       let newCount = 0;
-      let kind = "all";
-      let category = "all";
-      let page = 1;
+      let kind = initialKind;
+      let category = initialCategory;
+      let page = initialPage;
       let automatic = true;
       let timer = null;
       const signature = (event) => `${event.ts}|${event.action}|${event.path || ""}|${event.key_id || ""}|${event.peer || ""}`;
@@ -112,21 +116,33 @@ export async function render() {
         page = 1;
         showNew();
         paint();
+        syncUrl();
       };
-      search.oninput = () => { page = 1; paint(); };
+      const syncUrl = () => {
+        const params = new URLSearchParams();
+        if (search.value.trim()) params.set("q", search.value.trim());
+        if (kind !== "all") params.set("kind", kind);
+        if (category !== "all") params.set("type", category);
+        if (page > 1) params.set("page", String(page));
+        const query = params.toString();
+        history.replaceState(null, "", `#/audit${query ? `?${query}` : ""}`);
+      };
+      search.oninput = () => { page = 1; paint(); syncUrl(); };
       root.querySelector("[data-audit-category]").onchange = (event) => {
         category = event.target.value;
         page = 1;
         paint();
+        syncUrl();
       };
       root.querySelectorAll("[data-audit-kind]").forEach((button) => button.onclick = () => {
         kind = button.dataset.auditKind;
         page = 1;
         root.querySelectorAll("[data-audit-kind]").forEach((item) => item.classList.toggle("active", item === button));
         paint();
+        syncUrl();
       });
-      prev.onclick = () => { page -= 1; paint(); };
-      next.onclick = () => { page += 1; paint(); };
+      prev.onclick = () => { page -= 1; paint(); syncUrl(); };
+      next.onclick = () => { page += 1; paint(); syncUrl(); };
       auto.onclick = () => setAuto(!automatic);
       root.querySelector("[data-audit-refresh]").onclick = () => refresh();
       root.querySelector("[data-audit-export]").onclick = () => exportCsv(filtered());
