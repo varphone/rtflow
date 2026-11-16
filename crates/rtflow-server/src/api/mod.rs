@@ -367,7 +367,10 @@ pub(crate) async fn register_api_routes(
                 .redacted()
                 .to_toml()
                 .map_err(|error| (500, error.to_string()))?;
-            let info = state.store.info().map_err(|error| (500, error.to_string()))?;
+            let info = state
+                .store
+                .info()
+                .map_err(|error| (500, error.to_string()))?;
             Ok(json!({
                 "toml": toml,
                 "storage": {

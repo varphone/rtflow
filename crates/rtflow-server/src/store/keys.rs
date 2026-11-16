@@ -47,7 +47,12 @@ pub(crate) fn set_enabled(
 ) -> StoreResult<()> {
     let changed = store.connection().execute(
         "UPDATE stream_keys SET enabled=?2, revision=?3 WHERE kid=?1 AND revision=?4",
-        params![kid, enabled as i64, revision as i64, (revision.saturating_sub(1)) as i64],
+        params![
+            kid,
+            enabled as i64,
+            revision as i64,
+            (revision.saturating_sub(1)) as i64
+        ],
     )?;
     if changed == 0 {
         return Err(StoreError::Conflict(kid.into()));

@@ -115,8 +115,7 @@ pub struct KeyStore {
 impl KeyStore {
     pub fn new(config: &Config) -> Result<Self, KeyError> {
         let store = Arc::new(
-            Store::open(&config.storage, &config.server.state_dir)
-                .map_err(key_store_error)?,
+            Store::open(&config.storage, &config.server.state_dir).map_err(key_store_error)?,
         );
         Self::with_store(config, store)
     }

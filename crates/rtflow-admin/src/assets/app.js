@@ -415,6 +415,7 @@
         <td>${num(item.readers)}</td>
         <td>${item.recording ? '<span class="badge ok">录制中</span>' : "—"}</td>
         <td class="row-actions">
+          <button class="btn small" data-action="edit-path" data-path="${esc(item.name)}">编辑</button>
           <button class="btn small" data-action="kick" data-path="${esc(item.name)}">断开</button>
           <button class="btn small danger" data-action="delete-path" data-path="${esc(item.name)}">删除</button>
         </td>
@@ -547,32 +548,89 @@
     state.configToml = config.toml || "";
   }
 
-  async function createPath() {
-    const name = prompt("路径名（例如 live/cam）");
-    if (!name) return;
-    try {
-      await api("/paths", { method: "POST", body: JSON.stringify({ name, publish: true, read: true, record: true, hls: true, dash: true, flv: true, webrtc: true }) });
-      toast("路径已注册", "ok"); await loadControl(); render();
-    } catch (error) { toast(error.message, "bad"); }
+  function openPathForm(existing) {
+    const item = existing || { name: "", enabled: true, publish: true, read: true, record: false,
+      hls: true, dash: true, flv: true, webrtc: true, max_readers: 0, tenant: null };
+    const checkbox = (name, label) => `<label><input type="checkbox" name="${name}" ${item[name] ? "checked" : ""}> ${label}</label>`;
+    openModal(existing ? "编辑路径" : "新增路径", `
+      <form id="path-form" class="stack">
+        <label>名称<input class="input" name="name" required value="${esc(item.name)}" ${existing ? "disabled" : ""} placeholder="live/cam"></label>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          ${checkbox("publish", "发布")} ${checkbox("read", "观看")} ${checkbox("record", "录制")}
+          ${checkbox("hls", "HLS")} ${checkbox("dash", "DASH")} ${checkbox("flv", "FLV")} ${checkbox("webrtc", "WebRTC")}
+        </div>
+        <label>最大观看数<input class="input" name="max_readers" type="number" min="0" value="${item.max_readers || 0}"></label>
+        <label>租户<input class="input" name="tenant" value="${esc(item.tenant || "")}"></label>
+        <div class="actions"><button class="btn primary" type="submit">保存</button><button class="btn" type="button" data-action="close-modal">取消</button></div>
+      </form>`);
+    const form = document.getElementById("path-form");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const body = {
+        enabled: true,
+        publish: data.get("publish") === "on",
+        read: data.get("read") === "on",
+        record: data.get("record") === "on",
+        hls: data.get("hls") === "on",
+        dash: data.get("dash") === "on",
+        flv: data.get("flv") === "on",
+        webrtc: data.get("webrtc") === "on",
+        max_readers: Number(data.get("max_readers") || 0),
+        tenant: data.get("tenant") || null,
+      };
+      try {
+        if (existing) {
+          await api("/paths/" + encodeURIComponent(item.name), { method: "PATCH", body: JSON.stringify(body) });
+        } else {
+          await api("/paths", { method: "POST", body: JSON.stringify(Object.assign({ name: data.get("name") }, body)) });
+        }
+        closeModal(); toast("路径已保存", "ok"); await loadControl(); render();
+      } catch (error) { toast(error.message, "bad"); }
+    });
   }
 
+  async function createPath() { openPathForm(null); }
   async function deletePath(name) {
     if (!confirm(`删除路径 ${name}？`)) return;
     try { await api("/paths", { method: "DELETE", body: JSON.stringify({ name }) }); toast("路径已删除", "ok"); await loadControl(); render(); }
     catch (error) { toast(error.message, "bad"); }
   }
 
-  async function issueKey() {
-    const name = prompt("密钥名称（例如 obs）", "stream key");
-    if (!name) return;
-    const paths = prompt("允许的路径 glob（逗号分隔，留空表示全部）", "live/*");
-    try {
-      const result = await api("/keys", { method: "POST", body: JSON.stringify({ name, roles: ["publish", "read"], paths: paths ? paths.split(",").map((v) => v.trim()) : [], ttl: "24h" }) });
-      await loadControl(); render();
-      openModal("推流密钥（只显示一次）", `<p>请立即保存，关闭后无法再次查看。</p><pre class="code">${esc(result.secret)}</pre>`);
-    } catch (error) { toast(error.message, "bad"); }
+  function openKeyForm() {
+    openModal("签发推流密钥", `
+      <form id="key-form" class="stack">
+        <label>名称<input class="input" name="name" required placeholder="obs"></label>
+        <label>角色<select class="input" name="roles" multiple size="2">
+          <option value="publish" selected>publish</option><option value="read" selected>read</option>
+        </select></label>
+        <label>协议（逗号分隔，留空全部）<input class="input" name="protocols" placeholder="rtmp,srt"></label>
+        <label>路径 glob（逗号分隔，留空全部）<input class="input" name="paths" placeholder="live/*"></label>
+        <label>有效期<input class="input" name="ttl" value="24h"></label>
+        <label>最大连接数（0 不限）<input class="input" name="max_connections" type="number" min="0" value="0"></label>
+        <div class="actions"><button class="btn primary" type="submit">签发</button><button class="btn" type="button" data-action="close-modal">取消</button></div>
+      </form>`);
+    const form = document.getElementById("key-form");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const list = (value) => String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+      const roles = Array.from(form.querySelector("[name=roles]").selectedOptions).map((option) => option.value);
+      try {
+        const result = await api("/keys", { method: "POST", body: JSON.stringify({
+          name: data.get("name"), roles,
+          protocols: list(data.get("protocols")), paths: list(data.get("paths")),
+          ttl: data.get("ttl") || "24h",
+          max_connections: Number(data.get("max_connections") || 0),
+        }) });
+        closeModal();
+        openModal("推流密钥（只显示一次）", `<p>请立即保存，关闭后无法再次查看。</p><pre class="code">${esc(result.secret)}</pre>`);
+        await loadControl(); render();
+      } catch (error) { toast(error.message, "bad"); }
+    });
   }
 
+  async function issueKey() { openKeyForm(); }
   async function revokeKey(kid) {
     if (!confirm(`吊销密钥 ${kid}？`)) return;
     try { await api("/keys", { method: "DELETE", body: JSON.stringify({ kid }) }); toast("密钥已吊销", "ok"); await loadControl(); render(); }
@@ -853,6 +911,7 @@
     if (action === "logout") { try { await api("/logout", { method: "POST" }); } catch (_) {} state.session = { authenticated: false }; stopPolling(); renderLogin(); return; }
     if (action === "retry" || action === "refresh") { state.loading = true; state.error = ""; render(); try { await loadAll(); } catch (error) { state.error = error.message; } state.loading = false; render(); return; }
     if (action === "close-modal" || action === "modal-backdrop") { if (event.target === actionEl) closeModal(); return; }
+    if (action === "edit-path") return openPathForm(state.paths.find((item) => item.name === actionEl.dataset.path));
     if (action === "create-proxy") return createProxy();
     if (action === "edit-proxy") return openProxyForm(state.proxyConfigs.find((m) => m.path === actionEl.dataset.path));
     if (action === "restart-proxy") return restartProxy(actionEl.dataset.path);

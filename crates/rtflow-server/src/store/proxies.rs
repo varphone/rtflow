@@ -31,7 +31,9 @@ pub(crate) fn insert(store: &Store, mount: &ProxyMount) -> StoreResult<()> {
             mount.enabled as i64,
             mode_str(mount.mode),
             mount.idle_grace.map(|value| value.as_millis() as i64),
-            mount.description_refresh.map(|value| value.as_millis() as i64),
+            mount
+                .description_refresh
+                .map(|value| value.as_millis() as i64),
             sealed,
             now,
         ],
@@ -53,7 +55,9 @@ pub(crate) fn update(store: &Store, mount: &ProxyMount, expected: u64) -> StoreR
             mount.enabled as i64,
             mode_str(mount.mode),
             mount.idle_grace.map(|value| value.as_millis() as i64),
-            mount.description_refresh.map(|value| value.as_millis() as i64),
+            mount
+                .description_refresh
+                .map(|value| value.as_millis() as i64),
             sealed,
             crate::paths::unix_now() as i64,
             expected as i64,
@@ -127,7 +131,11 @@ fn row_to_mount(store: &Store, row: &rusqlite::Row<'_>) -> rusqlite::Result<Prox
 }
 
 fn mode_str(mode: ProxyMode) -> &'static str {
-    if mode.is_always() { "always" } else { "on-demand" }
+    if mode.is_always() {
+        "always"
+    } else {
+        "on-demand"
+    }
 }
 
 fn aad(path: &str) -> String {

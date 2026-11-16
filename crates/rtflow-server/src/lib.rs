@@ -12,15 +12,14 @@ pub mod metrics;
 pub mod paths;
 pub mod proxy_control;
 pub mod recording;
-mod store;
 pub mod server;
 pub mod srt_pull;
 pub mod srt_push;
 mod srt_supervisor;
+mod store;
 pub mod vod;
 
 pub use config::{Config, ConfigError};
-
 
 /// Storage metadata for CLI/diagnostics (does not start the server).
 pub fn storage_info(config: &Config) -> Result<(u32, u64), String> {

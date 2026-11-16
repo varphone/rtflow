@@ -24,5 +24,9 @@ fn secrets_are_bound_to_aad() {
         store.open_secret("proxy:/cam:upstreams", &sealed).unwrap(),
         b"secret"
     );
-    assert!(store.open_secret("proxy:/other:upstreams", &sealed).is_err());
+    assert!(
+        store
+            .open_secret("proxy:/other:upstreams", &sealed)
+            .is_err()
+    );
 }

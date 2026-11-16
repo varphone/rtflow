@@ -37,7 +37,9 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
     http.add_route(
         Method::Get,
         "/admin/api/v1/srt/pulls",
-        api_json(state.clone(), |state, _req| async move { Ok(state.srt.pull_json()) }),
+        api_json(state.clone(), |state, _req| async move {
+            Ok(state.srt.pull_json())
+        }),
     )
     .await;
     http.add_route(
@@ -71,10 +73,7 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
             let Some(id) = req.path.strip_prefix("/admin/api/v1/srt/pulls/") else {
                 return Err((400, "missing SRT endpoint id".into()));
             };
-            state
-                .srt
-                .delete(id)
-                .map_err(|error| (404, error))?;
+            state.srt.delete(id).map_err(|error| (404, error))?;
             state.srt.reload();
             audit(&state, AuditEvent::new("srt.delete", "ok").detail(id));
             Ok(json!({"deleted": id}))
@@ -85,7 +84,9 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
     http.add_route(
         Method::Get,
         "/admin/api/v1/srt/pushes",
-        api_json(state.clone(), |state, _req| async move { Ok(state.srt.push_json()) }),
+        api_json(state.clone(), |state, _req| async move {
+            Ok(state.srt.push_json())
+        }),
     )
     .await;
     http.add_route(
@@ -119,10 +120,7 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
             let Some(id) = req.path.strip_prefix("/admin/api/v1/srt/pushes/") else {
                 return Err((400, "missing SRT endpoint id".into()));
             };
-            state
-                .srt
-                .delete(id)
-                .map_err(|error| (404, error))?;
+            state.srt.delete(id).map_err(|error| (404, error))?;
             state.srt.reload();
             audit(&state, AuditEvent::new("srt.delete", "ok").detail(id));
             Ok(json!({"deleted": id}))
@@ -159,7 +157,13 @@ async fn srt_upsert(
     let id = body.id.unwrap_or_else(|| {
         let mut bytes = [0u8; 8];
         let _ = getrandom::getrandom(&mut bytes);
-        format!("srt_{}", bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>())
+        format!(
+            "srt_{}",
+            bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        )
     });
     let record = SrtRecord {
         id: id.clone(),

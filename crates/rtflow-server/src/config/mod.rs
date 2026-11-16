@@ -10,13 +10,13 @@ mod srt;
 mod storage;
 pub use proxy::{ProxyMode, ProxyMount, ProxySection, ProxyTransport, ProxyUpstream};
 pub use srt::{SrtPull, SrtPush, SrtSection};
-pub use storage::StorageSection;
 use std::{
     collections::BTreeMap,
     net::SocketAddr,
     path::{Path, PathBuf},
     time::Duration,
 };
+pub use storage::StorageSection;
 
 /// Top-level configuration.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

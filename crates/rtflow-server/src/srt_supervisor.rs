@@ -5,7 +5,10 @@
 //! partially applied change while the database is authoritative.
 use crate::{
     config::Config,
-    store::{self, Store, srt::{SrtDirection, SrtRecord}},
+    store::{
+        self, Store,
+        srt::{SrtDirection, SrtRecord},
+    },
 };
 use rtflow::MountRegistry;
 use serde_json::{Value, json};
@@ -155,16 +158,17 @@ impl SrtSupervisor {
     }
 
     pub fn upsert(&self, record: SrtRecord, replace: bool) -> Result<(), String> {
-        let existing = store::srt::revision(&self.store, &record.id)
-            .map_err(|error| error.to_string())?;
+        let existing =
+            store::srt::revision(&self.store, &record.id).map_err(|error| error.to_string())?;
         match (existing, replace) {
             (Some(revision), true) => {
                 store::srt::update(&self.store, &record, revision)
                     .map_err(|error| error.to_string())?;
             }
             (Some(_), false) => return Err("SRT endpoint already exists".into()),
-            (None, _) => store::srt::insert(&self.store, &record)
-                .map_err(|error| error.to_string())?,
+            (None, _) => {
+                store::srt::insert(&self.store, &record).map_err(|error| error.to_string())?
+            }
         }
         self.refresh_records();
         // `reload` needs Arc; this method is only called through Arc in the API.
@@ -201,7 +205,10 @@ impl SrtSupervisor {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut values = Vec::new();
-        for record in records.iter().filter(|record| record.direction == direction) {
+        for record in records
+            .iter()
+            .filter(|record| record.direction == direction)
+        {
             let mut value = json!({
                 "id": record.id,
                 "name": record.name,

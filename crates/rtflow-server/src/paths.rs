@@ -189,8 +189,7 @@ pub struct PathStore {
 impl PathStore {
     pub fn new(config: &Config, persist_dynamic: bool) -> Result<Self, PathError> {
         let store = Arc::new(
-            Store::open(&config.storage, &config.server.state_dir)
-                .map_err(path_store_error)?,
+            Store::open(&config.storage, &config.server.state_dir).map_err(path_store_error)?,
         );
         Self::with_store(config, persist_dynamic, store)
     }
@@ -200,8 +199,11 @@ impl PathStore {
         persist_dynamic: bool,
         store: Arc<Store>,
     ) -> Result<Self, PathError> {
-        let mut records: BTreeMap<String, PathRecord> =
-            store::paths::load_all(&store).map_err(path_store_error)?.into_iter().map(|record| (record.name.clone(), record)).collect();
+        let mut records: BTreeMap<String, PathRecord> = store::paths::load_all(&store)
+            .map_err(path_store_error)?
+            .into_iter()
+            .map(|record| (record.name.clone(), record))
+            .collect();
         if records.is_empty() {
             let legacy = load_file(&config.server.state_dir.join(STORE_FILE))?;
             for record in legacy.into_values() {
@@ -467,8 +469,6 @@ impl PathStore {
         }
         expired
     }
-
-
 }
 
 fn path_store_error(error: StoreError) -> PathError {
