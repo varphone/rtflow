@@ -27,6 +27,7 @@ export async function render() {
     actions: `<button class="btn small ghost" data-audit-auto>自动刷新：开</button><button class="btn small ghost" data-audit-export>导出 CSV</button><button class="btn small" data-audit-refresh>刷新</button>`,
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" data-audit-search placeholder="搜索动作、路径、操作者或详情"></div>
       <div class="seg"><button data-audit-kind="all" class="active">全部</button><button data-audit-kind="change">变更</button><button data-audit-kind="auth">认证</button></div>
+      <select class="input" data-audit-category aria-label="事件类型" style="width:auto"><option value="all">全部类型</option><option value="path">路径</option><option value="key">密钥</option><option value="proxy">代理</option><option value="srt">SRT</option><option value="record">录制</option><option value="auth">认证</option></select>
       <span class="meta" data-audit-count>${events.length} 条</span>
       <button class="btn small ghost" data-audit-new hidden></button></div>
       ${payload.enabled === false ? `<div class="error-banner">审计日志未启用：在服务配置中设置审计路径后重启。</div>` : ""}
@@ -47,6 +48,7 @@ export async function render() {
       let pending = null;
       let newCount = 0;
       let kind = "all";
+      let category = "all";
       let page = 1;
       let automatic = true;
       let timer = null;
@@ -56,6 +58,7 @@ export async function render() {
         return current.filter((event) => {
           if (kind === "auth" && !String(event.action).startsWith("auth.")) return false;
           if (kind === "change" && String(event.action).startsWith("auth.")) return false;
+          if (category !== "all" && !String(event.action).startsWith(`${category}.`)) return false;
           return !q || `${event.action} ${event.path || ""} ${event.user || ""} ${event.detail || ""} ${event.peer || ""}`.toLowerCase().includes(q);
         });
       };
@@ -111,6 +114,11 @@ export async function render() {
         paint();
       };
       search.oninput = () => { page = 1; paint(); };
+      root.querySelector("[data-audit-category]").onchange = (event) => {
+        category = event.target.value;
+        page = 1;
+        paint();
+      };
       root.querySelectorAll("[data-audit-kind]").forEach((button) => button.onclick = () => {
         kind = button.dataset.auditKind;
         page = 1;
