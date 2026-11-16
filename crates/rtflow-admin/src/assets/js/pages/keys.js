@@ -6,7 +6,14 @@ import { openKeyDrawer } from "../forms/key.js";
 let query = "";
 let sort = { field: "expires_at", dir: 1 };
 
-export async function render(_params, ctx) {
+export async function render(params, ctx) {
+  query = params?.get("q") || "";
+  const field = params?.get("sort");
+  if (["kid", "name", "expires_at"].includes(field)) {
+    sort = { field, dir: params?.get("dir") === "-1" ? -1 : 1 };
+  } else {
+    sort = { field: "expires_at", dir: 1 };
+  }
   const keys = await apiV1("/keys");
   const all = Array.isArray(keys) ? keys : keys.items || [];
   const initial = view(all);
@@ -26,7 +33,15 @@ export async function render(_params, ctx) {
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.enabled && !isExpired(item)).length} 有效`;
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的密钥", "调整搜索条件");
       };
-      search.oninput = () => { query = search.value; paint(); };
+      const syncUrl = () => {
+        const params = new URLSearchParams();
+        if (query.trim()) params.set("q", query.trim());
+        if (sort.field !== "expires_at" || sort.dir !== 1) params.set("sort", sort.field);
+        if (sort.dir === -1) params.set("dir", "-1");
+        const qs = params.toString();
+        history.replaceState(null, "", `#/config/keys${qs ? `?${qs}` : ""}`);
+      };
+      search.oninput = () => { query = search.value; paint(); syncUrl(); };
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
       root.querySelector("[data-action=issue]").onclick = () => openKeyDrawer((result) => { secretDialog("推流密钥（只显示一次）", result.secret); ctx.reload(); });
       root.addEventListener("click", async (event) => {
@@ -35,6 +50,7 @@ export async function render(_params, ctx) {
           const field = sorter.dataset.sort;
           sort = { field, dir: sort.field === field ? -sort.dir : 1 };
           paint();
+          syncUrl();
           return;
         }
         const target = event.target.closest("[data-action]");

@@ -42,8 +42,15 @@ function table(items) {
 }
 
 export async function render(params) {
-  const linked = params?.get("q");
-  if (linked !== null && linked !== undefined) query = linked;
+  query = params?.get("q") || "";
+  const linkedStatus = params?.get("status");
+  status = ["all", "active", "inactive"].includes(linkedStatus) ? linkedStatus : "all";
+  const field = params?.get("sort");
+  if (["path", "segments", "bytes"].includes(field)) {
+    sort = { field, dir: params?.get("dir") === "-1" ? -1 : 1 };
+  } else {
+    sort = { field: "path", dir: 1 };
+  }
   all = await api("/recordings");
   const initial = view();
   return {
@@ -92,14 +99,24 @@ export async function render(params) {
         }
         visible = next;
       };
-      search.oninput = () => { query = search.value; paint(); };
-      root.querySelectorAll("[data-rec-status]").forEach((button) => button.onclick = () => { status = button.dataset.recStatus; paint(); });
+      const syncUrl = () => {
+        const params = new URLSearchParams();
+        if (query.trim()) params.set("q", query.trim());
+        if (status !== "all") params.set("status", status);
+        if (sort.field !== "path" || sort.dir !== 1) params.set("sort", sort.field);
+        if (sort.dir === -1) params.set("dir", "-1");
+        const qs = params.toString();
+        history.replaceState(null, "", `#/config/recordings${qs ? `?${qs}` : ""}`);
+      };
+      search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      root.querySelectorAll("[data-rec-status]").forEach((button) => button.onclick = () => { status = button.dataset.recStatus; paint(); syncUrl(); });
       root.addEventListener("click", async (event) => {
         const sorter = event.target.closest("[data-sort]");
         if (sorter) {
           const field = sorter.dataset.sort;
           sort = { field, dir: sort.field === field ? -sort.dir : 1 };
           paint();
+          syncUrl();
           return;
         }
         const target = event.target.closest("[data-action]");
