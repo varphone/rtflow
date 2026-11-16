@@ -30,6 +30,8 @@
 
 ### Changed
 
+- 关闭播放器时销毁 hls.js、清空 video src，避免后台继续拉流。
+
 - 路径详情新增 RTSP 访问地址，系统 API 暴露 public_rtsp。
 
 - 直播详情新增 RTSP 播放地址（来自 public_rtsp），可直接复制到 VLC。

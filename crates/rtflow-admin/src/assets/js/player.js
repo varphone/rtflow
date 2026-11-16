@@ -17,17 +17,31 @@ function loadHls() {
 }
 
 export function playUrl(url, title, options = {}) {
+  let hls = null;
+  let video = null;
+  let closed = false;
   openDialog({
     title,
     body: `<video id="admin-video" controls autoplay muted playsinline></video><div class="note" id="player-status">正在加载…</div>`,
     footer: `<button class="btn" data-close-dialog>关闭</button>`,
+    onClose() {
+      closed = true;
+      hls?.destroy?.();
+      if (window.__rtflowHls === hls) window.__rtflowHls = null;
+      if (video) {
+        video.pause();
+        video.removeAttribute("src");
+        try { video.load(); } catch (_) {}
+      }
+    },
   });
-  const video = document.getElementById("admin-video");
+  video = document.getElementById("admin-video");
   const status = document.getElementById("player-status");
   loadHls().then((Hls) => {
+    if (closed) return;
     if (Hls && Hls.isSupported()) {
       const vod = options.vod === true;
-      const hls = new Hls({
+      hls = new Hls({
         liveDurationInfinity: !vod,
         lowLatencyMode: !vod,
         liveSyncDurationCount: 3,

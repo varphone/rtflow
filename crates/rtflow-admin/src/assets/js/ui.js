@@ -25,8 +25,10 @@ function focusFirst(root) {
 }
 
 let dialogEscape = null;
-export function openDialog({ title, body, footer = "", onMount }) {
+let dialogOnClose = null;
+export function openDialog({ title, body, footer = "", onMount, onClose }) {
   closeDialog();
+  dialogOnClose = onClose || null;
   modalRoot().innerHTML = `<div class="modal-backdrop" data-dialog-backdrop>
     <div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
       <div class="modal-head"><h2>${esc(title)}</h2><button class="btn ghost small" data-close-dialog aria-label="关闭">${icon("close")}</button></div>
@@ -47,6 +49,7 @@ export function openDialog({ title, body, footer = "", onMount }) {
 
 export function closeDialog() {
   if (dialogEscape) { document.removeEventListener("keydown", dialogEscape); dialogEscape = null; }
+  if (dialogOnClose) { try { dialogOnClose(); } catch (_) {} dialogOnClose = null; }
   modalRoot().innerHTML = "";
 }
 
