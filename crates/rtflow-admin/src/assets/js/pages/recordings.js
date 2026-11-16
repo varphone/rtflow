@@ -1,6 +1,6 @@
 import { api } from "../api.js";
-import { bytes, empty, esc, num } from "../format.js";
-import { toast } from "../ui.js";
+import { bytes, dateTime, empty, esc, num } from "../format.js";
+import { openDrawer, toast } from "../ui.js";
 
 let query = "";
 let status = "all";
@@ -9,7 +9,7 @@ let all = [];
 
 function row(item) {
   return `<tr data-recording="${esc(item.path)}">
-    <td class="mono">${esc(item.path)}</td>
+    <td><button class="link-cell mono" data-action="detail" data-path="${esc(item.path)}">${esc(item.path)}</button></td>
     <td data-cell="status">${item.active ? '<span class="badge ok">录制中</span>' : '<span class="badge">已停止</span>'}</td>
     <td class="mono" data-cell="segments">${num(item.segments)}</td>
     <td class="mono" data-cell="bytes">${bytes(item.bytes)}</td>
@@ -104,6 +104,11 @@ export async function render(params) {
         }
         const target = event.target.closest("[data-action]");
         if (!target) return;
+        if (target.dataset.action === "detail") {
+          const item = all.find((entry) => entry.path === target.dataset.path);
+          if (item) openRecordingDetail(item, ctx);
+          return;
+        }
         if (target.dataset.action === "vod") { location.hash = `#/vod?q=${encodeURIComponent(target.dataset.path)}`; return; }
         if (!["start", "stop"].includes(target.dataset.action)) return;
         try {
@@ -117,4 +122,38 @@ export async function render(params) {
       return () => clearInterval(timer);
     },
   };
+}
+
+
+function openRecordingDetail(item, ctx) {
+  openDrawer({
+    title: item.path,
+    description: item.active ? "录制中的任务" : "已停止的录制任务",
+    showSubmit: false,
+    body: `<div class="stack">
+      <div class="detail-grid">
+        <div class="detail-item"><span>状态</span><strong>${item.active ? "录制中" : "已停止"}</strong></div>
+        <div class="detail-item"><span>开始时间</span><strong>${esc(dateTime(item.started_at))}</strong></div>
+        <div class="detail-item"><span>分段</span><strong class="mono">${num(item.segments)}</strong></div>
+        <div class="detail-item"><span>已写入</span><strong class="mono">${bytes(item.bytes)}</strong></div>
+        <div class="detail-item"><span>丢弃</span><strong class="mono">${num(item.dropped)}</strong></div>
+        <div class="detail-item"><span>错误</span><strong class="cell-sub">${esc(item.last_error || "—")}</strong></div>
+      </div>
+      <section class="drawer-section"><h3>录制目录</h3><pre class="code">${esc(item.directory || "—")}</pre></section>
+      <div class="actions"><button class="btn small" data-rec-detail-toggle>${item.active ? "停止录制" : "开始录制"}</button>
+        <button class="btn small ghost" data-rec-detail-vod>查看点播</button></div>
+    </div>`,
+    onMount(root) {
+      const close = () => root.querySelector("[data-close-drawer]")?.click();
+      root.querySelector("[data-rec-detail-toggle]").onclick = async () => {
+        const action = item.active ? "stop" : "start";
+        try { await api(`/recordings/${action}`, { method: "POST", body: { path: item.path } }); toast("操作已提交", "ok"); close(); ctx.reload(); }
+        catch (error) { toast(error.message, "bad"); }
+      };
+      root.querySelector("[data-rec-detail-vod]").onclick = () => {
+        close();
+        location.hash = `#/vod?q=${encodeURIComponent(item.path)}`;
+      };
+    },
+  });
 }
