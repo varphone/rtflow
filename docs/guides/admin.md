@@ -11,7 +11,7 @@
 - **配置**：路径、推流密钥、RTSP 代理、SRT 拉/推、录制任务。
 - **系统**：脱敏 TOML、数据库 schema/大小、构建特性。
 
-业务配置写入 SQLite；服务配置只读，修改 `rtflow.toml` 后 SIGHUP 或重启。
+管理 API 请求 20 秒超时，网络错误显示可重试的错误条；业务配置写入 SQLite；服务配置只读，修改 `rtflow.toml` 后 SIGHUP 或重启。
 
 系统页展示 HLS 前缀与 RTSP/RTMP 公共基地址，并支持复制/下载只读 TOML，并可复制数据库备份命令。
 

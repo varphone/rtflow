@@ -15,12 +15,23 @@ async function request(path, { method = "GET", body, headers = {}, v1 = false } 
   const merged = Object.assign({ Accept: "application/json" }, headers);
   if (body !== undefined) merged["Content-Type"] = "application/json";
   if (method !== "GET" && csrf) merged["X-CSRF-Token"] = csrf;
-  const response = await fetch((v1 ? BASE + "/api/v1" : BASE + "/api") + path, {
-    method,
-    credentials: "same-origin",
-    headers: merged,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  let response;
+  try {
+    response = await fetch((v1 ? BASE + "/api/v1" : BASE + "/api") + path, {
+      method,
+      credentials: "same-origin",
+      headers: merged,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") throw new ApiError("请求超时，请稍后重试", 0, {});
+    throw new ApiError("网络连接失败，请检查服务状态", 0, {});
+  } finally {
+    clearTimeout(timeout);
+  }
   const text = await response.text();
   let payload = {};
   try { payload = text ? JSON.parse(text) : {}; } catch (_) { payload = { message: text }; }
