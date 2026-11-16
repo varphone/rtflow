@@ -3,6 +3,8 @@
 控制台路径为 `/admin`（默认 HTTP `3000`），使用 `[http] admin_username` 与
 `admin_password`/`RTFLOW_ADMIN_PASSWORD` 登录。
 
+登录页为分栏品牌视图：左侧展示协议/可观测/安全能力，右侧为账号表单；移动端收为单卡并保留品牌。
+
 ## 页面
 
 - **运行**：概览（KPI 与异常聚合）、直播流、点播。

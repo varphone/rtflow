@@ -93,16 +93,30 @@ async function boot() {
 }
 
 function renderLogin(message = "") {
-  app.innerHTML = `<main class="login-wrap"><div class="login-card">
-    <div class="brand"><span class="brand-logo">R</span><span>${esc(state.session?.title || "rtflow")}</span></div>
-    <h1>管理控制台</h1><p class="sub">登录以管理流、路径、代理与系统配置。</p>
-    <form id="login-form" class="stack">
-      ${message ? `<div class="form-error">${esc(message)}</div>` : ""}
-      <div class="field"><label for="login-user">用户名</label><input class="input" id="login-user" name="username" autocomplete="username" required autofocus></div>
-      <div class="field"><label for="login-pass">密码</label><input class="input" id="login-pass" name="password" type="password" autocomplete="current-password" required></div>
-      <button class="btn primary block" type="submit">登录</button>
-    </form>
-    <div class="login-foot">rtflow admin · ${esc(location.host)}</div>
+  app.innerHTML = `<main class="login-wrap"><div class="login-shell">
+    <section class="login-aside">
+      <div class="brand"><span class="brand-logo">R</span><span>${esc(state.session?.title || "rtflow")}</span></div>
+      <span class="login-kicker">CONTROL PLANE</span>
+      <h2>流媒体控制台</h2>
+      <p>从一个界面管理发布、播放、录制与回源，掌握每条流的运行状态。</p>
+      <ul class="login-points">
+        <li><b>多协议</b><span>RTSP · RTMP · SRT · HLS · WebRTC</span></li>
+        <li><b>运行可观测</b><span>实时吞吐、异常与审计记录</span></li>
+        <li><b>安全可控</b><span>推流密钥、路径策略与只读模式</span></li>
+      </ul>
+      <div class="login-aside-foot">SELF-HOSTED · ${esc(location.host)}</div>
+    </section>
+    <section class="login-card">
+      <div class="brand login-mobile-brand"><span class="brand-logo">R</span><span>${esc(state.session?.title || "rtflow")}</span></div>
+      <h1>登录</h1><p class="sub">使用管理员账号进入控制台。</p>
+      <form id="login-form" class="stack">
+        ${message ? `<div class="form-error">${esc(message)}</div>` : ""}
+        <div class="field"><label for="login-user">用户名</label><input class="input" id="login-user" name="username" autocomplete="username" required autofocus></div>
+        <div class="field"><label for="login-pass">密码</label><input class="input" id="login-pass" name="password" type="password" autocomplete="current-password" required></div>
+        <button class="btn primary block" type="submit">登录</button>
+      </form>
+      <div class="login-foot">rtflow admin</div>
+    </section>
   </div></main>`;
   const form = document.getElementById("login-form");
   form.addEventListener("submit", async (event) => {
