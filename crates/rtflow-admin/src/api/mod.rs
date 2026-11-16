@@ -326,6 +326,7 @@ fn system_handler(state: Arc<AdminState>) -> Handler {
                 "base_path": state.config.base_path,
                 "hls_prefix": state.config.hls_prefix,
                 "rtmp_base": state.config.rtmp_base,
+                "rtsp_base": state.config.rtsp_base,
             });
             respond_json(writer, 200, &body, None).await
         })
