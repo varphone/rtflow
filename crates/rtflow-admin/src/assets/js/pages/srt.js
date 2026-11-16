@@ -95,11 +95,19 @@ function openSrtDetail(item, tab, ctx) {
         <div class="detail-item"><span>加密</span><strong>${item.pbkeylen ? `AES-${item.pbkeylen * 8}` : "未启用"}</strong></div>
       </div>
       ${item.last_error ? `<div class="error-banner">${esc(item.last_error)}</div>` : ""}
-      <div class="actions"><button class="btn small" data-srt-edit>编辑</button><button class="btn small ghost" data-srt-toggle>${item.enabled ? "停用" : "启用"}</button><button class="btn small danger" data-srt-delete>删除</button></div>
+      <div class="actions"><button class="btn small" data-srt-edit>编辑</button><button class="btn small ghost" data-srt-toggle>${item.enabled ? "停用" : "启用"}</button>
+        <button class="btn small ghost" data-srt-copy>复制远端</button>${item.mount ? `<button class="btn small ghost" data-srt-live>查看 Mount</button>` : ""}<button class="btn small danger" data-srt-delete>删除</button></div>
     </div>`,
     onMount(root) {
       const close = () => root.querySelector("[data-close-drawer]")?.click();
       root.querySelector("[data-srt-edit]").onclick = () => { close(); openSrtDrawer(tab, item, () => ctx.reload()); };
+      root.querySelector("[data-srt-copy]").onclick = async () => {
+        try { await navigator.clipboard.writeText(item.remote || ""); toast("远端地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      };
+      root.querySelector("[data-srt-live]")?.addEventListener("click", () => {
+        close();
+        location.hash = `#/live?q=${encodeURIComponent(item.mount || "")}`;
+      });
       root.querySelector("[data-srt-toggle]").onclick = async () => {
         const body = { name: item.name, enabled: !item.enabled, remote: item.remote, stream_id: item.stream_id || null,
           mount: item.mount || null, pbkeylen: item.pbkeylen || 0, latency_ms: item.latency_ms || null };
