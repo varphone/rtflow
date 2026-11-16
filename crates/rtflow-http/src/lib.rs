@@ -380,7 +380,10 @@ where
         let (handler, params) = guard.route(&req.method, &req.path.clone());
         let handler = handler.clone();
         let mut req = req;
-        req.path_params = params;
+        req.path_params = params
+            .into_iter()
+            .map(|param| request::percent_decode(&param))
+            .collect();
         drop(guard);
 
         match handler(req, w).await {

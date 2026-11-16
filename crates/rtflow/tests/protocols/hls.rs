@@ -63,7 +63,6 @@ fn segmenter_produces_init_segment() {
     let mut segmenter = Segmenter::new(config, &desc);
     let mut rx = segmenter.subscribe();
 
-    // Push enough frames to trigger segment creation
     for i in 0..10 {
         let is_key = i % 5 == 0;
         let data = if is_key {
@@ -84,12 +83,9 @@ fn segmenter_produces_init_segment() {
 
     segmenter.flush();
 
-    // Should have received at least one segment
     let segment = rx.try_recv().unwrap();
     assert!(!segment.init.is_empty(), "init segment should not be empty");
-    // Init segment should start with ftyp box
     assert_eq!(&segment.init[4..8], b"ftyp");
-    // Should also contain moov box
     let init_str = std::str::from_utf8(&segment.init).unwrap_or("");
     assert!(init_str.contains("moov") || segment.init.windows(4).any(|w| w == b"moov"));
     let avcc = segment
@@ -110,7 +106,6 @@ fn segmenter_produces_media_segment() {
     let mut segmenter = Segmenter::new(config, &desc);
     let mut rx = segmenter.subscribe();
 
-    // Push frames to trigger segment
     for i in 0..10 {
         let is_key = i % 5 == 0;
         let data = if is_key {
@@ -136,7 +131,6 @@ fn segmenter_produces_media_segment() {
         !segment.data.is_empty(),
         "media segment should not be empty"
     );
-    // Media segment should start with styp box, then moof box
     assert_eq!(
         &segment.data[4..8],
         b"styp",
@@ -148,7 +142,6 @@ fn segmenter_produces_media_segment() {
         segment.data[2],
         segment.data[3],
     ]) as usize;
-    // moof follows styp
     let moof_offset = styp_size;
     let moof_size = u32::from_be_bytes([
         segment.data[moof_offset],
