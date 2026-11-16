@@ -71,6 +71,14 @@ function applyTheme(value) {
   localStorage.setItem("rtflow-theme", value);
 }
 applyTheme(theme());
+function density() { return localStorage.getItem("rtflow-density") || "comfortable"; }
+function applyDensity(value) {
+  document.documentElement.dataset.density = value;
+  localStorage.setItem("rtflow-density", value);
+  const button = document.querySelector("[data-density-toggle]");
+  if (button) button.title = value === "compact" ? "切换为舒适密度" : "切换为紧凑密度";
+}
+applyDensity(density());
 
 async function boot() {
   try {
@@ -136,6 +144,7 @@ function renderShell() {
         <div class="top-actions">
           <button class="command-trigger" data-command-open aria-label="打开命令面板">${icon("search")}<span>搜索</span><kbd>Ctrl K</kbd></button>
           <span class="health"><span class="dot ok"></span>运行中</span>
+          <button class="btn ghost small" data-density-toggle aria-label="切换表格密度" title="切换表格密度">${icon("density")}</button>
           <button class="btn ghost small" data-theme-toggle aria-label="切换主题">${icon("sun")}</button>
           <span class="user-chip"><span class="avatar">${esc((state.session?.username || "A").slice(0, 1).toUpperCase())}</span><span>${esc(state.session?.username || "admin")}</span></span>
           <button class="btn ghost small" data-logout aria-label="退出登录">${icon("logout")}</button>
@@ -150,6 +159,7 @@ function renderShell() {
   app.querySelector("[data-menu]").onclick = () => document.getElementById("sidebar").classList.toggle("open");
   app.querySelector("[data-command-open]").onclick = () => openPalette();
   app.querySelector("[data-theme-toggle]").onclick = () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
+  app.querySelector("[data-density-toggle]").onclick = () => applyDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact");
   app.querySelector("[data-logout]").onclick = async () => {
     try { await api("/logout", { method: "POST" }); } catch (_) {}
     state.session = null;
@@ -223,6 +233,7 @@ function openPalette() {
     })),
     { label: "刷新当前页面", hint: "重新加载当前数据", icon: "↻", shortcut: "R", run: () => navigate({ silent: true }) },
     { label: "切换深浅主题", hint: "在深色与浅色之间切换", icon: "◐", run: () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light") },
+    { label: "切换表格密度", hint: "舒适 / 紧凑", icon: "≡", run: () => applyDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact") },
     { label: "复制当前页面地址", hint: "复制带 hash 的链接", icon: "⧉", run: async () => {
       try { await navigator.clipboard.writeText(location.href); toast("链接已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
     } },
