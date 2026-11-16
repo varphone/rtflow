@@ -256,7 +256,15 @@ async function navigate(options = {}) {
   }
 }
 
-function openPalette() {
+async function openPalette() {
+  let streams = [], vods = [], paths = [];
+  try {
+    [streams, vods, paths] = await Promise.all([
+      api("/streams").then((payload) => payload.items || payload || []),
+      api("/vods").then((payload) => payload.items || payload || []),
+      apiV1("/paths/config").then((payload) => Array.isArray(payload) ? payload : payload.items || []),
+    ]);
+  } catch (_) { /* static commands still work */ }
   const commands = [
     ...Object.entries(routes).map(([route, info]) => ({
       label: info.label, hint: `${info.group} / ${info.label}`, icon: "→",
@@ -270,6 +278,18 @@ function openPalette() {
       localStorage.setItem("rtflow-time", localStorage.getItem("rtflow-time") === "relative" ? "absolute" : "relative");
       navigate({ silent: true });
     } },
+    ...streams.slice(0, 8).map((stream) => ({
+      label: `流 · ${stream.name}`, hint: `${stream.path} · ${stream.video?.codec || "媒体"}`, icon: "▷", keywords: "live stream",
+      run: () => { location.hash = `#/live?q=${encodeURIComponent(stream.path)}`; },
+    })),
+    ...paths.slice(0, 6).map((path) => ({
+      label: `路径 · /${path.name}`, hint: "配置 / 路径", icon: "⌁", keywords: "path config",
+      run: () => { location.hash = `#/config/paths?q=${encodeURIComponent(path.name)}`; },
+    })),
+    ...vods.slice(0, 6).map((vod) => ({
+      label: `点播 · ${vod.title}`, hint: "运行 / 点播", icon: "▤", keywords: "vod recording",
+      run: () => { location.hash = `#/vod?q=${encodeURIComponent(vod.title)}`; },
+    })),
     { label: "复制当前页面地址", hint: "复制带 hash 的链接", icon: "⧉", run: async () => {
       try { await navigator.clipboard.writeText(location.href); toast("链接已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
     } },

@@ -81,7 +81,7 @@ export function openCommandPalette(commands) {
   root.innerHTML = `<div class="modal-backdrop" data-palette-backdrop>
     <div class="command-palette" role="dialog" aria-modal="true" aria-label="命令面板">
       <div class="command-input"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span>
-        <input id="command-search" class="input" placeholder="搜索页面或操作…" autocomplete="off" spellcheck="false"></div>
+        <input id="command-search" class="input" placeholder="搜索页面、流、点播或路径…" autocomplete="off" spellcheck="false"></div>
       <div class="command-list" id="command-list"></div>
       <div class="command-foot"><span>↑↓ 选择</span><span>Enter 打开</span><span>Esc 关闭</span></div>
     </div></div>`;
