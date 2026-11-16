@@ -311,6 +311,13 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 .traffic-area { fill: color-mix(in srgb, var(--accent) 18%, transparent); stroke: none; }
 .traffic-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); font-size: 11.5px; }
 .traffic-empty[hidden] { display: none; }
+.audit-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--muted); }
+.audit-dot.auth { background: var(--accent-strong); }
+.audit-dot.path { background: var(--ok); }
+.audit-dot.key { background: var(--warn); }
+.audit-dot.proxy { background: #8b5cf6; }
+.audit-dot.srt { background: #06b6d4; }
+.audit-dot.record { background: #ec4899; }
 .attention-item { display: flex; align-items: center; gap: 10px; justify-content: space-between; border: 1px solid var(--line-soft); border-radius: 8px; padding: 9px 10px; }
 .attention-item > div { min-width: 0; }
 .event-row { display: flex; align-items: flex-start; gap: 8px; }

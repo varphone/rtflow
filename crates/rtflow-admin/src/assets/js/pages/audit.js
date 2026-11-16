@@ -132,7 +132,7 @@ export async function render() {
 function rows(events) {
   return events.map((event) => `<tr>
     <td class="mono cell-sub">${esc(dateTime(event.ts))}</td>
-    <td><div class="cell-main">${esc(labels[event.action] || event.action)}</div><div class="cell-sub mono">${esc(event.action)}</div></td>
+    <td><div class="cell-main"><span class="audit-dot ${esc(String(event.action).split(".")[0])}"></span>${esc(labels[event.action] || event.action)}</div><div class="cell-sub mono">${esc(event.action)}</div></td>
     <td>${resultBadge(event.result)}</td>
     <td><div class="cell-main mono">${esc(detail(event.path || event.key_id || event.detail))}</div><div class="cell-sub">${esc(event.protocol || "")}</div></td>
     <td><div class="cell-main">${esc(detail(event.user || event.role))}</div><div class="cell-sub mono">${esc(event.peer || "")}</div></td>
