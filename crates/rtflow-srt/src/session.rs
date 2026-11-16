@@ -595,6 +595,7 @@ impl SrtServer {
                 mount_path: None,
                 mount_registered: false,
                 mount: None,
+                publisher: None,
                 stream_id: stream_id.clone(),
                 peer_caps: info,
                 latency_ms,
@@ -718,10 +719,16 @@ impl SrtServer {
                         conn.mount_path = Some(mount_path);
                         conn.mount_registered = true;
                         conn.mount = Some(handle.mount().clone());
-                        if let Ok(publisher) = handle.publisher() {
-                            for unit in units {
-                                let _ = publisher.push(unit);
+                        match handle.publisher() {
+                            Ok(publisher) => {
+                                for unit in units {
+                                    let _ = publisher.push(unit);
+                                }
+                                // Keep the lease: mount snapshots and the
+                                // recording supervisor use publisher_connected.
+                                conn.publisher = Some(publisher);
                             }
+                            Err(error) => warn!(%error, "SRT: publisher attach failed"),
                         }
                     }
                     Err(error) => warn!(%error, "SRT: failed to register mount"),

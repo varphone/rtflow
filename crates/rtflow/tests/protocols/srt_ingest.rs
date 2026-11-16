@@ -470,6 +470,14 @@ async fn srt_ts_ingest_creates_mount() {
         !snapshots.is_empty(),
         "Expected at least one mount after TS ingest"
     );
+    // The ingest holds a publisher lease for the connection lifetime so the
+    // recording supervisor and discovery see an online publisher.
+    assert!(
+        snapshots
+            .iter()
+            .any(|(_, snapshot)| snapshot.publisher_connected),
+        "SRT mount must report publisher_connected"
+    );
 
     cancel.cancel();
 }

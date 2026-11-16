@@ -28,6 +28,9 @@ pub struct SrtConnection {
     pub(super) mount_registered: bool,
     /// Cached mount for this connection.
     pub(super) mount: Option<Arc<rtflow_mount::Mount>>,
+    /// Publisher lease held for the lifetime of the connection, so the mount
+    /// reports `publisher_connected`.
+    pub(super) publisher: Option<rtflow_mount::LocalPublisher>,
     /// Raw Stream ID from the handshake (may carry `?token=...`).
     pub(super) stream_id: Option<String>,
     /// Peer capabilities negotiated in HSREQ.
