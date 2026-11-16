@@ -1,6 +1,6 @@
 import { apiV1 } from "../api.js";
 import { bytes, empty, esc, num, stateBadge } from "../format.js";
-import { confirmDialog, openDialog, openDrawer, toast } from "../ui.js";
+import { confirmDialog, openDialog, openDrawer, syncSortAria, toast } from "../ui.js";
 import { openProxyDrawer } from "../forms/proxy.js";
 
 let query = "";
@@ -34,12 +34,14 @@ export async function render(params, ctx) {
       const panel = root.querySelector("[data-proxy-panel]");
       const count = root.querySelector("[data-proxy-count]");
       const search = root.querySelector("[data-proxy-search]");
+      syncSortAria(root.querySelector(".panel"), sort);
       let visible = initial;
       const paint = () => {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.state === "streaming").length} streaming`;
         root.querySelectorAll("[data-proxy-filter]").forEach((button) => button.classList.toggle("active", button.dataset.proxyFilter === filter));
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的代理", "调整搜索或状态筛选");
+        syncSortAria(panel, sort);
       };
       const syncUrl = () => {
         const params = new URLSearchParams();

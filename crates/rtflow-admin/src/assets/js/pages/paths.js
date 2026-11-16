@@ -1,6 +1,6 @@
 import { api, apiV1 } from "../api.js";
 import { dateTime, empty, esc } from "../format.js";
-import { confirmDialog, openDrawer, toast } from "../ui.js";
+import { confirmDialog, openDrawer, syncSortAria, toast } from "../ui.js";
 import { openPathDrawer } from "../forms/path.js";
 
 let query = "";
@@ -27,11 +27,13 @@ export async function render(params, ctx) {
       const panel = root.querySelector("[data-path-panel]");
       const count = root.querySelector("[data-path-count]");
       const search = root.querySelector("[data-path-search]");
+      syncSortAria(root.querySelector(".panel"), sort);
       let visible = initial;
       const paint = () => {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.enabled).length} 启用`;
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的路径", "调整搜索条件或新建路径");
+        syncSortAria(panel, sort);
       };
       const syncUrl = () => {
         const params = new URLSearchParams();

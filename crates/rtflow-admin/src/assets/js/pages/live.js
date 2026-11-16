@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { audioLabel, bytes, empty, esc, fps, iconSvg, num, resolution, statusBadge } from "../format.js";
-import { confirmDialog, openDrawer, toast } from "../ui.js";
+import { confirmDialog, openDrawer, syncSortAria, toast } from "../ui.js";
 import { playUrl } from "../player.js";
 
 let query = "";
@@ -66,6 +66,7 @@ export async function render(params) {
         markUpdated();
         count.textContent = `${visible.length} 条 · ${visible.filter((stream) => stream.publisher).length} 直播中`;
         panel.innerHTML = visible.length ? table(visible, selected) : empty("没有匹配的流", "调整筛选条件或等待推流");
+        syncSortAria(panel, sort);
         const all = panel.querySelector("[data-select-all]");
         if (all) {
           const picked = visible.filter((stream) => selected.has(stream.path)).length;

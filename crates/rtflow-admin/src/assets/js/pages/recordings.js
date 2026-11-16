@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { bytes, dateTime, empty, esc, num } from "../format.js";
-import { openDrawer, toast } from "../ui.js";
+import { openDrawer, syncSortAria, toast } from "../ui.js";
 
 let query = "";
 let status = "all";
@@ -63,6 +63,7 @@ export async function render(params) {
       <section class="panel">${initial.length ? table(initial) : empty("暂无录制任务", "在路径中开启录制，或等待发布者上线", "inbox", `<a class="btn small" href="#/config/paths">前往路径配置</a>`)}</section>`,
     mount(root, ctx) {
       const search = root.querySelector("[data-rec-search]");
+      syncSortAria(root.querySelector(".panel"), sort);
       const count = root.querySelector("[data-rec-count]");
       const panel = root.querySelector("section.panel");
       let visible = initial;
@@ -71,6 +72,7 @@ export async function render(params) {
         visible = view();
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.active).length} 录制中`;
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选", "inbox", (!query && status === "all") ? `<a class="btn small" href="#/config/paths">前往路径配置</a>` : "");
+        syncSortAria(panel, sort);
         sync();
       };
       const refresh = async () => {
@@ -83,6 +85,7 @@ export async function render(params) {
           visible = next;
           count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.active).length} 录制中`;
           panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选");
+          syncSortAria(panel, sort);
           sync();
           return;
         }

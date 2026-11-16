@@ -7,6 +7,8 @@ const toastRoot = () => document.getElementById("toast-root");
 export function toast(message, kind = "") {
   const el = document.createElement("div");
   el.className = `toast ${kind}`;
+  el.setAttribute("role", "status");
+  el.setAttribute("aria-live", "polite");
   el.textContent = message;
   toastRoot().appendChild(el);
   setTimeout(() => el.remove(), 3600);
@@ -191,6 +193,16 @@ function trapFocus(root, event) {
   const first = nodes[0], last = nodes[nodes.length - 1];
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+}
+
+export function syncSortAria(root, sort) {
+  root.querySelectorAll("[data-sort]").forEach((button) => {
+    const th = button.closest("th");
+    if (!th) return;
+    th.setAttribute("aria-sort", sort.field === button.dataset.sort
+      ? (sort.dir > 0 ? "ascending" : "descending")
+      : "none");
+  });
 }
 
 export function field(label, input, { hint = "", className = "" } = {}) {

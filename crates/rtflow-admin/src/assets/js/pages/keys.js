@@ -1,6 +1,6 @@
 import { apiV1 } from "../api.js";
 import { dateTime, empty, esc } from "../format.js";
-import { confirmDialog, secretDialog, toast } from "../ui.js";
+import { confirmDialog, secretDialog, syncSortAria, toast } from "../ui.js";
 import { openKeyDrawer } from "../forms/key.js";
 
 let query = "";
@@ -27,11 +27,13 @@ export async function render(params, ctx) {
       const panel = root.querySelector("[data-key-panel]");
       const count = root.querySelector("[data-key-count]");
       const search = root.querySelector("[data-key-search]");
+      syncSortAria(root.querySelector(".panel"), sort);
       let visible = initial;
       const paint = () => {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.enabled && !isExpired(item)).length} 有效`;
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的密钥", "调整搜索条件");
+        syncSortAria(panel, sort);
       };
       const syncUrl = () => {
         const params = new URLSearchParams();
