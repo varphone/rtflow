@@ -116,7 +116,13 @@ impl ServerHandle {
 
         let old_proxy = &self.config.proxy;
         let new_proxy = &config.proxy;
-        if self.apply_proxy_reload(old_proxy, new_proxy) {
+        if crate::proxy_control::apply_reload(
+            old_proxy,
+            new_proxy,
+            &self.proxies,
+            self.proxy_event_sink.clone(),
+            &self.cancel,
+        ) {
             report.applied.push("proxy");
         }
         *self
@@ -157,69 +163,6 @@ impl ServerHandle {
             report.restart_required.push("admin credentials");
         }
         Ok(report)
-    }
-
-    fn apply_proxy_reload(
-        &self,
-        old: &crate::config::ProxySection,
-        new: &crate::config::ProxySection,
-    ) -> bool {
-        let mut changed = false;
-        let old_mounts: std::collections::BTreeMap<_, _> = old
-            .mounts
-            .iter()
-            .map(|mount| (mount.path.as_str(), mount))
-            .collect();
-        let new_mounts: std::collections::BTreeMap<_, _> = new
-            .mounts
-            .iter()
-            .map(|mount| (mount.path.as_str(), mount))
-            .collect();
-        for path in old_mounts.keys() {
-            if !new.enabled || !new_mounts.contains_key(path) {
-                self.proxies.remove(path);
-                changed = true;
-            }
-        }
-        if !new.enabled {
-            return changed;
-        }
-        for (path, mount) in &new_mounts {
-            if !mount.enabled {
-                if old_mounts.contains_key(path) {
-                    self.proxies.remove(path);
-                    changed = true;
-                }
-                continue;
-            }
-            let unchanged = old.enabled
-                && old_mounts
-                    .get(path)
-                    .is_some_and(|previous| *previous == *mount);
-            if unchanged {
-                continue;
-            }
-            self.proxies.remove(path);
-            let Ok(upstream) = mount.upstream_config() else {
-                continue;
-            };
-            let startup_cache = upstream.startup_cache;
-            let options = rtflow::mount::MountOptions::builder()
-                .event_sink(self.proxy_event_sink.clone())
-                .startup_cache_config(startup_cache)
-                .cancel(self.cancel.child_token())
-                .build();
-            let path: std::sync::Arc<str> = std::sync::Arc::from(*path);
-            let _ = self.proxies.ensure(
-                path,
-                upstream,
-                options,
-                mount.idle_grace,
-                mount.mode.is_always(),
-            );
-            changed = true;
-        }
-        changed
     }
 
     pub async fn wait_for_signal(self, config_path: Option<PathBuf>) {
@@ -766,60 +709,19 @@ impl ServerApp {
             }));
         }
 
-        if config.proxy.enabled {
-            for mount in &config.proxy.mounts {
-                if !mount.enabled {
-                    continue;
-                }
-                let path: std::sync::Arc<str> = std::sync::Arc::from(mount.path.as_str());
-                let upstream = match mount.upstream_config() {
-                    Ok(upstream) => upstream,
-                    Err(error) => {
-                        tracing::warn!(path = %mount.path, %error, "proxy config rejected");
-                        continue;
-                    }
-                };
-                let startup_cache = upstream.startup_cache;
-                let options = rtflow::mount::MountOptions::builder()
-                    .event_sink(event_sink.clone())
-                    .startup_cache_config(startup_cache)
-                    .cancel(cancel.child_token())
-                    .build();
-                if let Err(error) = proxies.ensure(
-                    path.clone(),
-                    upstream,
-                    options,
-                    mount.idle_grace,
-                    mount.mode.is_always(),
-                ) {
-                    tracing::warn!(path = %path, %error, "proxy config rejected");
-                }
-            }
-        }
+        crate::proxy_control::register_configured(
+            &config.proxy,
+            &proxies,
+            event_sink.clone(),
+            &cancel,
+        );
 
-        {
-            let proxies = proxies.clone();
-            let metrics = metrics.clone();
-            let cancel = cancel.clone();
-            tasks.push(tokio::spawn(async move {
-                use std::sync::atomic::Ordering;
-                let mut tick = tokio::time::interval(Duration::from_secs(1));
-                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                loop {
-                    tokio::select! {
-                        _ = cancel.cancelled() => break,
-                        _ = tick.tick() => {
-                            let statuses = proxies.statuses();
-                            metrics.proxy_configured.store(statuses.len() as i64, Ordering::Relaxed);
-                            metrics.proxy_streaming.store(
-                                statuses.iter().filter(|s| s.state == "streaming").count() as i64,
-                                Ordering::Relaxed,
-                            );
-                        }
-                    }
-                }
-            }));
-        }
+        crate::proxy_control::spawn_metrics(
+            proxies.clone(),
+            metrics.clone(),
+            cancel.clone(),
+            &mut tasks,
+        );
 
         let rtsp_addr = rtsp.as_ref().map(|server| server.local_addr());
         tracing::info!(

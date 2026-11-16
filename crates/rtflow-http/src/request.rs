@@ -221,6 +221,14 @@ mod tests {
     }
 
     #[test]
+    fn query_values_are_percent_decoded() {
+        let (path, query) = parse_path_query("/x?path=%2Fa%20b&form=1+2");
+        assert_eq!(path, "/x");
+        assert_eq!(query.get("path").map(String::as_str), Some("/a b"));
+        assert_eq!(query.get("form").map(String::as_str), Some("1 2"));
+    }
+
+    #[test]
     fn parser_rejects_invalid_version_and_header_lines() {
         // HTTP/1.0 is accepted (answered with HTTP/1.1 framing).
         assert!(parse(b"GET / HTTP/1.0\r\n\r\n").is_ok());
