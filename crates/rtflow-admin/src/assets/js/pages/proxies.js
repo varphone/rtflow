@@ -148,7 +148,7 @@ function openProxyDetail(item, ctx) {
         <div class="endpoint"><span class="endpoint-label">#${index + 1}</span><code>${esc(upstream.url || "—")}</code><span class="cell-sub">${esc(upstream.transport || "auto")}</span></div>`).join("") : `<div class="note">未配置上游。</div>`}
         ${upstreams.length ? `<div class="actions" style="margin-top:8px"><button class="btn small ghost" data-proxy-copy-all>复制上游列表</button></div>` : ""}</section>
       ${item.last_error ? `<div class="error-banner">${esc(item.last_error)}</div>` : ""}
-      <div class="actions"><button class="btn small" data-pd-edit>编辑</button><button class="btn small" data-pd-restart>重启</button><button class="btn small ghost" data-pd-probe>探测上游</button><button class="btn small danger" data-pd-delete>删除</button></div>
+      <div class="actions"><button class="btn small" data-pd-edit>编辑</button><button class="btn small" data-pd-restart>重启</button><button class="btn small ghost" data-pd-probe>探测上游</button><button class="btn small ghost" data-pd-live>查看直播</button><button class="btn small danger" data-pd-delete>删除</button></div>
     </div>`,
     onMount(root) {
       const close = () => root.querySelector("[data-close-drawer]")?.click();
@@ -161,6 +161,7 @@ function openProxyDetail(item, ctx) {
         catch (error) { toast(error.message, "bad"); }
       };
       root.querySelector("[data-pd-probe]").onclick = () => probeProxy(item.path);
+      root.querySelector("[data-pd-live]").onclick = () => { close(); location.hash = `#/live?q=${encodeURIComponent(item.path)}`; };
       root.querySelector("[data-pd-delete]").onclick = async () => {
         if (!await confirmDialog({ title: "删除代理", message: `删除 ${item.path}？`, confirmLabel: "删除", danger: true })) return;
         try { await apiV1("/proxies?path=" + encodeURIComponent(item.path), { method: "DELETE" }); toast("代理已删除", "ok"); close(); ctx.reload(); }
