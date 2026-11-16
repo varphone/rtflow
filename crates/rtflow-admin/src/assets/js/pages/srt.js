@@ -1,6 +1,6 @@
 import { apiV1 } from "../api.js";
 import { bytes, empty, esc, num } from "../format.js";
-import { confirmDialog, toast } from "../ui.js";
+import { confirmDialog, openDrawer, toast } from "../ui.js";
 import { openSrtDrawer } from "../forms/srt.js";
 
 let tab = "pull";
@@ -41,6 +41,7 @@ export async function render(params, ctx) {
         if (!target || target === create) return;
         const item = visible.find((entry) => entry.id === target.dataset.id);
         if (!item) return;
+        if (target.dataset.action === "detail") return openSrtDetail(item, tab, ctx2);
         if (target.dataset.action === "edit") return openSrtDrawer(tab, item, () => ctx2.reload());
         if (target.dataset.action === "toggle") {
           const body = { name: item.name, enabled: !item.enabled, remote: item.remote, stream_id: item.stream_id || null,
@@ -65,7 +66,7 @@ function view(all) {
 
 function table(items) {
   return `<div class="table-wrap"><table class="data"><thead><tr><th>名称</th><th>状态</th><th>远端</th><th>Mount</th><th>连接</th><th>流量</th><th>错误</th><th></th></tr></thead><tbody>
-    ${items.map((item) => `<tr><td><div class="cell-main">${esc(item.name || item.id)}</div><div class="cell-sub mono">${esc(item.id)}</div></td>
+    ${items.map((item) => `<tr><td><button class="link-cell" data-action="detail" data-id="${esc(item.id)}">${esc(item.name || item.id)}</button><div class="cell-sub mono">${esc(item.id)}</div></td>
       <td>${item.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge">停用</span>'}</td><td class="mono">${esc(item.remote)}</td>
       <td class="mono">${esc(item.mount || "—")}</td><td>${item.connected ? '<span class="badge ok">已连接</span>' : "—"}</td><td class="mono">${bytes(item.bytes || 0)}</td>
       <td class="cell-sub">${esc(item.last_error || "—")}</td><td><div class="row-actions">
@@ -73,4 +74,43 @@ function table(items) {
         <button class="btn small ghost" data-action="toggle" data-id="${esc(item.id)}">${item.enabled ? "停用" : "启用"}</button>
         <button class="btn small danger" data-action="delete" data-id="${esc(item.id)}">删除</button></div></td></tr>`).join("")}
   </tbody></table></div>`;
+}
+
+
+function openSrtDetail(item, tab, ctx) {
+  const direction = tab === "push" ? "推流" : "拉流";
+  openDrawer({
+    title: item.name || item.id,
+    description: `SRT ${direction}端点`,
+    showSubmit: false,
+    body: `<div class="stack">
+      <div class="detail-grid">
+        <div class="detail-item"><span>状态</span><strong>${item.enabled ? "启用" : "停用"}</strong></div>
+        <div class="detail-item"><span>连接</span><strong>${item.connected ? "已连接" : "未连接"}</strong></div>
+        <div class="detail-item"><span>远端</span><strong class="mono">${esc(item.remote || "—")}</strong></div>
+        <div class="detail-item"><span>Mount</span><strong class="mono">${esc(item.mount || "—")}</strong></div>
+        <div class="detail-item"><span>Stream ID</span><strong class="mono">${esc(item.stream_id || "—")}</strong></div>
+        <div class="detail-item"><span>已传输</span><strong class="mono">${bytes(item.bytes || 0)}</strong></div>
+        <div class="detail-item"><span>延迟</span><strong class="mono">${item.latency_ms ? `${num(item.latency_ms)} ms` : "默认"}</strong></div>
+        <div class="detail-item"><span>加密</span><strong>${item.pbkeylen ? `AES-${item.pbkeylen * 8}` : "未启用"}</strong></div>
+      </div>
+      ${item.last_error ? `<div class="error-banner">${esc(item.last_error)}</div>` : ""}
+      <div class="actions"><button class="btn small" data-srt-edit>编辑</button><button class="btn small ghost" data-srt-toggle>${item.enabled ? "停用" : "启用"}</button><button class="btn small danger" data-srt-delete>删除</button></div>
+    </div>`,
+    onMount(root) {
+      const close = () => root.querySelector("[data-close-drawer]")?.click();
+      root.querySelector("[data-srt-edit]").onclick = () => { close(); openSrtDrawer(tab, item, () => ctx.reload()); };
+      root.querySelector("[data-srt-toggle]").onclick = async () => {
+        const body = { name: item.name, enabled: !item.enabled, remote: item.remote, stream_id: item.stream_id || null,
+          mount: item.mount || null, pbkeylen: item.pbkeylen || 0, latency_ms: item.latency_ms || null };
+        try { await apiV1(`/srt/${tab === "push" ? "pushes" : "pulls"}/${encodeURIComponent(item.id)}`, { method: "PATCH", body }); toast("状态已更新", "ok"); close(); ctx.reload(); }
+        catch (error) { toast(error.message, "bad"); }
+      };
+      root.querySelector("[data-srt-delete]").onclick = async () => {
+        if (!await confirmDialog({ title: "删除 SRT 端点", message: `删除 ${item.id}？`, confirmLabel: "删除", danger: true })) return;
+        try { await apiV1(`/srt/${tab === "push" ? "pushes" : "pulls"}/${encodeURIComponent(item.id)}`, { method: "DELETE" }); toast("已删除", "ok"); close(); ctx.reload(); }
+        catch (error) { toast(error.message, "bad"); }
+      };
+    },
+  });
 }

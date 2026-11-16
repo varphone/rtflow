@@ -159,7 +159,7 @@ textarea.input { resize: vertical; min-height: 80px; }
 .panel-head h2, .panel-head h3 { margin: 0; font-size: 13px; font-weight: 650; }
 .panel-head .sub { color: var(--faint); font-size: 12px; }
 .panel-body { padding: 14px; }
-.stack { display: grid; gap: 14px; }
+.stack { display: grid; gap: 14px; align-content: start; }
 .quick-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
 .quick-action { display: grid; gap: 3px; padding: 12px 13px; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text); transition: background .12s, border-color .12s; }
 .quick-action:hover { background: var(--surface-2); border-color: var(--muted); }
