@@ -27,6 +27,7 @@ const routes = {
   system: { page: system, group: "系统", label: "系统" },
 };
 const state = { session: null, route: "overview", loading: false };
+let pageCleanup = null;
 
 const navGroups = [
   ["运行", [["overview", "概览"], ["live", "直播流"], ["vod", "点播"]]],
@@ -139,6 +140,7 @@ function setCrumbs(route) {
 
 async function navigate(options = {}) {
   if (!state.session) return;
+  if (pageCleanup) { try { pageCleanup(); } catch (_) {} pageCleanup = null; }
   const route = currentRoute();
   state.route = route;
   setCrumbs(route);
@@ -155,7 +157,8 @@ async function navigate(options = {}) {
   try {
     const view = await routes[route].page.render(new URLSearchParams((location.hash.split("?")[1] || "")), ctx);
     target.innerHTML = `<div class="page-head"><div><h1>${esc(view.title)}</h1>${view.subtitle ? `<p>${esc(view.subtitle)}</p>` : ""}</div>${view.actions ? `<div class="actions">${view.actions}</div>` : ""}</div>${view.html || ""}`;
-    view.mount?.(target, ctx);
+    const cleanup = view.mount?.(target, ctx);
+    if (typeof cleanup === "function") pageCleanup = cleanup;
     if (focus?.placeholder) {
       const input = [...target.querySelectorAll("input")].find((element) => element.placeholder === focus.placeholder);
       if (input) { input.focus(); try { input.setSelectionRange(focus.start, focus.start); } catch (_) {} }

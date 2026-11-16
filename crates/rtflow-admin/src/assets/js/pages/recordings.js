@@ -21,6 +21,8 @@ export async function render(_params, ctx) {
         try { await api(`/recordings/${target.dataset.action}`, { method: "POST", body: { path: target.dataset.path } }); toast("操作已提交", "ok"); ctx.reload(); }
         catch (error) { toast(error.message, "bad"); }
       });
+      const timer = setInterval(() => ctx.reload({ keepFocus: true }), 2000);
+      return () => clearInterval(timer);
     },
   };
 }
