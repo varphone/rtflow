@@ -1,0 +1,50 @@
+# RTSP 代理服务完善路线图
+
+本文件对应“完善 RTSP 代理服务”开发计划的状态看板。
+
+## 已完成（M0 / M1 第一批）
+
+- [x] 抽取公开 `rtflow::server::ProxyService`：DESCRIBE、描述净化、mount 注册、订阅者 watcher、状态快照。
+- [x] `RtspServer::bind_with_proxy_service` 允许与 `rtflow-server` 共享同一服务，避免重复 watcher。
+- [x] `[proxy]` / `[[proxy.mounts]]` / `[[proxy.mounts.upstreams]]` 配置、校验与密码脱敏。
+- [x] `rtflow-server` 启动时并发注册静态代理；上游离线不阻塞启动。
+- [x] `GET /api/v1/proxies`、`GET /admin/api/v1/proxies` 只读状态。
+- [x] 现有代理集成测试与全量测试保持通过。
+
+## M1 剩余
+
+- [ ] 描述失败自动重试/退避（当前注册失败只记日志）。
+- [ ] SIGHUP 代理配置 diff（新增/删除/修改）。
+- [ ] per-mount `idle_grace`、常连模式（always）、`restart_pending`。
+- [ ] 已发现描述缓存（重启后上游离线仍可注册）。
+
+## M2 — 动态管理与可观测
+
+- [ ] admin CRUD、restart、probe。
+- [ ] 审计事件与代理指标（configured/streaming/connecting/failures/bytes）。
+- [ ] 管理页代理页签。
+- [ ] 运行时配置持久化（可选，0600）。
+
+## M3 — 运行时与时间轴
+
+- [ ] 媒体空闲看门狗可配置，去掉逐帧 timeout。
+- [ ] `RtspClient::connect_with_description` 快速重连；描述刷新。
+- [ ] RTCP SR NTP↔RTP 映射、RTP 时间戳回绕扩展、重连 A/V 同步。
+- [ ] RTSPS/SRTP/multicast/461 回退/redirect 代理测试矩阵。
+
+## M4 — 安全与边界
+
+- [ ] 上游 host/CIDR 允许列表、DNS 重绑定防护、跨源重定向策略。
+- [ ] 代理数量/上游数/并发描述上限。
+- [ ] 下游路径鉴权与凭据泄漏测试。
+
+## M5 — 互操作与收尾
+
+- [ ] ffmpeg/GStreamer 上下游互操作、50 代理/200 读者、8h soak。
+- [ ] 文档、迁移说明、CHANGELOG。
+
+## 已知缺口
+
+- 代理只读状态 API 尚无 CRUD；失败注册不会自动重试。
+- 代理媒体统计的 `bytes` 目前来自 mount `rtp_octets`，代理发布路径未累计字节（显示 0），M2 补 `published_bytes`。
+- 代理 HLS 播放曾观察到重复 DTS 警告，列入 M3 时间轴专项。

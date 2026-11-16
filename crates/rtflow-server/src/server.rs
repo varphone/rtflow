@@ -64,6 +64,7 @@ pub struct ServerHandle {
     keys: Arc<KeyStore>,
     discovery: Arc<DiscoveryService>,
     vod: Arc<VodCatalog>,
+    proxies: Arc<rtflow::server::ProxyService>,
     config: Arc<Config>,
 }
 
@@ -81,6 +82,7 @@ impl ServerHandle {
             cancel.cancel();
         }
         self.recording.shutdown().await;
+        self.proxies.shutdown();
         if let Some(rtsp) = self.rtsp.take()
             && let Err(error) = rtsp.shutdown().await
         {
@@ -299,6 +301,13 @@ impl ServerApp {
         });
 
         let cancel = CancellationToken::new();
+        let proxy_supervisor = rtflow::runtime::TaskSupervisor::new(event_sink.clone());
+        let proxies = rtflow::server::ProxyService::new(
+            mounts.clone(),
+            proxy_supervisor,
+            cancel.clone(),
+            config.proxy.idle_grace,
+        );
         let mut cancels = Vec::new();
         let mut tasks = Vec::new();
 
@@ -337,7 +346,12 @@ impl ServerApp {
                 );
             }
             rtsp_config.event_sink = event_sink.clone();
-            let server = rtflow::server::RtspServer::bind_with(rtsp_config, mounts.clone()).await?;
+            let server = rtflow::server::RtspServer::bind_with_proxy_service(
+                rtsp_config,
+                mounts.clone(),
+                proxies.clone(),
+            )
+            .await?;
             Some(server)
         } else {
             None
@@ -606,6 +620,7 @@ impl ServerApp {
             srt_listener_stats,
             srt_pull_status.clone(),
             srt_push_status.clone(),
+            proxies.clone(),
         )
         .await;
         // The console's catch-all assets route must be registered after the
@@ -672,6 +687,40 @@ impl ServerApp {
             }));
         }
 
+        if config.proxy.enabled {
+            for mount in &config.proxy.mounts {
+                if !mount.enabled {
+                    continue;
+                }
+                let proxies = proxies.clone();
+                let event_sink = event_sink.clone();
+                let cancel = cancel.clone();
+                let mount = mount.clone();
+                tasks.push(tokio::spawn(async move {
+                    let path: std::sync::Arc<str> = std::sync::Arc::from(mount.path.as_str());
+                    let upstream = match mount.upstream_config() {
+                        Ok(upstream) => upstream,
+                        Err(error) => {
+                            tracing::warn!(path = %mount.path, %error, "proxy config rejected");
+                            return;
+                        }
+                    };
+                    let startup_cache = upstream.startup_cache;
+                    let options = rtflow::mount::MountOptions::builder()
+                        .event_sink(event_sink)
+                        .startup_cache_config(startup_cache)
+                        .cancel(cancel.child_token())
+                        .build();
+                    match proxies.register(path.clone(), upstream, options).await {
+                        Ok(_) => tracing::info!(path = %path, "proxy mount registered"),
+                        Err(error) => {
+                            tracing::warn!(path = %path, %error, "proxy mount registration failed");
+                        }
+                    }
+                }));
+            }
+        }
+
         let rtsp_addr = rtsp.as_ref().map(|server| server.local_addr());
         tracing::info!(
             rtsp = ?rtsp_addr,
@@ -697,6 +746,7 @@ impl ServerApp {
             keys,
             discovery,
             vod,
+            proxies,
             config,
         })
     }

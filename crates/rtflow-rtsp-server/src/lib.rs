@@ -1,4 +1,6 @@
 mod proxy_runtime;
+pub mod proxy_service;
+pub use proxy_service::{ProxyService, ProxyStatus};
 mod session;
 mod tasks;
 mod timed_writer;
@@ -28,7 +30,6 @@ use rtflow_core::{
 };
 use rtflow_mount::{MountOptions, MountRegistry, continuity::StartupCacheConfig};
 use rtflow_rtsp::auth::{AllowAll, Authenticator};
-use rtflow_rtsp_client::{ClientOptions, RtspClient};
 use rtflow_runtime::{ShutdownReport, TaskSpec, TaskSupervisor, io::ControlConnection};
 #[cfg(feature = "tls")]
 use rtflow_security::TlsServerConfig;
@@ -64,6 +65,7 @@ struct State {
     peer_sessions: Mutex<HashMap<IpAddr, usize>>,
     connection_rate_limiter: ConnectionRateLimiter,
     timeline_epoch: std::time::Instant,
+    proxies: Arc<ProxyService>,
 }
 
 struct PeerSessionLease {
@@ -140,6 +142,24 @@ impl RtspServer {
     /// pass their shared registry here so RTSP sees RTMP/SRT-mounted streams;
     /// the caller is responsible for any metrics attachment on that registry.
     pub async fn bind_with(config: ServerConfig, mounts: Arc<MountRegistry>) -> Result<Self> {
+        Self::bind_with_proxies(config, mounts, None).await
+    }
+
+    /// Bind with an externally owned [`ProxyService`] so an application can
+    /// manage proxy mounts and RTSP sessions through one service.
+    pub async fn bind_with_proxy_service(
+        config: ServerConfig,
+        mounts: Arc<MountRegistry>,
+        proxies: Arc<ProxyService>,
+    ) -> Result<Self> {
+        Self::bind_with_proxies(config, mounts, Some(proxies)).await
+    }
+
+    async fn bind_with_proxies(
+        config: ServerConfig,
+        mounts: Arc<MountRegistry>,
+        proxies: Option<Arc<ProxyService>>,
+    ) -> Result<Self> {
         config.validate()?;
         let listener = TcpListener::bind(config.listen).await?;
         let local_addr = listener.local_addr()?;
@@ -154,31 +174,30 @@ impl RtspServer {
         let supervisor = TaskSupervisor::new(config.event_sink.clone());
         let connection_rate_limiter =
             ConnectionRateLimiter::new(config.security.connection_rate_limit)?;
+        let cancel = supervisor.cancellation_token();
+        let proxies = proxies.unwrap_or_else(|| {
+            ProxyService::new(
+                mounts.clone(),
+                supervisor.clone(),
+                cancel.clone(),
+                config.no_subscriber_grace,
+            )
+        });
         let state = Arc::new(State {
             mounts,
             session_slots: Arc::new(Semaphore::new(config.max_sessions)),
             next_session: AtomicU64::new(1),
-            cancel: supervisor.cancellation_token(),
+            cancel,
             supervisor,
             peer_sessions: Mutex::new(HashMap::new()),
             connection_rate_limiter,
             timeline_epoch: std::time::Instant::now(),
             config,
+            proxies,
         });
         // Gateway-style registries may already hold proxy mounts before the
         // RTSP server binds; start their subscriber watchers now.
-        for id in state.mounts.paths() {
-            if let Some(handle) = state.mounts.get_handle(id.as_str())
-                && matches!(handle.mount().config, MountConfig::Proxy { .. })
-            {
-                proxy_runtime::watch_proxy(
-                    handle.mount().clone(),
-                    state.cancel.clone(),
-                    state.supervisor.clone(),
-                    state.config.no_subscriber_grace,
-                );
-            }
-        }
+        state.proxies.watch_existing();
         emit(
             &state.config.event_sink,
             FrameworkEvent::Server(ServerEvent::Started { local_addr }),
@@ -366,6 +385,11 @@ impl RtspServer {
     pub fn registry(&self) -> Arc<MountRegistry> {
         self.state.mounts.clone()
     }
+
+    /// Proxy registration service used by this server.
+    pub fn proxy_service(&self) -> Arc<ProxyService> {
+        self.state.proxies.clone()
+    }
     pub async fn register_mount(
         &self,
         path: impl Into<Arc<str>>,
@@ -380,7 +404,7 @@ impl RtspServer {
     pub async fn register_mount_with(
         &self,
         path: impl Into<Arc<str>>,
-        mut config: MountConfig,
+        config: MountConfig,
         options: MountOptions,
     ) -> Result<MountHandle> {
         let path = path.into();
@@ -391,38 +415,6 @@ impl RtspServer {
         }
         if self.state.mounts.len() >= self.state.config.resource_limits.max_mounts {
             return Err(Error::Limit("mounts"));
-        }
-        if let MountConfig::Proxy { upstream } = &mut config
-            && upstream.cached_description.is_none()
-        {
-            let mut last_error = None;
-            for endpoint in upstream.endpoints() {
-                let mut builder = ClientOptions::builder()
-                    .transport(endpoint.transport)
-                    .request_timeout(endpoint.request_timeout)
-                    .jitter(endpoint.jitter);
-                if let Some(credentials) = endpoint.credentials {
-                    builder = builder.credentials(credentials);
-                }
-                #[cfg(feature = "tls")]
-                if let Some(tls) = endpoint.tls {
-                    builder = builder.tls(tls);
-                }
-                let options = match builder.build() {
-                    Ok(options) => options,
-                    Err(_) => continue,
-                };
-                match RtspClient::describe(endpoint.url, options).await {
-                    Ok(description) => {
-                        upstream.cached_description = Some(description);
-                        break;
-                    }
-                    Err(error) => last_error = Some(error),
-                }
-            }
-            if upstream.cached_description.is_none() {
-                return Err(last_error.unwrap_or(Error::Limit("proxy upstreams")));
-            }
         }
         let mut effective = options;
         if effective.consumer_queue_capacity.is_none() {
@@ -455,18 +447,18 @@ impl RtspServer {
         // One Mount construction path for every protocol server. This keeps
         // queue/cache/event/metrics wiring identical between RTSP, RTMP, SRT
         // and the gateway instead of maintaining a second copy here.
-        let handle = self
-            .state
-            .mounts
-            .register_with(path.clone(), config, effective)?;
-        if matches!(handle.mount().config, MountConfig::Proxy { .. }) {
-            crate::proxy_runtime::watch_proxy(
-                handle.mount().clone(),
-                self.state.cancel.clone(),
-                self.state.supervisor.clone(),
-                self.state.config.no_subscriber_grace,
-            );
-        }
+        let handle = match config {
+            MountConfig::Proxy { upstream } => {
+                self.state
+                    .proxies
+                    .register(path.clone(), *upstream, effective)
+                    .await?
+            }
+            other => self
+                .state
+                .mounts
+                .register_with(path.clone(), other, effective)?,
+        };
         #[cfg(feature = "multicast")]
         let mount = handle.mount().clone();
         #[cfg(feature = "multicast")]
@@ -622,10 +614,12 @@ async fn spawn_multicast_senders(
 }
 
 #[cfg(test)]
+use rtflow_rtsp_client::{ClientOptions, RtspClient};
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use rtflow_media::{Codec, MediaDescription, MediaKind, TrackDescription};
-    use rtflow_rtsp_client::{ClientOptions, RtspClient};
     #[tokio::test]
     async fn describe_registered_mount() {
         let server = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))

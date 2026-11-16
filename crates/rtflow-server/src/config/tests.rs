@@ -119,6 +119,34 @@ fn token_secrets_need_32_bytes() {
 }
 
 #[test]
+fn proxy_section_validates_and_redacts() {
+    let mut config = Config::default();
+    config.proxy.mounts.push(ProxyMount {
+        path: "/proxy/cam".into(),
+        upstreams: vec![ProxyUpstream {
+            url: "rtsp://user:secret@127.0.0.1:8554/live".into(),
+            username: Some("user".into()),
+            password: Some("secret".into()),
+            ..ProxyUpstream::default()
+        }],
+        ..ProxyMount::default()
+    });
+    assert!(config.validate().is_ok());
+    let text = config.redacted().to_toml().unwrap();
+    assert!(!text.contains("user:secret"), "{text}");
+    assert!(!text.contains("password = \"secret\""), "{text}");
+
+    config.proxy.mounts.push(config.proxy.mounts[0].clone());
+    assert!(config.validate().is_err());
+    config.proxy.mounts.pop();
+    config.proxy.mounts[0].path = "bad".into();
+    assert!(config.validate().is_err());
+    config.proxy.mounts[0].path = "/proxy/cam".into();
+    config.proxy.mounts[0].upstreams[0].url = "http://127.0.0.1/live".into();
+    assert!(config.validate().is_err());
+}
+
+#[test]
 fn comments_do_not_require_env_values() {
     assert_eq!(
         expand_env("# optional ${MISSING_FOR_TEST}\n").unwrap(),

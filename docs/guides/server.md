@@ -41,6 +41,37 @@ TSBPD + TLPKTDROP、HaiCrypt AES-CTR（含发送侧密钥刷新）。
 SRT 与 libsrt 系工具（ffmpeg、OBS、srt-live-transmit）互通：HSv5 握手、
 HSREQ/HSRSP 延迟协商、Stream ID、ACK/ACKACK/NAK、keepalive、TLPKTDROP。
 
+### RTSP 拉流代理
+
+```toml
+[proxy]
+enabled = true
+idle_grace = "5s"
+
+[[proxy.mounts]]
+path = "/cameras/front"
+
+[[proxy.mounts.upstreams]]
+url = "rtsp://192.0.2.10:554/live/main"
+transport = "tcp"          # auto | udp | tcp
+username = "admin"
+password = "${CAMERA_PASSWORD}"
+request_timeout = "5s"
+```
+
+代理在首个订阅者（RTSP/HLS/FLV 任一协议）出现时连接上游，最后一个订阅者离开并超过
+`idle_grace` 后断开；`mount` 与普通本地源一样参与 HLS/DASH/FLV/录制与路径鉴权。
+启动时服务端先 DESCRIBE 上游以注册 mount；上游离线时该代理注册失败并记录日志，
+当前需重启或重新加载配置后重试（动态 CRUD/自动重试见 `docs/roadmap/proxy.md`）。
+
+```text
+GET /api/v1/proxies          # 公开发现权限
+GET /admin/api/v1/proxies    # admin
+```
+
+返回代理路径、状态（idle/connecting/streaming/backoff）、订阅者、轨道数、上游主机
+（已脱敏）、重试次数与下次重试时间。
+
 ### SRT 拉流（server 作为 caller）
 
 ```toml

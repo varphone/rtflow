@@ -1,0 +1,194 @@
+//! RTSP pull-proxy configuration.
+use super::ConfigError;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+
+/// Top-level `[proxy]` section.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ProxySection {
+    pub enabled: bool,
+    #[serde(with = "humantime_serde")]
+    pub idle_grace: Duration,
+    pub mounts: Vec<ProxyMount>,
+}
+
+impl Default for ProxySection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            idle_grace: Duration::from_secs(5),
+            mounts: Vec::new(),
+        }
+    }
+}
+
+/// One configured proxy mount.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ProxyMount {
+    pub path: String,
+    pub enabled: bool,
+    #[serde(default, with = "humantime_serde")]
+    pub idle_grace: Option<Duration>,
+    pub upstreams: Vec<ProxyUpstream>,
+}
+
+impl Default for ProxyMount {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
+            enabled: true,
+            idle_grace: None,
+            upstreams: Vec::new(),
+        }
+    }
+}
+
+/// Upstream transport selection.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProxyTransport {
+    #[default]
+    Auto,
+    Udp,
+    Tcp,
+}
+
+/// One upstream RTSP endpoint.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ProxyUpstream {
+    pub url: String,
+    pub transport: ProxyTransport,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    #[serde(with = "humantime_serde")]
+    pub request_timeout: Duration,
+}
+
+impl Default for ProxyUpstream {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            transport: ProxyTransport::Auto,
+            username: None,
+            password: None,
+            request_timeout: Duration::from_secs(5),
+        }
+    }
+}
+
+impl ProxyTransport {
+    pub fn to_upstream(self) -> rtflow::mount::upstream::UpstreamTransport {
+        match self {
+            Self::Auto => rtflow::mount::upstream::UpstreamTransport::Auto,
+            Self::Udp => rtflow::mount::upstream::UpstreamTransport::Udp,
+            Self::Tcp => rtflow::mount::upstream::UpstreamTransport::TcpInterleaved,
+        }
+    }
+}
+
+impl ProxyMount {
+    /// Build the runtime upstream configuration.
+    pub fn upstream_config(&self) -> Result<rtflow::mount::upstream::UpstreamConfig, String> {
+        let first = self
+            .upstreams
+            .first()
+            .ok_or_else(|| format!("proxy mount {} has no upstreams", self.path))?;
+        let mut config = first.endpoint()?;
+        let mut upstream =
+            rtflow::mount::upstream::UpstreamConfig::new(config.url.clone(), config.transport);
+        upstream.credentials = config.credentials.take();
+        upstream.request_timeout = config.request_timeout;
+        for endpoint in self.upstreams.iter().skip(1) {
+            upstream.add_fallback(endpoint.endpoint()?);
+        }
+        Ok(upstream)
+    }
+}
+
+impl ProxyUpstream {
+    pub fn endpoint(&self) -> Result<rtflow::mount::upstream::UpstreamEndpoint, String> {
+        let url = url::Url::parse(&self.url)
+            .map_err(|error| format!("invalid proxy upstream {:?}: {error}", self.url))?;
+        if !matches!(url.scheme(), "rtsp" | "rtsps") {
+            return Err(format!(
+                "proxy upstream {:?} must use rtsp:// or rtsps://",
+                self.url
+            ));
+        }
+        if self.request_timeout.is_zero() {
+            return Err("proxy upstream request_timeout is zero".into());
+        }
+        let mut endpoint =
+            rtflow::mount::upstream::UpstreamEndpoint::new(url, self.transport.to_upstream());
+        endpoint.request_timeout = self.request_timeout;
+        if let (Some(username), Some(password)) = (&self.username, &self.password) {
+            endpoint.credentials = Some(rtflow::auth::Credentials {
+                username: username.clone(),
+                password: password.clone(),
+            });
+        }
+        Ok(endpoint)
+    }
+}
+
+impl ProxySection {
+    pub(super) fn validate(&self) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.idle_grace.is_zero() {
+            return Err(ConfigError::Invalid("proxy.idle_grace is zero".into()));
+        }
+        let mut paths = std::collections::HashSet::new();
+        for (index, mount) in self.mounts.iter().enumerate() {
+            if !mount.path.starts_with('/') || mount.path == "/" {
+                return Err(ConfigError::Invalid(format!(
+                    "proxy.mounts[{index}].path must start with '/' and not be root"
+                )));
+            }
+            if !paths.insert(mount.path.clone()) {
+                return Err(ConfigError::Invalid(format!(
+                    "duplicate proxy mount {}",
+                    mount.path
+                )));
+            }
+            if mount.upstreams.is_empty() {
+                return Err(ConfigError::Invalid(format!(
+                    "proxy.mounts[{index}] has no upstreams"
+                )));
+            }
+            if mount.idle_grace.is_some_and(|grace| grace.is_zero()) {
+                return Err(ConfigError::Invalid(format!(
+                    "proxy.mounts[{index}].idle_grace is zero"
+                )));
+            }
+            for (upstream_index, upstream) in mount.upstreams.iter().enumerate() {
+                upstream.endpoint().map_err(|error| {
+                    ConfigError::Invalid(format!(
+                        "proxy.mounts[{index}].upstreams[{upstream_index}]: {error}"
+                    ))
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn redact(&mut self) {
+        for mount in &mut self.mounts {
+            for upstream in &mut mount.upstreams {
+                if upstream.password.is_some() {
+                    upstream.password = Some("<redacted>".into());
+                }
+                if let Ok(mut url) = url::Url::parse(&upstream.url)
+                    && url.password().is_some()
+                {
+                    let _ = url.set_password(Some("redacted"));
+                    upstream.url = url.into();
+                }
+            }
+        }
+    }
+}

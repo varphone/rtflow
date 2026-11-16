@@ -5,7 +5,9 @@
 //! instead of silently disabling a feature.
 use serde::{Deserialize, Serialize};
 
+mod proxy;
 mod srt;
+pub use proxy::{ProxyMount, ProxySection, ProxyTransport, ProxyUpstream};
 pub use srt::{SrtPull, SrtPush, SrtSection};
 use std::{
     collections::BTreeMap,
@@ -34,6 +36,7 @@ pub struct Config {
     pub hooks: HooksSection,
     pub audit: AuditSection,
     pub discovery: DiscoverySection,
+    pub proxy: ProxySection,
     /// Static path rules. Keys are globs (`live/*`, `private/**`).
     pub paths: BTreeMap<String, PathRule>,
 }
@@ -458,6 +461,7 @@ impl Config {
         if copy.discovery.token.is_some() {
             copy.discovery.token = Some("<redacted>".into());
         }
+        copy.proxy.redact();
         copy
     }
 
@@ -573,6 +577,7 @@ impl Config {
                 "srt.pbkeylen must be 0, 16, 24 or 32".into(),
             ));
         }
+        self.proxy.validate()?;
         if self.hooks.timeout.is_zero() {
             return Err(ConfigError::Invalid("hooks.timeout is zero".into()));
         }
