@@ -55,6 +55,8 @@
 
 系统页支持复制/下载只读 TOML，以及复制数据库备份命令。
 
+系统页支持复制/下载只读 TOML 配置，并可复制数据库备份命令。
+
 ## 开发
 
 前端资源位于 `crates/rtflow-admin/src/assets/`，由 Rust `include_bytes!` 嵌入：
