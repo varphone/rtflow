@@ -2,6 +2,7 @@
 
 mod digest_proxy_auth;
 mod proxy_461;
+mod proxy_av_sync;
 mod proxy_failover;
 mod proxy_gstreamer;
 mod proxy_multicast;
