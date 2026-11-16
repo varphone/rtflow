@@ -5,6 +5,7 @@ import { playUrl } from "../player.js";
 
 let query = "";
 let status = "all";
+let sort = { field: "name", dir: 1 };
 
 export async function render(params) {
   const linked = params?.get("q");
@@ -34,13 +35,26 @@ export async function render(params) {
         bulk.textContent = selected.size ? `断开所选 (${selected.size})` : "断开所选";
       };
       const syncStatus = () => root.querySelectorAll("[data-live-status]").forEach((button) => button.classList.toggle("active", button.dataset.liveStatus === status));
-      const paint = () => {
+      const view = () => {
         const q = query.trim().toLowerCase();
-        visible = liveStreams.filter((stream) => {
+        const items = liveStreams.filter((stream) => {
           const match = !q || stream.path.toLowerCase().includes(q) || stream.name.toLowerCase().includes(q) || (stream.video?.codec || "").toLowerCase().includes(q);
           const state = status === "all" || (status === "live" ? stream.publisher : !stream.publisher);
           return match && state;
         });
+        const value = (stream) => {
+          if (sort.field === "status") return stream.publisher ? 0 : 1;
+          if (sort.field === "subscribers") return Number(stream.subscribers || 0);
+          if (sort.field === "frames") return Number(stream.accepted_frames || 0);
+          return stream.name.toLowerCase();
+        };
+        return items.sort((left, right) => {
+          const a = value(left), b = value(right);
+          return (a < b ? -1 : a > b ? 1 : 0) * sort.dir;
+        });
+      };
+      const paint = () => {
+        visible = view();
         count.textContent = `${visible.length} 条`;
         panel.innerHTML = visible.length ? table(visible, selected) : empty("没有匹配的流", "调整筛选条件或等待推流");
         const all = panel.querySelector("[data-select-all]");
@@ -94,12 +108,7 @@ export async function render(params) {
         let next;
         try { next = (await api("/streams")).items || []; } catch (_) { return; }
         liveStreams = next;
-        const filtered = next.filter((stream) => {
-          const q = query.trim().toLowerCase();
-          const match = !q || stream.path.toLowerCase().includes(q) || stream.name.toLowerCase().includes(q) || (stream.video?.codec || "").toLowerCase().includes(q);
-          const state = status === "all" || (status === "live" ? stream.publisher : !stream.publisher);
-          return match && state;
-        });
+        const filtered = view();
         const existing = [...panel.querySelectorAll("tr[data-stream]")].map((row) => row.dataset.stream);
         if (existing.length !== filtered.length || existing.some((path, index) => path !== filtered[index].path)) {
           visible = filtered;
@@ -128,6 +137,13 @@ export async function render(params) {
       root.querySelector("[data-live-auto]").onclick = () => setAuto(!automatic);
       root.querySelector("[data-live-refresh]").onclick = () => refresh();
       root.addEventListener("click", async (event) => {
+        const sorter = event.target.closest("[data-sort]");
+        if (sorter) {
+          const field = sorter.dataset.sort;
+          sort = { field, dir: sort.field === field ? -sort.dir : 1 };
+          paint();
+          return;
+        }
         const target = event.target.closest("[data-action]");
         if (!target) return;
         const action = target.dataset.action;
@@ -152,7 +168,12 @@ export async function render(params) {
 }
 
 function table(items, selected) {
-  return `<div class="table-wrap"><table class="data live-table"><thead><tr><th class="select-col"><input type="checkbox" data-select-all aria-label="选择全部"></th><th>流</th><th>状态</th><th>视频</th><th>音频</th><th>订阅</th><th>接收 / 丢弃</th><th></th></tr></thead><tbody>
+  const arrow = (field) => sort.field === field ? (sort.dir > 0 ? " ↑" : " ↓") : " ↕";
+  return `<div class="table-wrap"><table class="data live-table"><thead><tr><th class="select-col"><input type="checkbox" data-select-all aria-label="选择全部"></th>
+    <th><button class="sort-btn" data-sort="name">流${arrow("name")}</button></th>
+    <th><button class="sort-btn" data-sort="status">状态${arrow("status")}</button></th><th>视频</th><th>音频</th>
+    <th><button class="sort-btn" data-sort="subscribers">订阅${arrow("subscribers")}</button></th>
+    <th><button class="sort-btn" data-sort="frames">接收 / 丢弃${arrow("frames")}</button></th><th></th></tr></thead><tbody>
     ${items.map((stream) => `<tr data-stream="${esc(stream.path)}" class="${selected.has(stream.path) ? "selected" : ""}">
       <td class="select-col"><input type="checkbox" data-select="${esc(stream.path)}" ${selected.has(stream.path) ? "checked" : ""} aria-label="选择 ${esc(stream.name)}"></td>
       <td><button class="link-cell" data-action="detail" data-path="${esc(stream.path)}">${esc(stream.name)}</button><div class="cell-sub mono">${esc(stream.path)}</div></td>
