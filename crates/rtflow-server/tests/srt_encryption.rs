@@ -98,6 +98,17 @@ async fn srt_encrypted_publish_reaches_hls() {
     }
     assert!(online, "encrypted SRT publisher never appeared");
 
+    let stats = client
+        .get(format!("{http}/api/v1/srt"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(stats.contains("\"role\":\"listener\""), "{stats}");
+    assert!(stats.contains("\"encrypted\":true"), "{stats}");
+
     let mut playlist = String::new();
     for _ in 0..40 {
         if let Ok(response) = client

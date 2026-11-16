@@ -85,6 +85,7 @@ pub struct SrtCaller {
     latency_ms: u32,
     peer_idle_timeout: Duration,
     last_skipped: u64,
+    stream_id: Option<String>,
 }
 
 impl SrtCaller {
@@ -279,6 +280,7 @@ impl SrtCaller {
             latency_ms,
             peer_idle_timeout: config.peer_idle_timeout,
             last_skipped: 0,
+            stream_id: config.stream_id.clone(),
         })
     }
 
@@ -288,6 +290,31 @@ impl SrtCaller {
 
     pub fn latency_ms(&self) -> u32 {
         self.latency_ms
+    }
+
+    pub fn encrypted(&self) -> bool {
+        self.crypto.is_some()
+    }
+
+    /// Current connection statistics.
+    pub fn stats(&self) -> crate::SrtConnectionStats {
+        let stats = self.tsbpd.stats();
+        crate::SrtConnectionStats {
+            peer: self.remote,
+            stream_id: self.stream_id.clone(),
+            mount: None,
+            encrypted: self.crypto.is_some(),
+            latency_ms: self.latency_ms,
+            rtt_us: self.rtt_us,
+            packets_received: self.packets_received,
+            bytes_received: self.bytes_received,
+            delivered: stats.delivered,
+            skipped: stats.skipped,
+            loss_events: stats.loss_events,
+            undecryptable: 0,
+            duration_secs: self.started.elapsed().as_secs(),
+            srt_version: 0,
+        }
     }
 
     /// Receive the next decrypted MPEG-TS payload chunk.

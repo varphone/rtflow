@@ -4,8 +4,45 @@ use rtflow::{
     MountConfig, MountHandle, MountRegistry,
     srt::{SrtCaller, SrtCallerConfig, ts_demux::TsStreamDemuxer},
 };
-use std::{sync::Arc, time::Duration};
+use serde::Serialize;
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio_util::sync::CancellationToken;
+
+/// Runtime status of one configured pull source.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct SrtPullStatus {
+    pub remote: String,
+    pub stream_id: Option<String>,
+    pub mount: String,
+    pub connected: bool,
+    pub encrypted: bool,
+    pub bytes: u64,
+    pub rtt_us: u32,
+    pub skipped: u64,
+    pub last_error: Option<String>,
+}
+
+/// Create the status table for the configured pulls.
+pub fn status_table(config: &Config) -> Arc<Mutex<Vec<SrtPullStatus>>> {
+    let entries = config
+        .srt
+        .pull
+        .iter()
+        .map(|pull| SrtPullStatus {
+            remote: pull.remote.clone(),
+            stream_id: pull.stream_id.clone(),
+            mount: pull
+                .mount
+                .clone()
+                .unwrap_or_else(|| default_mount_path(pull)),
+            ..SrtPullStatus::default()
+        })
+        .collect();
+    Arc::new(Mutex::new(entries))
+}
 
 /// Spawn one task per configured pull source. Reconnects with exponential
 /// backoff until the server shuts down.
@@ -13,28 +50,47 @@ pub fn spawn(
     config: Arc<Config>,
     mounts: Arc<MountRegistry>,
     cancel: CancellationToken,
+    status: Arc<Mutex<Vec<SrtPullStatus>>>,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     config
         .srt
         .pull
         .iter()
         .cloned()
-        .map(|pull| {
+        .enumerate()
+        .map(|(index, pull)| {
             let mounts = mounts.clone();
             let cancel = cancel.clone();
             let base = config.clone();
+            let status = status.clone();
             tokio::spawn(async move {
-                run_pull(pull, base, mounts, cancel).await;
+                run_pull(pull, index, base, mounts, cancel, status).await;
             })
         })
         .collect()
 }
 
+fn update_status(
+    status: &Arc<Mutex<Vec<SrtPullStatus>>>,
+    index: usize,
+    update: impl FnOnce(&mut SrtPullStatus),
+) {
+    if let Some(entry) = status
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_mut(index)
+    {
+        update(entry);
+    }
+}
+
 async fn run_pull(
     pull: SrtPull,
+    index: usize,
     config: Arc<Config>,
     mounts: Arc<MountRegistry>,
     cancel: CancellationToken,
+    status: Arc<Mutex<Vec<SrtPullStatus>>>,
 ) {
     let mut backoff = Duration::from_secs(1);
     loop {
@@ -80,16 +136,39 @@ async fn run_pull(
                     .mount
                     .clone()
                     .unwrap_or_else(|| default_mount_path(&pull));
-                if let Err(error) = pump(caller, &mount_path, mounts.clone(), cancel.clone()).await
+                update_status(&status, index, |entry| {
+                    entry.connected = true;
+                    entry.encrypted = caller.encrypted();
+                    entry.mount = mount_path.clone();
+                    entry.last_error = None;
+                });
+                if let Err(error) = pump(
+                    caller,
+                    &mount_path,
+                    mounts.clone(),
+                    cancel.clone(),
+                    &status,
+                    index,
+                )
+                .await
                 {
                     tracing::warn!(%error, mount = %mount_path, "SRT pull: stream ended");
+                    update_status(&status, index, |entry| {
+                        entry.last_error = Some(error.to_string());
+                    });
                 }
+                update_status(&status, index, |entry| entry.connected = false);
                 if let Some(handle) = mounts.get_handle(&mount_path) {
                     handle.mount().cancel.cancel();
                 }
                 mounts.unregister(&mount_path);
             }
             Err(error) => {
+                let message = error.to_string();
+                update_status(&status, index, |entry| {
+                    entry.connected = false;
+                    entry.last_error = Some(message.clone());
+                });
                 tracing::warn!(remote = %pull.remote, %error, "SRT pull: connect failed");
             }
         }
@@ -106,6 +185,8 @@ async fn pump(
     mount_path: &str,
     mounts: Arc<MountRegistry>,
     cancel: CancellationToken,
+    status: &Arc<Mutex<Vec<SrtPullStatus>>>,
+    index: usize,
 ) -> rtflow::Result<()> {
     let mut demux = TsStreamDemuxer::new();
     let mut mount: Option<MountHandle> = None;
@@ -119,6 +200,14 @@ async fn pump(
             result = caller.recv() => result?,
         };
         demux.push(&payload);
+        {
+            let stats = caller.stats();
+            update_status(status, index, |entry| {
+                entry.bytes = stats.bytes_received;
+                entry.rtt_us = stats.rtt_us;
+                entry.skipped = stats.skipped;
+            });
+        }
         let units = demux.take_units();
         if units.is_empty() {
             continue;

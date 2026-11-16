@@ -18,6 +18,8 @@
 
 ### Added
 
+- SRT 新增连接统计（监听端与 caller），通过 `/api/v1/srt`、
+  `/admin/api/v1/srt` 暴露 peer、mount、RTT、丢包/跳包、加解密与拉流状态。
 - SRT 新增 caller（拉流）角色与 `SrtCaller` API；`rtflow-server` 支持
   `[[srt.pull]]` 主动拉取 SRT 源并注册为可播放/可录制 mount（断线指数退避）。
 - SRT 支持 HaiCrypt AES-CTR 加密（passphrase/pbkeylen/enforced_encryption），

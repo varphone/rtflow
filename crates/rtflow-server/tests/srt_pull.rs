@@ -114,6 +114,17 @@ async fn srt_pull_publishes_to_mount_and_hls() {
     }
     assert!(online, "pulled SRT mount never came online");
 
+    let stats = client
+        .get(format!("{http}/api/v1/srt"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(stats.contains("\"role\":\"caller\""), "{stats}");
+    assert!(stats.contains("\"connected\":true"), "{stats}");
+
     let mut playlist = String::new();
     for _ in 0..40 {
         if let Ok(response) = client

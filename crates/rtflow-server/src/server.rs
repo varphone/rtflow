@@ -303,10 +303,12 @@ impl ServerApp {
         let mut tasks = Vec::new();
 
         // SRT pull (caller) sources run for the lifetime of the server.
+        let srt_pull_status = crate::srt_pull::status_table(&config);
         tasks.extend(crate::srt_pull::spawn(
             config.clone(),
             mounts.clone(),
             cancel.clone(),
+            srt_pull_status.clone(),
         ));
 
         let rtsp = if config.rtsp.enabled {
@@ -363,6 +365,9 @@ impl ServerApp {
             (None, None)
         };
 
+        let mut srt_listener_stats: Option<
+            Arc<std::sync::RwLock<Vec<rtflow::srt::SrtConnectionStats>>>,
+        > = None;
         let (srt_addr, srt_cancel) = if config.srt.enabled {
             let srt_config = SrtConfig {
                 bind_addr: config.srt.listen,
@@ -380,6 +385,7 @@ impl ServerApp {
                 ..SrtConfig::default()
             };
             let server = SrtServer::with_config(srt_config, mounts.clone()).await?;
+            srt_listener_stats = Some(server.stats_handle());
             let addr = server.local_addr()?;
             let token = server.cancellation_token();
             let task = tokio::spawn(async move {
@@ -590,6 +596,8 @@ impl ServerApp {
             mounts.clone(),
             audit.clone(),
             admin.clone(),
+            srt_listener_stats,
+            srt_pull_status.clone(),
         )
         .await;
         // The console's catch-all assets route must be registered after the

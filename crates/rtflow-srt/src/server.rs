@@ -19,6 +19,7 @@ impl SrtServer {
             config: SrtConfig::default(),
             cancel: CancellationToken::new(),
             pending_cookies: std::sync::Mutex::new(HashMap::new()),
+            stats: Arc::new(std::sync::RwLock::new(Vec::new())),
         })
     }
 
@@ -36,7 +37,21 @@ impl SrtServer {
             config,
             cancel: CancellationToken::new(),
             pending_cookies: std::sync::Mutex::new(HashMap::new()),
+            stats: Arc::new(std::sync::RwLock::new(Vec::new())),
         })
+    }
+
+    /// Snapshot handle for live connection statistics.
+    pub fn stats_handle(&self) -> Arc<std::sync::RwLock<Vec<SrtConnectionStats>>> {
+        self.stats.clone()
+    }
+
+    /// Current connection statistics snapshot.
+    pub fn stats(&self) -> Vec<SrtConnectionStats> {
+        self.stats
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Get the local address the server is bound to.

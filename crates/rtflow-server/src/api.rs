@@ -30,6 +30,8 @@ pub(crate) async fn register_api_routes(
     mounts: Arc<MountRegistry>,
     audit_log: Option<Arc<AuditLog>>,
     admin: Option<Arc<rtflow::admin::Admin>>,
+    srt_listener: Option<Arc<std::sync::RwLock<Vec<rtflow::srt::SrtConnectionStats>>>>,
+    srt_pulls: Arc<std::sync::Mutex<Vec<crate::srt_pull::SrtPullStatus>>>,
 ) {
     let state = ApiState {
         config,
@@ -41,6 +43,8 @@ pub(crate) async fn register_api_routes(
         mounts,
         audit: audit_log,
         admin,
+        srt_listener,
+        srt_pulls,
         idempotency: std::sync::Mutex::new(std::collections::HashMap::new()),
     };
     let state = Arc::new(state);
@@ -138,6 +142,14 @@ pub(crate) async fn register_api_routes(
         "/api/v1/vods",
         api_public_json(state.clone(), |state, _req| async move {
             Ok(serde_json::to_value(state.vod.list()).unwrap_or_default())
+        }),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
+        "/api/v1/srt",
+        api_public_json(state.clone(), |state, _req| async move {
+            Ok(srt_status_json(&state))
         }),
     )
     .await;
@@ -326,6 +338,14 @@ pub(crate) async fn register_api_routes(
     .await;
     http.add_route(
         Method::Get,
+        "/admin/api/v1/srt",
+        api_json(state.clone(), |state, _req| async move {
+            Ok(srt_status_json(&state))
+        }),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
         "/admin/api/v1/recordings",
         api_json(state.clone(), |state, _req| async move {
             Ok(serde_json::to_value(state.recording.status()).unwrap_or_default())
@@ -461,6 +481,8 @@ struct ApiState {
     mounts: Arc<MountRegistry>,
     audit: Option<Arc<AuditLog>>,
     admin: Option<Arc<rtflow::admin::Admin>>,
+    srt_listener: Option<Arc<std::sync::RwLock<Vec<rtflow::srt::SrtConnectionStats>>>>,
+    srt_pulls: Arc<std::sync::Mutex<Vec<crate::srt_pull::SrtPullStatus>>>,
     /// Replayed responses for `Idempotency-Key` POSTs.
     idempotency: std::sync::Mutex<
         std::collections::HashMap<String, (std::time::Instant, u16, serde_json::Value)>,
@@ -471,6 +493,60 @@ fn audit(state: &ApiState, event: AuditEvent) {
     if let Some(log) = &state.audit {
         log.record(&event);
     }
+}
+
+fn srt_status_json(state: &ApiState) -> serde_json::Value {
+    let listener: Vec<serde_json::Value> = state
+        .srt_listener
+        .as_ref()
+        .map(|stats| {
+            stats
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .map(|entry| {
+                    json!({
+                        "role": "listener",
+                        "peer": entry.peer.to_string(),
+                        "stream_id": entry.stream_id,
+                        "mount": entry.mount,
+                        "encrypted": entry.encrypted,
+                        "latency_ms": entry.latency_ms,
+                        "rtt_us": entry.rtt_us,
+                        "packets": entry.packets_received,
+                        "bytes": entry.bytes_received,
+                        "delivered": entry.delivered,
+                        "skipped": entry.skipped,
+                        "losses": entry.loss_events,
+                        "undecryptable": entry.undecryptable,
+                        "duration_secs": entry.duration_secs,
+                        "srt_version": format!("{:#x}", entry.srt_version),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let pulls: Vec<serde_json::Value> = state
+        .srt_pulls
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .map(|entry| {
+            json!({
+                "role": "caller",
+                "remote": entry.remote,
+                "stream_id": entry.stream_id,
+                "mount": entry.mount,
+                "connected": entry.connected,
+                "encrypted": entry.encrypted,
+                "bytes": entry.bytes,
+                "rtt_us": entry.rtt_us,
+                "skipped": entry.skipped,
+                "last_error": entry.last_error,
+            })
+        })
+        .collect();
+    json!({"listener": listener, "pulls": pulls})
 }
 
 fn api_json<F, Fut>(state: Arc<ApiState>, handler: F) -> Handler

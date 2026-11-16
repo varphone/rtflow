@@ -62,6 +62,29 @@ pub struct SrtServer {
     cancel: CancellationToken,
     /// SYN cookies issued during induction, pending conclusion verification.
     pending_cookies: std::sync::Mutex<HashMap<SocketAddr, PendingCookie>>,
+    /// Snapshot of live connections, refreshed by the maintenance loop.
+    stats: Arc<std::sync::RwLock<Vec<SrtConnectionStats>>>,
+}
+
+/// Per-connection SRT statistics exposed for monitoring.
+#[derive(Clone, Debug)]
+pub struct SrtConnectionStats {
+    pub peer: SocketAddr,
+    pub stream_id: Option<String>,
+    pub mount: Option<String>,
+    pub encrypted: bool,
+    /// Negotiated receiver latency, milliseconds.
+    pub latency_ms: u32,
+    /// Smoothed round-trip time, microseconds.
+    pub rtt_us: u32,
+    pub packets_received: u64,
+    pub bytes_received: u64,
+    pub delivered: u64,
+    pub skipped: u64,
+    pub loss_events: u64,
+    pub undecryptable: u64,
+    pub duration_secs: u64,
+    pub srt_version: u32,
 }
 
 /// Handshake state kept between the induction and conclusion messages.

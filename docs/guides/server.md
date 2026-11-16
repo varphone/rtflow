@@ -152,6 +152,25 @@ curl -u admin:password -X DELETE http://127.0.0.1:8080/admin/api/v1/keys/<kid>
 - `paths.<rule>.max_readers`：观看人数上限。鉴权时按 mount 当前订阅数检查，属于准入控制（并发鉴权可能短暂超出）。
 - `rtsp.max_sessions`、`[security]` 的连接限流仍是硬上限。
 
+## SRT 状态 API
+
+```text
+GET /api/v1/srt          # 公开发现权限（或 admin Basic）
+GET /admin/api/v1/srt    # admin Basic / 会话 / token
+```
+
+返回监听连接与拉流源的实时状态：
+
+```json
+{
+  "listener": [{"peer":"…","stream_id":"live/cam","mount":"/live/cam",
+                "encrypted":true,"rtt_us":124,"packets":42,"delivered":42,
+                "skipped":0,"losses":0,"latency_ms":120}],
+  "pulls":    [{"remote":"…","mount":"/live/pulled","connected":true,
+                "bytes":67680,"rtt_us":120,"last_error":null}]
+}
+```
+
 ## 指标
 
 `/metrics` 输出 Prometheus 文本：框架连接/会话/协议计数之外，还有应用级指标：

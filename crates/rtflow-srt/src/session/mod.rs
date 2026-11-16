@@ -101,6 +101,35 @@ impl SrtServer {
             }
         }
 
+        // Refresh the monitoring snapshot before dropping expired entries so
+        // callers see the final counters once, then they disappear.
+        let snapshot: Vec<SrtConnectionStats> = connections
+            .iter()
+            .map(|(peer, conn)| {
+                let stats = conn.tsbpd.stats();
+                SrtConnectionStats {
+                    peer: *peer,
+                    stream_id: conn.stream_id.clone(),
+                    mount: conn.mount_path.clone(),
+                    encrypted: conn.crypto.is_some(),
+                    latency_ms: conn.latency_ms,
+                    rtt_us: conn.rtt_us,
+                    packets_received: conn.packets_received,
+                    bytes_received: conn.bytes_received,
+                    delivered: stats.delivered,
+                    skipped: stats.skipped,
+                    loss_events: stats.loss_events,
+                    undecryptable: conn.undecryptable,
+                    duration_secs: conn.start_time.elapsed().as_secs(),
+                    srt_version: conn.peer_caps.srt_version,
+                }
+            })
+            .collect();
+        *self
+            .stats
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
+
         for peer in expired {
             warn!(peer = %peer, "SRT: connection timed out (no keepalive)");
             if let Some(conn) = connections.get(&peer) {
