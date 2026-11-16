@@ -74,7 +74,6 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
                 return Err((400, "missing SRT endpoint id".into()));
             };
             state.srt.delete(id).map_err(|error| (404, error))?;
-            state.srt.reload();
             audit(&state, AuditEvent::new("srt.delete", "ok").detail(id));
             Ok(json!({"deleted": id}))
         }),
@@ -121,7 +120,6 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
                 return Err((400, "missing SRT endpoint id".into()));
             };
             state.srt.delete(id).map_err(|error| (404, error))?;
-            state.srt.reload();
             audit(&state, AuditEvent::new("srt.delete", "ok").detail(id));
             Ok(json!({"deleted": id}))
         }),
@@ -186,7 +184,6 @@ async fn srt_upsert(
         .srt
         .upsert(record, replace)
         .map_err(|error| (409, error))?;
-    state.srt.reload();
     audit(
         state,
         AuditEvent::new("srt.upsert", "ok").detail(format!("{direction:?}/{id}")),

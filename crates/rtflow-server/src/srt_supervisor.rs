@@ -1,8 +1,4 @@
 //! Dynamic SRT pull/push endpoints backed by the business database.
-//!
-//! Mutations restart the SRT task set as a unit. This is deliberately simple:
-//! SRT endpoints are few, and reconnecting all of them is preferable to a
-//! partially applied change while the database is authoritative.
 use crate::{
     config::Config,
     store::{
@@ -13,18 +9,16 @@ use crate::{
 use rtflow::MountRegistry;
 use serde_json::{Value, json};
 use std::{
+    collections::HashMap,
     sync::{Arc, Mutex, RwLock},
-    time::Duration,
 };
 use tokio_util::sync::CancellationToken;
 
-struct Current {
+struct RecordTask {
     cancel: CancellationToken,
     tasks: Vec<tokio::task::JoinHandle<()>>,
-    pull_status: Arc<Mutex<Vec<crate::srt_pull::SrtPullStatus>>>,
-    push_status: Arc<Mutex<Vec<crate::srt_push::SrtPushStatus>>>,
-    pull_ids: Vec<String>,
-    push_ids: Vec<String>,
+    pull_status: Option<Arc<Mutex<Vec<crate::srt_pull::SrtPullStatus>>>>,
+    push_status: Option<Arc<Mutex<Vec<crate::srt_push::SrtPushStatus>>>>,
 }
 
 pub struct SrtSupervisor {
@@ -33,7 +27,7 @@ pub struct SrtSupervisor {
     mounts: Arc<MountRegistry>,
     cancel: CancellationToken,
     records: RwLock<Vec<SrtRecord>>,
-    current: Mutex<Option<Current>>,
+    tasks: Mutex<HashMap<String, RecordTask>>,
 }
 
 impl SrtSupervisor {
@@ -89,7 +83,7 @@ impl SrtSupervisor {
             mounts,
             cancel,
             records: RwLock::new(records),
-            current: Mutex::new(None),
+            tasks: Mutex::new(HashMap::new()),
         });
         supervisor.reload();
         Ok(supervisor)
@@ -102,62 +96,96 @@ impl SrtSupervisor {
             .clone()
     }
 
+    /// Restart every endpoint. Used at startup and after a full reload.
     pub fn reload(self: &Arc<Self>) {
-        if let Some(current) = self
-            .current
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
         {
-            current.cancel.cancel();
-            for task in current.tasks {
-                task.abort();
+            let mut tasks = self
+                .tasks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for (_, task) in tasks.drain() {
+                task.cancel.cancel();
+                for handle in task.tasks {
+                    handle.abort();
+                }
             }
         }
-        let records = self.records();
-        let pulls: Vec<_> = records
-            .iter()
-            .filter(|record| record.enabled && record.direction == SrtDirection::Pull)
-            .map(|record| (record.id.clone(), record.pull()))
-            .collect();
-        let pushes: Vec<_> = records
-            .iter()
-            .filter(|record| record.enabled && record.direction == SrtDirection::Push)
-            .map(|record| (record.id.clone(), record.push()))
-            .collect();
-        let mut runtime = (*self.config).clone();
-        runtime.srt.pull = pulls.iter().map(|(_, pull)| pull.clone()).collect();
-        runtime.srt.push = pushes.iter().map(|(_, push)| push.clone()).collect();
-        let runtime = Arc::new(runtime);
-        let cancel = self.cancel.child_token();
-        let pull_status = crate::srt_pull::status_table(&runtime);
-        let push_status = crate::srt_push::status_table(&runtime);
-        let mut tasks = crate::srt_pull::spawn(
-            runtime.clone(),
-            self.mounts.clone(),
-            cancel.clone(),
-            pull_status.clone(),
-        );
-        tasks.extend(crate::srt_push::spawn(
-            runtime,
-            self.mounts.clone(),
-            cancel.clone(),
-            push_status.clone(),
-        ));
-        *self
-            .current
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Current {
-            cancel,
-            tasks,
-            pull_status,
-            push_status,
-            pull_ids: pulls.iter().map(|(id, _)| id.clone()).collect(),
-            push_ids: pushes.iter().map(|(id, _)| id.clone()).collect(),
-        });
+        for record in self.records() {
+            self.start(&record);
+        }
     }
 
-    pub fn upsert(&self, record: SrtRecord, replace: bool) -> Result<(), String> {
+    fn start(self: &Arc<Self>, record: &SrtRecord) {
+        if !record.enabled {
+            return;
+        }
+        let mut runtime = (*self.config).clone();
+        runtime.srt.pull.clear();
+        runtime.srt.push.clear();
+        match record.direction {
+            SrtDirection::Pull => runtime.srt.pull.push(record.pull()),
+            SrtDirection::Push => runtime.srt.push.push(record.push()),
+        }
+        let runtime = Arc::new(runtime);
+        let cancel = self.cancel.child_token();
+        let (tasks, pull_status, push_status) = match record.direction {
+            SrtDirection::Pull => {
+                let status = crate::srt_pull::status_table(&runtime);
+                let tasks = crate::srt_pull::spawn(
+                    runtime,
+                    self.mounts.clone(),
+                    cancel.clone(),
+                    status.clone(),
+                );
+                (tasks, Some(status), None)
+            }
+            SrtDirection::Push => {
+                let status = crate::srt_push::status_table(&runtime);
+                let tasks = crate::srt_push::spawn(
+                    runtime,
+                    self.mounts.clone(),
+                    cancel.clone(),
+                    status.clone(),
+                );
+                (tasks, None, Some(status))
+            }
+        };
+        self.tasks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                record.id.clone(),
+                RecordTask {
+                    cancel,
+                    tasks,
+                    pull_status,
+                    push_status,
+                },
+            );
+    }
+
+    fn stop(&self, id: &str) {
+        if let Some(task) = self
+            .tasks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(id)
+        {
+            task.cancel.cancel();
+            for handle in task.tasks {
+                handle.abort();
+            }
+        }
+    }
+
+    fn restart(self: &Arc<Self>, id: &str) {
+        self.stop(id);
+        if let Some(record) = self.records().into_iter().find(|record| record.id == id) {
+            self.start(&record);
+        }
+    }
+
+    pub fn upsert(self: &Arc<Self>, record: SrtRecord, replace: bool) -> Result<(), String> {
         let existing =
             store::srt::revision(&self.store, &record.id).map_err(|error| error.to_string())?;
         match (existing, replace) {
@@ -171,11 +199,12 @@ impl SrtSupervisor {
             }
         }
         self.refresh_records();
-        // `reload` needs Arc; this method is only called through Arc in the API.
+        self.restart(&record.id);
         Ok(())
     }
 
-    pub fn delete(&self, id: &str) -> Result<(), String> {
+    pub fn delete(self: &Arc<Self>, id: &str) -> Result<(), String> {
+        self.stop(id);
         store::srt::delete(&self.store, id).map_err(|error| error.to_string())?;
         self.refresh_records();
         Ok(())
@@ -200,8 +229,8 @@ impl SrtSupervisor {
 
     fn status_json(&self, direction: SrtDirection) -> Value {
         let records = self.records();
-        let current = self
-            .current
+        let tasks = self
+            .tasks
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut values = Vec::new();
@@ -222,37 +251,36 @@ impl SrtSupervisor {
                 "latency_ms": record.latency_ms,
                 "connected": false,
             });
-            match (direction, &*current) {
-                (SrtDirection::Pull, Some(current)) => {
-                    if let Some(status) = current
-                        .pull_ids
-                        .iter()
-                        .position(|id| id == &record.id)
-                        .and_then(|index| current.pull_status.lock().ok()?.get(index).cloned())
-                    {
-                        value["connected"] = json!(status.connected);
-                        value["encrypted"] = json!(status.encrypted);
-                        value["bytes"] = json!(status.bytes);
-                        value["rtt_us"] = json!(status.rtt_us);
-                        value["skipped"] = json!(status.skipped);
-                        value["last_error"] = json!(status.last_error);
+            if let Some(task) = tasks.get(&record.id) {
+                match direction {
+                    SrtDirection::Pull => {
+                        if let Some(status) = task
+                            .pull_status
+                            .as_ref()
+                            .and_then(|status| status.lock().ok()?.first().cloned())
+                        {
+                            value["connected"] = json!(status.connected);
+                            value["encrypted"] = json!(status.encrypted);
+                            value["bytes"] = json!(status.bytes);
+                            value["rtt_us"] = json!(status.rtt_us);
+                            value["skipped"] = json!(status.skipped);
+                            value["last_error"] = json!(status.last_error);
+                        }
+                    }
+                    SrtDirection::Push => {
+                        if let Some(status) = task
+                            .push_status
+                            .as_ref()
+                            .and_then(|status| status.lock().ok()?.first().cloned())
+                        {
+                            value["connected"] = json!(status.connected);
+                            value["encrypted"] = json!(status.encrypted);
+                            value["bytes"] = json!(status.bytes_sent);
+                            value["rtt_us"] = json!(status.rtt_us);
+                            value["last_error"] = json!(status.last_error);
+                        }
                     }
                 }
-                (SrtDirection::Push, Some(current)) => {
-                    if let Some(status) = current
-                        .push_ids
-                        .iter()
-                        .position(|id| id == &record.id)
-                        .and_then(|index| current.push_status.lock().ok()?.get(index).cloned())
-                    {
-                        value["connected"] = json!(status.connected);
-                        value["encrypted"] = json!(status.encrypted);
-                        value["bytes"] = json!(status.bytes_sent);
-                        value["rtt_us"] = json!(status.rtt_us);
-                        value["last_error"] = json!(status.last_error);
-                    }
-                }
-                _ => {}
             }
             values.push(value);
         }
@@ -261,21 +289,15 @@ impl SrtSupervisor {
 
     #[allow(dead_code)]
     pub fn shutdown(&self) {
-        if let Some(current) = self
-            .current
+        let mut tasks = self
+            .tasks
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
-            current.cancel.cancel();
-            for task in current.tasks {
-                task.abort();
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (_, task) in tasks.drain() {
+            task.cancel.cancel();
+            for handle in task.tasks {
+                handle.abort();
             }
         }
     }
-}
-
-#[allow(dead_code)]
-fn _duration(value: Duration) -> Duration {
-    value
 }
