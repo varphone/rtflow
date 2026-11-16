@@ -48,4 +48,5 @@ zeroize.workspace = true
 
 [dev-dependencies]
 rcgen.workspace = true
+rtflow-testkit.workspace = true
 tempfile = "3"
