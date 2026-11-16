@@ -13,12 +13,13 @@ pub(crate) fn register_configured(
     if !config.enabled {
         return;
     }
+    let mut active = proxies.statuses().len();
     for mount in &config.mounts {
         if !mount.enabled {
             continue;
         }
         let path: Arc<str> = Arc::from(mount.path.as_str());
-        let Ok(upstream) = mount.upstream_config() else {
+        let Ok(upstream) = mount.upstream_config_with(config.redirect_policy) else {
             continue;
         };
         let startup_cache = upstream.startup_cache;
@@ -27,6 +28,11 @@ pub(crate) fn register_configured(
             .startup_cache_config(startup_cache)
             .cancel(cancel.child_token())
             .build();
+        if active >= config.max_proxies {
+            tracing::warn!(path = %mount.path, max = config.max_proxies, "proxy limit reached");
+            continue;
+        }
+        active += 1;
         if let Err(error) = proxies.ensure(
             path,
             upstream,
@@ -82,7 +88,7 @@ pub(crate) fn apply_reload(
             continue;
         }
         proxies.remove(path);
-        let Ok(upstream) = mount.upstream_config() else {
+        let Ok(upstream) = mount.upstream_config_with(new.redirect_policy) else {
             continue;
         };
         let startup_cache = upstream.startup_cache;

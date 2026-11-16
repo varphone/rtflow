@@ -1,6 +1,6 @@
 mod proxy_runtime;
 pub mod proxy_service;
-pub use proxy_service::{ProxyService, ProxyStatus};
+pub use proxy_service::{ProxyPolicy, ProxyService, ProxyStatus};
 mod session;
 mod tasks;
 mod timed_writer;

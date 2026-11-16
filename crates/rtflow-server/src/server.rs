@@ -321,11 +321,15 @@ impl ServerApp {
         let cancel = CancellationToken::new();
         let proxy_supervisor = rtflow::runtime::TaskSupervisor::new(event_sink.clone());
         let proxy_config = Arc::new(std::sync::RwLock::new(config.proxy.clone()));
-        let proxies = rtflow::server::ProxyService::new(
+        let proxies = rtflow::server::ProxyService::new_with_policy(
             mounts.clone(),
             proxy_supervisor,
             cancel.clone(),
             config.proxy.idle_grace,
+            rtflow::server::ProxyPolicy {
+                allow_private_networks: config.proxy.allow_private_networks,
+                allowed_hosts: config.proxy.allowed_hosts.clone(),
+            },
         );
         let mut cancels = Vec::new();
         let mut tasks = Vec::new();

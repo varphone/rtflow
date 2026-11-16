@@ -25,6 +25,8 @@ pub struct UpstreamEndpoint {
     pub credentials: Option<Credentials>,
     pub request_timeout: Duration,
     pub media_idle_timeout: Duration,
+    pub follow_redirects: bool,
+    pub allow_cross_origin_redirect: bool,
     pub jitter: JitterBufferConfig,
     #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
@@ -38,6 +40,8 @@ impl UpstreamEndpoint {
             credentials: None,
             request_timeout: Duration::from_secs(5),
             media_idle_timeout: Duration::from_secs(15),
+            follow_redirects: true,
+            allow_cross_origin_redirect: false,
             jitter: JitterBufferConfig::default(),
             #[cfg(feature = "tls")]
             tls: None,
@@ -222,6 +226,8 @@ pub struct UpstreamConfig {
     pub reconnect: ReconnectPolicy,
     pub request_timeout: Duration,
     pub media_idle_timeout: Duration,
+    pub follow_redirects: bool,
+    pub allow_cross_origin_redirect: bool,
     pub jitter: JitterBufferConfig,
     #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
@@ -241,6 +247,8 @@ impl UpstreamConfig {
             reconnect: ReconnectPolicy::default(),
             request_timeout: Duration::from_secs(5),
             media_idle_timeout: Duration::from_secs(15),
+            follow_redirects: true,
+            allow_cross_origin_redirect: false,
             jitter: JitterBufferConfig::default(),
             #[cfg(feature = "tls")]
             tls: None,
@@ -263,6 +271,8 @@ impl UpstreamConfig {
             credentials: self.credentials.clone(),
             request_timeout: self.request_timeout,
             media_idle_timeout: self.media_idle_timeout,
+            follow_redirects: self.follow_redirects,
+            allow_cross_origin_redirect: self.allow_cross_origin_redirect,
             jitter: self.jitter.clone(),
             #[cfg(feature = "tls")]
             tls: self.tls.clone(),
@@ -310,6 +320,8 @@ impl TryFrom<ProxyRoute> for UpstreamConfig {
         config.credentials = primary.credentials;
         config.request_timeout = primary.request_timeout;
         config.media_idle_timeout = primary.media_idle_timeout;
+        config.follow_redirects = primary.follow_redirects;
+        config.allow_cross_origin_redirect = primary.allow_cross_origin_redirect;
         config.jitter = primary.jitter;
         #[cfg(feature = "tls")]
         {

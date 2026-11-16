@@ -213,6 +213,8 @@ async fn run_proxy(
         let mut builder = ClientOptions::builder()
             .transport(endpoint.transport)
             .request_timeout(endpoint.request_timeout)
+            .follow_redirects(endpoint.follow_redirects)
+            .allow_cross_origin_redirect(endpoint.allow_cross_origin_redirect)
             .jitter(endpoint.jitter.clone());
         if let Some(credentials) = endpoint.credentials.clone() {
             builder = builder.credentials(credentials);

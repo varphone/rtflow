@@ -14,6 +14,22 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+/// Network policy applied to upstream endpoints.
+#[derive(Clone, Debug)]
+pub struct ProxyPolicy {
+    pub allow_private_networks: bool,
+    pub allowed_hosts: Vec<String>,
+}
+
+impl Default for ProxyPolicy {
+    fn default() -> Self {
+        Self {
+            allow_private_networks: true,
+            allowed_hosts: Vec::new(),
+        }
+    }
+}
+
 /// Status of one configured proxy mount.
 #[derive(Clone, Debug)]
 pub struct ProxyStatus {
@@ -58,6 +74,7 @@ pub struct ProxyService {
     supervisor: TaskSupervisor,
     cancel: CancellationToken,
     default_grace: Duration,
+    policy: ProxyPolicy,
     entries: Mutex<HashMap<Arc<str>, Arc<Mutex<Entry>>>>,
 }
 
@@ -68,11 +85,28 @@ impl ProxyService {
         cancel: CancellationToken,
         no_subscriber_grace: Duration,
     ) -> Arc<Self> {
+        Self::new_with_policy(
+            mounts,
+            supervisor,
+            cancel,
+            no_subscriber_grace,
+            ProxyPolicy::default(),
+        )
+    }
+
+    pub fn new_with_policy(
+        mounts: Arc<MountRegistry>,
+        supervisor: TaskSupervisor,
+        cancel: CancellationToken,
+        no_subscriber_grace: Duration,
+        policy: ProxyPolicy,
+    ) -> Arc<Self> {
         Arc::new(Self {
             mounts,
             supervisor,
             cancel,
             default_grace: no_subscriber_grace,
+            policy,
             entries: Mutex::new(HashMap::new()),
         })
     }
@@ -91,7 +125,7 @@ impl ProxyService {
             return Err(rtflow_core::error::Error::Limit("proxy upstreams"));
         }
         if upstream.cached_description.is_none() {
-            upstream.cached_description = Some(describe_upstream(&upstream).await?);
+            upstream.cached_description = Some(describe_upstream(&upstream, &self.policy).await?);
         }
         let status_upstream = upstream.clone();
         let config = MountConfig::Proxy {
@@ -199,7 +233,7 @@ impl ProxyService {
                     entry.cancel.clone(),
                 )
             };
-            match describe_upstream(&upstream).await {
+            match describe_upstream(&upstream, &self.policy).await {
                 Ok(description) => {
                     upstream.cached_description = Some(description);
                     let config = MountConfig::Proxy {
@@ -362,12 +396,19 @@ fn validate_path(path: &str) -> rtflow_core::error::Result<()> {
 
 async fn describe_upstream(
     upstream: &UpstreamConfig,
+    policy: &ProxyPolicy,
 ) -> rtflow_core::error::Result<rtflow_media::MediaDescription> {
     let mut last_error = None;
     for endpoint in upstream.endpoints() {
+        if let Err(error) = validate_endpoint(&endpoint, policy).await {
+            last_error = Some(error);
+            continue;
+        }
         let mut builder = ClientOptions::builder()
             .transport(endpoint.transport)
             .request_timeout(endpoint.request_timeout)
+            .follow_redirects(endpoint.follow_redirects)
+            .allow_cross_origin_redirect(endpoint.allow_cross_origin_redirect)
             .jitter(endpoint.jitter);
         if let Some(credentials) = endpoint.credentials {
             builder = builder.credentials(credentials);
@@ -455,4 +496,102 @@ fn sanitize_description(
         }
     }
     description
+}
+
+async fn validate_endpoint(
+    endpoint: &rtflow_mount::upstream::UpstreamEndpoint,
+    policy: &ProxyPolicy,
+) -> rtflow_core::error::Result<()> {
+    let host = endpoint
+        .url
+        .host_str()
+        .ok_or_else(|| rtflow_core::error::Error::InvalidConfig("proxy URL has no host".into()))?;
+    let port = endpoint.url.port_or_known_default().unwrap_or(554);
+    if !policy.allowed_hosts.is_empty() && !host_matches(host, port, &policy.allowed_hosts) {
+        return Err(rtflow_core::error::Error::InvalidConfig(format!(
+            "proxy host {host} is not in proxy.allowed_hosts"
+        )));
+    }
+    if policy.allow_private_networks {
+        return Ok(());
+    }
+    let addresses = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|error| {
+            rtflow_core::error::Error::InvalidConfig(format!("proxy DNS lookup failed: {error}"))
+        })?;
+    for address in addresses {
+        if is_non_public(address.ip()) {
+            return Err(rtflow_core::error::Error::InvalidConfig(format!(
+                "proxy host {host} resolves to non-public address {}",
+                address.ip()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn host_matches(host: &str, port: u16, patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| {
+        let pattern = pattern.trim();
+        if let Ok(cidr) = pattern.parse::<rtflow_security::IpCidr>()
+            && let Ok(address) = host.parse::<std::net::IpAddr>()
+        {
+            return cidr.contains(address);
+        }
+        if let Some(suffix) = pattern.strip_prefix("*.") {
+            return host.len() > suffix.len()
+                && host.ends_with(suffix)
+                && host.as_bytes()[host.len() - suffix.len() - 1] == b'.';
+        }
+        pattern == host || pattern == format!("{host}:{port}")
+    })
+}
+
+fn is_non_public(address: std::net::IpAddr) -> bool {
+    match address {
+        std::net::IpAddr::V4(address) => {
+            address.is_private()
+                || address.is_loopback()
+                || address.is_link_local()
+                || address.is_unspecified()
+                || address.is_broadcast()
+        }
+        std::net::IpAddr::V6(address) => {
+            address.is_loopback()
+                || address.is_unspecified()
+                || address.is_multicast()
+                || address.is_unique_local()
+                || address.is_unicast_link_local()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_allow_list_matches_hosts_wildcards_and_cidrs() {
+        let patterns = vec![
+            "camera.local".to_string(),
+            "*.example.com".to_string(),
+            "10.0.0.0/8".to_string(),
+            "rtsp.example.net:8554".to_string(),
+        ];
+        assert!(host_matches("camera.local", 554, &patterns));
+        assert!(host_matches("cam.example.com", 554, &patterns));
+        assert!(host_matches("10.2.3.4", 554, &patterns));
+        assert!(host_matches("rtsp.example.net", 8554, &patterns));
+        assert!(!host_matches("example.com", 554, &patterns));
+        assert!(!host_matches("192.168.1.1", 554, &patterns));
+    }
+
+    #[test]
+    fn private_and_loopback_addresses_are_non_public() {
+        assert!(is_non_public("127.0.0.1".parse().unwrap()));
+        assert!(is_non_public("192.168.1.10".parse().unwrap()));
+        assert!(is_non_public("169.254.1.1".parse().unwrap()));
+        assert!(!is_non_public("8.8.8.8".parse().unwrap()));
+    }
 }

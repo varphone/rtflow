@@ -47,6 +47,10 @@ HSREQ/HSRSP 延迟协商、Stream ID、ACK/ACKACK/NAK、keepalive、TLPKTDROP。
 [proxy]
 enabled = true
 idle_grace = "5s"
+max_proxies = 128
+allow_private_networks = true   # 公网部署可关；关闭时拒绝私网/loopback 上游
+allowed_hosts = []              # 空=不限；支持 host、host:port、*.domain、CIDR
+redirect_policy = "same-origin" # none | same-origin | any
 
 [[proxy.mounts]]
 path = "/cameras/front"

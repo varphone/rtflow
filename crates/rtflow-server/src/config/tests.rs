@@ -144,6 +144,9 @@ fn proxy_section_validates_and_redacts() {
     config.proxy.mounts[0].path = "/proxy/cam".into();
     config.proxy.mounts[0].upstreams[0].url = "http://127.0.0.1/live".into();
     assert!(config.validate().is_err());
+    config.proxy.mounts[0].upstreams[0].url = "rtsp://127.0.0.1/live".into();
+    config.proxy.allowed_hosts = vec!["10.0.0.0/99".into()];
+    assert!(config.validate().is_err());
 }
 
 #[test]

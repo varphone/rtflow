@@ -10,6 +10,10 @@ pub struct ProxySection {
     pub enabled: bool,
     #[serde(with = "humantime_serde")]
     pub idle_grace: Duration,
+    pub max_proxies: usize,
+    pub allow_private_networks: bool,
+    pub allowed_hosts: Vec<String>,
+    pub redirect_policy: RedirectPolicy,
     pub mounts: Vec<ProxyMount>,
 }
 
@@ -18,6 +22,10 @@ impl Default for ProxySection {
         Self {
             enabled: true,
             idle_grace: Duration::from_secs(5),
+            max_proxies: 128,
+            allow_private_networks: true,
+            allowed_hosts: Vec::new(),
+            redirect_policy: RedirectPolicy::SameOrigin,
             mounts: Vec::new(),
         }
     }
@@ -36,6 +44,24 @@ pub struct ProxyMount {
 }
 
 /// Proxy connection mode.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RedirectPolicy {
+    None,
+    #[default]
+    SameOrigin,
+    Any,
+}
+
+impl RedirectPolicy {
+    pub fn follow(self) -> bool {
+        !matches!(self, Self::None)
+    }
+    pub fn cross_origin(self) -> bool {
+        matches!(self, Self::Any)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProxyMode {
@@ -129,6 +155,13 @@ impl ProxyMount {
 
     /// Build the runtime upstream configuration.
     pub fn upstream_config(&self) -> Result<rtflow::mount::upstream::UpstreamConfig, String> {
+        self.upstream_config_with(RedirectPolicy::SameOrigin)
+    }
+
+    pub fn upstream_config_with(
+        &self,
+        redirect_policy: RedirectPolicy,
+    ) -> Result<rtflow::mount::upstream::UpstreamConfig, String> {
         let first = self
             .upstreams
             .first()
@@ -139,6 +172,8 @@ impl ProxyMount {
         upstream.credentials = config.credentials.take();
         upstream.request_timeout = config.request_timeout;
         upstream.media_idle_timeout = config.media_idle_timeout;
+        upstream.follow_redirects = redirect_policy.follow();
+        upstream.allow_cross_origin_redirect = redirect_policy.cross_origin();
         for endpoint in self.upstreams.iter().skip(1) {
             upstream.add_fallback(endpoint.endpoint()?);
         }
@@ -184,6 +219,12 @@ impl ProxySection {
         if self.idle_grace.is_zero() {
             return Err(ConfigError::Invalid("proxy.idle_grace is zero".into()));
         }
+        if self.max_proxies == 0 {
+            return Err(ConfigError::Invalid("proxy.max_proxies is zero".into()));
+        }
+        for pattern in &self.allowed_hosts {
+            validate_host_pattern(pattern)?;
+        }
         let mut paths = std::collections::HashSet::new();
         for (index, mount) in self.mounts.iter().enumerate() {
             if !paths.insert(mount.path.clone()) {
@@ -214,4 +255,19 @@ impl ProxySection {
             }
         }
     }
+}
+
+fn validate_host_pattern(pattern: &str) -> Result<(), ConfigError> {
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return Err(ConfigError::Invalid(
+            "proxy.allowed_hosts contains an empty entry".into(),
+        ));
+    }
+    if pattern.contains('/') {
+        pattern
+            .parse::<rtflow::security::IpCidr>()
+            .map_err(|error| ConfigError::Invalid(format!("proxy.allowed_hosts: {error}")))?;
+    }
+    Ok(())
 }
