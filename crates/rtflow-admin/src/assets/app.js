@@ -234,6 +234,10 @@ function openPalette() {
     { label: "刷新当前页面", hint: "重新加载当前数据", icon: "↻", shortcut: "R", run: () => navigate({ silent: true }) },
     { label: "切换深浅主题", hint: "在深色与浅色之间切换", icon: "◐", run: () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light") },
     { label: "切换表格密度", hint: "舒适 / 紧凑", icon: "≡", run: () => applyDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact") },
+    { label: "切换时间显示", hint: localStorage.getItem("rtflow-time") === "relative" ? "当前：相对时间" : "当前：绝对时间", icon: "◷", run: () => {
+      localStorage.setItem("rtflow-time", localStorage.getItem("rtflow-time") === "relative" ? "absolute" : "relative");
+      navigate({ silent: true });
+    } },
     { label: "复制当前页面地址", hint: "复制带 hash 的链接", icon: "⧉", run: async () => {
       try { await navigator.clipboard.writeText(location.href); toast("链接已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
     } },

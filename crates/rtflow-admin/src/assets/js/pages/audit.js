@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { dateTime, empty, esc, iconSvg } from "../format.js";
-import { openDrawer } from "../ui.js";
+import { openDrawer, toast } from "../ui.js";
 
 const PAGE_SIZE = 25;
 const labels = {
@@ -139,12 +139,15 @@ function openAuditEvent(event) {
     body: `<div class="stack">
       <div class="detail-grid">${fields.map(([label, value]) => `<div class="detail-item"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("")}</div>
       ${links.length ? `<section class="drawer-section"><h3>关联资源</h3><div class="actions">${links.map(([label, href]) => `<a class="btn small" href="${href}" data-event-goto>${esc(label)}</a>`).join("")}</div></section>` : ""}
-      <section class="drawer-section"><h3>原始记录</h3><pre class="code">${esc(JSON.stringify(event, null, 2))}</pre></section>
+      <section class="drawer-section"><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">原始记录</h3><button class="btn small ghost" data-audit-copy style="margin-left:auto">复制 JSON</button></div><pre class="code">${esc(JSON.stringify(event, null, 2))}</pre></section>
     </div>`,
     onMount(root) {
       root.querySelectorAll("[data-event-goto]").forEach((link) => link.onclick = () => {
         root.querySelector("[data-close-drawer]")?.click();
       });
+      root.querySelector("[data-audit-copy]").onclick = async () => {
+        try { await navigator.clipboard.writeText(JSON.stringify(event, null, 2)); toast("JSON 已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      };
     },
   });
 }

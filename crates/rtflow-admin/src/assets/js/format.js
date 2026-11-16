@@ -20,7 +20,17 @@ export function uptime(seconds) {
   return `${m} 分钟`;
 }
 
-export const dateTime = (unix) => unix ? new Date(Number(unix) * 1000).toLocaleString("zh-CN") : "—";
+export function dateTime(unix) {
+  if (!unix) return "—";
+  const date = new Date(Number(unix) * 1000);
+  if ((localStorage.getItem("rtflow-time") || "absolute") !== "relative") return date.toLocaleString("zh-CN");
+  const seconds = Math.max(0, (Date.now() - date.getTime()) / 1000);
+  if (seconds < 45) return "刚刚";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
+  if (seconds < 7 * 86400) return `${Math.floor(seconds / 86400)} 天前`;
+  return date.toLocaleDateString("zh-CN");
+}
 export const resolution = (track) => track && track.width && track.height ? `${track.width}×${track.height}` : "—";
 export const fps = (track) => track && track.frame_rate ? `${track.frame_rate} fps` : "";
 export function duration(ms) {
