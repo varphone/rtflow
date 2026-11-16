@@ -1,7 +1,7 @@
 import { api, apiV1, setCsrf } from "./js/api.js";
 import { icon } from "./js/icons.js";
 import { esc } from "./js/format.js";
-import { toast } from "./js/ui.js";
+import { openCommandPalette, toast } from "./js/ui.js";
 import * as overview from "./js/pages/overview.js";
 import * as live from "./js/pages/live.js";
 import * as vod from "./js/pages/vod.js";
@@ -132,6 +132,7 @@ function renderShell() {
         <button class="btn ghost small menu-btn" data-menu aria-label="打开菜单">${icon("menu")}</button>
         <div class="crumbs" id="crumbs"></div>
         <div class="top-actions">
+          <button class="command-trigger" data-command-open aria-label="打开命令面板">${icon("search")}<span>搜索</span><kbd>Ctrl K</kbd></button>
           <span class="health"><span class="dot ok"></span>运行中</span>
           <button class="btn ghost small" data-theme-toggle aria-label="切换主题">${icon("sun")}</button>
           <span class="user-chip"><span class="avatar">${esc((state.session?.username || "A").slice(0, 1).toUpperCase())}</span><span>${esc(state.session?.username || "admin")}</span></span>
@@ -145,6 +146,7 @@ function renderShell() {
     document.getElementById("sidebar").classList.remove("open");
   }));
   app.querySelector("[data-menu]").onclick = () => document.getElementById("sidebar").classList.toggle("open");
+  app.querySelector("[data-command-open]").onclick = () => openPalette();
   app.querySelector("[data-theme-toggle]").onclick = () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
   app.querySelector("[data-logout]").onclick = async () => {
     try { await api("/logout", { method: "POST" }); } catch (_) {}
@@ -210,6 +212,32 @@ async function navigate(options = {}) {
   }
 }
 
+function openPalette() {
+  const commands = [
+    ...Object.entries(routes).map(([route, info]) => ({
+      label: info.label, hint: `${info.group} / ${info.label}`, icon: "→",
+      keywords: route,
+      run: () => { location.hash = `#/${route}`; },
+    })),
+    { label: "刷新当前页面", hint: "重新加载当前数据", icon: "↻", shortcut: "R", run: () => navigate({ silent: true }) },
+    { label: "切换深浅主题", hint: "在深色与浅色之间切换", icon: "◐", run: () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light") },
+    { label: "复制当前页面地址", hint: "复制带 hash 的链接", icon: "⧉", run: async () => {
+      try { await navigator.clipboard.writeText(location.href); toast("链接已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+    } },
+    { label: "退出登录", hint: "结束当前管理员会话", icon: "⏻", run: async () => {
+      try { await api("/logout", { method: "POST" }); } catch (_) {}
+      state.session = null; renderLogin();
+    } },
+  ];
+  openCommandPalette(commands);
+}
+
+window.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if (state.session) openPalette();
+  }
+});
 window.addEventListener("hashchange", () => navigate());
 setInterval(() => { if (state.session) refreshCounts(); }, 10000);
 window.addEventListener("rtflow:unauthorized", () => { state.session = null; renderLogin("登录已过期"); });

@@ -71,6 +71,54 @@ export function secretDialog(title, secret) {
   });
 }
 
+export function openCommandPalette(commands) {
+  const root = modalRoot();
+  root.innerHTML = `<div class="modal-backdrop" data-palette-backdrop>
+    <div class="command-palette" role="dialog" aria-modal="true" aria-label="命令面板">
+      <div class="command-input"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span>
+        <input id="command-search" class="input" placeholder="搜索页面或操作…" autocomplete="off" spellcheck="false"></div>
+      <div class="command-list" id="command-list"></div>
+      <div class="command-foot"><span>↑↓ 选择</span><span>Enter 打开</span><span>Esc 关闭</span></div>
+    </div></div>`;
+  const input = root.querySelector("#command-search");
+  const list = root.querySelector("#command-list");
+  let filtered = commands;
+  let selected = 0;
+  const close = () => { root.innerHTML = ""; };
+  const run = (command) => { close(); command.run?.(); };
+  const paint = () => {
+    if (!filtered.length) { list.innerHTML = `<div class="command-empty">没有匹配项</div>`; return; }
+    selected = Math.max(0, Math.min(selected, filtered.length - 1));
+    list.innerHTML = filtered.map((command, index) =>
+      `<button class="command-item ${index === selected ? "active" : ""}" data-command="${index}">
+        <span class="command-icon">${command.icon || "›"}</span>
+        <span><strong>${esc(command.label)}</strong>${command.hint ? `<small>${esc(command.hint)}</small>` : ""}</span>
+        ${command.shortcut ? `<span class="command-shortcut">${esc(command.shortcut)}</span>` : ""}
+      </button>`).join("");
+    list.querySelectorAll("[data-command]").forEach((button) => {
+      button.onmouseenter = () => { selected = Number(button.dataset.command); paint(); };
+      button.onclick = () => run(filtered[Number(button.dataset.command)]);
+    });
+  };
+  const filter = () => {
+    const query = input.value.trim().toLowerCase();
+    filtered = !query ? commands : commands.filter((command) =>
+      `${command.label} ${command.hint || ""} ${command.keywords || ""}`.toLowerCase().includes(query));
+    selected = 0; paint();
+  };
+  input.oninput = filter;
+  input.onkeydown = (event) => {
+    if (event.key === "ArrowDown") { event.preventDefault(); selected = Math.min(selected + 1, filtered.length - 1); paint(); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); selected = Math.max(selected - 1, 0); paint(); }
+    else if (event.key === "Enter" && filtered[selected]) { event.preventDefault(); run(filtered[selected]); }
+    else if (event.key === "Escape") { event.preventDefault(); close(); }
+  };
+  root.querySelector("[data-palette-backdrop]").addEventListener("click", (event) => {
+    if (event.target.dataset.paletteBackdrop !== undefined) close();
+  });
+  filter(); input.focus();
+}
+
 export function openDrawer({ title, description = "", body, submitLabel = "保存", onSubmit, onMount }) {
   const root = modalRoot();
   root.innerHTML = `<div class="drawer-backdrop" data-drawer-backdrop>
@@ -82,18 +130,24 @@ export function openDrawer({ title, description = "", body, submitLabel = "保�
         <div class="drawer-foot"><button type="button" class="btn" data-close-drawer>取消</button><button type="submit" class="btn primary">${esc(submitLabel)}</button></div>
       </form>
     </aside></div>`;
-  const close = () => { root.innerHTML = ""; };
+  let dirty = false;
+  const forceClose = () => { root.innerHTML = ""; };
+  const close = () => {
+    if (dirty && !window.confirm("有未保存的修改，确定放弃？")) return;
+    forceClose();
+  };
+  const form = root.querySelector("#drawer-form");
+  form.addEventListener("input", () => { dirty = true; }, { once: false });
   root.querySelectorAll("[data-close-drawer]").forEach((button) => button.onclick = close);
   root.querySelector("[data-drawer-backdrop]").addEventListener("click", (event) => {
     if (event.target.dataset.drawerBackdrop !== undefined) close();
   });
-  const form = root.querySelector("#drawer-form");
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = form.querySelector("button[type=submit]");
     button.disabled = true;
     try {
-      await onSubmit(new FormData(form), { close });
+      await onSubmit(new FormData(form), { close: forceClose });
     } catch (error) {
       let box = form.querySelector(".form-error");
       if (!box) { box = document.createElement("div"); box.className = "form-error"; form.querySelector(".drawer-body").prepend(box); }
@@ -103,11 +157,22 @@ export function openDrawer({ title, description = "", body, submitLabel = "保�
     }
   });
   onMount?.(root);
+  root.addEventListener("keydown", (event) => trapFocus(root, event));
   focusFirst(root);
   document.addEventListener("keydown", function esc(event) {
     if (event.key === "Escape") { close(); document.removeEventListener("keydown", esc); }
   });
   return { close };
+}
+
+function trapFocus(root, event) {
+  if (event.key !== "Tab") return;
+  const nodes = [...root.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])")]
+    .filter((node) => node.offsetParent !== null);
+  if (!nodes.length) return;
+  const first = nodes[0], last = nodes[nodes.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 }
 
 export function field(label, input, { hint = "", className = "" } = {}) {
