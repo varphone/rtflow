@@ -512,12 +512,19 @@ async fn open_and_describe(
     ServerCapabilities,
 )> {
     let mut current = url.clone();
+    let mut options = options.clone();
     for _ in 0..5 {
-        match open_and_describe_once(&current, options).await? {
+        match open_and_describe_once(&current, &options).await? {
             DescribeOutcome::Ready(stream, uri, base, description, mux, capabilities) => {
                 return Ok((stream, uri, base, description, mux, capabilities));
             }
-            DescribeOutcome::Redirect(target) => current = target,
+            DescribeOutcome::Redirect(target) => {
+                // A DNS-pinned peer address belongs to the original origin;
+                // following a redirect must resolve the new host instead of
+                // reconnecting to the pinned address.
+                options.peer_addr = None;
+                current = target;
+            }
         }
     }
     Err(Error::Rtsp("too many RTSP redirects".into()))
