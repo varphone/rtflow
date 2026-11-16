@@ -54,6 +54,10 @@ export async function render(params, ctx) {
       root.querySelectorAll("[data-proxy-filter]").forEach((button) => button.onclick = () => { filter = button.dataset.proxyFilter; paint(); syncUrl(); });
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
       root.querySelector("[data-action=create]").onclick = () => openProxyDrawer(null, () => ctx.reload());
+      if (params?.get("new") === "1") {
+        history.replaceState(null, "", "#/config/proxies");
+        openProxyDrawer(null, () => ctx.reload());
+      }
       root.addEventListener("click", async (event) => {
         const sorter = event.target.closest("[data-sort]");
         if (sorter) {

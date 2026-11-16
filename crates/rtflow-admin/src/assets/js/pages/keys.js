@@ -44,6 +44,10 @@ export async function render(params, ctx) {
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
       root.querySelector("[data-action=issue]").onclick = () => openKeyDrawer((result) => { secretDialog("推流密钥（只显示一次）", result.secret); ctx.reload(); });
+      if (params?.get("new") === "1") {
+        history.replaceState(null, "", "#/config/keys");
+        openKeyDrawer((result) => { secretDialog("推流密钥（只显示一次）", result.secret); ctx.reload(); });
+      }
       root.addEventListener("click", async (event) => {
         const sorter = event.target.closest("[data-sort]");
         if (sorter) {

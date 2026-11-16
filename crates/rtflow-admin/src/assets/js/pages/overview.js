@@ -55,9 +55,9 @@ export async function render() {
         <div class="stat ${d.attention.length ? "attention" : ""}"><div class="label">需要关注</div><div class="value ${d.attention.length ? "warn" : ""}" data-ov="attention-count">${num(d.attention.length)}</div><div class="hint">代理 / SRT / 录制异常</div></div>
       </div>
       <div class="quick-actions">
-        <a class="quick-action" href="#/config/paths"><span class="kicker">配置</span><strong>新建路径</strong><small>注册路径与发布策略</small></a>
-        <a class="quick-action" href="#/config/keys"><span class="kicker">安全</span><strong>签发密钥</strong><small>一次性 secret 与权限范围</small></a>
-        <a class="quick-action" href="#/config/proxies"><span class="kicker">回源</span><strong>新增代理</strong><small>拉取 RTSP/RTSPS 上游</small></a>
+        <a class="quick-action" href="#/config/paths?new=1"><span class="kicker">配置</span><strong>新建路径</strong><small>注册路径与发布策略</small></a>
+        <a class="quick-action" href="#/config/keys?new=1"><span class="kicker">安全</span><strong>签发密钥</strong><small>一次性 secret 与权限范围</small></a>
+        <a class="quick-action" href="#/config/proxies?new=1"><span class="kicker">回源</span><strong>新增代理</strong><small>拉取 RTSP/RTSPS 上游</small></a>
         <a class="quick-action" href="#/system"><span class="kicker">诊断</span><strong>服务与存储</strong><small>TOML、DB schema、版本</small></a>
       </div>
       <section class="panel traffic-panel">
@@ -196,7 +196,7 @@ function activeHtml(active, system) {
   }
   return `<div class="empty">${iconSvg("inbox")}<h3>暂无直播流</h3>
     <div class="faint">使用 RTMP / RTSP / SRT 推流后出现在这里；也可以先注册一条路径。</div>
-    <div class="actions" style="justify-content:center;margin-top:14px"><a class="btn small" href="#/config/paths">新建路径</a>
+    <div class="actions" style="justify-content:center;margin-top:14px"><a class="btn small" href="#/config/paths?new=1">新建路径</a>
       <button class="btn small ghost" data-copy-push>复制推流地址</button></div>
     <pre class="code" style="text-align:left;max-width:520px;margin:14px auto 0">${esc(system.rtmp_base || `rtmp://${location.hostname}:1935`)}/live/your-stream</pre>
   </div>`;
