@@ -217,6 +217,30 @@ fn metrics_response(registry: &MetricsRegistry) -> String {
         "Active SRT streams",
         registry.srt_streams_active.load(Ordering::Relaxed),
     );
+    write_gauge(
+        &mut out,
+        "rtflow_srt_rtt_microseconds",
+        "Last SRT round-trip time estimate",
+        registry.srt_rtt_us.load(Ordering::Relaxed) as i64,
+    );
+    write_counter(
+        &mut out,
+        "rtflow_srt_loss_packets_total",
+        "SRT packets detected as lost",
+        registry.srt_loss_packets.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut out,
+        "rtflow_srt_skipped_packets_total",
+        "SRT packets skipped by TLPKTDROP",
+        registry.srt_skipped_packets.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut out,
+        "rtflow_srt_handshake_failures_total",
+        "Rejected SRT handshakes",
+        registry.srt_handshake_failures.load(Ordering::Relaxed),
+    );
     write_counter(
         &mut out,
         "rtflow_webrtc_sessions_total",
@@ -528,6 +552,18 @@ fn build_stats_json(registry: &MetricsRegistry, mounts: &rtflow_mount::MountRegi
     out.push_str(&format!(
         "\"srt_streams_active\":{},",
         registry.srt_streams_active.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"srt_rtt_us\":{},",
+        registry.srt_rtt_us.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"srt_loss_packets\":{},",
+        registry.srt_loss_packets.load(Ordering::Relaxed)
+    ));
+    out.push_str(&format!(
+        "\"srt_skipped_packets\":{},",
+        registry.srt_skipped_packets.load(Ordering::Relaxed)
     ));
     out.push_str(&format!(
         "\"webrtc_sessions_total\":{},",

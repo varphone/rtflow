@@ -50,6 +50,13 @@ impl SrtServer {
                 self.deliver_units(conn, *peer).await;
             }
             if skipped {
+                #[cfg(feature = "metrics")]
+                if let Some(metrics) = &self.config.metrics {
+                    use std::sync::atomic::Ordering;
+                    metrics
+                        .srt_skipped_packets
+                        .fetch_add(conn.tsbpd.skipped_count(), Ordering::Relaxed);
+                }
                 // Fake ACK: tell the sender we moved past the gap so it can
                 // release its retransmission buffer.
                 self.send_ack(conn, *peer, timestamp).await;
@@ -65,8 +72,19 @@ impl SrtServer {
                 let nak = nak_packet(&losses, conn.peer_socket_id, timestamp);
                 self.send_control(&nak, *peer).await;
                 debug!(peer = %peer, ranges = losses.len(), "SRT: sent NAK");
-                conn.last_nak_losses = losses;
+                conn.last_nak_losses = losses.clone();
                 conn.last_nak_time = now;
+                #[cfg(feature = "metrics")]
+                if let Some(metrics) = &self.config.metrics {
+                    use std::sync::atomic::Ordering;
+                    let total: u64 = losses
+                        .iter()
+                        .map(|(start, end)| {
+                            u64::from(tsbpd::seq_distance(*start, *end).wrapping_add(1))
+                        })
+                        .sum();
+                    metrics.srt_loss_packets.fetch_add(total, Ordering::Relaxed);
+                }
             }
 
             // Full ACK cadence.
@@ -137,6 +155,13 @@ impl SrtServer {
     ) {
         let response = rejection_response(listener_socket_id, caller, reason);
         let packet = handshake_control_packet(&response, caller.socket_id, 0);
+        #[cfg(feature = "metrics")]
+        if let Some(metrics) = &self.config.metrics {
+            use std::sync::atomic::Ordering;
+            metrics
+                .srt_handshake_failures
+                .fetch_add(1, Ordering::Relaxed);
+        }
         warn!(
             peer = %peer,
             reason,

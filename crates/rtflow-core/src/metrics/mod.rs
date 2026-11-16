@@ -72,6 +72,14 @@ pub struct MetricsRegistry {
     // Protocol-level: SRT
     pub srt_connections_total: AtomicU64,
     pub srt_streams_active: AtomicI64,
+    /// Last measured SRT round-trip time, microseconds.
+    pub srt_rtt_us: AtomicU64,
+    /// Packets declared lost by NAK/TSBPD gap detection.
+    pub srt_loss_packets: AtomicU64,
+    /// Packets skipped by TLPKTDROP.
+    pub srt_skipped_packets: AtomicU64,
+    /// Rejected SRT handshakes (any reason).
+    pub srt_handshake_failures: AtomicU64,
 
     // Protocol-level: WebRTC
     pub webrtc_sessions_total: AtomicU64,
@@ -118,6 +126,10 @@ impl MetricsRegistry {
             rtmp_players_active: AtomicI64::new(0),
             srt_connections_total: AtomicU64::new(0),
             srt_streams_active: AtomicI64::new(0),
+            srt_rtt_us: AtomicU64::new(0),
+            srt_loss_packets: AtomicU64::new(0),
+            srt_skipped_packets: AtomicU64::new(0),
+            srt_handshake_failures: AtomicU64::new(0),
             webrtc_sessions_total: AtomicU64::new(0),
             webrtc_sessions_active: AtomicI64::new(0),
             http_requests_total: AtomicU64::new(0),
