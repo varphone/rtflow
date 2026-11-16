@@ -262,6 +262,8 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 .data .select-col { width: 30px; padding-right: 0; }
 .data .select-col input { accent-color: var(--accent); width: 14px; height: 14px; }
 .data tr.selected td { background: var(--surface-2); }
+.sort-btn { border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 600; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; padding: 0; cursor: pointer; }
+.sort-btn:hover { color: var(--text); }
 .link-cell { border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 600; padding: 0; cursor: pointer; text-align: left; }
 .link-cell:hover { color: var(--accent-strong); text-decoration: underline; text-underline-offset: 2px; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
