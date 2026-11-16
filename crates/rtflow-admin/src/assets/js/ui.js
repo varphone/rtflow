@@ -13,8 +13,13 @@ export function toast(message, kind = "") {
 }
 
 function focusFirst(root) {
-  const target = root.querySelector("button, input, select, textarea, [tabindex]");
-  if (target) target.focus();
+  const target = root.querySelector("input, select, textarea")
+    || root.querySelector(".drawer-body, .modal-body")
+    || root.querySelector("button, [tabindex]");
+  if (target) {
+    if (!target.hasAttribute("tabindex")) target.tabIndex = -1;
+    target.focus();
+  }
 }
 
 export function openDialog({ title, body, footer = "", onMount }) {
@@ -119,7 +124,7 @@ export function openCommandPalette(commands) {
   filter(); input.focus();
 }
 
-export function openDrawer({ title, description = "", body, submitLabel = "保存", onSubmit, onMount }) {
+export function openDrawer({ title, description = "", body, submitLabel = "保存", onSubmit, onMount, showSubmit = true }) {
   const root = modalRoot();
   root.innerHTML = `<div class="drawer-backdrop" data-drawer-backdrop>
     <aside class="drawer" role="dialog" aria-modal="true" aria-label="${esc(title)}">
@@ -127,7 +132,7 @@ export function openDrawer({ title, description = "", body, submitLabel = "保�
         <button class="btn ghost small" data-close-drawer aria-label="关闭" style="margin-left:auto">${icon("close")}</button></div>
       <form class="drawer-form" id="drawer-form" style="display:contents">
         <div class="drawer-body">${body}</div>
-        <div class="drawer-foot"><button type="button" class="btn" data-close-drawer>取消</button><button type="submit" class="btn primary">${esc(submitLabel)}</button></div>
+        <div class="drawer-foot"><button type="button" class="btn" data-close-drawer>${showSubmit ? "取消" : "关闭"}</button>${showSubmit ? `<button type="submit" class="btn primary">${esc(submitLabel)}</button>` : ""}</div>
       </form>
     </aside></div>`;
   let dirty = false;
