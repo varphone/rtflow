@@ -1,4 +1,4 @@
-import { api, setCsrf } from "./js/api.js";
+import { api, apiV1, setCsrf } from "./js/api.js";
 import { icon } from "./js/icons.js";
 import { esc } from "./js/format.js";
 import { toast } from "./js/ui.js";
@@ -26,7 +26,7 @@ const routes = {
   "config/recordings": { page: recordings, group: "配置", label: "录制" },
   system: { page: system, group: "系统", label: "系统" },
 };
-const state = { session: null, route: "overview", loading: false };
+const state = { session: null, route: "overview", loading: false, counts: { live: 0, proxies: 0, srt: 0 } };
 let pageCleanup = null;
 let pageController = null;
 let navSeq = 0;
@@ -37,6 +37,23 @@ const navGroups = [
   ["系统", [["system", "系统"]]],
 ];
 const navIcons = { overview: "overview", live: "live", vod: "vod", "config/paths": "paths", "config/keys": "keys", "config/proxies": "proxy", "config/srt": "srt", "config/recordings": "record", system: "system" };
+
+async function refreshCounts() {
+  try {
+    const [overview, proxies, pulls, pushes] = await Promise.all([
+      api("/overview"), apiV1("/proxies"), apiV1("/srt/pulls"), apiV1("/srt/pushes"),
+    ]);
+    state.counts = {
+      live: Number(overview.mounts || 0),
+      proxies: (proxies.proxies || []).length,
+      srt: (pulls.items || []).length + (pushes.items || []).length,
+    };
+    for (const [key, value] of Object.entries(state.counts)) {
+      const node = document.querySelector(`[data-nav-count="${key}"]`);
+      if (node) node.textContent = value || "";
+    }
+  } catch (_) { /* counts are best effort */ }
+}
 
 function currentRoute() {
   let route = (location.hash || "").replace(/^#\/?/, "").split("?")[0];
@@ -61,6 +78,7 @@ async function boot() {
     setCsrf(session.csrf);
     renderShell();
     await navigate();
+    refreshCounts();
   } catch (error) {
     renderLogin(error.message);
   }
@@ -92,13 +110,20 @@ function renderLogin(message = "") {
   });
 }
 
+function navCount(route) {
+  if (route === "live") return `<span class="count" data-nav-count="live">${state.counts.live || ""}</span>`;
+  if (route === "config/proxies") return `<span class="count" data-nav-count="proxies">${state.counts.proxies || ""}</span>`;
+  if (route === "config/srt") return `<span class="count" data-nav-count="srt">${state.counts.srt || ""}</span>`;
+  return "";
+}
+
 function renderShell() {
   app.innerHTML = `<div class="layout">
     <aside class="sidebar" id="sidebar">
       <div class="brand"><span class="brand-logo">R</span><span>rtflow</span></div>
       ${navGroups.map(([label, items]) => `<nav class="nav-group" aria-label="${label}">
         <div class="nav-label">${label}</div>
-        ${items.map(([route, text]) => `<a class="nav-item" data-route="${route}" href="#/${route}">${icon(navIcons[route] || "overview")}<span>${text}</span></a>`).join("")}
+        ${items.map(([route, text]) => `<a class="nav-item" data-route="${route}" href="#/${route}">${icon(navIcons[route] || "overview")}<span>${text}</span>${navCount(route)}</a>`).join("")}
       </nav>`).join("")}
       <div class="sidebar-foot"><span>rtflow ${esc(state.session?.version || "")}</span><span>${state.session?.readonly ? "只读模式" : "管理模式"}</span></div>
     </aside>
@@ -186,5 +211,6 @@ async function navigate(options = {}) {
 }
 
 window.addEventListener("hashchange", () => navigate());
+setInterval(() => { if (state.session) refreshCounts(); }, 10000);
 window.addEventListener("rtflow:unauthorized", () => { state.session = null; renderLogin("登录已过期"); });
 boot();
