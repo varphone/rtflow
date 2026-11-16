@@ -8,8 +8,15 @@ let status = "all";
 let sort = { field: "name", dir: 1 };
 
 export async function render(params) {
-  const linked = params?.get("q");
-  if (linked !== null && linked !== undefined) query = linked;
+  query = params?.get("q") || "";
+  const linkedStatus = params?.get("status");
+  status = ["all", "live", "idle"].includes(linkedStatus) ? linkedStatus : "all";
+  const linkedSort = params?.get("sort");
+  if (["name", "status", "subscribers", "frames"].includes(linkedSort)) {
+    sort = { field: linkedSort, dir: params?.get("dir") === "-1" ? -1 : 1 };
+  } else {
+    sort = { field: "name", dir: 1 };
+  }
   const payload = await api("/streams");
   const streams = payload.items || payload;
   return {
@@ -67,8 +74,17 @@ export async function render(params) {
         }
         syncStatus();
       };
-      search.oninput = () => { query = search.value; paint(); };
-      root.querySelectorAll("[data-live-status]").forEach((button) => button.onclick = () => { status = button.dataset.liveStatus; paint(); });
+      const syncUrl = () => {
+        const params = new URLSearchParams();
+        if (query.trim()) params.set("q", query.trim());
+        if (status !== "all") params.set("status", status);
+        if (sort.field !== "name" || sort.dir !== 1) params.set("sort", sort.field);
+        if (sort.dir === -1) params.set("dir", "-1");
+        const qs = params.toString();
+        history.replaceState(null, "", `#/live${qs ? `?${qs}` : ""}`);
+      };
+      search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      root.querySelectorAll("[data-live-status]").forEach((button) => button.onclick = () => { status = button.dataset.liveStatus; paint(); syncUrl(); });
       root.addEventListener("change", (event) => {
         const rowSelect = event.target.closest("[data-select]");
         if (rowSelect) {
@@ -145,6 +161,7 @@ export async function render(params) {
           const field = sorter.dataset.sort;
           sort = { field, dir: sort.field === field ? -sort.dir : 1 };
           paint();
+          syncUrl();
           return;
         }
         const target = event.target.closest("[data-action]");
