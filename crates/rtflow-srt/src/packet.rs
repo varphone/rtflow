@@ -24,6 +24,8 @@ pub struct DataPacket {
     pub ordered: bool,
     /// Retransmitted flag (set by the sender on retransmissions).
     pub retransmitted: bool,
+    /// Key-based encryption flag: 0 = none, 1 = even key, 2 = odd key.
+    pub key_flags: u8,
     /// Payload data.
     pub payload: Bytes,
 }
@@ -130,6 +132,7 @@ pub fn parse_packet_borrowed(data: Bytes) -> Option<SrtPacket> {
                 position: f.position,
                 ordered: f.ordered,
                 retransmitted: f.retransmitted,
+                key_flags: f.key_flags,
                 message_number: f.message_number,
                 timestamp: f.timestamp,
                 socket_id: f.socket_id,
@@ -144,6 +147,7 @@ struct DataFields {
     position: u8,
     ordered: bool,
     retransmitted: bool,
+    key_flags: u8,
     message_number: u32,
     timestamp: u32,
     socket_id: u32,
@@ -163,6 +167,7 @@ fn parse_data_fields(data: &[u8], first_word: u32) -> Option<(DataFields, &[u8])
     let position = ((second_word >> 30) & 0x03) as u8;
     let ordered = (second_word >> 29) & 1 == 1;
     let retransmitted = (second_word >> 26) & 1 == 1;
+    let key_flags = ((second_word >> 27) & 0x03) as u8;
     let message_number = second_word & 0x03FF_FFFF;
     let timestamp = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
     let socket_id = u32::from_be_bytes([data[12], data[13], data[14], data[15]]);
@@ -172,6 +177,7 @@ fn parse_data_fields(data: &[u8], first_word: u32) -> Option<(DataFields, &[u8])
             position,
             ordered,
             retransmitted,
+            key_flags,
             message_number,
             timestamp,
             socket_id,
@@ -206,6 +212,7 @@ fn parse_data_packet(data: &[u8], first_word: u32) -> Option<SrtPacket> {
         position: f.position,
         ordered: f.ordered,
         retransmitted: f.retransmitted,
+        key_flags: f.key_flags,
         message_number: f.message_number,
         timestamp: f.timestamp,
         socket_id: f.socket_id,
@@ -239,6 +246,7 @@ pub fn encode_data_packet(pkt: &DataPacket) -> BytesMut {
     if pkt.retransmitted {
         second_word |= 1 << 26;
     }
+    second_word |= (u32::from(pkt.key_flags) & 0x03) << 27;
     buf.put_u32(second_word);
 
     buf.put_u32(pkt.timestamp);
@@ -353,6 +361,23 @@ pub fn ackack_packet(ack_sequence: u32, socket_id: u32, timestamp: u32) -> Contr
     }
 }
 
+/// Build a user-defined extension control packet (KMREQ/KMRSP refresh).
+pub fn user_defined_packet(
+    extended_type: u16,
+    data: Bytes,
+    socket_id: u32,
+    timestamp: u32,
+) -> ControlPacket {
+    ControlPacket {
+        control_type: ControlType::UserDefined,
+        type_specific: extended_type,
+        additional_info: 0,
+        timestamp,
+        socket_id,
+        data,
+    }
+}
+
 /// Build a SHUTDOWN control packet.
 pub fn shutdown_packet(socket_id: u32, timestamp: u32) -> ControlPacket {
     ControlPacket {
@@ -448,6 +473,7 @@ mod tests {
             socket_id: 0xDEADBEEF,
             ordered: true,
             retransmitted: false,
+            key_flags: 0,
             payload: Bytes::from(vec![1, 2, 3, 4, 5]),
         };
 

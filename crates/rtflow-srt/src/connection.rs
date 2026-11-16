@@ -31,6 +31,10 @@ pub struct SrtConnection {
     /// Publisher lease held for the lifetime of the connection, so the mount
     /// reports `publisher_connected`.
     pub(super) publisher: Option<rtflow_mount::LocalPublisher>,
+    /// AES-CTR receiver state when the connection is encrypted.
+    pub(super) crypto: Option<crate::crypto::SessionCrypto>,
+    /// Packets dropped because they were not decryptable.
+    pub(super) undecryptable: u64,
     /// Raw Stream ID from the handshake (may carry `?token=...`).
     pub(super) stream_id: Option<String>,
     /// Peer capabilities negotiated in HSREQ.

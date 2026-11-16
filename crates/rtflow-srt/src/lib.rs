@@ -7,6 +7,7 @@
 //!
 //! - HSv5 caller-listener handshake, byte-compatible with libsrt 1.4/1.5
 //! - HSREQ/HSRSP negotiation (TSBPD latency = max of both sides)
+//! - HaiCrypt AES-CTR encryption (passphrase, 128/192/256-bit keys)
 //! - Stream ID (`#!::r=...` or a plain path, optional `?token=`) routing
 //! - Full ACK / ACKACK with RTT estimation, NAK loss reports, keepalive,
 //!   shutdown and DROPREQ handling
@@ -16,8 +17,8 @@
 //! # Limitations
 //!
 //! - Listener mode only (no caller/rendezvous)
-//! - No encryption: connections advertising a cipher are rejected with
-//!   `SRT_REJ_CRYPTO`
+//! - Key refresh is applied on receipt (mid-stream KMREQ); this listener
+//!   never rekeys its own (unused) TX direction
 //! - MPEG-TS payloads only (other payloads are consumed but not exposed)
 //!
 //! # Example
@@ -34,20 +35,13 @@
 //! # Ok(())
 //! # }
 //! ```
+pub mod crypto;
 pub mod handshake;
 pub mod packet;
 pub mod ts_demux;
 pub mod tsbpd;
 
-use handshake::{
-    Handshake, HandshakeType, HsExtFields, HsExtension, HsFlags, SRT_CMD_FILTER, SRT_CMD_GROUP,
-    SRT_VERSION, SRT_VERSION_4, SRT_VERSION_5, conclusion_response, generate_cookie,
-    handshake_control_packet, induction_response, parse_handshake, reject, rejection_response,
-};
-use packet::{
-    AckFields, ControlPacket, ControlType, SrtPacket, ack_packet, encode_control_packet,
-    keepalive_packet, nak_packet, parse_packet_borrowed, shutdown_packet,
-};
+use packet::{SrtPacket, parse_packet_borrowed};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;

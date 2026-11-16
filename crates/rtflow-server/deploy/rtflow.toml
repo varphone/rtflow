@@ -36,6 +36,10 @@ peer_idle_timeout = "30s"
 tlpktdrop = true
 mtu = 1500
 max_connections = 10
+# HaiCrypt encryption (10..80 byte passphrase). Leave unset for plaintext.
+# passphrase = "${RTFLOW_SRT_PASSPHRASE}"
+# pbkeylen = 16
+enforced_encryption = true
 allowed_stream_ids = []  # empty = open; list exact stream ids to restrict
 # Publish tokens/keys are verified from `streamid` (`live/cam?token=...`)
 # using the [auth] configuration, like RTSP/RTMP/HTTP.

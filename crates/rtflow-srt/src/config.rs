@@ -37,6 +37,13 @@ pub struct SrtConfig {
     pub allowed_stream_ids: Vec<String>,
     /// Optional publish authorization (HMAC token, API key, path policy).
     pub authenticator: Option<Arc<dyn PublishAuthenticator>>,
+    /// HaiCrypt passphrase (10..80 bytes). `None` disables encryption.
+    pub passphrase: Option<String>,
+    /// AES key length: 0 (auto → 16), 16, 24 or 32 bytes.
+    pub pbkeylen: u32,
+    /// Reject peers that do not use encryption when a passphrase is set
+    /// (and encrypted peers when it is not). libsrt's default is enforced.
+    pub enforced_encryption: bool,
 }
 
 /// SRT publish authorization hook.
@@ -46,6 +53,17 @@ pub struct SrtConfig {
 /// apply the same policy as the other protocols.
 pub trait PublishAuthenticator: Send + Sync + std::fmt::Debug {
     fn authorize(&self, stream_id: &str, peer: SocketAddr) -> bool;
+}
+
+impl SrtConfig {
+    /// Effective AES key length for the passphrase (defaults to 128-bit).
+    pub fn key_length(&self) -> Option<crypto::KeyLength> {
+        self.passphrase.as_ref().map(|_| match self.pbkeylen {
+            24 => crypto::KeyLength::Aes192,
+            32 => crypto::KeyLength::Aes256,
+            _ => crypto::KeyLength::Aes128,
+        })
+    }
 }
 
 impl Default for SrtConfig {
@@ -67,6 +85,9 @@ impl Default for SrtConfig {
             metrics: None,
             allowed_stream_ids: Vec::new(),
             authenticator: None,
+            passphrase: None,
+            pbkeylen: 0,
+            enforced_encryption: true,
         }
     }
 }

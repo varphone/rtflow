@@ -401,6 +401,7 @@ async fn send_ts_data(
             socket_id: dest_socket_id,
             ordered: true,
             retransmitted: false,
+            key_flags: 0,
             payload: Bytes::copy_from_slice(ts_pkt),
         };
         let wire = encode_data_packet(&data_pkt);
@@ -576,6 +577,7 @@ async fn srt_keepalive_timeout_disconnects() {
         socket_id: server_sid,
         ordered: true,
         retransmitted: false,
+        key_flags: 0,
         payload: Bytes::from_static(&[0x47; 188]),
     };
     let wire = encode_data_packet(&data_pkt);

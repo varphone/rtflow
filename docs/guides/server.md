@@ -33,7 +33,29 @@ ffmpeg -re -i input.mp4 -c copy -f mpegts \
 
 SRT 与 libsrt 系工具（ffmpeg、OBS、srt-live-transmit）互通：HSv5 握手、
 HSREQ/HSRSP 延迟协商、Stream ID、ACK/ACKACK/NAK、keepalive、TLPKTDROP。
-加密（AES）尚未实现，携带 passphrase 的连接会收到 `SRT_REJ_CRYPTO` 拒绝。
+
+### SRT 加密（HaiCrypt AES-CTR）
+
+```toml
+[srt]
+passphrase = "secretpass12345"   # 10..80 字节
+pbkeylen = 16                    # 16/24/32，0 表示默认 16
+enforced_encryption = true       # 对端加密设置不一致时拒绝（libsrt 默认）
+```
+
+推流端：
+
+```bash
+ffmpeg -re -i input.mp4 -c copy -f mpegts \
+  'srt://host:9000?streamid=live/cam&passphrase=secretpass12345&pbkeylen=16'
+```
+
+- 监听端作为响应方解包 KMREQ、回显 KMRSP，并用 AES-CTR 解密数据；
+- 错误 passphrase 返回 `SRT_REJ_BADSECRET`（1010），明文对端在
+  `enforced_encryption=true` 时返回 `SRT_REJ_UNSECURE`（1011）；
+- 支持运行中的密钥刷新（`UMSG_EXT` KMREQ）；
+- libsrt 不会对 `passphrase=` 做 URL 解码：含空格等字符时请直接使用可打印
+  安全字符，避免 `%20` 被当作口令的一部分。
 
 ## 播放
 

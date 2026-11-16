@@ -18,6 +18,9 @@
 
 ### Added
 
+- SRT 支持 HaiCrypt AES-CTR 加密（passphrase/pbkeylen/enforced_encryption），
+  监听端解包 KMREQ、回显 KMRSP、解密数据并处理运行中密钥刷新；错误口令与
+  明文对端按规范拒绝。
 - SRT 协议与 libsrt 系工具（ffmpeg/OBS）互通：修正握手类型/字段、HSREQ/HSRSP、
   Stream ID（含字节序与 `#!::` 解析）、完整 ACK/ACKACK/RTT、NAK、keepalive、
   shutdown、DROPREQ；TSBPD 使用协商延迟并支持 TLPKTDROP 跳包与 fake ACK；

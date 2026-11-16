@@ -153,6 +153,12 @@ pub struct SrtSection {
     pub tlpktdrop: bool,
     pub mtu: u32,
     pub max_connections: usize,
+    /// HaiCrypt passphrase (10..80 bytes); empty disables SRT encryption.
+    pub passphrase: Option<String>,
+    /// AES key length in bytes: 0 (auto → 16), 16, 24 or 32.
+    pub pbkeylen: u32,
+    /// Reject peers whose encryption settings differ (libsrt default).
+    pub enforced_encryption: bool,
     /// Optional SRT stream-id allowlist. Empty keeps SRT open; use signed
     /// keys/tokens at the application layer where possible.
     pub allowed_stream_ids: Vec<String>,
@@ -168,6 +174,9 @@ impl Default for SrtSection {
             tlpktdrop: true,
             mtu: 1500,
             max_connections: 10,
+            passphrase: None,
+            pbkeylen: 0,
+            enforced_encryption: true,
             allowed_stream_ids: Vec::new(),
         }
     }
@@ -537,6 +546,18 @@ impl Config {
                 ));
             }
         }
+        if let Some(passphrase) = &self.srt.passphrase
+            && !(10..=80).contains(&passphrase.len())
+        {
+            return Err(ConfigError::Invalid(
+                "srt.passphrase must be 10..80 bytes".into(),
+            ));
+        }
+        if !matches!(self.srt.pbkeylen, 0 | 16 | 24 | 32) {
+            return Err(ConfigError::Invalid(
+                "srt.pbkeylen must be 0, 16, 24 or 32".into(),
+            ));
+        }
         if self.hooks.timeout.is_zero() {
             return Err(ConfigError::Invalid("hooks.timeout is zero".into()));
         }
@@ -714,80 +735,4 @@ pub enum ConfigError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn defaults_validate() {
-        let config = Config::default();
-        config.validate().unwrap();
-    }
-
-    #[test]
-    fn rejects_unknown_keys() {
-        let error = Config::from_toml("[rtsp]\nlissten = \"0.0.0.0:8554\"\n").unwrap_err();
-        assert!(matches!(error, ConfigError::Parse(..)));
-    }
-
-    #[test]
-    fn glob_matching() {
-        assert!(glob_match("live/*", "live/cam"));
-        assert!(!glob_match("live/*", "live/a/b"));
-        assert!(glob_match("live/**", "live/a/b"));
-        assert!(glob_match("**", "anything"));
-        assert!(glob_match("**", ""));
-    }
-
-    #[test]
-    fn most_specific_rule_wins() {
-        let mut config = Config::default();
-        config.paths.insert(
-            "**".into(),
-            PathRule {
-                hls: true,
-                ..PathRule::default()
-            },
-        );
-        config.paths.insert(
-            "private/**".into(),
-            PathRule {
-                read: false,
-                ..PathRule::default()
-            },
-        );
-        let (pattern, rule) = config.path_rule("private/cam");
-        assert_eq!(pattern, "private/**");
-        assert!(!rule.read);
-    }
-
-    #[test]
-    fn printed_config_redacts_secrets() {
-        let mut config = Config::default();
-        config.http.admin_password = "secret".into();
-        config.auth.token_secrets = vec!["token-secret".into()];
-        config.hooks.secret = Some("hook-secret".into());
-        config.http.api_tokens = vec!["api-token".into()];
-        let text = config.redacted().to_toml().unwrap();
-        assert!(!text.contains("token-secret"));
-        assert!(!text.contains("hook-secret"));
-        assert!(!text.contains("api-token"));
-        assert!(text.contains("<redacted>"));
-        // The original config keeps the real values.
-        assert_eq!(config.http.admin_password, "secret");
-    }
-
-    #[test]
-    fn comments_do_not_require_env_values() {
-        assert_eq!(
-            expand_env("# optional ${MISSING_FOR_TEST}\n").unwrap(),
-            "# optional ${MISSING_FOR_TEST}\n"
-        );
-    }
-
-    #[test]
-    fn env_expansion_requires_values() {
-        unsafe { std::env::set_var("RTFLOW_TEST_TOKEN", "abc") };
-        assert_eq!(expand_env("x=${RTFLOW_TEST_TOKEN}").unwrap(), "x=abc");
-        assert!(expand_env("x=${RTFLOW_TEST_MISSING}").is_err());
-    }
-}
+mod tests;
