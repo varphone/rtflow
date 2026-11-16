@@ -23,6 +23,11 @@ export function uptime(seconds) {
 export const dateTime = (unix) => unix ? new Date(Number(unix) * 1000).toLocaleString("zh-CN") : "—";
 export const resolution = (track) => track && track.width && track.height ? `${track.width}×${track.height}` : "—";
 export const fps = (track) => track && track.frame_rate ? `${track.frame_rate} fps` : "";
+export function duration(ms) {
+  const total = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+}
 export function audioLabel(track) {
   if (!track) return "—";
   return `${track.codec}${track.channels ? " · " + track.channels + "ch" : ""}${track.sample_rate ? " · " + Math.round(track.sample_rate / 1000) + "kHz" : ""}`;
