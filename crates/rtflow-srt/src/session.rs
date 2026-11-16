@@ -103,6 +103,7 @@ impl SrtServer {
                 if conn.mount_registered
                     && let Some(path) = &conn.mount_path
                 {
+                    self.release_stream_metric();
                     self.mounts.unregister(path);
                     info!("SRT: unregistered mount {path} with expired connection");
                 }
@@ -170,6 +171,17 @@ impl SrtServer {
         );
         self.send_control(&packet, peer).await;
     }
+
+    #[cfg(feature = "metrics")]
+    fn release_stream_metric(&self) {
+        if let Some(metrics) = &self.config.metrics {
+            use std::sync::atomic::Ordering;
+            metrics.srt_streams_active.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+
+    #[cfg(not(feature = "metrics"))]
+    fn release_stream_metric(&self) {}
 
     fn log_connection_stats(&self, conn: &SrtConnection, peer: SocketAddr, reason: &str) {
         let stats = conn.tsbpd.stats();
@@ -252,6 +264,7 @@ impl SrtServer {
                     if conn.mount_registered
                         && let Some(path) = conn.mount_path.clone()
                     {
+                        self.release_stream_metric();
                         self.mounts.unregister(&path);
                         info!("SRT: unregistered mount {path} on peer shutdown");
                     }
@@ -275,6 +288,7 @@ impl SrtServer {
                     && conn.mount_registered
                     && let Some(path) = &conn.mount_path
                 {
+                    self.release_stream_metric();
                     self.mounts.unregister(path);
                 }
                 connections.remove(&peer);
@@ -562,6 +576,13 @@ impl SrtServer {
             recv_latency_ms: caps.recv_latency_ms,
             send_latency_ms: caps.send_latency_ms,
         };
+        #[cfg(feature = "metrics")]
+        if let Some(metrics) = &self.config.metrics {
+            use std::sync::atomic::Ordering;
+            metrics
+                .srt_connections_total
+                .fetch_add(1, Ordering::Relaxed);
+        }
         connections.insert(
             peer,
             SrtConnection {

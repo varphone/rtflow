@@ -333,11 +333,12 @@ impl ServerApp {
                 async_authenticator: Some(auth.clone()),
                 ..RtmpSessionConfig::default()
             };
-            #[allow(clippy::needless_update)] // `metrics` only exists with feature
+            #[allow(clippy::needless_update)] // `metrics` only exists with the feature
             let rtmp_config = RtmpConfig {
                 bind_addr: config.rtmp.listen,
                 session,
                 max_connections: config.rtmp.max_connections,
+                metrics: Some(metrics.clone()),
                 ..RtmpConfig::default()
             };
             let server = RtmpServer::with_config(rtmp_config, mounts.clone()).await?;
@@ -365,6 +366,7 @@ impl ServerApp {
                 max_connections: config.srt.max_connections,
                 allowed_stream_ids: config.srt.allowed_stream_ids.clone(),
                 authenticator: Some(Arc::new(SrtAuth { auth: auth.clone() })),
+                metrics: Some(metrics.clone()),
                 ..SrtConfig::default()
             };
             let server = SrtServer::with_config(srt_config, mounts.clone()).await?;

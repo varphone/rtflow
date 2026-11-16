@@ -40,7 +40,18 @@ mkv = ["rtflow-file/mkv"]
 client = ["dep:rtflow-rtsp-client"]
 server = ["dep:rtflow-rtsp-server"]
 file-storage = ["dep:rtflow-file", "dep:rtflow-storage"]
-metrics = ["dep:rtflow-metrics"]
+metrics = [
+    "dep:rtflow-metrics",
+    "rtflow-mount/metrics",
+    "rtflow-http/metrics",
+    "rtflow-http-flv/metrics",
+    "rtflow-hls/metrics",
+    "rtflow-dash/metrics",
+    "rtflow-rtmp/metrics",
+    "rtflow-srt/metrics",
+    "rtflow-webrtc/metrics",
+    "rtflow-rtsp-server/metrics",
+]
 http = ["dep:rtflow-http"]
 http-flv = ["http", "dep:rtflow-http-flv"]
 ws-flv = ["http-flv", "rtflow-http-flv/ws"]
