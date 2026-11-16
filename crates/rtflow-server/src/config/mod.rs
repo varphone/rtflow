@@ -105,6 +105,9 @@ pub struct RtspSection {
     #[serde(with = "humantime_serde")]
     pub session_timeout: Duration,
     pub max_sessions: usize,
+    /// Per-source-IP RTSP session limit (proxies fanning out from one IP may
+    /// need a higher value).
+    pub max_sessions_per_ip: usize,
     pub dynamic_publishers: bool,
 }
 
@@ -123,6 +126,7 @@ impl Default for RtspSection {
             listen: "0.0.0.0:8554".parse().expect("valid default"),
             session_timeout: Duration::from_secs(60),
             max_sessions: 256,
+            max_sessions_per_ip: 32,
             dynamic_publishers: true,
         }
     }
@@ -493,6 +497,11 @@ impl Config {
         }
         if self.rtsp.enabled && self.rtsp.max_sessions == 0 {
             return Err(ConfigError::Invalid("rtsp.max_sessions is zero".into()));
+        }
+        if self.rtsp.enabled && self.rtsp.max_sessions_per_ip == 0 {
+            return Err(ConfigError::Invalid(
+                "rtsp.max_sessions_per_ip is zero".into(),
+            ));
         }
         if self.hls.enabled && (self.hls.window < 3 || self.hls.segment_duration.is_zero()) {
             return Err(ConfigError::Invalid(

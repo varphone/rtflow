@@ -358,6 +358,7 @@ impl ServerApp {
             let mut rtsp_config = rtflow::server::ServerConfig::new(config.rtsp.listen);
             rtsp_config.session_timeout = config.rtsp.session_timeout;
             rtsp_config.max_sessions = config.rtsp.max_sessions;
+            rtsp_config.resource_limits.max_sessions_per_ip = config.rtsp.max_sessions_per_ip;
             rtsp_config.dynamic_publishers = config.rtsp.dynamic_publishers;
             rtsp_config.authenticator = auth.clone();
             if let Some(tls) = &config.rtsp.tls {

@@ -20,6 +20,7 @@ access_log = false
 [rtsp]
 enabled = true
 listen = "0.0.0.0:8554"
+max_sessions_per_ip = 32
 session_timeout = "60s"
 max_sessions = 256
 dynamic_publishers = true
