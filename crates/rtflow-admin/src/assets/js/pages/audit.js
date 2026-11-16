@@ -113,6 +113,14 @@ function rows(events) {
 
 
 function openAuditEvent(event) {
+  const links = [];
+  if (event.path) {
+    links.push([`查看路径`, `#/config/paths?q=${encodeURIComponent(event.path)}`]);
+    links.push([`查看直播`, `#/live?q=${encodeURIComponent(event.path)}`]);
+  }
+  if (String(event.action).startsWith("proxy.") && event.path) links.push([`查看代理`, `#/config/proxies?q=${encodeURIComponent(event.path)}`]);
+  if (String(event.action).startsWith("record.") && event.path) links.push([`查看录制`, `#/config/recordings?q=${encodeURIComponent(event.path)}`]);
+  if (String(event.action).startsWith("srt.") && event.detail) links.push([`查看 SRT`, `#/config/srt?q=${encodeURIComponent(event.detail)}`]);
   const fields = [
     ["时间", dateTime(event.ts)],
     ["动作", `${labels[event.action] || event.action} (${event.action})`],
@@ -130,7 +138,13 @@ function openAuditEvent(event) {
     showSubmit: false,
     body: `<div class="stack">
       <div class="detail-grid">${fields.map(([label, value]) => `<div class="detail-item"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("")}</div>
+      ${links.length ? `<section class="drawer-section"><h3>关联资源</h3><div class="actions">${links.map(([label, href]) => `<a class="btn small" href="${href}" data-event-goto>${esc(label)}</a>`).join("")}</div></section>` : ""}
       <section class="drawer-section"><h3>原始记录</h3><pre class="code">${esc(JSON.stringify(event, null, 2))}</pre></section>
     </div>`,
+    onMount(root) {
+      root.querySelectorAll("[data-event-goto]").forEach((link) => link.onclick = () => {
+        root.querySelector("[data-close-drawer]")?.click();
+      });
+    },
   });
 }

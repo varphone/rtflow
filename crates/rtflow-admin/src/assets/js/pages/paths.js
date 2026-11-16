@@ -6,7 +6,9 @@ import { openPathDrawer } from "../forms/path.js";
 let query = "";
 let sort = { field: "name", dir: 1 };
 
-export async function render(_params, ctx) {
+export async function render(params, ctx) {
+  const linked = params?.get("q");
+  if (linked !== null && linked !== undefined) query = linked;
   const [paths, system] = await Promise.all([apiV1("/paths/config"), api("/system")]);
   const all = Array.isArray(paths) ? paths : paths.items || [];
   const initial = view(all);
