@@ -544,9 +544,10 @@ fn kick_handler(state: Arc<AdminState>) -> Handler {
             let Some(path) = req.query.get("path") else {
                 return respond_json(writer, 400, &json!({"error":"missing_path"}), None).await;
             };
-            if state.mounts.unregister(path).is_none() {
+            let Some(mount) = state.mounts.unregister(path) else {
                 return respond_json(writer, 404, &json!({"error":"not_found"}), None).await;
-            }
+            };
+            mount.mount().cancel.cancel();
             respond_json(writer, 200, &json!({"ok":true}), None).await
         })
     })

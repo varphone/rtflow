@@ -27,7 +27,12 @@ impl SrtServer {
 
         let mut expired = Vec::new();
         for (peer, conn) in connections.iter_mut() {
-            if now.duration_since(conn.last_recv_time) > self.config.peer_idle_timeout {
+            if now.duration_since(conn.last_recv_time) > self.config.peer_idle_timeout
+                || conn
+                    .mount
+                    .as_ref()
+                    .is_some_and(|mount| mount.cancel.is_cancelled())
+            {
                 expired.push(*peer);
                 continue;
             }

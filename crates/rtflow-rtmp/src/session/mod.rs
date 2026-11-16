@@ -223,9 +223,25 @@ pub async fn serve_rtmp_session(
     let idle_timeout = Duration::from_secs(30);
 
     loop {
+        let mount_cancel = match &state {
+            SessionState::Publishing { mount_handle, .. }
+            | SessionState::Playing { mount_handle, .. } => {
+                Some(mount_handle.mount().cancel_token())
+            }
+            _ => None,
+        };
         tokio::select! {
             _ = cancel.cancelled() => {
                 debug!(?peer, "RTMP: server shutdown");
+                break;
+            }
+            _ = async {
+                match &mount_cancel {
+                    Some(token) => token.cancelled().await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                debug!(?peer, "RTMP: mount removed");
                 break;
             }
             _ = &mut writer_done_rx => {

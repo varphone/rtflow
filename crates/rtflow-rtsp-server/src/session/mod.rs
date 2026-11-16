@@ -131,9 +131,32 @@ pub(super) async fn serve_connection(
     let mut last_activity = tokio::time::Instant::now();
     let publisher_activity = Arc::new(AtomicU64::new(epoch_millis()));
     loop {
+        let mount_cancel = if phase == ConnectionPhase::Recording {
+            resources
+                .claims
+                .first()
+                .map(|mount| mount.cancel.clone())
+                .or_else(|| {
+                    resources
+                        .dynamic_mounts
+                        .first()
+                        .map(|handle| handle.mount().cancel_token())
+                })
+        } else {
+            None
+        };
         let n = if phase == ConnectionPhase::Recording {
             tokio::select! {
                 _ = state.cancel.cancelled() => break,
+                _ = async {
+                    match &mount_cancel {
+                        Some(token) => token.cancelled().await,
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    tracing::debug!("RTSP publisher mount removed");
+                    break;
+                }
                 _ = rtcp_tick.tick() => {
                     // The RTCP tick must not keep a stalled publisher's
                     // control connection alive forever.

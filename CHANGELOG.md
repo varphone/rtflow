@@ -7,6 +7,9 @@
 
 ### Fixed
 
+- 断开直播流现在同时取消 mount 并关闭发布连接：RTMP/RTSP 会话监听 mount
+  取消令牌，SRT 维护循环清理已取消 mount 的连接，不再只从列表移除。
+
 - SRT MPEG-TS demux 按 ADTS 拆分音频帧、剥离 ADTS 头并从 ADTS 解析采样率/声道，
   修复 HLS 直播 AAC DTS 非单调与 48kHz 源被标成 44.1kHz。
 - 录制从首个视频关键帧开始，HLS segmenter 在切段前提取 SPS/PPS，修复中途开始录制
