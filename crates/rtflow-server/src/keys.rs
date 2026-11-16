@@ -2,15 +2,17 @@
 //!
 //! A key is `kid.secret`; only the Argon2id hash of `secret` is persisted.
 //! The secret is returned exactly once from [`KeyStore::issue`].
-use crate::config::{Config, glob_match};
+use crate::{
+    config::{Config, glob_match},
+    store::{self, Store, StoreError},
+};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::Write,
-    path::{Path, PathBuf},
-    sync::RwLock,
+    path::Path,
+    sync::{Arc, RwLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -55,7 +57,13 @@ pub struct KeyRecord {
     pub created_at: u64,
     pub expires_at: u64,
     pub enabled: bool,
-    hash: String,
+    pub(crate) hash: String,
+    #[serde(default = "initial_revision")]
+    pub revision: u64,
+}
+
+fn initial_revision() -> u64 {
+    1
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -100,16 +108,30 @@ struct StoreFile {
 }
 
 pub struct KeyStore {
-    file: PathBuf,
+    store: Arc<Store>,
     keys: RwLock<Vec<KeyRecord>>,
 }
 
 impl KeyStore {
     pub fn new(config: &Config) -> Result<Self, KeyError> {
-        let file = config.server.state_dir.join(STORE_FILE);
-        let keys = load_file(&file)?;
+        let store = Arc::new(
+            Store::open(&config.storage, &config.server.state_dir)
+                .map_err(key_store_error)?,
+        );
+        Self::with_store(config, store)
+    }
+
+    pub(crate) fn with_store(config: &Config, store: Arc<Store>) -> Result<Self, KeyError> {
+        let mut keys = store::keys::load_all(&store).map_err(key_store_error)?;
+        if keys.is_empty() {
+            let file = config.server.state_dir.join(STORE_FILE);
+            keys = load_file(&file)?;
+            for key in &keys {
+                store::keys::insert(&store, key).map_err(key_store_error)?;
+            }
+        }
         Ok(Self {
-            file,
+            store,
             keys: RwLock::new(keys),
         })
     }
@@ -159,13 +181,13 @@ impl KeyStore {
             expires_at: now.saturating_add(ttl.as_secs()),
             enabled: true,
             hash,
+            revision: 1,
         };
-        let mut keys = self
-            .keys
+        store::keys::insert(&self.store, &record).map_err(key_store_error)?;
+        self.keys
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        keys.push(record.clone());
-        self.persist_locked(&keys)?;
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(record.clone());
         Ok(IssuedKey {
             status: KeyStatus::from(&record),
             secret,
@@ -180,12 +202,14 @@ impl KeyStore {
         let Some(key) = keys.iter_mut().find(|key| key.kid == kid) else {
             return Err(KeyError::NotFound(kid.into()));
         };
+        let next_revision = key.revision.saturating_add(1);
+        store::keys::set_enabled(&self.store, kid, false, next_revision)
+            .map_err(key_store_error)?;
         key.enabled = false;
-        self.persist_locked(&keys)
+        key.revision = next_revision;
+        Ok(())
     }
 
-    /// Verify `kid.secret`, expiry, scope and protocol. Returns the key's
-    /// record so callers can apply quotas and audit the key id.
     pub fn verify(&self, token: &str, path: &str, role: &str, protocol: &str) -> Option<KeyRecord> {
         let (kid, secret) = token.rsplit_once('.')?;
         let keys = self
@@ -221,16 +245,6 @@ impl KeyStore {
             .ok()?;
         Some(key.clone())
     }
-
-    fn persist_locked(&self, keys: &[KeyRecord]) -> Result<(), KeyError> {
-        atomic_write_json(
-            &self.file,
-            &StoreFile {
-                version: STORE_VERSION,
-                keys: keys.to_vec(),
-            },
-        )
-    }
 }
 
 fn load_file(path: &Path) -> Result<Vec<KeyRecord>, KeyError> {
@@ -249,21 +263,11 @@ fn load_file(path: &Path) -> Result<Vec<KeyRecord>, KeyError> {
     Ok(file.keys)
 }
 
-fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), KeyError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| KeyError::Io(error.to_string()))?;
+fn key_store_error(error: StoreError) -> KeyError {
+    match error {
+        StoreError::NotFound(_) => KeyError::NotFound(String::new()),
+        other => KeyError::Io(other.to_string()),
     }
-    let bytes =
-        serde_json::to_vec_pretty(value).map_err(|error| KeyError::Io(error.to_string()))?;
-    let temporary = path.with_extension("json.tmp");
-    {
-        let mut file =
-            fs::File::create(&temporary).map_err(|error| KeyError::Io(error.to_string()))?;
-        file.write_all(&bytes)
-            .and_then(|_| file.sync_all())
-            .map_err(|error| KeyError::Io(error.to_string()))?;
-    }
-    fs::rename(&temporary, path).map_err(|error| KeyError::Io(error.to_string()))
 }
 
 fn unix_now() -> u64 {

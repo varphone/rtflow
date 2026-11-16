@@ -53,43 +53,18 @@ pub(super) fn srt_status_json(state: &ApiState) -> serde_json::Value {
         })
         .unwrap_or_default();
     let pulls: Vec<serde_json::Value> = state
-        .srt_pulls
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .iter()
-        .map(|entry| {
-            json!({
-                "role": "caller",
-                "remote": entry.remote,
-                "stream_id": entry.stream_id,
-                "mount": entry.mount,
-                "connected": entry.connected,
-                "encrypted": entry.encrypted,
-                "bytes": entry.bytes,
-                "rtt_us": entry.rtt_us,
-                "skipped": entry.skipped,
-                "last_error": entry.last_error,
-            })
-        })
-        .collect();
+        .srt
+        .pull_json()
+        .get("items")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
     let pushes: Vec<serde_json::Value> = state
-        .srt_pushes
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .iter()
-        .map(|entry| {
-            json!({
-                "role": "sender",
-                "mount": entry.mount,
-                "remote": entry.remote,
-                "stream_id": entry.stream_id,
-                "connected": entry.connected,
-                "encrypted": entry.encrypted,
-                "bytes_sent": entry.bytes_sent,
-                "rtt_us": entry.rtt_us,
-                "last_error": entry.last_error,
-            })
-        })
-        .collect();
+        .srt
+        .push_json()
+        .get("items")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
     json!({"listener": listener, "pulls": pulls, "pushes": pushes})
 }

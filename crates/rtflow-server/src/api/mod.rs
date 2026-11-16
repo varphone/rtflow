@@ -1,5 +1,6 @@
 //! HTTP control-plane API (paths, keys, recordings, VOD, discovery).
 mod proxy;
+mod srt;
 mod status;
 use crate::{
     audit::{AuditEvent, AuditLog},
@@ -28,14 +29,14 @@ pub(crate) async fn register_api_routes(
     discovery: Arc<DiscoveryService>,
     paths: Arc<PathStore>,
     keys: Arc<KeyStore>,
+    store: Arc<crate::store::Store>,
     vod: Arc<VodCatalog>,
     recording: Arc<RecordingSupervisor>,
     mounts: Arc<MountRegistry>,
     audit_log: Option<Arc<AuditLog>>,
     admin: Option<Arc<rtflow::admin::Admin>>,
     srt_listener: Option<Arc<std::sync::RwLock<Vec<rtflow::srt::SrtConnectionStats>>>>,
-    srt_pulls: Arc<std::sync::Mutex<Vec<crate::srt_pull::SrtPullStatus>>>,
-    srt_pushes: Arc<std::sync::Mutex<Vec<crate::srt_push::SrtPushStatus>>>,
+    srt: Arc<crate::srt_supervisor::SrtSupervisor>,
     proxies: Arc<rtflow::server::ProxyService>,
     proxy_config: Arc<std::sync::RwLock<crate::config::ProxySection>>,
     proxy_event_sink: Arc<dyn rtflow::EventSink>,
@@ -46,14 +47,14 @@ pub(crate) async fn register_api_routes(
         discovery,
         paths,
         keys,
+        store,
         vod,
         recording,
         mounts,
         audit: audit_log,
         admin,
         srt_listener,
-        srt_pulls,
-        srt_pushes,
+        srt,
         proxies,
         proxy_config,
         proxy_event_sink,
@@ -359,6 +360,22 @@ pub(crate) async fn register_api_routes(
     .await;
     http.add_route(
         Method::Get,
+        "/admin/api/v1/storage",
+        api_json(state.clone(), |state, _req| async move {
+            let info = state
+                .store
+                .info()
+                .map_err(|error| (500, error.to_string()))?;
+            Ok(json!({
+                "schema_version": info.schema_version,
+                "bytes": info.bytes,
+                "path_len": info.path_len,
+            }))
+        }),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
         "/admin/api/v1/srt",
         api_json(state.clone(), |state, _req| async move {
             Ok(srt_status_json(&state))
@@ -366,6 +383,7 @@ pub(crate) async fn register_api_routes(
     )
     .await;
     proxy::register(http, state.clone()).await;
+    srt::register(http, state.clone()).await;
     http.add_route(
         Method::Get,
         "/admin/api/v1/recordings",
@@ -498,14 +516,14 @@ struct ApiState {
     discovery: Arc<DiscoveryService>,
     paths: Arc<PathStore>,
     keys: Arc<KeyStore>,
+    store: Arc<crate::store::Store>,
     vod: Arc<VodCatalog>,
     recording: Arc<RecordingSupervisor>,
     mounts: Arc<MountRegistry>,
     audit: Option<Arc<AuditLog>>,
     admin: Option<Arc<rtflow::admin::Admin>>,
     srt_listener: Option<Arc<std::sync::RwLock<Vec<rtflow::srt::SrtConnectionStats>>>>,
-    srt_pulls: Arc<std::sync::Mutex<Vec<crate::srt_pull::SrtPullStatus>>>,
-    srt_pushes: Arc<std::sync::Mutex<Vec<crate::srt_push::SrtPushStatus>>>,
+    srt: Arc<crate::srt_supervisor::SrtSupervisor>,
     proxies: Arc<rtflow::server::ProxyService>,
     proxy_config: Arc<std::sync::RwLock<crate::config::ProxySection>>,
     proxy_event_sink: Arc<dyn rtflow::EventSink>,

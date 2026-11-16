@@ -15,6 +15,9 @@
     keys: [],
     recordings: [],
     proxies: [],
+    proxyConfigs: [],
+    srtPulls: [],
+    srtPushes: [],
     overview: {},
     system: {},
     query: "",
@@ -111,6 +114,25 @@
     }
     if (!response.ok) {
       const error = new Error(body.message || body.error || `请求失败 (${response.status})`);
+      error.status = response.status;
+      throw error;
+    }
+    return body;
+  }
+
+  async function apiV1(path, options = {}) {
+    const headers = Object.assign({ Accept: "application/json" }, options.headers || {});
+    if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+    if (options.method && options.method !== "GET" && state.session && state.session.csrf) {
+      headers["X-CSRF-Token"] = state.session.csrf;
+    }
+    const response = await fetch(BASE + "/api/v1" + path,
+      Object.assign({ credentials: "same-origin" }, options, { headers }));
+    const text = await response.text();
+    let body = {};
+    try { body = text ? JSON.parse(text) : {}; } catch (_) { body = { message: text }; }
+    if (!response.ok) {
+      const error = new Error(body.error || body.message || `请求失败 (${response.status})`);
       error.status = response.status;
       throw error;
     }
@@ -427,6 +449,21 @@
         <td>${num(item.tracks)}</td>
         <td>${num(item.attempts)}</td>
         <td>${item.last_error ? esc(item.last_error) : "—"}</td>
+        <td class="row-actions">
+          <button class="btn small" data-action="restart-proxy" data-path="${esc(item.path)}">重启</button>
+          <button class="btn small danger" data-action="delete-proxy" data-path="${esc(item.path)}">删除</button>
+        </td>
+      </tr>`).join("");
+    const srtRows = (items, direction) => items.map((item) => `
+      <tr>
+        <td><code>${esc(item.name || item.id)}</code></td>
+        <td>${item.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge">停用</span>'}</td>
+        <td class="mono">${esc(item.remote)}</td>
+        <td>${esc(item.mount || "—")}</td>
+        <td>${item.connected ? '<span class="badge ok">已连接</span>' : "—"}</td>
+        <td>${bytes(item.bytes || 0)}</td>
+        <td>${item.last_error ? esc(item.last_error) : "—"}</td>
+        <td class="row-actions"><button class="btn small danger" data-action="delete-srt" data-direction="${direction}" data-id="${esc(item.id)}">删除</button></td>
       </tr>`).join("");
     return `
       <div class="stack">
@@ -457,18 +494,43 @@
           <div class="panel-head"><h3>RTSP 代理</h3><span class="sub">状态只读</span></div>
           <div class="table-wrap"><table class="data">
             <thead><tr><th>路径</th><th>状态</th><th>上游</th><th>订阅</th><th>轨道</th><th>重试</th><th>错误</th></tr></thead>
-            <tbody>${proxies || '<tr><td colspan="7" class="empty-cell">未配置代理</td></tr>'}</tbody>
+            <tbody>${proxies || '<tr><td colspan="8" class="empty-cell">未配置代理</td></tr>'}</tbody>
+          </table></div>
+          <div class="actions" style="padding:12px">
+            <button class="btn small" data-action="create-proxy">新增代理</button>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h3>SRT 拉流</h3><span class="sub">SQLite</span>
+            <div class="actions"><button class="btn small" data-action="create-srt" data-direction="pull">新增拉流</button></div></div>
+          <div class="table-wrap"><table class="data">
+            <thead><tr><th>名称</th><th>状态</th><th>远端</th><th>Mount</th><th>连接</th><th>流量</th><th>错误</th><th></th></tr></thead>
+            <tbody>${srtRows(state.srtPulls, "pulls") || '<tr><td colspan="8" class="empty-cell">未配置 SRT 拉流</td></tr>'}</tbody>
+          </table></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h3>SRT 推流</h3><span class="sub">SQLite</span>
+            <div class="actions"><button class="btn small" data-action="create-srt" data-direction="push">新增推流</button></div></div>
+          <div class="table-wrap"><table class="data">
+            <thead><tr><th>名称</th><th>状态</th><th>远端</th><th>Mount</th><th>连接</th><th>流量</th><th>错误</th><th></th></tr></thead>
+            <tbody>${srtRows(state.srtPushes, "pushes") || '<tr><td colspan="8" class="empty-cell">未配置 SRT 推流</td></tr>'}</tbody>
           </table></div>
         </section>
       </div>`;
   }
 
   async function loadControl() {
-    const [paths, keys, recordings, proxies] = await Promise.all([api("/paths"), api("/keys"), api("/recordings"), api("/proxies")]);
+    const [paths, keys, recordings, proxies, proxyConfigs, pulls, pushes] = await Promise.all([
+      api("/paths"), api("/keys"), api("/recordings"), api("/proxies"),
+      apiV1("/proxies/config"), apiV1("/srt/pulls"), apiV1("/srt/pushes"),
+    ]);
     state.paths = Array.isArray(paths) ? paths : (paths.items || []);
     state.keys = Array.isArray(keys) ? keys : (keys.items || []);
     state.recordings = Array.isArray(recordings) ? recordings : (recordings.items || []);
     state.proxies = Array.isArray(proxies) ? proxies : (proxies.proxies || []);
+    state.proxyConfigs = proxyConfigs.mounts || [];
+    state.srtPulls = pulls.items || [];
+    state.srtPushes = pushes.items || [];
   }
 
   async function createPath() {
@@ -643,6 +705,57 @@
     }
   }
 
+  async function createProxy() {
+    const path = prompt("代理路径（例如 /cameras/front）");
+    if (!path) return;
+    const url = prompt("上游 RTSP URL");
+    if (!url) return;
+    try {
+      await apiV1("/proxies", { method: "POST", body: JSON.stringify({
+        path, upstreams: [{ url, transport: "tcp" }] }) });
+      toast("代理已创建", "ok"); await loadControl(); render();
+    } catch (error) { toast(error.message, "bad"); }
+  }
+
+  async function restartProxy(path) {
+    try {
+      await apiV1("/proxies/restart?path=" + encodeURIComponent(path), { method: "POST" });
+      toast("代理重启已提交", "ok"); await loadControl(); render();
+    } catch (error) { toast(error.message, "bad"); }
+  }
+
+  async function deleteProxy(path) {
+    if (!confirm(`删除代理 ${path}？`)) return;
+    try {
+      await apiV1("/proxies?path=" + encodeURIComponent(path), { method: "DELETE" });
+      toast("代理已删除", "ok"); await loadControl(); render();
+    } catch (error) { toast(error.message, "bad"); }
+  }
+
+  async function createSrt(direction) {
+    const remote = prompt("远端 host:port");
+    if (!remote) return;
+    const mount = prompt(direction === "push" ? "源 mount（例如 /live/cam）" : "目标 mount（可空）", "/live/cam");
+    if (direction === "push" && !mount) return;
+    const streamId = prompt("Stream ID（可空）", "");
+    const passphrase = prompt("Passphrase（10..80 字节，可空）", "");
+    const body = { remote, stream_id: streamId || null, mount: mount || null,
+      passphrase: passphrase || null, pbkeylen: 0, enabled: true };
+    try {
+      const route = direction === "push" ? "pushes" : "pulls";
+      await apiV1("/srt/" + route, { method: "POST", body: JSON.stringify(body) });
+      toast("SRT 端点已创建", "ok"); await loadControl(); render();
+    } catch (error) { toast(error.message, "bad"); }
+  }
+
+  async function deleteSrt(direction, id) {
+    if (!confirm(`删除 SRT 端点 ${id}？`)) return;
+    try {
+      await apiV1("/srt/" + direction + "/" + encodeURIComponent(id), { method: "DELETE" });
+      toast("SRT 端点已删除", "ok"); await loadControl(); render();
+    } catch (error) { toast(error.message, "bad"); }
+  }
+
   async function kickStream(path) {
     if (!confirm(`确定断开并移除 ${path} 吗？该操作会关闭当前发布者与所有观看连接。`)) return;
     try { await api("/streams?path=" + encodeURIComponent(path), { method: "DELETE" }); toast("流已移除", "ok"); await loadAll(); render(); }
@@ -671,6 +784,11 @@
     if (action === "logout") { try { await api("/logout", { method: "POST" }); } catch (_) {} state.session = { authenticated: false }; stopPolling(); renderLogin(); return; }
     if (action === "retry" || action === "refresh") { state.loading = true; state.error = ""; render(); try { await loadAll(); } catch (error) { state.error = error.message; } state.loading = false; render(); return; }
     if (action === "close-modal" || action === "modal-backdrop") { if (event.target === actionEl) closeModal(); return; }
+    if (action === "create-proxy") return createProxy();
+    if (action === "restart-proxy") return restartProxy(actionEl.dataset.path);
+    if (action === "delete-proxy") return deleteProxy(actionEl.dataset.path);
+    if (action === "create-srt") return createSrt(actionEl.dataset.direction);
+    if (action === "delete-srt") return deleteSrt(actionEl.dataset.direction, actionEl.dataset.id);
     if (action === "play") {
       const kind = actionEl.dataset.kind;
       if (kind === "live") {

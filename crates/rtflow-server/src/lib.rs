@@ -12,9 +12,11 @@ pub mod metrics;
 pub mod paths;
 pub mod proxy_control;
 pub mod recording;
+mod store;
 pub mod server;
 pub mod srt_pull;
 pub mod srt_push;
+mod srt_supervisor;
 pub mod vod;
 
 pub use config::{Config, ConfigError};

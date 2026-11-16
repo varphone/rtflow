@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 
 mod proxy;
 mod srt;
+mod storage;
 pub use proxy::{ProxyMode, ProxyMount, ProxySection, ProxyTransport, ProxyUpstream};
 pub use srt::{SrtPull, SrtPush, SrtSection};
+pub use storage::StorageSection;
 use std::{
     collections::BTreeMap,
     net::SocketAddr,
@@ -37,6 +39,7 @@ pub struct Config {
     pub audit: AuditSection,
     pub discovery: DiscoverySection,
     pub proxy: ProxySection,
+    pub storage: StorageSection,
     /// Static path rules. Keys are globs (`live/*`, `private/**`).
     pub paths: BTreeMap<String, PathRule>,
 }
@@ -495,6 +498,7 @@ impl Config {
         if self.server.shutdown_grace.is_zero() {
             return Err(ConfigError::Invalid("server.shutdown_grace is zero".into()));
         }
+        self.storage.validate()?;
         if self.rtsp.enabled && self.rtsp.max_sessions == 0 {
             return Err(ConfigError::Invalid("rtsp.max_sessions is zero".into()));
         }

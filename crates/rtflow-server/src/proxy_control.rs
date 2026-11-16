@@ -116,67 +116,16 @@ pub(crate) fn register_configured(
 pub(crate) fn apply_reload(
     old: &ProxySection,
     new: &ProxySection,
-    proxies: &Arc<ProxyService>,
-    event_sink: Arc<dyn rtflow::EventSink>,
-    cancel: &CancellationToken,
+    _proxies: &Arc<ProxyService>,
+    _event_sink: Arc<dyn rtflow::EventSink>,
+    _cancel: &CancellationToken,
 ) -> bool {
-    let mut changed = false;
-    let old_mounts: std::collections::BTreeMap<_, _> = old
-        .mounts
-        .iter()
-        .map(|mount| (mount.path.as_str(), mount))
-        .collect();
-    let new_mounts: std::collections::BTreeMap<_, _> = new
-        .mounts
-        .iter()
-        .map(|mount| (mount.path.as_str(), mount))
-        .collect();
-    for path in old_mounts.keys() {
-        if !new.enabled || !new_mounts.contains_key(path) {
-            proxies.remove(path);
-            changed = true;
-        }
-    }
-    if !new.enabled {
-        return changed;
-    }
-    for (path, mount) in &new_mounts {
-        if !mount.enabled {
-            if old_mounts.contains_key(path) {
-                proxies.remove(path);
-                changed = true;
-            }
-            continue;
-        }
-        let unchanged = old.enabled
-            && old_mounts
-                .get(path)
-                .is_some_and(|previous| *previous == *mount);
-        if unchanged {
-            continue;
-        }
-        proxies.remove(path);
-        let Ok(upstream) = mount.upstream_config_with(new.redirect_policy) else {
-            continue;
-        };
-        let startup_cache = upstream.startup_cache;
-        let options = rtflow::mount::MountOptions::builder()
-            .event_sink(event_sink.clone())
-            .startup_cache_config(startup_cache)
-            .cancel(cancel.child_token())
-            .build();
-        let path: Arc<str> = Arc::from(*path);
-        let _ = proxies.ensure(
-            path,
-            upstream,
-            options,
-            mount.idle_grace,
-            mount.mode.is_always(),
-            mount.description_refresh.or(Some(new.description_refresh)),
+    if old != new {
+        tracing::warn!(
+            "[[proxy.mounts]] is managed by the business database; TOML changes are ignored"
         );
-        changed = true;
     }
-    changed
+    false
 }
 
 pub(crate) fn spawn_metrics(

@@ -2,6 +2,11 @@
 # Start: rtflow-server --config rtflow.toml
 # Check: rtflow-server --config rtflow.toml --check-config
 
+[storage]
+database = "./state/rtflow.db"
+busy_timeout = "5s"
+master_key_env = "RTFLOW_MASTER_KEY"
+
 [server]
 name = "rtflow"
 shutdown_grace = "10s"

@@ -7,14 +7,16 @@
 //! A concrete record overrides the matching rule for that path. Static rules
 //! are never rewritten by the API: configuration remains the operator's
 //! source of truth, while runtime registration is a separate, auditable layer.
-use crate::config::{Config, PathRule};
+use crate::{
+    config::{Config, PathRule},
+    store::{self, Store, StoreError},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fs,
-    io::Write,
-    path::{Path, PathBuf},
-    sync::RwLock,
+    path::Path,
+    sync::{Arc, RwLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -50,6 +52,12 @@ pub struct PathRecord {
     pub updated_at: u64,
     /// Unix seconds; dynamic paths without a publisher expire after this.
     pub expires_at: Option<u64>,
+    #[serde(default = "initial_revision")]
+    pub revision: u64,
+}
+
+fn initial_revision() -> u64 {
+    1
 }
 
 /// Partial update for an API-registered path. Omitted fields keep their
@@ -131,6 +139,7 @@ impl PathSpec {
             created_at: now,
             updated_at: now,
             expires_at: None,
+            revision: 1,
         }
     }
 
@@ -159,6 +168,7 @@ impl PathSpec {
             created_at: now,
             updated_at: now,
             expires_at,
+            revision: 1,
         }
     }
 }
@@ -170,7 +180,7 @@ struct StoreFile {
 }
 
 pub struct PathStore {
-    file: PathBuf,
+    store: Arc<Store>,
     rules: RwLock<BTreeMap<String, PathRule>>,
     records: RwLock<BTreeMap<String, PathRecord>>,
     persist_dynamic: bool,
@@ -178,15 +188,33 @@ pub struct PathStore {
 
 impl PathStore {
     pub fn new(config: &Config, persist_dynamic: bool) -> Result<Self, PathError> {
-        let state_dir = &config.server.state_dir;
-        let file = state_dir.join(STORE_FILE);
-        let records = load_file(&file)?;
+        let store = Arc::new(
+            Store::open(&config.storage, &config.server.state_dir)
+                .map_err(path_store_error)?,
+        );
+        Self::with_store(config, persist_dynamic, store)
+    }
+
+    pub(crate) fn with_store(
+        config: &Config,
+        persist_dynamic: bool,
+        store: Arc<Store>,
+    ) -> Result<Self, PathError> {
+        let mut records: BTreeMap<String, PathRecord> =
+            store::paths::load_all(&store).map_err(path_store_error)?.into_iter().map(|record| (record.name.clone(), record)).collect();
+        if records.is_empty() {
+            let legacy = load_file(&config.server.state_dir.join(STORE_FILE))?;
+            for record in legacy.into_values() {
+                store::paths::insert(&store, &record).map_err(path_store_error)?;
+                records.insert(record.name.clone(), record);
+            }
+        }
         let mut rules = config.paths.clone();
         if rules.is_empty() {
             rules.insert("**".into(), PathRule::default());
         }
         Ok(Self {
-            file,
+            store,
             rules: RwLock::new(rules),
             records: RwLock::new(records),
             persist_dynamic,
@@ -293,8 +321,8 @@ impl PathStore {
             return Err(PathError::Conflict(name.into()));
         }
         let record = spec.into_record(name, PathSource::Api);
+        store::paths::insert(&self.store, &record).map_err(path_store_error)?;
         records.insert(name.to_owned(), record.clone());
-        self.persist_locked(&records)?;
         Ok(record)
     }
 
@@ -348,8 +376,10 @@ impl PathStore {
             record.metadata = value;
         }
         record.updated_at = unix_now();
+        record.revision = existing.revision.saturating_add(1);
+        store::paths::update(&self.store, &record, Some(existing.revision))
+            .map_err(path_store_error)?;
         records.insert(name.to_owned(), record.clone());
-        self.persist_locked(&records)?;
         Ok(record)
     }
 
@@ -367,8 +397,10 @@ impl PathStore {
         }
         let mut record = spec.into_record(name, existing.source);
         record.created_at = existing.created_at;
+        record.revision = existing.revision.saturating_add(1);
+        store::paths::update(&self.store, &record, Some(existing.revision))
+            .map_err(path_store_error)?;
         records.insert(name.to_owned(), record.clone());
-        self.persist_locked(&records)?;
         Ok(record)
     }
 
@@ -383,8 +415,9 @@ impl PathStore {
         if existing.source == PathSource::Config {
             return Err(PathError::ReadOnly(name.into()));
         }
+        store::paths::delete(&self.store, name, Some(existing.revision))
+            .map_err(path_store_error)?;
         let record = records.remove(name).expect("checked above");
-        self.persist_locked(&records)?;
         Ok(record)
     }
 
@@ -401,12 +434,14 @@ impl PathStore {
             }
         }
         let record = PathSpec::from_rule(rule, PathSource::Dynamic, name);
+        if self.persist_dynamic {
+            let _ = store::paths::insert(&self.store, &record);
+        }
         let mut records = self
             .records
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         records.insert(name.to_owned(), record.clone());
-        let _ = self.persist_locked(&records);
         record
     }
 
@@ -427,21 +462,20 @@ impl PathStore {
         for name in &expired {
             records.remove(name);
         }
-        if !expired.is_empty() {
-            let _ = self.persist_locked(&records);
+        if !expired.is_empty() && self.persist_dynamic {
+            let _ = store::paths::purge_expired(&self.store, now);
         }
         expired
     }
 
-    fn persist_locked(&self, records: &BTreeMap<String, PathRecord>) -> Result<(), PathError> {
-        if !self.persist_dynamic && records.values().all(|r| r.source == PathSource::Dynamic) {
-            return Ok(());
-        }
-        let file = StoreFile {
-            version: STORE_VERSION,
-            paths: records.values().cloned().collect(),
-        };
-        atomic_write_json(&self.file, &file)
+
+}
+
+fn path_store_error(error: StoreError) -> PathError {
+    match error {
+        StoreError::Conflict(_) => PathError::Conflict(String::new()),
+        StoreError::NotFound(_) => PathError::NotFound(String::new()),
+        other => PathError::Io(other.to_string()),
     }
 }
 
@@ -512,26 +546,6 @@ fn load_file(path: &Path) -> Result<BTreeMap<String, PathRecord>, PathError> {
         .collect())
 }
 
-fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), PathError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| PathError::Io(format!("{}: {error}", parent.display())))?;
-    }
-    let bytes = serde_json::to_vec_pretty(value)
-        .map_err(|error| PathError::Io(format!("serialize paths: {error}")))?;
-    let temporary = path.with_extension("json.tmp");
-    {
-        let mut file = fs::File::create(&temporary)
-            .map_err(|error| PathError::Io(format!("{}: {error}", temporary.display())))?;
-        file.write_all(&bytes)
-            .and_then(|_| file.sync_all())
-            .map_err(|error| PathError::Io(format!("{}: {error}", temporary.display())))?;
-    }
-    fs::rename(&temporary, path)
-        .map_err(|error| PathError::Io(format!("{}: {error}", path.display())))?;
-    Ok(())
-}
-
 pub fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -562,7 +576,7 @@ mod tests {
 
     static SEQ: AtomicU64 = AtomicU64::new(1);
 
-    fn store() -> (PathStore, PathBuf) {
+    fn store() -> (PathStore, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!(
             "rtflow-paths-{}-{}",
             std::process::id(),

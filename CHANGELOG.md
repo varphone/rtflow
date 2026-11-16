@@ -29,6 +29,12 @@
 
 ### Added
 
+- 业务数据改用 SQLite（`state/rtflow.db`，WAL）：路径、推流密钥、RTSP 代理、
+  SRT pull/push、幂等键；TOML 服务配置保持不变，旧 JSON/TOML 业务数据首次启动
+  一次性导入。秘密字段 AES-256-GCM 加密，DB/主密钥 0600。
+- 管理台新增代理/SRT 列表与创建/删除/重启操作，业务 CRUD 走
+  `/admin/api/v1`。
+
 - RTSP 拉流代理：`[proxy]`/`[[proxy.mounts]]` 配置、按需/常连、失败退避重试、
   per-mount `idle_grace`、SIGHUP 增删改、上游 host/CIDR/私网策略、DNS 固定、
   重定向策略、并发/数量上限、运行时持久化、缓存 SDP 快速重连、媒体空闲看门狗、

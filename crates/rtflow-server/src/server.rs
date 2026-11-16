@@ -275,15 +275,29 @@ impl ServerApp {
     pub async fn start(
         config: Config,
     ) -> Result<ServerHandle, Box<dyn std::error::Error + Send + Sync>> {
-        let config = crate::proxy_control::load_overlay(config);
+        let mut config = crate::proxy_control::load_overlay(config);
         config.validate()?;
+        let store = Arc::new(
+            crate::store::Store::open(&config.storage, &config.server.state_dir)
+                .map_err(|error| format!("cannot open business database: {error}"))?,
+        );
+        let stored_proxies = crate::store::proxies::load_all(&store)
+            .map_err(|error| format!("cannot load proxy mounts: {error}"))?;
+        if stored_proxies.is_empty() {
+            for mount in &config.proxy.mounts {
+                crate::store::proxies::insert(&store, mount)
+                    .map_err(|error| format!("cannot seed proxy mounts: {error}"))?;
+            }
+        } else {
+            config.proxy.mounts = stored_proxies;
+        }
         let config = Arc::new(config);
         let metrics = Arc::new(MetricsRegistry::default());
         let mut mounts = MountRegistry::new(4096);
         mounts.attach_global(metrics.clone());
         let mounts = Arc::new(mounts);
-        let paths = Arc::new(PathStore::new(&config, false)?);
-        let keys = Arc::new(KeyStore::new(&config)?);
+        let paths = Arc::new(PathStore::with_store(&config, false, store.clone())?);
+        let keys = Arc::new(KeyStore::with_store(&config, store.clone())?);
         let hooks = if config.hooks.on_publish_auth.is_some()
             || config.hooks.on_play_auth.is_some()
             || config.hooks.on_publish_done.is_some()
@@ -339,21 +353,12 @@ impl ServerApp {
         let mut cancels = Vec::new();
         let mut tasks = Vec::new();
 
-        // SRT pull (caller) sources run for the lifetime of the server.
-        let srt_pull_status = crate::srt_pull::status_table(&config);
-        tasks.extend(crate::srt_pull::spawn(
+        let srt = crate::srt_supervisor::SrtSupervisor::new(
+            store.clone(),
             config.clone(),
             mounts.clone(),
             cancel.clone(),
-            srt_pull_status.clone(),
-        ));
-        let srt_push_status = crate::srt_push::status_table(&config);
-        tasks.extend(crate::srt_push::spawn(
-            config.clone(),
-            mounts.clone(),
-            cancel.clone(),
-            srt_push_status.clone(),
-        ));
+        )?;
 
         let rtsp = if config.rtsp.enabled {
             let mut rtsp_config = rtflow::server::ServerConfig::new(config.rtsp.listen);
@@ -642,14 +647,14 @@ impl ServerApp {
             discovery.clone(),
             paths.clone(),
             keys.clone(),
+            store.clone(),
             vod.clone(),
             recording.clone(),
             mounts.clone(),
             audit.clone(),
             admin.clone(),
             srt_listener_stats,
-            srt_pull_status.clone(),
-            srt_push_status.clone(),
+            srt.clone(),
             proxies.clone(),
             proxy_config.clone(),
             event_sink.clone(),

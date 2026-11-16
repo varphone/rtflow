@@ -11,6 +11,37 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
     )
     .await;
     http.add_route(
+        Method::Get,
+        "/admin/api/v1/proxies/config",
+        api_json(state.clone(), |state, _req| async move {
+            Ok(serde_json::json!({
+                "mounts": state
+                    .proxy_config
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .mounts
+                    .iter()
+                    .map(|mount| serde_json::json!({
+                        "path": mount.path,
+                        "enabled": mount.enabled,
+                        "mode": mount.mode,
+                        "idle_grace_ms": mount.idle_grace.map(|value| value.as_millis() as u64),
+                        "description_refresh_ms": mount.description_refresh.map(|value| value.as_millis() as u64),
+                        "upstreams": mount.upstreams.iter().map(|upstream| serde_json::json!({
+                            "url": upstream.url,
+                            "transport": upstream.transport,
+                            "username": upstream.username,
+                            "password": if upstream.password.is_some() { "<redacted>" } else { "" },
+                            "request_timeout_ms": upstream.request_timeout.as_millis() as u64,
+                            "media_idle_timeout_ms": upstream.media_idle_timeout.as_millis() as u64,
+                        })).collect::<Vec<_>>(),
+                    }))
+                    .collect::<Vec<_>>(),
+            }))
+        }),
+    )
+    .await;
+    http.add_route(
         Method::Post,
         "/admin/api/v1/proxies",
         api_write(state.clone(), |state, req| async move {
@@ -52,14 +83,14 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
             let Some(index) = existed else {
                 return Err((404, "proxy not found".into()));
             };
-            {
-                let mut config = state
-                    .proxy_config
-                    .write()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                config.mounts.remove(index);
-                crate::proxy_control::save_overlay(&state.config.server.state_dir, &config);
-            }
+            crate::store::proxies::delete(&state.store, &path)
+                .map_err(|error| (500, error.to_string()))?;
+            state
+                .proxy_config
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .mounts
+                .remove(index);
             state.proxies.remove(&path);
             audit(&state, AuditEvent::new("proxy.delete", "ok").path(&path));
             Ok(serde_json::json!({"deleted": path}))
@@ -150,19 +181,35 @@ fn proxy_upsert(
 ) -> Result<serde_json::Value, (u16, String)> {
     mount.validate().map_err(|error| (400, error))?;
     let path = mount.path.clone();
+    let existed = state
+        .proxy_config
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .mounts
+        .iter()
+        .any(|entry| entry.path == path);
+    if existed && !replace {
+        return Err((409, "proxy already exists".into()));
+    }
+    if existed {
+        let revision = crate::store::proxies::revision(&state.store, &path)
+            .map_err(|error| (500, error.to_string()))?
+            .ok_or((404, "proxy not found".into()))?;
+        crate::store::proxies::update(&state.store, &mount, revision)
+            .map_err(|error| (500, error.to_string()))?;
+    } else {
+        crate::store::proxies::insert(&state.store, &mount)
+            .map_err(|error| (500, error.to_string()))?;
+    }
     {
         let mut config = state
             .proxy_config
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(index) = config.mounts.iter().position(|entry| entry.path == path) {
-            if !replace {
-                return Err((409, "proxy already exists".into()));
-            }
             config.mounts.remove(index);
         }
         config.mounts.push(mount.clone());
-        crate::proxy_control::save_overlay(&state.config.server.state_dir, &config);
     }
     let upstream = mount.upstream_config().map_err(|error| (400, error))?;
     let options = rtflow::mount::MountOptions::builder()
