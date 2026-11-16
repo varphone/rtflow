@@ -15,5 +15,5 @@ RUN mkdir -p /var/lib/rtflow/recordings /var/lib/rtflow/state /var/log/rtflow \
     && chown -R rtflow:rtflow /var/lib/rtflow /var/log/rtflow
 USER rtflow
 WORKDIR /var/lib/rtflow
-EXPOSE 8554 1935 9000/udp 8080 8088
+EXPOSE 8554 1935 9000/udp 3000 8088
 ENTRYPOINT ["rtflow-server", "--config", "/etc/rtflow/rtflow.toml"]

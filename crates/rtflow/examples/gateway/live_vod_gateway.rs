@@ -27,7 +27,7 @@ struct Args {
     rtsp: SocketAddr,
     #[arg(long, default_value = "0.0.0.0:1935")]
     rtmp: SocketAddr,
-    #[arg(long, default_value = "0.0.0.0:8080")]
+    #[arg(long, default_value = "0.0.0.0:3000")]
     http: SocketAddr,
     /// Optional file VOD: `id=path`.
     #[arg(long = "vod-file")]

@@ -35,7 +35,7 @@ cargo run -p rtflow-server -- --init-config
 cargo run -p rtflow-server -- --config rtflow.toml
 ```
 
-默认 RTSP `8554`、RTMP `1935`、SRT `9000/udp`、HTTP `8080`、WS-FLV `8088`。
+默认 RTSP `8554`、RTMP `1935`、SRT `9000/udp`、HTTP `3000`、WS-FLV `8088`。
 推流认证、路径注册/发现、录制/VOD、管理 API 与部署说明见
 [docs/guides/server.md](docs/guides/server.md)。
 
@@ -150,7 +150,7 @@ server.shutdown().await
 推入 RTSP 的最小路径见 `examples/embedded/ipc_camera.rs`；帧构造/时间戳/SPS/PPS
 自动注入等细节见 `docs/guides/embedded.md`。浏览器实时预览（网页版 IPC
 观看）无需额外代码：`cargo run --example ipc_camera -- --web` 后打开
-`http://<ip>:8080/`，页面自动列出全部通道并以 WS-FLV / HTTP-FLV /
+`http://<ip>:3000/`，页面自动列出全部通道并以 WS-FLV / HTTP-FLV /
 HLS 三种模式播放（`--no-web` 可只留 RTSP）。
 
 ## WebRTC（WHIP/WHEP）

@@ -194,7 +194,7 @@ listen = "0.0.0.0:9000"
 enabled = true
 
 [http]
-listen = "0.0.0.0:8080"
+listen = "0.0.0.0:3000"
 admin = true
 metrics = true
 health = true

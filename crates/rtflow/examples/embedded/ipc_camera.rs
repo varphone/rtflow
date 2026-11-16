@@ -19,7 +19,7 @@
 //!   cargo run --example ipc_camera -- --audio aac
 //!   vlc rtsp://127.0.0.1:8554/cam/main   (and /cam/sub)
 //!   # browser playback (WS-FLV / HTTP-FLV / HLS): open
-//!   #   http://127.0.0.1:8080/   (--no-web to disable the HTTP/WS servers)
+//!   #   http://127.0.0.1:3000/   (--no-web to disable the HTTP/WS servers)
 use clap::{Parser, ValueEnum};
 use rtflow::hls::{HlsConfig, create_hls_router};
 use rtflow::http::{HttpConfig, HttpServer, Method};
@@ -75,7 +75,7 @@ struct Args {
     #[arg(long, default_value_t = 128)]
     queue: usize,
     /// HTTP listen address: browser player page + HTTP-FLV + HLS.
-    #[arg(long, default_value = "0.0.0.0:8080")]
+    #[arg(long, default_value = "0.0.0.0:3000")]
     web_listen: SocketAddr,
     /// WS-FLV (WebSocket) listen address for low-latency browser playback.
     #[arg(long, default_value = "0.0.0.0:8088")]

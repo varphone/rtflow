@@ -15,7 +15,7 @@ state_dir = "./state"
 public_rtsp = "rtsp://127.0.0.1:8554"
 public_rtmp = "rtmp://127.0.0.1:1935"
 public_srt = "srt://127.0.0.1:9000"
-public_http = "http://127.0.0.1:8080"
+public_http = "http://127.0.0.1:3000"
 
 [log]
 level = "info"
@@ -73,7 +73,7 @@ allowed_stream_ids = []
 enabled = true
 
 [http]
-listen = "0.0.0.0:8080"
+listen = "0.0.0.0:3000"
 # HTTPS: set both files (RTSP TLS is configured under [rtsp.tls]).
 # tls.certificate = "/etc/rtflow/server.crt"
 # tls.private_key = "/etc/rtflow/server.key"

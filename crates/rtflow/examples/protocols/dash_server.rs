@@ -11,17 +11,17 @@ use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 ///   ffmpeg -re -i INPUT -c copy -f rtsp rtsp://127.0.0.1:8554/live/stream
 ///
 /// Play in browser (dash.js):
-///   Open http://127.0.0.1:8080/live/stream/player
+///   Open http://127.0.0.1:3000/live/stream/player
 ///
 /// Play via FFplay:
-///   ffplay http://127.0.0.1:8080/live/stream/manifest.mpd
+///   ffplay http://127.0.0.1:3000/live/stream/manifest.mpd
 #[derive(Debug, Parser)]
 struct Args {
     /// RTSP listen address.
     #[arg(long, default_value = "0.0.0.0:8554")]
     rtsp_listen: SocketAddr,
     /// HTTP listen address for DASH playback.
-    #[arg(long, default_value = "0.0.0.0:8080")]
+    #[arg(long, default_value = "0.0.0.0:3000")]
     http_listen: SocketAddr,
     /// Mount path for the stream.
     #[arg(long, default_value = "/live/stream")]

@@ -19,7 +19,7 @@
 //!
 //! ```text
 //! cargo run --example ipc_camera -- --web
-//! # open http://127.0.0.1:8080/ in a browser
+//! # open http://127.0.0.1:3000/ in a browser
 //! ```
 
 use rtflow_http::{Handler, ResponseWriter};

@@ -29,7 +29,7 @@ listen = "0.0.0.0:8554"
 listen = "0.0.0.0:1935"
 
 [http]
-listen = "0.0.0.0:8080"
+listen = "0.0.0.0:3000"
 admin_password = "${RTFLOW_ADMIN_PASSWORD}"
 
 [storage]
@@ -58,7 +58,7 @@ rtflow-server --config rtflow.toml
 ## 管理入口
 
 ```text
-http://<host>:8080/admin
+http://<host>:3000/admin
 ```
 
 控制台提供直播/点播/路径/密钥/代理/SRT/录制/系统页面；业务 CRUD 走

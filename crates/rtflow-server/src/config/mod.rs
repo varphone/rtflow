@@ -186,7 +186,7 @@ pub struct HttpSection {
 impl Default for HttpSection {
     fn default() -> Self {
         Self {
-            listen: "0.0.0.0:8080".parse().expect("valid default"),
+            listen: "0.0.0.0:3000".parse().expect("valid default"),
             tls: None,
             admin: true,
             metrics: true,

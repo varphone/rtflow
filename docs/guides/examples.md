@@ -96,7 +96,7 @@ cargo run --example live_vod_gateway --features "server,rtmp,hls,http-flv,file-s
 
 - OBS：服务器 `rtmp://127.0.0.1:1935/live`，串流密钥 `cam`；凭据模式可用
   `cam?token=<HMAC>`（`--token secret`）。
-- 管理控制台：`http://127.0.0.1:8080/admin`，管理员默认 `admin` /
+- 管理控制台：`http://127.0.0.1:3000/admin`，管理员默认 `admin` /
   `rtflow-admin`（示例参数，生产请覆盖）。`admin` 只注册控制台/API；
   HLS live/VOD 路由仍由示例的 `/hls/*`、`/vod/*` 注册。
 - HLS 直播：`/hls/live/cam/index.m3u8`；VOD：`/vod/demo/index.m3u8`。
@@ -108,7 +108,7 @@ cargo run --example live_vod_gateway --features "server,rtmp,hls,http-flv,file-s
 
 ```bash
 cargo run --example ipc_camera -- --audio aac
-# 浏览器打开 http://127.0.0.1:8080/ —— 页面自动列出 /cam/main、/cam/sub
+# 浏览器打开 http://127.0.0.1:3000/ —— 页面自动列出 /cam/main、/cam/sub
 # RTSP 播放: vlc rtsp://127.0.0.1:8554/cam/main
 ```
 
@@ -118,10 +118,10 @@ cargo run --example ipc_camera -- --audio aac
 | 模式 | URL 形态 | 延迟 | 播放器 |
 | --- | --- | --- | --- |
 | WS-FLV | `ws://host:8088/cam/main.flv` | 最低 | mpegts.js |
-| HTTP-FLV | `http://host:8080/cam/main.flv` | 低 | mpegts.js |
-| HLS | `http://host:8080/cam/main.m3u8` | 1–3 s | hls.js / Safari 原生 |
+| HTTP-FLV | `http://host:3000/cam/main.flv` | 低 | mpegts.js |
+| HLS | `http://host:3000/cam/main.m3u8` | 1–3 s | hls.js / Safari 原生 |
 
-默认端口：RTSP `8554`、页面/HTTP-FLV/HLS `8080`、WS-FLV `8088`；
+默认端口：RTSP `8554`、页面/HTTP-FLV/HLS `3000`、WS-FLV `8088`；
 `--no-web` 只保留 RTSP。mpegts.js/hls.js 从 CDN（jsdelivr，自动回退
 unpkg）加载；离线内网环境请把 `src/http_flv/player.html` 中的两个
 `<script>` 换成自托管文件。

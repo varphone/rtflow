@@ -11,10 +11,10 @@ use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 /// plus an embedded browser player using native WebRTC APIs.
 ///
 /// Publish from browser:
-///   Open http://127.0.0.1:8080/publisher
+///   Open http://127.0.0.1:3000/publisher
 ///
 /// Play from browser:
-///   Open http://127.0.0.1:8080/player
+///   Open http://127.0.0.1:3000/player
 ///
 /// Publish via FFmpeg (experimental WHIP support):
 ///   NOTE: WHIP/WHEP is a placeholder (no ICE/DTLS/SRTP media pipeline);
@@ -22,7 +22,7 @@ use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 #[derive(Debug, Parser)]
 struct Args {
     /// HTTP listen address for WHIP/WHEP.
-    #[arg(long, default_value = "0.0.0.0:8080")]
+    #[arg(long, default_value = "0.0.0.0:3000")]
     http_listen: SocketAddr,
     /// RTSP listen address (optional ingest source).
     #[arg(long, default_value = "0.0.0.0:8554")]

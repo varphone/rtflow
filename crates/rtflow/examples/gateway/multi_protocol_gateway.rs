@@ -35,7 +35,7 @@ struct Args {
     #[arg(long, default_value = "0.0.0.0:9000")]
     srt_listen: SocketAddr,
     /// HTTP listen address (HLS/DASH/FLV/WebRTC).
-    #[arg(long, default_value = "0.0.0.0:8080")]
+    #[arg(long, default_value = "0.0.0.0:3000")]
     http_listen: SocketAddr,
     /// Mount path for the stream.
     #[arg(long, default_value = "/live/stream")]
