@@ -33,6 +33,7 @@
 - [x] 周期性描述刷新（无订阅者时更新 mount 描述）。
 - [x] RTCP SR NTP↔RTP 映射，统一多轨 A/V 起点（首次 SR 后重定基准）。
 - [x] RTP 时间戳回绕扩展（depacketizer）。
+- [x] 上游重启后重连恢复的端到端测试。
 - [ ] 重连后 A/V 相对偏移的长期漂移校准。
 - [x] RTSPS/SRTP/multicast/跨源 REDIRECT/461 回退代理端到端测试。
 
