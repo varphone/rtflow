@@ -7,8 +7,9 @@ let tab = "pull";
 let query = "";
 
 export async function render(params, ctx) {
-  const linked = params?.get("q");
-  if (linked !== null && linked !== undefined) query = linked;
+  query = params?.get("q") || "";
+  const linkedTab = params?.get("tab");
+  tab = ["pull", "push"].includes(linkedTab) ? linkedTab : "pull";
   const [pulls, pushes] = await Promise.all([apiV1("/srt/pulls"), apiV1("/srt/pushes")]);
   const all = { pull: pulls.items || [], push: pushes.items || [] };
   const initial = view(all);
@@ -32,8 +33,15 @@ export async function render(params, ctx) {
         root.querySelectorAll("[data-srt-tab]").forEach((button) => button.classList.toggle("active", button.dataset.srtTab === tab));
         create.textContent = tab === "push" ? "新增推流" : "新增拉流";
       };
-      search.oninput = () => { query = search.value; paint(); };
-      root.querySelectorAll("[data-srt-tab]").forEach((button) => button.onclick = () => { tab = button.dataset.srtTab; paint(); });
+      const syncUrl = () => {
+        const params = new URLSearchParams();
+        if (tab !== "pull") params.set("tab", tab);
+        if (query.trim()) params.set("q", query.trim());
+        const qs = params.toString();
+        history.replaceState(null, "", `#/config/srt${qs ? `?${qs}` : ""}`);
+      };
+      search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      root.querySelectorAll("[data-srt-tab]").forEach((button) => button.onclick = () => { tab = button.dataset.srtTab; paint(); syncUrl(); });
       root.querySelector("[data-action=refresh]").onclick = () => ctx2.reload();
       create.onclick = () => openSrtDrawer(tab, null, () => ctx2.reload());
       root.addEventListener("click", async (event) => {

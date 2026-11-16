@@ -8,8 +8,9 @@ let query = "";
 let sort = "recent";
 
 export async function render(params) {
-  const linked = params?.get("q");
-  if (linked !== null && linked !== undefined) query = linked;
+  query = params?.get("q") || "";
+  const linkedSort = params?.get("sort");
+  sort = ["recent", "duration", "cached"].includes(linkedSort) ? linkedSort : "recent";
   const payload = await api("/vods");
   const vods = payload.items || payload;
   const initial = filter(vods, query);
@@ -73,8 +74,15 @@ export async function render(params) {
         selected.clear();
         ctx.reload();
       };
-      search.oninput = () => { query = search.value; paint(); };
-      sorter.onchange = () => { sort = sorter.value; paint(); };
+      const syncUrl = () => {
+        const params = new URLSearchParams();
+        if (query.trim()) params.set("q", query.trim());
+        if (sort !== "recent") params.set("sort", sort);
+        const qs = params.toString();
+        history.replaceState(null, "", `#/vod${qs ? `?${qs}` : ""}`);
+      };
+      search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      sorter.onchange = () => { sort = sorter.value; paint(); syncUrl(); };
       root.querySelector("[data-vod-refresh]").onclick = () => ctx.reload();
       root.addEventListener("click", async (event) => {
         const target = event.target.closest("[data-action]");
