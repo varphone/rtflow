@@ -14,7 +14,7 @@ export async function render(_params, ctx) {
     title: "推流密钥",
     subtitle: "签发一次性 secret，可限定角色、协议与路径。",
     actions: `<button class="btn small primary" data-action="issue">签发密钥</button><button class="btn small" data-action="refresh">刷新</button>`,
-    html: `<div class="toolbar"><div class="search"><input class="input" data-key-search value="${esc(query)}" placeholder="搜索 Key ID 或名称"></div><span class="meta" data-key-count>${initial.length} 条 · ${initial.filter((item) => item.enabled).length} 有效</span></div>
+    html: `<div class="toolbar"><div class="search"><input class="input" data-key-search value="${esc(query)}" placeholder="搜索 Key ID 或名称"></div><span class="meta" data-key-count>${initial.length} 条 · ${initial.filter((item) => item.enabled && !isExpired(item)).length} 有效</span></div>
       <section class="panel" data-key-panel>${initial.length ? table(initial) : empty("暂未签发密钥", "点击“签发密钥”创建第一条")}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-key-panel]");
@@ -23,7 +23,7 @@ export async function render(_params, ctx) {
       let visible = initial;
       const paint = () => {
         visible = view(all);
-        count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.enabled).length} 有效`;
+        count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.enabled && !isExpired(item)).length} 有效`;
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的密钥", "调整搜索条件");
       };
       search.oninput = () => { query = search.value; paint(); };
@@ -72,7 +72,20 @@ function table(items) {
     <th><button class="sort-btn" data-sort="expires_at">过期${arrow("expires_at")}</button></th><th>状态</th><th></th></tr></thead><tbody>
     ${items.map((item) => `<tr><td class="mono">${esc(item.kid)}</td><td>${esc(item.name)}</td><td>${esc((item.roles || []).join(", "))}</td>
       <td>${esc((item.protocols || []).join(", ") || "全部")}</td><td class="mono">${esc((item.paths || []).join(", ") || "全部")}</td>
-      <td>${dateTime(item.expires_at)}</td><td>${item.enabled ? '<span class="badge ok">有效</span>' : '<span class="badge bad">已吊销</span>'}</td>
+      <td>${dateTime(item.expires_at)}</td><td>${keyStatus(item)}</td>
       <td><div class="row-actions"><button class="btn small ghost" data-action="copy" data-kid="${esc(item.kid)}">复制</button><button class="btn small danger" data-action="revoke" data-kid="${esc(item.kid)}" ${item.enabled ? "" : "disabled"}>吊销</button></div></td></tr>`).join("")}
   </tbody></table></div>`;
+}
+
+
+function isExpired(item) {
+  return Boolean(item.expires_at && Number(item.expires_at) * 1000 < Date.now());
+}
+
+function keyStatus(item) {
+  if (!item.enabled) return '<span class="badge bad">已吊销</span>';
+  if (isExpired(item)) return '<span class="badge bad">已过期</span>';
+  const remaining = Number(item.expires_at || 0) * 1000 - Date.now();
+  if (item.expires_at && remaining < 24 * 3600 * 1000) return '<span class="badge warn">即将过期</span>';
+  return '<span class="badge ok">有效</span>';
 }
