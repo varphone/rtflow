@@ -20,7 +20,7 @@ export async function render(params) {
     html: `<div class="toolbar"><label class="checkline"><input type="checkbox" data-vod-select-all> 全选</label>
       <div class="search">${iconSvg("search")}<input class="input" data-vod-search value="${esc(query)}" placeholder="搜索点播名称或 ID"></div>
       <select class="input" data-vod-sort aria-label="点播排序" style="width:auto"><option value="recent" ${sort === "recent" ? "selected" : ""}>最新录制</option><option value="duration" ${sort === "duration" ? "selected" : ""}>按时长</option><option value="cached" ${sort === "cached" ? "selected" : ""}>已缓存优先</option></select>
-      <span class="meta" data-vod-count>${initial.length} 条</span>
+      <span class="meta" data-vod-count>${initial.length} 条 · ${initial.filter((vod) => vod.cached).length} 已缓存</span>
       <button class="btn small ghost" data-vod-bulk disabled>刷新所选缓存</button></div>
       <div data-vod-results>${initial.length ? cards(initial, new Set()) : empty("暂无可用的点播资源", "在服务端配置录制目录或文件 VOD 后显示")}</div>`,
     mount(root, ctx) {
@@ -42,7 +42,7 @@ export async function render(params) {
       };
       const paint = () => {
         visible = filter(allVods, search.value);
-        count.textContent = `${visible.length} 条`;
+        count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.cached).length} 已缓存`;
         results.innerHTML = visible.length ? cards(visible, selected) : empty("没有匹配的点播", "调整搜索条件");
         sync();
       };

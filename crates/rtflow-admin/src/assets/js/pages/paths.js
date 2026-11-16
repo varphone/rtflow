@@ -16,7 +16,7 @@ export async function render(params, ctx) {
     title: "路径",
     subtitle: "路径策略、发布/观看开关与录制。",
     actions: `<button class="btn small primary" data-action="create">新建路径</button><button class="btn small" data-action="refresh">刷新</button>`,
-    html: `<div class="toolbar"><div class="search"><input class="input" data-path-search value="${esc(query)}" placeholder="搜索路径"></div><span class="meta" data-path-count>${initial.length} 条</span></div>
+    html: `<div class="toolbar"><div class="search"><input class="input" data-path-search value="${esc(query)}" placeholder="搜索路径"></div><span class="meta" data-path-count>${initial.length} 条 · ${initial.filter((item) => item.enabled).length} 启用</span></div>
       <section class="panel" data-path-panel>${initial.length ? table(initial) : empty("暂无路径记录", "新建路径或通过配置提供 glob 规则")}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-path-panel]");
@@ -25,7 +25,7 @@ export async function render(params, ctx) {
       let visible = initial;
       const paint = () => {
         visible = view(all);
-        count.textContent = `${visible.length} 条`;
+        count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.enabled).length} 启用`;
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的路径", "调整搜索条件或新建路径");
       };
       search.oninput = () => { query = search.value; paint(); };

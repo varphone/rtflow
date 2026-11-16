@@ -57,7 +57,7 @@ export async function render(params) {
       const paint = () => {
         visible = view();
         markUpdated();
-        count.textContent = `${visible.length} 条`;
+        count.textContent = `${visible.length} 条 · ${visible.filter((stream) => stream.publisher).length} 直播中`;
         panel.innerHTML = visible.length ? table(visible, selected) : empty("没有匹配的流", "调整筛选条件或等待推流");
         const all = panel.querySelector("[data-select-all]");
         if (all) {
