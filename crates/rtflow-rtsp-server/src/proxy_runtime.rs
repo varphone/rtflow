@@ -216,6 +216,9 @@ async fn run_proxy(
             .follow_redirects(endpoint.follow_redirects)
             .allow_cross_origin_redirect(endpoint.allow_cross_origin_redirect)
             .jitter(endpoint.jitter.clone());
+        if let Some(address) = endpoint.resolved {
+            builder = builder.peer_addr(address);
+        }
         if let Some(credentials) = endpoint.credentials.clone() {
             builder = builder.credentials(credentials);
         }

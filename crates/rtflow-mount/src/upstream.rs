@@ -27,6 +27,8 @@ pub struct UpstreamEndpoint {
     pub media_idle_timeout: Duration,
     pub follow_redirects: bool,
     pub allow_cross_origin_redirect: bool,
+    /// Resolved peer address used to pin DNS (the URL host is kept for SNI).
+    pub resolved: Option<std::net::SocketAddr>,
     pub jitter: JitterBufferConfig,
     #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
@@ -42,6 +44,7 @@ impl UpstreamEndpoint {
             media_idle_timeout: Duration::from_secs(15),
             follow_redirects: true,
             allow_cross_origin_redirect: false,
+            resolved: None,
             jitter: JitterBufferConfig::default(),
             #[cfg(feature = "tls")]
             tls: None,
@@ -228,6 +231,7 @@ pub struct UpstreamConfig {
     pub media_idle_timeout: Duration,
     pub follow_redirects: bool,
     pub allow_cross_origin_redirect: bool,
+    pub resolved: Option<std::net::SocketAddr>,
     pub jitter: JitterBufferConfig,
     #[cfg(feature = "tls")]
     pub tls: Option<TlsClientConfig>,
@@ -249,6 +253,7 @@ impl UpstreamConfig {
             media_idle_timeout: Duration::from_secs(15),
             follow_redirects: true,
             allow_cross_origin_redirect: false,
+            resolved: None,
             jitter: JitterBufferConfig::default(),
             #[cfg(feature = "tls")]
             tls: None,
@@ -273,6 +278,7 @@ impl UpstreamConfig {
             media_idle_timeout: self.media_idle_timeout,
             follow_redirects: self.follow_redirects,
             allow_cross_origin_redirect: self.allow_cross_origin_redirect,
+            resolved: self.resolved,
             jitter: self.jitter.clone(),
             #[cfg(feature = "tls")]
             tls: self.tls.clone(),
@@ -322,6 +328,7 @@ impl TryFrom<ProxyRoute> for UpstreamConfig {
         config.media_idle_timeout = primary.media_idle_timeout;
         config.follow_redirects = primary.follow_redirects;
         config.allow_cross_origin_redirect = primary.allow_cross_origin_redirect;
+        config.resolved = primary.resolved;
         config.jitter = primary.jitter;
         #[cfg(feature = "tls")]
         {

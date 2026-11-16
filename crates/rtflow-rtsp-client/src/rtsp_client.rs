@@ -536,7 +536,16 @@ pub(super) async fn open_control(
     let port = url
         .port()
         .unwrap_or_else(|| if url.scheme() == "rtsps" { 322 } else { 554 });
-    let tcp = timeout(options.request_timeout, TcpStream::connect((host, port)))
+    let target = match options.peer_addr {
+        Some(address) => address,
+        None => {
+            let mut addresses = tokio::net::lookup_host((host, port)).await?;
+            addresses
+                .next()
+                .ok_or_else(|| Error::Rtsp("RTSP host did not resolve".into()))?
+        }
+    };
+    let tcp = timeout(options.request_timeout, TcpStream::connect(target))
         .await
         .map_err(|_| Error::Rtsp("RTSP connect timeout".into()))??;
     tcp.set_nodelay(true)?;

@@ -136,8 +136,9 @@ impl ProxyService {
         if upstream.endpoints().len() > self.policy.max_upstreams {
             return Err(rtflow_core::error::Error::Limit("proxy upstream count"));
         }
+        prepare_upstream(&mut upstream, &self.policy).await?;
         if upstream.cached_description.is_none() {
-            upstream.cached_description = Some(describe_upstream(&upstream, &self.policy).await?);
+            upstream.cached_description = Some(describe_prepared(&upstream).await?);
         }
         let status_upstream = upstream.clone();
         let config = MountConfig::Proxy {
@@ -257,11 +258,15 @@ impl ProxyService {
                 .acquire()
                 .await
                 .map_err(|_| rtflow_core::error::Error::Limit("proxy describe slots"))?;
-            let described = describe_upstream(&upstream, &self.policy).await;
+            let described = match prepare_upstream(&mut upstream, &self.policy).await {
+                Ok(()) => describe_prepared(&upstream).await,
+                Err(error) => Err(error),
+            };
             drop(slot);
             match described {
                 Ok(description) => {
                     upstream.cached_description = Some(description);
+                    let runtime_upstream = upstream.clone();
                     let config = MountConfig::Proxy {
                         upstream: Box::new(upstream),
                     };
@@ -272,6 +277,7 @@ impl ProxyService {
                                 let mut guard = entry
                                     .lock()
                                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                                guard.upstream = runtime_upstream;
                                 guard.upstream.cached_description = Some(handle.description());
                                 guard.state.phase = Phase::Registered;
                                 guard.state.last_error = None;
@@ -492,40 +498,6 @@ fn validate_path(path: &str) -> rtflow_core::error::Result<()> {
     Ok(())
 }
 
-async fn describe_upstream(
-    upstream: &UpstreamConfig,
-    policy: &ProxyPolicy,
-) -> rtflow_core::error::Result<rtflow_media::MediaDescription> {
-    let mut last_error = None;
-    for endpoint in upstream.endpoints() {
-        if let Err(error) = validate_endpoint(&endpoint, policy).await {
-            last_error = Some(error);
-            continue;
-        }
-        let mut builder = ClientOptions::builder()
-            .transport(endpoint.transport)
-            .request_timeout(endpoint.request_timeout)
-            .follow_redirects(endpoint.follow_redirects)
-            .allow_cross_origin_redirect(endpoint.allow_cross_origin_redirect)
-            .jitter(endpoint.jitter);
-        if let Some(credentials) = endpoint.credentials {
-            builder = builder.credentials(credentials);
-        }
-        #[cfg(feature = "tls")]
-        if let Some(tls) = endpoint.tls {
-            builder = builder.tls(tls);
-        }
-        let Ok(options) = builder.build() else {
-            continue;
-        };
-        match RtspClient::describe(endpoint.url, options).await {
-            Ok(description) => return Ok(sanitize_description(description)),
-            Err(error) => last_error = Some(error),
-        }
-    }
-    Err(last_error.unwrap_or(rtflow_core::error::Error::Limit("proxy upstreams")))
-}
-
 fn status_of(path: &Arc<str>, entry: &Arc<Mutex<Entry>>) -> ProxyStatus {
     let entry = entry
         .lock()
@@ -596,10 +568,73 @@ fn sanitize_description(
     description
 }
 
-async fn validate_endpoint(
-    endpoint: &rtflow_mount::upstream::UpstreamEndpoint,
+async fn describe_upstream(
+    upstream: &UpstreamConfig,
+    policy: &ProxyPolicy,
+) -> rtflow_core::error::Result<rtflow_media::MediaDescription> {
+    let mut prepared = upstream.clone();
+    prepare_upstream(&mut prepared, policy).await?;
+    describe_prepared(&prepared).await
+}
+
+async fn describe_prepared(
+    upstream: &UpstreamConfig,
+) -> rtflow_core::error::Result<rtflow_media::MediaDescription> {
+    let mut last_error = None;
+    for endpoint in upstream.endpoints() {
+        let mut builder = ClientOptions::builder()
+            .transport(endpoint.transport)
+            .request_timeout(endpoint.request_timeout)
+            .follow_redirects(endpoint.follow_redirects)
+            .allow_cross_origin_redirect(endpoint.allow_cross_origin_redirect)
+            .jitter(endpoint.jitter);
+        if let Some(address) = endpoint.resolved {
+            builder = builder.peer_addr(address);
+        }
+        if let Some(credentials) = endpoint.credentials {
+            builder = builder.credentials(credentials);
+        }
+        #[cfg(feature = "tls")]
+        if let Some(tls) = endpoint.tls {
+            builder = builder.tls(tls);
+        }
+        let Ok(options) = builder.build() else {
+            continue;
+        };
+        match RtspClient::describe(endpoint.url, options).await {
+            Ok(description) => return Ok(sanitize_description(description)),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or(rtflow_core::error::Error::Limit("proxy upstreams")))
+}
+
+async fn prepare_upstream(
+    upstream: &mut UpstreamConfig,
     policy: &ProxyPolicy,
 ) -> rtflow_core::error::Result<()> {
+    let endpoints = upstream.endpoints();
+    if endpoints.len() > policy.max_upstreams {
+        return Err(rtflow_core::error::Error::Limit("proxy upstream count"));
+    }
+    let mut resolved = Vec::with_capacity(endpoints.len());
+    for endpoint in endpoints {
+        let address = resolve_endpoint(&endpoint, policy).await?;
+        resolved.push(address);
+    }
+    upstream.resolved = resolved.first().copied().flatten();
+    let mut fallbacks: Vec<_> = upstream.endpoints().into_iter().skip(1).collect();
+    for (endpoint, address) in fallbacks.iter_mut().zip(resolved.iter().skip(1)) {
+        endpoint.resolved = *address;
+    }
+    upstream.fallbacks = fallbacks;
+    Ok(())
+}
+
+async fn resolve_endpoint(
+    endpoint: &rtflow_mount::upstream::UpstreamEndpoint,
+    policy: &ProxyPolicy,
+) -> rtflow_core::error::Result<Option<std::net::SocketAddr>> {
     let host = endpoint
         .url
         .host_str()
@@ -610,23 +645,28 @@ async fn validate_endpoint(
             "proxy host {host} is not in proxy.allowed_hosts"
         )));
     }
-    if policy.allow_private_networks {
-        return Ok(());
-    }
-    let addresses = tokio::net::lookup_host((host, port))
+    let addresses: Vec<_> = tokio::net::lookup_host((host, port))
         .await
         .map_err(|error| {
             rtflow_core::error::Error::InvalidConfig(format!("proxy DNS lookup failed: {error}"))
-        })?;
-    for address in addresses {
-        if is_non_public(address.ip()) {
-            return Err(rtflow_core::error::Error::InvalidConfig(format!(
-                "proxy host {host} resolves to non-public address {}",
-                address.ip()
-            )));
+        })?
+        .collect();
+    if addresses.is_empty() {
+        return Err(rtflow_core::error::Error::InvalidConfig(format!(
+            "proxy host {host} did not resolve"
+        )));
+    }
+    if !policy.allow_private_networks {
+        for address in &addresses {
+            if is_non_public(address.ip()) {
+                return Err(rtflow_core::error::Error::InvalidConfig(format!(
+                    "proxy host {host} resolves to non-public address {}",
+                    address.ip()
+                )));
+            }
         }
     }
-    Ok(())
+    Ok(addresses.first().copied())
 }
 
 fn host_matches(host: &str, port: u16, patterns: &[String]) -> bool {
@@ -683,6 +723,22 @@ mod tests {
         assert!(host_matches("rtsp.example.net", 8554, &patterns));
         assert!(!host_matches("example.com", 554, &patterns));
         assert!(!host_matches("192.168.1.1", 554, &patterns));
+    }
+
+    #[tokio::test]
+    async fn dns_policy_pins_public_and_rejects_private() {
+        let mut upstream = UpstreamConfig::new(
+            url::Url::parse("rtsp://127.0.0.1/live").unwrap(),
+            rtflow_mount::upstream::UpstreamTransport::TcpInterleaved,
+        );
+        let strict = ProxyPolicy {
+            allow_private_networks: false,
+            ..ProxyPolicy::default()
+        };
+        assert!(prepare_upstream(&mut upstream, &strict).await.is_err());
+        let permissive = ProxyPolicy::default();
+        prepare_upstream(&mut upstream, &permissive).await.unwrap();
+        assert_eq!(upstream.resolved, Some("127.0.0.1:554".parse().unwrap()));
     }
 
     #[test]

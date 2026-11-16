@@ -6,6 +6,9 @@ pub struct ClientOptions {
     pub transport: UpstreamTransport,
     pub credentials: Option<Credentials>,
     pub request_timeout: Duration,
+    /// Optional resolved peer address (DNS pinning). The URL host is still
+    /// used for TLS SNI and request URIs.
+    pub peer_addr: Option<std::net::SocketAddr>,
     pub jitter: JitterBufferConfig,
     pub output_queue_capacity: usize,
     /// Byte cap for frames buffered in the output queue. When exceeded the
@@ -44,6 +47,7 @@ impl std::fmt::Debug for ClientOptions {
             .field("transport", &self.transport)
             .field("credentials", &self.credentials)
             .field("request_timeout", &self.request_timeout)
+            .field("peer_addr", &self.peer_addr)
             .field("jitter", &self.jitter)
             .field("output_queue_capacity", &self.output_queue_capacity)
             .field("max_output_bytes", &self.max_output_bytes)
@@ -72,6 +76,7 @@ impl Default for ClientOptions {
             transport: UpstreamTransport::Auto,
             credentials: None,
             request_timeout: Duration::from_secs(5),
+            peer_addr: None,
             jitter: JitterBufferConfig::default(),
             output_queue_capacity: 64,
             max_output_bytes: 8 * 1024 * 1024,
@@ -218,6 +223,11 @@ impl ClientOptionsBuilder {
 
     pub fn credentials(mut self, value: Credentials) -> Self {
         self.options.credentials = Some(value);
+        self
+    }
+
+    pub fn peer_addr(mut self, value: std::net::SocketAddr) -> Self {
+        self.options.peer_addr = Some(value);
         self
     }
 
