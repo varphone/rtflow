@@ -166,7 +166,8 @@ textarea.input { resize: vertical; min-height: 80px; }
 .quick-action .kicker { color: var(--faint); font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; }
 .quick-action strong { font-size: 13.5px; }
 .quick-action small { color: var(--muted); font-size: 11.5px; }
-.stat.attention { border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); }
+.stat.attention { border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); animation: attention-in .35s ease; }
+@keyframes attention-in { from { box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 22%, transparent); } to { box-shadow: none; } }
 .stat .value.warn { color: var(--warn); }
 .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .stat { background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 15px; }
@@ -318,6 +319,9 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 .pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 2px 2px; }
 .pager-buttons { display: flex; align-items: center; gap: 8px; }
 .pager-buttons .btn { min-width: 0; }
+.btn.loading { position: relative; color: transparent !important; }
+.btn.loading::after { content: ""; position: absolute; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .btn.ghost.active { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
 
 /* Command palette */

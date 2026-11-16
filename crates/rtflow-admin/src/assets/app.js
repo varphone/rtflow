@@ -123,6 +123,9 @@ function renderLogin(message = "") {
     event.preventDefault();
     const button = form.querySelector("button");
     button.disabled = true;
+    button.classList.add("loading");
+    button.textContent = "登录中…";
+    button.setAttribute("aria-busy", "true");
     try {
       await api("/login", { method: "POST", body: { username: form.username.value, password: form.password.value } });
       await boot();
