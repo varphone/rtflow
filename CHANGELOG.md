@@ -29,6 +29,17 @@
 
 ### Added
 
+- RTSP 拉流代理：`[proxy]`/`[[proxy.mounts]]` 配置、按需/常连、失败退避重试、
+  per-mount `idle_grace`、SIGHUP 增删改、上游 host/CIDR/私网策略、DNS 固定、
+  重定向策略、并发/数量上限、运行时持久化、缓存 SDP 快速重连、媒体空闲看门狗、
+  周期描述刷新、RTCP SR 多轨 A/V 对齐。
+- 代理管理 API：`GET/POST/PATCH/DELETE /admin/api/v1/proxies`、restart、probe，
+  状态含 attempts/retry/last_error/bytes；代理 configured/streaming 指标与管理页
+  只读表格。
+- 代理传输矩阵测试：UDP/TCP/461 回退/multicast/SRTP/RTSPS/跨源 redirect，
+  下游 Basic 鉴权、GStreamer/ffmpeg 互操作、10 代理自动化与 50 代理/200 路 HLS
+  短时冒烟。
+
 - SRT 新增连接统计（监听端、caller、sender），通过 `/api/v1/srt`、
   `/admin/api/v1/srt` 暴露 peer、mount、RTT、丢包/跳包、加解密与推拉流状态。
 - SRT 新增 sender（推流）角色与 `SrtSender`：数据分包、重传窗口、ACK/NAK、
