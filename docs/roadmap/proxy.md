@@ -52,12 +52,13 @@
 - [x] 10 代理 + 10 路 HLS 的自动化冒烟（`proxy_scale.rs`）。
 - [x] 50 代理 + 200 路 HLS 短时冒烟（第二次遍历 200/200，RSS ~212MB）。
 - [x] 可配置 soak 测试工具（`proxy_soak.rs`，默认 60s，可跑 8h）。
-- [ ] 8h soak 实际执行。
+- [x] 短时 soak 验收（用户确认）：50 代理/200 路 HLS 第二遍 200/200，
+      `proxy_soak` 30s 140/150（启动阶段失败）。8h 长跑留待部署环境按需执行。
 - [x] server 配置 → 代理 mount → HLS 端到端测试（`proxy_config.rs`）。
 - [x] 文档、迁移说明、CHANGELOG。
 
 ## 已知缺口
 
-- 8h soak 工具已就绪，实际 8h 执行待部署环境完成。
+- 8h soak 未在本环境执行；已按用户确认以短时 soak 验收，长跑命令见代理指南。
 - 运行时 CRUD 通过 `persist_runtime` 写入覆盖文件，不回写原配置文件。
 - `restart` 延迟切换依赖订阅者计数归零，极端卡死的会话可能延长等待。
