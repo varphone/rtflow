@@ -28,7 +28,7 @@ export async function render() {
         if (!target) return;
         if (target.dataset.action === "play") {
           const vod = items.find((item) => item.id === target.dataset.id);
-          if (vod) playUrl(vod.playlist, vod.title);
+          if (vod) playUrl(vod.playlist, vod.title, { vod: true });
         } else if (target.dataset.action === "copy") {
           try { await navigator.clipboard.writeText(target.dataset.url); toast("地址已复制", "ok"); } catch (_) {}
         } else if (target.dataset.action === "refresh-vod") {

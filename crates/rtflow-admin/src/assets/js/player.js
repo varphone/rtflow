@@ -16,7 +16,7 @@ function loadHls() {
   return loading;
 }
 
-export function playUrl(url, title) {
+export function playUrl(url, title, options = {}) {
   openDialog({
     title,
     body: `<video id="admin-video" controls autoplay muted playsinline></video><div class="note" id="player-status">正在加载…</div>`,
@@ -26,9 +26,18 @@ export function playUrl(url, title) {
   const status = document.getElementById("player-status");
   loadHls().then((Hls) => {
     if (Hls && Hls.isSupported()) {
-      const hls = new Hls({ liveDurationInfinity: true, lowLatencyMode: true, liveSyncDurationCount: 3, backBufferLength: 10 });
+      const vod = options.vod === true;
+      const hls = new Hls({
+        liveDurationInfinity: !vod,
+        lowLatencyMode: !vod,
+        liveSyncDurationCount: 3,
+        backBufferLength: 10,
+        startPosition: vod ? 0 : -1,
+      });
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) status.textContent = "播放失败：" + (data.details || "未知错误");
+        if (data.fatal) {
+          status.textContent = "播放失败：" + (data.details || "未知错误") + (data.reason ? " (" + data.reason + ")" : "");
+        }
       });
       hls.loadSource(url);
       hls.attachMedia(video);
