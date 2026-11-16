@@ -60,7 +60,7 @@ export async function render(params) {
     html: `<div class="toolbar"><div class="search"><input class="input" data-rec-search value="${esc(query)}" placeholder="搜索录制路径"></div>
       <div class="seg"><button data-rec-status="all" class="${status === "all" ? "active" : ""}">全部</button><button data-rec-status="active" class="${status === "active" ? "active" : ""}">录制中</button><button data-rec-status="inactive" class="${status === "inactive" ? "active" : ""}">已停止</button></div>
       <span class="meta" data-rec-count>${initial.length} 条 · ${initial.filter((item) => item.active).length} 录制中</span></div>
-      <section class="panel">${initial.length ? table(initial) : empty("暂无录制任务", "在路径中开启录制，或等待发布者上线")}</section>`,
+      <section class="panel">${initial.length ? table(initial) : empty("暂无录制任务", "在路径中开启录制，或等待发布者上线", "inbox", `<a class="btn small" href="#/config/paths">前往路径配置</a>`)}</section>`,
     mount(root, ctx) {
       const search = root.querySelector("[data-rec-search]");
       const count = root.querySelector("[data-rec-count]");
@@ -70,7 +70,7 @@ export async function render(params) {
       const paint = () => {
         visible = view();
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.active).length} 录制中`;
-        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选");
+        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选", "inbox", (!query && status === "all") ? `<a class="btn small" href="#/config/paths">前往路径配置</a>` : "");
         sync();
       };
       const refresh = async () => {
