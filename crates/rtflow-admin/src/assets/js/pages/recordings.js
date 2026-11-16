@@ -41,7 +41,9 @@ function table(items) {
     <tbody id="recording-rows">${items.length ? items.map(row).join("") : `<tr><td colspan="6" class="empty-cell">没有匹配的录制任务</td></tr>`}</tbody></table></div>`;
 }
 
-export async function render() {
+export async function render(params) {
+  const linked = params?.get("q");
+  if (linked !== null && linked !== undefined) query = linked;
   all = await api("/recordings");
   const initial = view();
   return {

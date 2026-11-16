@@ -6,7 +6,9 @@ import { playUrl } from "../player.js";
 let query = "";
 let status = "all";
 
-export async function render() {
+export async function render(params) {
+  const linked = params?.get("q");
+  if (linked !== null && linked !== undefined) query = linked;
   const payload = await api("/streams");
   const streams = payload.items || payload;
   return {

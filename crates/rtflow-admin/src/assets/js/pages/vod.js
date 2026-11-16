@@ -5,7 +5,9 @@ import { playUrl } from "../player.js";
 
 let query = "";
 
-export async function render() {
+export async function render(params) {
+  const linked = params?.get("q");
+  if (linked !== null && linked !== undefined) query = linked;
   const payload = await api("/vods");
   const vods = payload.items || payload;
   const initial = filter(vods, query);

@@ -1,13 +1,13 @@
-import { apiV1 } from "../api.js";
+import { api, apiV1 } from "../api.js";
 import { dateTime, empty, esc } from "../format.js";
-import { confirmDialog, toast } from "../ui.js";
+import { confirmDialog, openDrawer, toast } from "../ui.js";
 import { openPathDrawer } from "../forms/path.js";
 
 let query = "";
 let sort = { field: "name", dir: 1 };
 
 export async function render(_params, ctx) {
-  const paths = await apiV1("/paths/config");
+  const [paths, system] = await Promise.all([apiV1("/paths/config"), api("/system")]);
   const all = Array.isArray(paths) ? paths : paths.items || [];
   const initial = view(all);
   return {
@@ -38,9 +38,10 @@ export async function render(_params, ctx) {
           return;
         }
         const target = event.target.closest("[data-action]");
-        if (!target || !["edit", "kick", "delete"].includes(target.dataset.action)) return;
+        if (!target || !["detail", "edit", "kick", "delete"].includes(target.dataset.action)) return;
         const item = visible.find((entry) => entry.name === target.dataset.name);
         if (!item) return;
+        if (target.dataset.action === "detail") return openPathDetail(item, system, ctx);
         if (target.dataset.action === "edit") return openPathDrawer(item, () => ctx.reload());
         if (target.dataset.action === "kick") {
           try { await apiV1("/kick?path=" + encodeURIComponent(item.name), { method: "POST" }); toast("已断开", "ok"); ctx.reload(); }
@@ -79,11 +80,64 @@ function table(items) {
     <th>发布 / 观看</th><th>录制</th>
     <th><button class="sort-btn" data-sort="max_readers">最大读者${arrow("max_readers")}</button></th>
     <th><button class="sort-btn" data-sort="updated_at">更新时间${arrow("updated_at")}</button></th><th></th></tr></thead><tbody>
-    ${items.map((item) => `<tr><td><div class="cell-main mono">/${esc(item.name)}</div><div class="cell-sub">${item.enabled ? "启用" : "停用"}</div></td>
+    ${items.map((item) => `<tr><td><button class="link-cell mono" data-action="detail" data-name="${esc(item.name)}">/${esc(item.name)}</button><div class="cell-sub">${item.enabled ? "启用" : "停用"}</div></td>
       <td><span class="badge">${esc(item.source)}</span></td><td>${item.publish ? '<span class="badge ok">发布</span>' : ""} ${item.read ? '<span class="badge ok">观看</span>' : '<span class="badge bad">不可读</span>'}</td>
       <td>${item.record ? '<span class="badge ok">开启</span>' : "—"}</td><td class="mono">${item.max_readers || "∞"}</td><td>${dateTime(item.updated_at)}</td>
       <td><div class="row-actions"><button class="btn small" data-action="edit" data-name="${esc(item.name)}">编辑</button>
         <button class="btn small ghost" data-action="kick" data-name="${esc(item.name)}">断开</button>
         <button class="btn small danger" data-action="delete" data-name="${esc(item.name)}">删除</button></div></td></tr>`).join("")}
   </tbody></table></div>`;
+}
+
+
+function openPathDetail(item, system, ctx) {
+  const base = String(system.rtmp_base || `rtmp://${location.hostname}:1935`).replace(/\/$/, "");
+  const hls = `${location.origin}${system.hls_prefix || "/hls"}/${item.name}/index.m3u8`;
+  const endpoint = (label, url) => `<div class="endpoint"><span class="endpoint-label">${label}</span><code>${esc(url)}</code><button class="btn small ghost" data-copy="${esc(url)}">复制</button></div>`;
+  const flags = [item.publish && "发布", item.read && "观看", item.record && "录制"].filter(Boolean).join(" · ") || "无";
+  const protocols = [item.hls && "HLS", item.dash && "DASH", item.flv && "HTTP-FLV", item.webrtc && "WebRTC"].filter(Boolean).join(" · ") || "未开启输出";
+  openDrawer({
+    title: `/${item.name}`,
+    description: "路径策略、输出协议与关联资源。",
+    showSubmit: false,
+    body: `<div class="stack">
+      <div class="detail-grid">
+        <div class="detail-item"><span>状态</span><strong>${item.enabled ? "启用" : "停用"}</strong></div>
+        <div class="detail-item"><span>来源</span><strong>${esc(item.source)}</strong></div>
+        <div class="detail-item"><span>允许操作</span><strong>${esc(flags)}</strong></div>
+        <div class="detail-item"><span>最大读者</span><strong class="mono">${item.max_readers || "∞"}</strong></div>
+        <div class="detail-item"><span>租户</span><strong>${esc(item.tenant || "—")}</strong></div>
+        <div class="detail-item"><span>修订</span><strong class="mono">${esc(item.revision || 1)}</strong></div>
+      </div>
+      <section class="drawer-section"><h3>输出协议</h3><div class="feature-list">${protocols.split(" · ").map((value) => `<span class="badge">${esc(value)}</span>`).join("")}</div></section>
+      <section class="drawer-section"><h3>时间信息</h3><div class="detail-grid">
+        <div class="detail-item"><span>创建</span><strong>${esc(dateTime(item.created_at))}</strong></div>
+        <div class="detail-item"><span>更新</span><strong>${esc(dateTime(item.updated_at))}</strong></div>
+      </div></section>
+      <section class="drawer-section"><h3>访问地址</h3>${endpoint("HLS", hls)}${endpoint("RTMP", `${base}/${item.name}`)}</section>
+      <section class="drawer-section"><h3>关联资源</h3><div class="actions">
+        <button class="btn small" data-goto="#/live?q=${encodeURIComponent(item.name)}">查看直播</button>
+        <button class="btn small" data-goto="#/vod?q=${encodeURIComponent(item.name)}">查看点播</button>
+        <button class="btn small" data-goto="#/config/recordings?q=${encodeURIComponent(item.name)}">查看录制</button>
+      </div></section>
+      <div class="actions"><button class="btn small" data-detail-edit>编辑策略</button><button class="btn small danger" data-detail-kick>断开该路径</button></div>
+    </div>`,
+    onMount(root) {
+      root.querySelectorAll("[data-copy]").forEach((button) => button.onclick = async () => {
+        try { await navigator.clipboard.writeText(button.dataset.copy); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      });
+      root.querySelectorAll("[data-goto]").forEach((button) => button.onclick = () => {
+        root.querySelector("[data-close-drawer]")?.click();
+        location.hash = button.dataset.goto;
+      });
+      root.querySelector("[data-detail-edit]").onclick = () => {
+        root.querySelector("[data-close-drawer]")?.click();
+        openPathDrawer(item, () => ctx.reload());
+      };
+      root.querySelector("[data-detail-kick]").onclick = async () => {
+        try { await apiV1("/kick?path=" + encodeURIComponent(item.name), { method: "POST" }); toast("已断开", "ok"); root.querySelector("[data-close-drawer]")?.click(); ctx.reload(); }
+        catch (error) { toast(error.message, "bad"); }
+      };
+    },
+  });
 }
