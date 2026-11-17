@@ -4,7 +4,9 @@
 //! then read device information, the media service endpoint and each profile's
 //! RTSP stream URI. HTTP Basic and Digest authentication are supported.
 //!
-//! This module is compiled only with the `onvif` feature.
+//! The crate is standalone; the `rtflow` facade re-exports it as
+//! `rtflow::onvif` behind the `onvif` feature, and `rtflow-server` enables that
+//! feature with `--features onvif`.
 use base64::Engine as _;
 use md5::{Digest, Md5};
 use quick_xml::Reader;

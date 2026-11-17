@@ -40,7 +40,7 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
                     .map_err(|error| (400, format!("invalid body: {error}")))?
             };
             let timeout = Duration::from_millis(body.timeout_ms.unwrap_or(3000).clamp(500, 10_000));
-            let devices = crate::onvif::discover(timeout)
+            let devices = rtflow::onvif::discover(timeout)
                 .await
                 .map_err(|error| (502, error))?;
             Ok(serde_json::json!({ "devices": devices }))
@@ -53,7 +53,7 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
         api_json(state.clone(), |_state, req| async move {
             let body: InspectRequest = serde_json::from_slice(&req.body)
                 .map_err(|error| (400, format!("invalid body: {error}")))?;
-            let details = crate::onvif::inspect(
+            let details = rtflow::onvif::inspect(
                 &body.xaddr,
                 body.username.filter(|value| !value.is_empty()),
                 body.password,

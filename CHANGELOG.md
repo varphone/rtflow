@@ -8,7 +8,7 @@
 ### Added
 
 - RTSP 拉流定时窗口：`schedule` 支持按周几和本地时间启停拉流，跨天窗口、窗口外状态 `scheduled`，停止时自动结束录制；控制台提供定时表单与列表标记。
-- ONVIF 设备发现（`onvif` feature，默认关闭）：WS-Discovery 扫描、设备信息/GetProfiles/GetStreamUri、HTTP Basic/Digest；控制台“发现设备”可预填 RTSP 拉流。
+- ONVIF 设备发现（`onvif` feature，默认关闭）：新增独立 crate `rtflow-onvif`（WS-Discovery、设备信息/GetProfiles/GetStreamUri、HTTP Basic/Digest），`rtflow` 门面导出为 `rtflow::onvif`；控制台“发现设备”可预填 RTSP 拉流。
 
 - RTSP 拉流输出：`outputs` 支持 RTSP/HLS/DASH/HTTP-FLV/WebRTC 直播、录制与最大观看数；创建/修改拉流源时自动创建受管路径策略，删除时清理，重启后自动恢复。
 - 拉流录制闭环：录制器识别代理 streaming 状态，拉流源可按路径自动录制，录制分段进入点播目录。

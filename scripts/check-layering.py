@@ -51,6 +51,7 @@ LAYERS: dict[str, int] = {
     "rtflow-http-flv": 9,
     "rtflow-rtmp": 9,
     "rtflow-srt": 9,
+    "rtflow-onvif": 9,
     "rtflow-webrtc": 9,
     "rtflow-gst": 9,
     "rtflow-admin": 10,

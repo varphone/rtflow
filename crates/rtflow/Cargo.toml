@@ -59,6 +59,7 @@ hls = ["http", "mp4", "dep:rtflow-hls"]
 dash = ["hls", "dep:rtflow-dash"]
 rtmp = ["dep:rtflow-rtmp"]
 srt = ["dep:rtflow-srt"]
+onvif = ["dep:rtflow-onvif"]
 # Low-level RTSP/interleaved framer (exposed for fuzzing and tooling).
 framing = ["dep:rtflow-framing"]
 webrtc = ["http", "dep:rtflow-webrtc"]
@@ -184,6 +185,7 @@ rtflow-webrtc = { workspace = true, optional = true }
 rtflow-metrics = { workspace = true, optional = true }
 rtflow-admin = { workspace = true, optional = true }
 rtflow-source = { workspace = true, optional = true }
+rtflow-onvif = { workspace = true, optional = true }
 rtflow-gst = { workspace = true, optional = true }
 tokio.workspace = true
 tracing.workspace = true

@@ -33,6 +33,7 @@
 | 9 | `rtflow-http-flv` | HTTP-FLV / WS-FLV | `ws` |
 | 9 | `rtflow-rtmp` | RTMP 推拉流 | — |
 | 9 | `rtflow-srt` | SRT ingest | — |
+| 9 | `rtflow-onvif` | ONVIF WS-Discovery 与 SOAP 客户端 | — |
 | 9 | `rtflow-webrtc` | WHIP/WHEP | — |
 | 9 | `rtflow-gst` | GStreamer 源/汇 | — |
 | 10 | `rtflow-dash` | DASH MPD 与分片端点 | — |
@@ -56,7 +57,7 @@
 | `dash` | `rtflow-dash`（并启用 `hls`） |
 | `http-flv` | `rtflow-http-flv` |
 | `ws-flv` | `rtflow-http-flv/ws` |
-| `rtmp` / `srt` | `rtflow-rtmp` / `rtflow-srt` |
+| `rtmp` / `srt` / `onvif` | `rtflow-rtmp` / `rtflow-srt` / `rtflow-onvif` |
 | `webrtc` | `rtflow-webrtc` |
 | `srtp` | `rtflow-srtp` + RTSP/客户端/服务端 `srtp` |
 | `multicast` | media/rtsp/client/server/mount/hls `multicast` |

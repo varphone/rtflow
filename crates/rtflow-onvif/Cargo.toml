@@ -1,0 +1,20 @@
+[package]
+name = "rtflow-onvif"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ONVIF WS-Discovery and SOAP client for rtflow"
+readme = "README.md"
+publish = true
+
+[dependencies]
+base64.workspace = true
+getrandom.workspace = true
+md-5.workspace = true
+quick-xml.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+tokio.workspace = true
+url.workspace = true

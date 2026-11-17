@@ -39,6 +39,7 @@ rtflow-gateway = { path = "crates/rtflow-gateway", version = "0.3.0" }
 rtflow-admin = { path = "crates/rtflow-admin", version = "0.3.0" }
 rtflow-metrics = { path = "crates/rtflow-metrics", version = "0.3.0" }
 rtflow-source = { path = "crates/rtflow-source", version = "0.3.0" }
+rtflow-onvif = { path = "crates/rtflow-onvif", version = "0.3.0" }
 rtflow = { path = "crates/rtflow", version = "0.3.0" }
 rtflow-testkit = { path = "crates/rtflow-testkit" }
 

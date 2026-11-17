@@ -9,8 +9,6 @@ pub mod hooks;
 pub mod keys;
 pub mod media;
 pub mod metrics;
-#[cfg(feature = "onvif")]
-pub mod onvif;
 pub mod paths;
 pub mod proxy_control;
 mod pull_policy;

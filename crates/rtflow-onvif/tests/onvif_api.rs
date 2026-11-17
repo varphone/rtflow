@@ -1,6 +1,5 @@
-//! ONVIF inspect flow against a fake SOAP endpoint (feature `onvif`).
-#![cfg(feature = "onvif")]
-use rtflow_server::onvif;
+//! ONVIF inspect flow against a fake SOAP endpoint.
+use rtflow_onvif as onvif;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 

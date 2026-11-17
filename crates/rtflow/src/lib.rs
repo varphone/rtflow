@@ -47,6 +47,8 @@ pub use rtflow_media as media;
 #[cfg(feature = "metrics")]
 pub use rtflow_metrics as metrics;
 pub use rtflow_mount as mount;
+#[cfg(feature = "onvif")]
+pub use rtflow_onvif as onvif;
 pub use rtflow_pipeline as pipeline;
 pub use rtflow_rtcp as rtcp;
 pub use rtflow_rtp as rtp;

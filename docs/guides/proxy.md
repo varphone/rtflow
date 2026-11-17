@@ -97,7 +97,7 @@ schedule = { days = ["mon", "tue", "wed", "thu", "fri"],
 
 ## ONVIF 设备发现（feature: onvif）
 
-ONVIF 是**编译期可选**能力，默认不编译。启用：
+ONVIF 的底层实现位于独立 crate `rtflow-onvif`（WS-Discovery/SOAP 客户端，无内部依赖）；`rtflow` 门面在 `onvif` feature 下将它导出为 `rtflow::onvif`。ONVIF 是**编译期可选**能力，默认不编译。启用：
 
 ```bash
 cargo build -p rtflow-server --features onvif
