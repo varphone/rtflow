@@ -380,6 +380,9 @@ where
         let (handler, params) = guard.route(&req.method, &req.path.clone());
         let handler = handler.clone();
         let mut req = req;
+        // Route matching uses the encoded path; handlers should see the
+        // decoded form so names containing `/` (encoded as %2F) work.
+        req.path = request::percent_decode(&req.path);
         req.path_params = params
             .into_iter()
             .map(|param| request::percent_decode(&param))

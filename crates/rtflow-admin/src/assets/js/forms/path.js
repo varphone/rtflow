@@ -11,6 +11,7 @@ export function openPathDrawer(existing, onSaved) {
       <div class="form-section">
         <h3>基础</h3>
         ${field("路径名", textInput("name", item.name, `required ${existing ? "disabled" : ""} placeholder="live/cam"`), { hint: "由字母、数字、- _ . ~ / 组成，不能以 / 开头或结尾。" })}
+        ${checkbox("enabled", "启用该路径", item.enabled !== false)}
       </div>
       <div class="form-section">
         <h3>允许的操作</h3>
@@ -34,7 +35,7 @@ export function openPathDrawer(existing, onSaved) {
     submitLabel: existing ? "保存修改" : "创建路径",
     async onSubmit(data, { close }) {
       const body = {
-        enabled: true,
+        enabled: data.get("enabled") === "on",
         publish: data.get("publish") === "on",
         read: data.get("read") === "on",
         record: data.get("record") === "on",

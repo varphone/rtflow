@@ -7,6 +7,9 @@
 
 ### Fixed
 
+- HTTP 路由匹配后解码请求路径，修复名称含 `/` 的路径无法保存（%2F 未解码）。
+- 路径表单支持启用/停用，不再强制 enabled=true。
+
 - 点播 HLS 默认生成 MPEG-TS（fMP4 不可用时回退），修复 Firefox MSE
   `bufferAppendError`；兼容 Edge/Chrome。
 
