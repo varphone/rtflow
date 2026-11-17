@@ -325,7 +325,7 @@ function isTyping(event) {
 
 function exportCurrentView() {
   const button = document.querySelector(
-    "[data-action=export],[data-rec-export],[data-proxy-export],[data-srt-export],[data-audit-export]"
+    "[data-action=export],[data-live-export],[data-vod-export],[data-rec-export],[data-proxy-export],[data-srt-export],[data-audit-export]"
   );
   if (button) { button.click(); return true; }
   toast("当前页面不支持导出", "bad");

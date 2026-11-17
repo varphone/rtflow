@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { bytes, dateTime, duration, empty, esc, iconSvg } from "../format.js";
+import { bytes, dateTime, duration, empty, esc, exportCsv, iconSvg } from "../format.js";
 import { openDrawer } from "../ui.js";
 import { confirmDialog, toast } from "../ui.js";
 import { playUrl } from "../player.js";
@@ -17,7 +17,7 @@ export async function render(params) {
   return {
     title: "点播",
     subtitle: "录制目录与文件 VOD 资源。",
-    actions: `<button class="btn small" data-vod-refresh>刷新</button>`,
+    actions: `<button class="btn small ghost" data-vod-export>导出</button><button class="btn small" data-vod-refresh>刷新</button>`,
     html: `<div class="toolbar"><label class="checkline"><input type="checkbox" data-vod-select-all> 全选</label>
       <div class="search">${iconSvg("search")}<input class="input" data-vod-search value="${esc(query)}" placeholder="搜索点播名称或 ID"></div>
       <select class="input" data-vod-sort aria-label="点播排序" style="width:auto"><option value="recent" ${sort === "recent" ? "selected" : ""}>最新录制</option><option value="duration" ${sort === "duration" ? "selected" : ""}>按时长</option><option value="cached" ${sort === "cached" ? "selected" : ""}>已缓存优先</option></select>
@@ -93,6 +93,12 @@ export async function render(params) {
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
       sorter.onchange = () => { sort = sorter.value; paint(); syncUrl(); };
+      root.querySelector("[data-vod-export]").onclick = () => {
+        exportCsv(`vod-${new Date().toISOString().slice(0, 10)}.csv`,
+          ["id", "title", "duration_ms", "cached", "cache_bytes", "playlist"],
+          visible.map((item) => [item.id, item.title, item.duration_ms, item.cached, item.cache_bytes || 0, item.playlist]));
+        toast(`已导出 ${visible.length} 条点播`, "ok");
+      };
       root.querySelector("[data-vod-refresh]").onclick = () => ctx.reload();
       root.addEventListener("click", async (event) => {
         const target = event.target.closest("[data-action]");

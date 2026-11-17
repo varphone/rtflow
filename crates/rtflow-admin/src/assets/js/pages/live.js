@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { audioLabel, bytes, empty, esc, fps, iconSvg, num, resolution, statusBadge } from "../format.js";
+import { audioLabel, bytes, empty, esc, exportCsv, fps, iconSvg, num, resolution, statusBadge } from "../format.js";
 import { confirmDialog, openDrawer, syncSortAria, toast } from "../ui.js";
 import { playUrl } from "../player.js";
 
@@ -22,7 +22,7 @@ export async function render(params) {
   return {
     title: "直播流",
     subtitle: "实时发布状态、播放与流控制。",
-    actions: `<button class="btn small ghost active" data-live-auto>自动刷新：开</button><button class="btn small" data-live-refresh>刷新</button>`,
+    actions: `<button class="btn small ghost" data-live-export>导出</button><button class="btn small ghost active" data-live-auto>自动刷新：开</button><button class="btn small" data-live-refresh>刷新</button>`,
     html: `<div class="toolbar">
       <div class="search">${iconSvg("search")}<input class="input" data-live-search value="${esc(query)}" placeholder="搜索名称、路径或编码"></div>
       <div class="seg"><button data-live-status="all">全部</button><button data-live-status="live">直播中</button><button data-live-status="idle">待机</button></div>
@@ -156,6 +156,12 @@ export async function render(params) {
         button.classList.toggle("active", enabled);
         if (timer) { clearInterval(timer); timer = null; }
         if (enabled) timer = setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+      };
+      root.querySelector("[data-live-export]").onclick = () => {
+        exportCsv(`streams-${new Date().toISOString().slice(0, 10)}.csv`,
+          ["path", "name", "publisher", "subscribers", "video_codec", "audio_codec", "accepted_frames", "dropped_frames", "hls", "rtsp", "rtmp"],
+          visible.map((item) => [item.path, item.name, item.publisher, item.subscribers, item.video?.codec || "", item.audio?.codec || "", item.accepted_frames, item.dropped_frames, item.hls_url, item.rtsp_url, item.rtmp_url]));
+        ctx.toast(`已导出 ${visible.length} 条流`, "ok");
       };
       root.querySelector("[data-live-auto]").onclick = () => setAuto(!automatic);
       root.querySelector("[data-live-refresh]").onclick = () => refresh();
