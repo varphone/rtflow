@@ -367,10 +367,38 @@ function manageViews() {
     title: "保存的视图",
     body: views.length ? `<div class="view-list">${views.map((view, index) => `<div class="view-row">
       <div><strong>${esc(view.name)}</strong><div class="cell-sub mono">${esc(view.hash)}</div></div>
-      <button class="btn small danger" data-delete-view="${index}">删除</button>
+      <div class="row-actions"><button class="btn small ghost" data-rename-view="${index}">重命名</button><button class="btn small danger" data-delete-view="${index}">删除</button></div>
     </div>`).join("")}</div>` : `<div class="note">还没有保存的视图。在命令面板中选择“保存当前视图”。</div>`,
     footer: `${views.length ? `<button class="btn danger ghost" data-clear-views>清空全部</button>` : ""}<button class="btn" data-close-dialog>关闭</button>`,
     onMount(root) {
+      root.querySelectorAll("[data-rename-view]").forEach((button) => button.onclick = () => {
+        const list = savedViews();
+        const index = Number(button.dataset.renameView);
+        const current = list[index];
+        if (!current) return;
+        openDialog({
+          title: "重命名视图",
+          body: `<div class="field"><label for="view-rename">视图名称</label><input class="input" id="view-rename" maxlength="40" value="${esc(current.name)}" autofocus></div>`,
+          footer: `<button class="btn" data-close-dialog>取消</button><button class="btn primary" data-rename-save>保存</button>`,
+          onMount(dialog) {
+            const input = dialog.querySelector("#view-rename");
+            const save = () => {
+              const name = input.value.trim();
+              if (!name) { toast("请输入视图名称", "bad"); return; }
+              if (savedViews().some((view, i) => i !== index && view.name === name)) { toast("视图名称已存在", "bad"); return; }
+              const next = savedViews();
+              next[index] = { ...next[index], name };
+              localStorage.setItem("rtflow-views", JSON.stringify(next));
+              closeDialog();
+              toast("视图已重命名", "ok");
+              manageViews();
+            };
+            dialog.querySelector("[data-rename-save]").onclick = save;
+            input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); save(); } });
+            requestAnimationFrame(() => { input.focus(); input.select(); });
+          },
+        });
+      });
       root.querySelectorAll("[data-delete-view]").forEach((button) => button.onclick = () => {
         const next = savedViews();
         next.splice(Number(button.dataset.deleteView), 1);

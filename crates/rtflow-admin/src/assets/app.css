@@ -400,6 +400,7 @@ input[type="search"]::-webkit-search-cancel-button:hover { background: var(--tex
 .view-row { display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; }
 .view-row > div { min-width: 0; flex: 1; }
 .view-row .cell-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.view-row .row-actions { display: flex; gap: 5px; flex: none; }
 .shortcut-list { display: grid; gap: 9px; }
 .shortcut-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--muted); }
 .shortcut-row kbd { color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; font-size: 11px; }
