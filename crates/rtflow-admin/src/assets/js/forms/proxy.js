@@ -15,7 +15,7 @@ function upstreamRow(upstream = {}, index = 0) {
       </select>`)}
       ${field("用户名", textInput("username", upstream.username || ""))}
     </div>
-    ${field("密码", `<input class="input" type="password" name="password" placeholder="${upstream.password ? "留空保持不变" : ""}">`)}
+    ${field("密码", `<input class="input" type="password" name="password" autocomplete="new-password" spellcheck="false" placeholder="${upstream.password ? "留空保持不变" : ""}">`)}
   </div>`;
 }
 

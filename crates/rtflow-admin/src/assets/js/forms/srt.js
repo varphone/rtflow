@@ -25,7 +25,7 @@ export function openSrtDrawer(direction, existing, onSaved, options = {}) {
       </div>
       <div class="form-section">
         <h3>加密与选项</h3>
-        ${field("Passphrase", `<input class="input" type="password" name="passphrase" placeholder="${editing ? "留空保持原值" : "留空不加密，10..80 字节"}">`)}
+        ${field("Passphrase", `<input class="input" type="password" name="passphrase" autocomplete="new-password" spellcheck="false" placeholder="${editing ? "留空保持原值" : "留空不加密，10..80 字节"}">`)}
         ${field("密钥长度", `<select class="input" name="pbkeylen">
           <option value="0" ${item.pbkeylen === 0 ? "selected" : ""}>自动 / 不设置</option>
           <option value="16" ${item.pbkeylen === 16 ? "selected" : ""}>16</option>

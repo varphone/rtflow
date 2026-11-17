@@ -45,6 +45,8 @@
 
 ### Changed
 
+- 代理/SRT 密码字段声明 new-password 并关闭拼写检查。
+
 - 表单文本输入默认关闭自动大写、自动填充与拼写检查，适合路径/URL/ID。
 
 - 侧栏与面包屑补充导航 landmark/aria-label。
