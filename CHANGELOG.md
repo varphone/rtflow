@@ -35,6 +35,12 @@
 
 ### Changed
 
+- 保存视图支持导入/导出 JSON（校验名称与 hash，去重后最多 12 个）。
+
+### Fixed
+
+- 修复管理视图嵌套模板导致 app.js 在浏览器中解析失败、界面空白的问题。
+
 - 抽屉保存按钮提交期间显示加载 spinner 与 aria-busy，避免重复提交。
 
 - 主题支持“跟随系统”，随 prefers-color-scheme 实时切换。
