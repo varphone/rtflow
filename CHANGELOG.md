@@ -41,6 +41,8 @@
 
 ### Changed
 
+- SRT 详情支持“复制端点”，名称与 mount 预填 -copy。
+
 - 代理详情支持“复制代理”，预填 `/path-copy` 并以 POST 创建。
 
 - 路径详情支持“复制路径”，预填 `name-copy` 并以 POST 创建副本。

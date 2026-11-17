@@ -161,7 +161,7 @@ function openSrtDetail(item, tab, ctx) {
       </div>
       <div data-srt-error>${item.last_error ? `<div class="error-banner">${esc(item.last_error)}</div>` : ""}</div>
       <div class="actions"><button class="btn small" data-srt-edit>编辑</button><button class="btn small ghost" data-srt-toggle>${item.enabled ? "停用" : "启用"}</button>
-        <button class="btn small ghost" data-srt-copy>复制远端</button>${item.mount ? `<button class="btn small ghost" data-srt-live>查看 Mount</button>` : ""}<button class="btn small danger" data-srt-delete>删除</button></div>
+        <button class="btn small ghost" data-srt-clone>复制端点</button><button class="btn small ghost" data-srt-copy>复制远端</button>${item.mount ? `<button class="btn small ghost" data-srt-live>查看 Mount</button>` : ""}<button class="btn small danger" data-srt-delete>删除</button></div>
     </div>`,
     onClose() { if (timer) clearInterval(timer); },
     onMount(root) {
@@ -184,6 +184,7 @@ function openSrtDetail(item, tab, ctx) {
       };
       timer = setInterval(update, 2000);
       root.querySelector("[data-srt-edit]").onclick = () => { close(); openSrtDrawer(tab, item, () => ctx.reload()); };
+      root.querySelector("[data-srt-clone]").onclick = () => { close(); openSrtDrawer(tab, item, () => ctx.reload(), { clone: true }); };
       root.querySelector("[data-srt-copy]").onclick = async () => {
         try { await navigator.clipboard.writeText(item.remote || ""); toast("远端地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
