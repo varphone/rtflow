@@ -35,6 +35,8 @@
 
 ### Changed
 
+- 支持 prefers-reduced-motion，关闭过渡与循环动画。
+
 - 全站链接、按钮、输入与可聚焦元素统一 focus-visible 焦点环。
 
 - 网络断开/恢复提示；toast 最多同时保留 3 条。
