@@ -1,7 +1,7 @@
 import { api, apiV1, setCsrf } from "./js/api.js";
 import { icon } from "./js/icons.js";
 import { esc } from "./js/format.js";
-import { closeDialog, openCommandPalette, openDialog, toast } from "./js/ui.js";
+import { closeDialog, confirmDialog, openCommandPalette, openDialog, toast } from "./js/ui.js";
 import * as overview from "./js/pages/overview.js";
 import * as live from "./js/pages/live.js";
 import * as vod from "./js/pages/vod.js";
@@ -361,6 +361,33 @@ function savedViews() {
   try { return JSON.parse(localStorage.getItem("rtflow-views") || "[]"); } catch (_) { return []; }
 }
 
+function manageViews() {
+  const views = savedViews();
+  openDialog({
+    title: "保存的视图",
+    body: views.length ? `<div class="view-list">${views.map((view, index) => `<div class="view-row">
+      <div><strong>${esc(view.name)}</strong><div class="cell-sub mono">${esc(view.hash)}</div></div>
+      <button class="btn small danger" data-delete-view="${index}">删除</button>
+    </div>`).join("")}</div>` : `<div class="note">还没有保存的视图。在命令面板中选择“保存当前视图”。</div>`,
+    footer: `${views.length ? `<button class="btn danger ghost" data-clear-views>清空全部</button>` : ""}<button class="btn" data-close-dialog>关闭</button>`,
+    onMount(root) {
+      root.querySelectorAll("[data-delete-view]").forEach((button) => button.onclick = () => {
+        const next = savedViews();
+        next.splice(Number(button.dataset.deleteView), 1);
+        localStorage.setItem("rtflow-views", JSON.stringify(next));
+        toast("视图已删除", "ok");
+        manageViews();
+      });
+      root.querySelector("[data-clear-views]")?.addEventListener("click", async () => {
+        if (!await confirmDialog({ title: "清空视图", message: "删除全部保存的视图？", confirmLabel: "清空", danger: true })) return;
+        localStorage.removeItem("rtflow-views");
+        toast("视图已清空", "ok");
+        manageViews();
+      });
+    },
+  });
+}
+
 function saveCurrentView() {
   const route = currentRoute();
   const hash = location.hash || `#/${route}`;
@@ -401,6 +428,7 @@ function openPalette() {
   const actions = [
     { label: "刷新当前页面", hint: "重新加载当前数据", icon: "↻", shortcut: "R", group: "操作", run: () => navigate({ silent: true }) },
     { label: "保存当前视图", hint: "保存页面与筛选条件到本地", icon: "★", group: "操作", run: () => saveCurrentView() },
+    { label: "管理保存的视图", hint: "查看或删除本地视图", icon: "☆", group: "操作", run: () => manageViews() },
     { label: "导出当前视图", hint: "CSV（当前页面支持时）", icon: "⇩", group: "操作", run: () => exportCurrentView() },
     { label: "切换深浅主题", hint: "在深色与浅色之间切换", icon: "◐", group: "操作", run: () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light") },
     { label: "切换表格密度", hint: "舒适 / 紧凑", icon: "≡", group: "操作", run: () => applyDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact") },
