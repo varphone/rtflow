@@ -6,11 +6,14 @@ import { playUrl } from "../player.js";
 
 let query = "";
 let sort = "recent";
+let cacheFilter = "all";
 
 export async function render(params) {
   query = params?.get("q") || "";
   const linkedSort = params?.get("sort");
   sort = ["recent", "duration", "cached"].includes(linkedSort) ? linkedSort : "recent";
+  const linkedCache = params?.get("cache");
+  cacheFilter = ["cached", "uncached"].includes(linkedCache) ? linkedCache : "all";
   const payload = await api("/vods");
   const vods = payload.items || payload;
   const initial = filter(vods, query);
@@ -21,6 +24,7 @@ export async function render(params) {
     html: `<div class="toolbar"><label class="checkline"><input type="checkbox" data-vod-select-all> 全选</label>
       <div class="search">${iconSvg("search")}<input class="input" data-vod-search value="${esc(query)}" placeholder="搜索点播名称或 ID"></div>
       <select class="input" data-vod-sort aria-label="点播排序" style="width:auto"><option value="recent" ${sort === "recent" ? "selected" : ""}>最新录制</option><option value="duration" ${sort === "duration" ? "selected" : ""}>按时长</option><option value="cached" ${sort === "cached" ? "selected" : ""}>已缓存优先</option></select>
+      <div class="seg"><button data-vod-cache-filter="all" class="${cacheFilter === "all" ? "active" : ""}">全部</button><button data-vod-cache-filter="cached" class="${cacheFilter === "cached" ? "active" : ""}">已缓存</button><button data-vod-cache-filter="uncached" class="${cacheFilter === "uncached" ? "active" : ""}">未缓存</button></div>
       <span class="meta" data-vod-count>${initial.length} 条 · ${initial.filter((vod) => vod.cached).length} 已缓存</span>
       <button class="btn small ghost" data-vod-copy-bulk disabled>复制所选地址</button>
       <button class="btn small ghost" data-vod-bulk disabled>刷新所选缓存</button></div>
@@ -88,11 +92,17 @@ export async function render(params) {
         const params = new URLSearchParams();
         if (query.trim()) params.set("q", query.trim());
         if (sort !== "recent") params.set("sort", sort);
+        if (cacheFilter !== "all") params.set("cache", cacheFilter);
         const qs = params.toString();
         history.replaceState(null, "", `#/vod${qs ? `?${qs}` : ""}`);
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
       sorter.onchange = () => { sort = sorter.value; paint(); syncUrl(); };
+      root.querySelectorAll("[data-vod-cache-filter]").forEach((button) => button.onclick = () => {
+        cacheFilter = button.dataset.vodCacheFilter;
+        root.querySelectorAll("[data-vod-cache-filter]").forEach((item) => item.classList.toggle("active", item === button));
+        paint(); syncUrl();
+      });
       root.querySelector("[data-vod-export]").onclick = () => {
         exportCsv(`vod-${new Date().toISOString().slice(0, 10)}.csv`,
           ["id", "title", "duration_ms", "cached", "cache_bytes", "playlist"],
@@ -136,7 +146,11 @@ export async function render(params) {
 
 function filter(vods, value) {
   const q = String(value || "").trim().toLowerCase();
-  const items = !q ? [...vods] : vods.filter((item) => `${item.title} ${item.id}`.toLowerCase().includes(q));
+  const items = vods.filter((item) => {
+    const match = !q || `${item.title} ${item.id}`.toLowerCase().includes(q);
+    const cache = cacheFilter === "all" || (cacheFilter === "cached" ? item.cached : !item.cached);
+    return match && cache;
+  });
   const stamp = (item) => Number(String(item.id).split("@").pop()) || 0;
   if (sort === "duration") items.sort((a, b) => Number(b.duration_ms || 0) - Number(a.duration_ms || 0));
   else if (sort === "cached") items.sort((a, b) => Number(Boolean(b.cached)) - Number(Boolean(a.cached)) || stamp(b) - stamp(a));
