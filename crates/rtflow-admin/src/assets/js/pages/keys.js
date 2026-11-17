@@ -115,7 +115,7 @@ function view(all) {
 
 function table(items) {
   const arrow = (field) => sort.field === field ? (sort.dir > 0 ? " ↑" : " ↓") : " ↕";
-  return `<div class="table-wrap"><table class="data"><thead><tr>
+  return `<div class="table-wrap"><table class="data"><caption class="sr-only">共 ${items.length} 条推流密钥</caption><thead><tr>
     <th><button class="sort-btn" data-sort="kid">Key ID${arrow("kid")}</button></th>
     <th><button class="sort-btn" data-sort="name">名称${arrow("name")}</button></th><th>角色</th><th>协议</th><th>路径范围</th>
     <th><button class="sort-btn" data-sort="expires_at">过期${arrow("expires_at")}</button></th><th>状态</th><th></th></tr></thead><tbody>

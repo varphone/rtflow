@@ -36,7 +36,7 @@ export async function render(params) {
       <button class="btn small ghost" data-audit-reset ${initialQuery.trim() || initialKind !== "all" || initialCategory !== "all" ? "" : "hidden"}>重置</button>
       <button class="btn small ghost" data-audit-new hidden></button></div>
       ${payload.enabled === false ? `<div class="error-banner">审计日志未启用：在服务配置中设置审计路径后重启。</div>` : ""}
-      <section class="panel"><div class="table-wrap audit-table"><table class="data audit-table"><thead><tr><th>时间</th><th>动作</th><th>结果</th><th>对象</th><th>操作者</th><th>详情</th><th></th></tr></thead><tbody data-audit-rows></tbody></table></div>
+      <section class="panel"><div class="table-wrap audit-table"><table class="data audit-table" aria-label="审计事件列表"><thead><tr><th>时间</th><th>动作</th><th>结果</th><th>对象</th><th>操作者</th><th>详情</th><th></th></tr></thead><tbody data-audit-rows></tbody></table></div>
         <div class="pager"><span class="meta" data-audit-range></span><div class="pager-buttons"><button class="btn small ghost" data-audit-prev>上一页</button><span class="meta" data-audit-page></span><button class="btn small ghost" data-audit-next>下一页</button></div></div>
       </section>`,
     mount(root, ctx) {

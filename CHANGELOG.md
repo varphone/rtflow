@@ -35,6 +35,8 @@
 
 ### Changed
 
+- 数据表增加 sr-only caption，审计表补充 aria-label。
+
 - 直播详情支持复制全部播放地址（每行一个）。
 
 - 支持 prefers-reduced-motion，关闭过渡与循环动画。
