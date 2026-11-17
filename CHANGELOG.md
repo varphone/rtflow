@@ -41,6 +41,8 @@
 
 ### Changed
 
+- 命令面板新增“清除当前筛选”，复用页面重置逻辑。
+
 - 系统页新增 sqlite3 PRAGMA integrity_check 校验命令与复制。
 
 - 点播批量刷新缓存提交期间按钮显示 spinner 并禁用。

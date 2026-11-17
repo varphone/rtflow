@@ -354,6 +354,14 @@ function exportCurrentView() {
   return false;
 }
 
+function clearCurrentFilters() {
+  const reset = document.querySelector(
+    "[data-path-reset],[data-key-reset],[data-srt-reset],[data-vod-reset],[data-live-reset],[data-proxy-reset],[data-rec-reset],[data-audit-reset]"
+  );
+  if (reset && !reset.hidden) { reset.click(); return; }
+  toast("当前页面没有可清除的筛选", "bad");
+}
+
 function focusPageSearch() {
   const input = document.querySelector(
     "[data-live-search],[data-path-search],[data-key-search],[data-proxy-search],[data-srt-search],[data-vod-search],[data-rec-search],[data-audit-search]"
@@ -548,6 +556,7 @@ function openPalette() {
   const actions = [
     { label: "刷新当前页面", hint: "重新加载当前数据", icon: "↻", shortcut: "R", group: "操作", run: () => navigate({ silent: true }) },
     { label: "保存当前视图", hint: "保存页面与筛选条件到本地", icon: "★", group: "操作", run: () => saveCurrentView() },
+    { label: "清除当前筛选", hint: "搜索与状态恢复默认", icon: "⌫", group: "操作", run: () => clearCurrentFilters() },
     { label: "管理保存的视图", hint: "查看或删除本地视图", icon: "☆", group: "操作", run: () => manageViews() },
     { label: "导入视图", hint: "从 JSON 合并筛选视图", icon: "⇧", group: "操作", run: () => importViewsFile() },
     { label: "导出视图", hint: "下载 JSON 备份", icon: "⇩", group: "操作", run: () => exportViewsFile() },
