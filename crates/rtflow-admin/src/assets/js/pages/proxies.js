@@ -120,7 +120,7 @@ function view(all) {
 
 function table(items) {
   const arrow = (field) => sort.field === field ? (sort.dir > 0 ? " ↑" : " ↓") : " ↕";
-  return `<div class="table-wrap"><table class="data"><caption class="sr-only">共 ${items.length} 条代理</caption><thead><tr>
+  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data"><caption class="sr-only">共 ${items.length} 条代理</caption><thead><tr>
     <th><button class="sort-btn" data-sort="path">路径${arrow("path")}</button></th>
     <th><button class="sort-btn" data-sort="state">状态${arrow("state")}</button></th><th>上游</th><th>订阅</th><th>轨道</th>
     <th><button class="sort-btn" data-sort="attempts">重试${arrow("attempts")}</button></th><th>错误</th><th></th></tr></thead><tbody>

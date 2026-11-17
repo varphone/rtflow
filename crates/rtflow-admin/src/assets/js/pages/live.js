@@ -207,7 +207,7 @@ export async function render(params) {
 
 function table(items, selected) {
   const arrow = (field) => sort.field === field ? (sort.dir > 0 ? " ↑" : " ↓") : " ↕";
-  return `<div class="table-wrap"><table class="data live-table"><caption class="sr-only">共 ${items.length} 条直播流</caption><thead><tr><th class="select-col"><input type="checkbox" data-select-all aria-label="选择全部"></th>
+  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data live-table"><caption class="sr-only">共 ${items.length} 条直播流</caption><thead><tr><th class="select-col"><input type="checkbox" data-select-all aria-label="选择全部"></th>
     <th><button class="sort-btn" data-sort="name">流${arrow("name")}</button></th>
     <th><button class="sort-btn" data-sort="status">状态${arrow("status")}</button></th><th>视频</th><th>音频</th>
     <th><button class="sort-btn" data-sort="subscribers">订阅${arrow("subscribers")}</button></th>

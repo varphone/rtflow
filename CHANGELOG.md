@@ -45,6 +45,8 @@
 
 ### Changed
 
+- 宽表格容器增加 tabindex/role=region，键盘可聚焦并横向滚动。
+
 - 统一细滚动条样式，颜色跟随主题。
 
 - 管理页增加 nosniff、DENY、no-referrer 与 frame-ancestors 安全响应头。

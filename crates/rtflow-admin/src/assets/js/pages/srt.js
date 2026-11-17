@@ -129,7 +129,7 @@ function view(all) {
 
 function table(items) {
   const arrow = (field) => sort.field === field ? (sort.dir > 0 ? " ↑" : " ↓") : " ↕";
-  return `<div class="table-wrap"><table class="data"><caption class="sr-only">共 ${items.length} 个 SRT 端点</caption><thead><tr><th><button class="sort-btn" data-sort="name">名称${arrow("name")}</button></th><th>状态</th><th><button class="sort-btn" data-sort="remote">远端${arrow("remote")}</button></th><th>Mount</th><th><button class="sort-btn" data-sort="connected">连接${arrow("connected")}</button></th><th><button class="sort-btn" data-sort="bytes">流量${arrow("bytes")}</button></th><th>错误</th><th></th></tr></thead><tbody>
+  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data"><caption class="sr-only">共 ${items.length} 个 SRT 端点</caption><thead><tr><th><button class="sort-btn" data-sort="name">名称${arrow("name")}</button></th><th>状态</th><th><button class="sort-btn" data-sort="remote">远端${arrow("remote")}</button></th><th>Mount</th><th><button class="sort-btn" data-sort="connected">连接${arrow("connected")}</button></th><th><button class="sort-btn" data-sort="bytes">流量${arrow("bytes")}</button></th><th>错误</th><th></th></tr></thead><tbody>
     ${items.map((item) => `<tr><td><button class="link-cell" data-action="detail" data-id="${esc(item.id)}">${esc(item.name || item.id)}</button><div class="cell-sub mono">${esc(item.id)}</div></td>
       <td>${item.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge">停用</span>'}</td><td class="mono">${esc(item.remote)}</td>
       <td class="mono">${esc(item.mount || "—")}</td><td>${item.connected ? '<span class="badge ok">已连接</span>' : "—"}</td><td class="mono">${bytes(item.bytes || 0)}</td>

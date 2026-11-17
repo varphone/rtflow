@@ -34,7 +34,7 @@ function view() {
 
 function table(items) {
   const arrow = (field) => sort.field === field ? (sort.dir > 0 ? " ↑" : " ↓") : " ↕";
-  return `<div class="table-wrap"><table class="data"><caption class="sr-only">共 ${items.length} 条录制任务</caption>
+  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data"><caption class="sr-only">共 ${items.length} 条录制任务</caption>
     <thead><tr><th><button class="sort-btn" data-sort="path">路径${arrow("path")}</button></th><th>状态</th>
       <th><button class="sort-btn" data-sort="segments">分段${arrow("segments")}</button></th>
       <th><button class="sort-btn" data-sort="bytes">大小${arrow("bytes")}</button></th><th>错误</th><th></th></tr></thead>
