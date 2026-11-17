@@ -159,7 +159,7 @@ export async function render(params) {
 }
 
 function filter(vods, value) {
-  const q = String(value || "").trim().toLowerCase();
+  const q = String(value || "").trim().toLowerCase().replace(/^\/+/, "");
   const items = vods.filter((item) => {
     const match = !q || `${item.title} ${item.id}`.toLowerCase().includes(q);
     const cache = cacheFilter === "all" || (cacheFilter === "cached" ? item.cached : !item.cached);

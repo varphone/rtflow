@@ -103,7 +103,7 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
         name: path.rsplit('/').next().unwrap_or(path).to_owned(),
         video,
         audio,
-        publisher: snapshot.publisher_connected,
+        publisher: publishing(&snapshot),
         subscribers: snapshot.subscriber_count.max(snapshot.broadcast_receivers),
         accepted_frames: snapshot.stats.accepted_frames,
         dropped_frames: snapshot.stats.dropped_frames,
@@ -115,6 +115,14 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
         rtsp_url,
         protocols: vec!["HLS", "RTSP"],
     })
+}
+
+fn publishing(snapshot: &rtflow_mount::MountSnapshot) -> bool {
+    snapshot.publisher_connected
+        || matches!(
+            snapshot.proxy_state,
+            Some(rtflow_mount::upstream::ProxyState::Streaming)
+        )
 }
 
 pub(super) fn streams(state: &AdminState) -> Vec<StreamView> {

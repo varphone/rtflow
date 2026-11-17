@@ -23,13 +23,13 @@ export async function render(params, ctx) {
   const all = statuses.map((entry) => Object.assign({}, configs.find((mount) => mount.path === entry.path) || {}, entry));
   const initial = view(all);
   return {
-    title: "RTSP 代理",
-    subtitle: "拉流代理配置与运行状态。",
-    actions: `<button class="btn small" data-proxy-export>导出</button><button class="btn small primary" data-action="create">新增代理</button><button class="btn small" data-action="refresh">刷新</button>`,
-    html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-proxy-search aria-label="搜索 RTSP 代理" value="${esc(query)}" placeholder="搜索路径或上游"></div>
+    title: "RTSP 拉流",
+    subtitle: "主动拉取第三方 RTSP 设备，支持直播、录制与点播。",
+    actions: `<button class="btn small" data-proxy-export>导出</button><button class="btn small primary" data-action="create">新增拉流</button><button class="btn small" data-action="refresh">刷新</button>`,
+    html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-proxy-search aria-label="搜索 RTSP 拉流" value="${esc(query)}" placeholder="搜索路径或上游"></div>
       <div class="seg">${["all", "streaming", "idle", "backoff", "describing"].map((state) => `<button data-proxy-filter="${state}" class="${filter === state ? "active" : ""}">${state === "all" ? "全部" : state}</button>`).join("")}</div>
-      <span class="meta" data-proxy-count>${initial.length} 条 · ${initial.filter((item) => item.state === "streaming").length} streaming</span><button class="btn small ghost" data-proxy-reset ${query.trim() || filter !== "all" ? "" : "hidden"}>重置</button></div>
-      <section class="panel" data-proxy-panel>${initial.length ? table(initial) : empty("暂无代理", "新增一个 RTSP 拉流代理", "proxy", `<a class="btn small" href="#/config/proxies?new=1">新增代理</a>`)}</section>`,
+      <span class="meta" data-proxy-count>${initial.length} 条 · ${initial.filter((item) => item.state === "streaming").length} streaming · ${initial.filter((item) => item.recording?.active).length} 录制中</span><button class="btn small ghost" data-proxy-reset ${query.trim() || filter !== "all" ? "" : "hidden"}>重置</button></div>
+      <section class="panel" data-proxy-panel>${initial.length ? table(initial) : empty("暂无拉流源", "新增一个 RTSP 上游开始主动拉流", "proxy", `<a class="btn small" href="#/config/proxies?new=1">新增拉流</a>`)}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-proxy-panel]");
       const count = root.querySelector("[data-proxy-count]");
@@ -39,10 +39,10 @@ export async function render(params, ctx) {
       let visible = initial;
       const paint = () => {
         visible = view(all);
-        count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.state === "streaming").length} streaming`;
+        count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.state === "streaming").length} streaming · ${visible.filter((item) => item.recording?.active).length} 录制中`;
         reset.hidden = !(query.trim() || filter !== "all");
         root.querySelectorAll("[data-proxy-filter]").forEach((button) => button.classList.toggle("active", button.dataset.proxyFilter === filter));
-        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的代理", "调整搜索或状态筛选", "proxy");
+        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的拉流源", "调整搜索或状态筛选", "proxy");
         syncSortAria(panel, sort);
       };
       const syncUrl = () => {
@@ -63,9 +63,9 @@ export async function render(params, ctx) {
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
       root.querySelector("[data-proxy-export]").onclick = () => {
         exportCsv(`proxies-${new Date().toISOString().slice(0, 10)}.csv`,
-          ["path", "state", "mode", "upstreams", "subscribers", "tracks", "attempts", "bytes", "last_error"],
-          visible.map((item) => [item.path, item.state || "", item.mode || "", (item.upstreams || []).map((upstream) => upstream.url).join(" "), item.subscribers || 0, item.tracks || 0, item.attempts || 0, item.bytes || 0, item.last_error || ""]));
-        toast(`已导出 ${visible.length} 条代理`, "ok");
+          ["path", "state", "mode", "outputs", "recording", "upstreams", "subscribers", "tracks", "attempts", "bytes", "last_error"],
+          visible.map((item) => [item.path, item.state || "", item.mode || "", outputsSummary(item.outputs), item.recording?.active ? "recording" : "", (item.upstreams || []).map((upstream) => upstream.url).join(" "), item.subscribers || 0, item.tracks || 0, item.attempts || 0, item.bytes || 0, item.last_error || ""]));
+        toast(`已导出 ${visible.length} 条拉流源`, "ok");
       };
       root.querySelector("[data-action=create]").onclick = () => openProxyDrawer(null, () => ctx.reload());
       if (params?.get("new") === "1") {
@@ -91,13 +91,16 @@ export async function render(params, ctx) {
         } else if (target.dataset.action === "edit") {
           openProxyDrawer(item, () => ctx.reload());
         } else if (target.dataset.action === "restart") {
-          try { await apiV1("/proxies/restart?path=" + encodeURIComponent(path), { method: "POST" }); toast("重启已提交", "ok"); ctx.reload(); }
-          catch (error) { toast(error.message, "bad"); }
+          try {
+            const result = await apiV1("/proxies/restart?path=" + encodeURIComponent(path), { method: "POST" });
+            toast(result.pending ? "重启已排队，等待当前订阅结束" : "重启已提交", "ok");
+            ctx.reload();
+          } catch (error) { toast(error.message, "bad"); }
         } else if (target.dataset.action === "probe") {
           await probeProxy(path);
         } else if (target.dataset.action === "delete") {
-          if (!await confirmDialog({ title: "删除代理", message: `删除 ${path}？`, confirmLabel: "删除", danger: true })) return;
-          try { await apiV1("/proxies?path=" + encodeURIComponent(path), { method: "DELETE" }); toast("代理已删除", "ok"); ctx.reload(); }
+          if (!await confirmDialog({ title: "删除拉流源", message: `删除 ${path}？同时停止拉流并移除受管输出策略。`, confirmLabel: "删除", danger: true })) return;
+          try { await apiV1("/proxies?path=" + encodeURIComponent(path), { method: "DELETE" }); toast("拉流源已删除", "ok"); ctx.reload(); }
           catch (error) { toast(error.message, "bad"); }
         }
       });
@@ -118,13 +121,41 @@ function view(all) {
   });
 }
 
+function outputsSummary(outputs) {
+  if (!outputs) return "输出由路径策略管理";
+  const parts = [];
+  if (outputs.hls) parts.push("HLS");
+  if (outputs.flv) parts.push("FLV");
+  if (outputs.dash) parts.push("DASH");
+  if (outputs.webrtc) parts.push("WebRTC");
+  if (outputs.record) parts.push("录制");
+  return parts.length ? parts.join(" · ") : "仅拉流";
+}
+
+function protocolSummary(outputs) {
+  if (!outputs) return "由路径策略管理";
+  const parts = [];
+  if (outputs.read) parts.push("RTSP");
+  if (outputs.hls) parts.push("HLS");
+  if (outputs.flv) parts.push("HTTP-FLV");
+  if (outputs.dash) parts.push("DASH");
+  if (outputs.webrtc) parts.push("WebRTC");
+  return parts.length ? parts.join(" · ") : "—";
+}
+
+function recordingLabel(item) {
+  if (item.recording?.active) return "录制中";
+  if (item.outputs?.record) return "等待录制";
+  return "关闭";
+}
+
 function table(items) {
   const arrow = (field) => sort.field === field ? (sort.dir > 0 ? " ↑" : " ↓") : " ↕";
-  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data proxies-table"><caption class="sr-only">共 ${items.length} 条代理</caption><thead><tr>
+  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data proxies-table"><caption class="sr-only">共 ${items.length} 条拉流源</caption><thead><tr>
     <th><button class="sort-btn" data-sort="path">路径${arrow("path")}</button></th>
     <th><button class="sort-btn" data-sort="state">状态${arrow("state")}</button></th><th>上游</th><th>订阅</th><th>轨道</th>
     <th><button class="sort-btn" data-sort="attempts">重试${arrow("attempts")}</button></th><th>错误</th><th></th></tr></thead><tbody>
-    ${items.map((item) => `<tr><td><button class="link-cell mono" data-action="detail" data-path="${esc(item.path)}">${esc(item.path)}</button></td><td>${stateBadge(item.state)}</td><td class="mono">${esc(item.upstream || "—")}</td>
+    ${items.map((item) => `<tr><td><button class="link-cell mono" data-action="detail" data-path="${esc(item.path)}">${esc(item.path)}</button><div class="cell-sub">${esc(outputsSummary(item.outputs))}${item.recording?.active ? ' <span class="badge ok">录制中</span>' : ""}</div></td><td>${stateBadge(item.state)}</td><td class="mono">${esc(item.upstream || "—")}</td>
       <td class="mono">${num(item.subscribers)}</td><td class="mono">${num(item.tracks)}</td><td class="mono">${num(item.attempts)}</td><td class="cell-sub">${esc(item.last_error || "—")}</td>
       <td><div class="row-actions"><button class="btn small" data-action="edit" data-path="${esc(item.path)}">编辑</button>
         <button class="btn small ghost" data-action="restart" data-path="${esc(item.path)}">重启</button>
@@ -143,10 +174,11 @@ async function probeProxy(path) {
 
 function openProxyDetail(item, ctx, taken = []) {
   const upstreams = item.upstreams || [];
+  const recording = item.recording || null;
   let timer = null;
   openDrawer({
     title: item.path,
-    description: "RTSP 代理运行状态与上游配置。",
+    description: "RTSP 拉流运行状态、输出与上游配置。",
     showSubmit: false,
     body: `<div class="stack">
       <div class="detail-grid">
@@ -157,11 +189,22 @@ function openProxyDetail(item, ctx, taken = []) {
         <div class="detail-item"><span>重试次数</span><strong class="mono" data-proxy-detail="attempts">${num(item.attempts)}</strong></div>
         <div class="detail-item"><span>接收流量</span><strong class="mono" data-proxy-detail="bytes">${bytes(item.bytes || 0)}</strong></div>
       </div>
+      <section class="drawer-section"><h3>输出与录制</h3>
+        <div class="detail-grid">
+          <div class="detail-item"><span>直播协议</span><strong>${esc(protocolSummary(item.outputs))}</strong></div>
+          <div class="detail-item"><span>录制</span><strong data-proxy-detail="recording">${esc(recordingLabel(item))}</strong></div>
+          <div class="detail-item"><span>录制分段</span><strong class="mono" data-proxy-detail="recording-segments">${num(recording?.segments || 0)}</strong></div>
+          <div class="detail-item"><span>录制大小</span><strong class="mono" data-proxy-detail="recording-bytes">${bytes(recording?.bytes || 0)}</strong></div>
+          <div class="detail-item"><span>最大观看</span><strong class="mono">${item.outputs && item.outputs.max_readers ? num(item.outputs.max_readers) : "不限"}</strong></div>
+          <div class="detail-item"><span>策略归属</span><strong>${item.managed ? "由拉流源管理" : "由路径页管理"}</strong></div>
+        </div>
+        ${recording?.directory ? `<div class="note mono" style="margin-top:8px;overflow-wrap:anywhere">${esc(recording.directory)}</div>` : ""}
+      </section>
       <section class="drawer-section"><h3>上游列表</h3>${upstreams.length ? upstreams.map((upstream, index) => `
         <div class="endpoint"><span class="endpoint-label">#${index + 1}</span><code>${esc(upstream.url || "—")}</code><span class="cell-sub">${esc(upstream.transport || "auto")}</span></div>`).join("") : `<div class="note">未配置上游。</div>`}
         ${upstreams.length ? `<div class="actions" style="margin-top:8px"><button class="btn small ghost" data-proxy-copy-all>复制上游列表</button></div>` : ""}</section>
       <div data-proxy-error>${item.last_error ? `<div class="error-banner">${esc(item.last_error)}</div>` : ""}</div>
-      <div class="actions"><button class="btn small" data-pd-edit>编辑</button><button class="btn small ghost" data-pd-clone>复制代理</button><button class="btn small" data-pd-restart>重启</button><button class="btn small ghost" data-pd-probe>探测上游</button><button class="btn small ghost" data-pd-live>查看直播</button><button class="btn small danger" data-pd-delete>删除</button></div>
+      <div class="actions"><button class="btn small" data-pd-edit>编辑</button><button class="btn small ghost" data-pd-clone>复制拉流</button><button class="btn small ghost" data-pd-restart>重启</button><button class="btn small ghost" data-pd-probe>探测上游</button><button class="btn small ghost" data-pd-live>查看直播</button><button class="btn small ghost" data-pd-vod>查看点播</button><button class="btn small danger" data-pd-delete>删除</button></div>
     </div>`,
     onClose() { if (timer) clearInterval(timer); },
     onMount(root) {
@@ -184,6 +227,9 @@ function openProxyDetail(item, ctx, taken = []) {
         set("tracks", num(current.tracks));
         set("attempts", num(current.attempts));
         set("bytes", bytes(current.bytes || 0));
+        set("recording", recordingLabel({ recording: current.recording, outputs: item.outputs }));
+        set("recording-segments", num(current.recording?.segments || 0));
+        set("recording-bytes", bytes(current.recording?.bytes || 0));
         root.querySelector("[data-proxy-error]").innerHTML = current.last_error ? `<div class="error-banner">${esc(current.last_error)}</div>` : "";
       };
       timer = setInterval(update, 2000);
@@ -195,7 +241,11 @@ function openProxyDetail(item, ctx, taken = []) {
       root.querySelector("[data-pd-restart]").onclick = async (event) => {
         const button = event.currentTarget;
         button.disabled = true; button.classList.add("loading");
-        try { await apiV1("/proxies/restart?path=" + encodeURIComponent(item.path), { method: "POST" }); toast("重启已提交", "ok"); close(); ctx.reload(); }
+        try {
+          const result = await apiV1("/proxies/restart?path=" + encodeURIComponent(item.path), { method: "POST" });
+          toast(result.pending ? "重启已排队，等待当前订阅结束" : "重启已提交", "ok");
+          close(); ctx.reload();
+        }
         catch (error) { toast(error.message, "bad"); button.disabled = false; button.classList.remove("loading"); }
       };
       root.querySelector("[data-pd-probe]").onclick = async (event) => {
@@ -205,9 +255,10 @@ function openProxyDetail(item, ctx, taken = []) {
         finally { button.disabled = false; button.classList.remove("loading"); }
       };
       root.querySelector("[data-pd-live]").onclick = () => { close(); location.hash = `#/live?q=${encodeURIComponent(item.path)}`; };
+      root.querySelector("[data-pd-vod]").onclick = () => { close(); location.hash = `#/vod?q=${encodeURIComponent(item.path.replace(/^\//, ""))}`; };
       root.querySelector("[data-pd-delete]").onclick = async () => {
-        if (!await confirmDialog({ title: "删除代理", message: `删除 ${item.path}？`, confirmLabel: "删除", danger: true })) return;
-        try { await apiV1("/proxies?path=" + encodeURIComponent(item.path), { method: "DELETE" }); toast("代理已删除", "ok"); close(); ctx.reload(); }
+        if (!await confirmDialog({ title: "删除拉流源", message: `删除 ${item.path}？同时停止拉流并移除受管输出策略。`, confirmLabel: "删除", danger: true })) return;
+        try { await apiV1("/proxies?path=" + encodeURIComponent(item.path), { method: "DELETE" }); toast("拉流源已删除", "ok"); close(); ctx.reload(); }
         catch (error) { toast(error.message, "bad"); }
       };
     },

@@ -481,8 +481,8 @@ input[type="search"]::-webkit-search-cancel-button:hover { background: var(--tex
   .keys-table th:nth-child(7), .keys-table td:nth-child(7) { width: 8%; }
   .keys-table th:nth-child(8), .keys-table td:nth-child(8) { width: 15%; }
   .proxies-table th:nth-child(1), .proxies-table td:nth-child(1) { width: 18%; }
-  .proxies-table th:nth-child(2), .proxies-table td:nth-child(2) { width: 9%; }
-  .proxies-table th:nth-child(3), .proxies-table td:nth-child(3) { width: 24%; }
+  .proxies-table th:nth-child(2), .proxies-table td:nth-child(2) { width: 10%; }
+  .proxies-table th:nth-child(3), .proxies-table td:nth-child(3) { width: 23%; }
   .proxies-table th:nth-child(4), .proxies-table td:nth-child(4) { width: 7%; }
   .proxies-table th:nth-child(5), .proxies-table td:nth-child(5) { width: 6%; }
   .proxies-table th:nth-child(6), .proxies-table td:nth-child(6) { width: 7%; }

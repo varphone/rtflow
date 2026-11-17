@@ -22,7 +22,7 @@ const routes = {
   vod: { page: vod, group: "运行", label: "点播" },
   "config/paths": { page: paths, group: "配置", label: "路径" },
   "config/keys": { page: keys, group: "配置", label: "推流密钥" },
-  "config/proxies": { page: proxies, group: "配置", label: "RTSP 代理" },
+  "config/proxies": { page: proxies, group: "配置", label: "RTSP 拉流" },
   "config/srt": { page: srt, group: "配置", label: "SRT" },
   "config/recordings": { page: recordings, group: "配置", label: "录制" },
   system: { page: system, group: "系统", label: "系统" },
@@ -35,7 +35,7 @@ let navSeq = 0;
 
 const navGroups = [
   ["运行", [["overview", "概览"], ["live", "直播流"], ["vod", "点播"]]],
-  ["配置", [["config/paths", "路径"], ["config/keys", "推流密钥"], ["config/proxies", "RTSP 代理"], ["config/srt", "SRT"], ["config/recordings", "录制"]]],
+  ["配置", [["config/paths", "路径"], ["config/keys", "推流密钥"], ["config/proxies", "RTSP 拉流"], ["config/srt", "SRT"], ["config/recordings", "录制"]]],
   ["系统", [["system", "系统"], ["audit", "审计日志"]]],
 ];
 const navIcons = { overview: "overview", live: "live", vod: "vod", "config/paths": "paths", "config/keys": "keys", "config/proxies": "proxy", "config/srt": "srt", "config/recordings": "record", system: "system", audit: "audit" };

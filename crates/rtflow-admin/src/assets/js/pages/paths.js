@@ -137,7 +137,7 @@ function table(items) {
     <th><button class="sort-btn" data-sort="max_readers">最大读者${arrow("max_readers")}</button></th>
     <th><button class="sort-btn" data-sort="updated_at">更新时间${arrow("updated_at")}</button></th><th></th></tr></thead><tbody>
     ${items.map((item) => `<tr><td><button class="link-cell mono" data-action="detail" data-name="${esc(item.name)}">/${esc(item.name)}</button><div class="cell-sub">${item.enabled ? "启用" : "停用"}</div></td>
-      <td><span class="badge">${esc(item.source)}</span></td><td>${item.publish ? '<span class="badge ok">发布</span>' : ""} ${item.read ? '<span class="badge ok">观看</span>' : '<span class="badge bad">不可读</span>'}</td>
+      <td><span class="badge">${esc(item.source)}</span>${item.metadata?.managed_by === "rtsp-pull" ? '<span class="badge codec" style="margin-left:4px">拉流</span>' : ""}</td><td>${item.publish ? '<span class="badge ok">发布</span>' : ""} ${item.read ? '<span class="badge ok">观看</span>' : '<span class="badge bad">不可读</span>'}</td>
       <td>${item.record ? '<span class="badge ok">开启</span>' : "—"}</td><td class="mono">${item.max_readers || "∞"}</td><td>${dateTime(item.updated_at)}</td>
       <td><div class="row-actions"><button class="btn small" data-action="edit" data-name="${esc(item.name)}">编辑</button>
         <button class="btn small ghost" data-action="toggle" data-name="${esc(item.name)}">${item.enabled ? "停用" : "启用"}</button>
