@@ -179,7 +179,7 @@ function navCount(route) {
 
 function renderShell() {
   app.innerHTML = `<div class="layout">
-    <aside class="sidebar" id="sidebar">
+    <aside class="sidebar" id="sidebar" aria-label="主导航">
       <a class="brand" href="#/overview" aria-label="返回概览"><span class="brand-logo">R</span><span>rtflow</span></a>
       ${navGroups.map(([label, items]) => `<nav class="nav-group" aria-label="${label}">
         <div class="nav-label">${label}</div>
@@ -192,7 +192,7 @@ function renderShell() {
     <div class="main">
       <header class="topbar">
         <button class="btn ghost small menu-btn" data-menu aria-label="打开菜单" aria-controls="sidebar" aria-expanded="false">${icon("menu")}</button>
-        <div class="crumbs" id="crumbs"></div>
+        <div class="crumbs" id="crumbs" role="navigation" aria-label="面包屑"></div>
         <div class="top-actions">
           <button class="command-trigger" data-command-open aria-label="打开命令面板" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K">${icon("search")}<span>搜索</span><kbd>Ctrl K</kbd></button>
           <a class="health" href="#/system" title="查看系统状态" data-health><span class="dot ok"></span><span data-health-label aria-live="polite">运行中</span></a>

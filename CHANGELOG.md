@@ -45,6 +45,8 @@
 
 ### Changed
 
+- 侧栏与面包屑补充导航 landmark/aria-label。
+
 - 移动端侧栏打开聚焦首个导航项，Esc/遮罩关闭后焦点回到菜单按钮，侧栏内 Tab 循环。
 
 - 顶栏健康状态标签使用 aria-live=polite 播报变化。
