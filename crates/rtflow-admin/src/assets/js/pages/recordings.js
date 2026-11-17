@@ -68,6 +68,7 @@ export async function render(params) {
       const count = root.querySelector("[data-rec-count]");
       const panel = root.querySelector("section.panel");
       let visible = initial;
+      let hovered = false;
       const sync = () => root.querySelectorAll("[data-rec-status]").forEach((button) => button.classList.toggle("active", button.dataset.recStatus === status));
       const paint = () => {
         visible = view();
@@ -153,7 +154,11 @@ export async function render(params) {
           visible.map((item) => [item.path, item.active, isoTime(item.started_at), item.segments, item.bytes, item.dropped, item.last_error || "", item.directory || ""]));
         toast(`已导出 ${visible.length} 条录制任务`, "ok");
       };
-      const timer = setInterval(() => { if (!document.hidden) refresh(); }, 2000);
+      panel.addEventListener("mouseenter", () => { hovered = true; });
+      panel.addEventListener("mouseleave", () => { hovered = false; });
+      panel.addEventListener("focusin", () => { hovered = true; });
+      panel.addEventListener("focusout", () => { hovered = false; });
+      const timer = setInterval(() => { if (!document.hidden && !hovered) refresh(); }, 2000);
       return () => clearInterval(timer);
     },
   };

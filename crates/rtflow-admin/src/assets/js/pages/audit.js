@@ -58,6 +58,8 @@ export async function render(params) {
       let category = initialCategory;
       let page = initialPage;
       let automatic = localStorage.getItem("rtflow-auto-audit") !== "off";
+      let hovered = false;
+      const auditPanel = root.querySelector(".panel");
       let timer = null;
       const signature = (event) => `${event.ts}|${event.action}|${event.path || ""}|${event.key_id || ""}|${event.peer || ""}`;
       const filtered = () => {
@@ -112,7 +114,7 @@ export async function render(params) {
         auto.textContent = enabled ? "自动刷新：开" : "自动刷新：关";
         auto.classList.toggle("active", enabled);
         if (timer) { clearInterval(timer); timer = null; }
-        if (enabled) timer = setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+        if (enabled) timer = setInterval(() => { if (!document.hidden && !hovered) refresh(); }, 5000);
       };
       newButton.onclick = () => {
         if (pending) current = pending;
@@ -157,6 +159,10 @@ export async function render(params) {
       auto.onclick = () => setAuto(!automatic);
       root.querySelector("[data-audit-refresh]").onclick = () => refresh();
       root.querySelector("[data-audit-export]").onclick = () => exportCsv(filtered());
+      auditPanel.addEventListener("mouseenter", () => { hovered = true; });
+      auditPanel.addEventListener("mouseleave", () => { hovered = false; });
+      auditPanel.addEventListener("focusin", () => { hovered = true; });
+      auditPanel.addEventListener("focusout", () => { hovered = false; });
       paint();
       setAuto(automatic);
       return () => { if (timer) clearInterval(timer); };
