@@ -103,8 +103,6 @@ pub fn create_dash_handlers(
     config: DashConfig,
     mount: &rtflow_mount::MountHandle,
 ) -> (Handler, Handler, Handler) {
-    let video_ring = Arc::new(SegmentRing::new(config.segment_count));
-    let audio_ring = Arc::new(SegmentRing::new(config.segment_count));
     // Mirror served-segment counts into the global metrics registry when
     // the mount's event sink is a MetricsEventSink.
     #[cfg(feature = "metrics")]
@@ -121,46 +119,100 @@ pub fn create_dash_handlers(
     let cancel = mount.cancellation_token();
     let mount_source = mount.announce_fmtp_source();
 
-    let video_description = only_kind(&description, rtflow_media::MediaKind::Video);
-    let audio_description = only_kind(&description, rtflow_media::MediaKind::Audio);
-    let has_video = !video_description.tracks.is_empty();
-    let has_audio = !audio_description.tracks.is_empty();
-    let track_kinds: std::collections::HashMap<u8, rtflow_media::MediaKind> = description
+    let video_tracks: Vec<rtflow_media::TrackDescription> = description
         .tracks
         .iter()
-        .map(|track| (track.id, track.kind))
+        .filter(|track| track.kind == rtflow_media::MediaKind::Video)
+        .cloned()
         .collect();
+    let audio_track = description
+        .tracks
+        .iter()
+        .find(|track| track.kind == rtflow_media::MediaKind::Audio)
+        .cloned();
+    let video_descriptions: Vec<MediaDescription> = video_tracks
+        .iter()
+        .map(|track| {
+            let mut filtered = description.clone();
+            filtered.tracks = vec![track.clone()];
+            filtered
+        })
+        .collect();
+    let audio_description = audio_track.as_ref().map(|track| {
+        let mut filtered = description.clone();
+        filtered.tracks = vec![track.clone()];
+        filtered
+    });
+    let video_rings: Vec<Arc<SegmentRing>> = video_tracks
+        .iter()
+        .map(|_| Arc::new(SegmentRing::new(config.segment_count)))
+        .collect();
+    let audio_ring = audio_track
+        .as_ref()
+        .map(|_| Arc::new(SegmentRing::new(config.segment_count)));
+    let rings = Arc::new(handler::DashRings {
+        video: video_tracks
+            .iter()
+            .zip(&video_rings)
+            .map(|(track, ring)| handler::DashTrackRing {
+                id: track.id,
+                track: track.clone(),
+                ring: ring.clone(),
+            })
+            .collect(),
+        audio: audio_track
+            .as_ref()
+            .zip(audio_ring.as_ref())
+            .map(|(track, ring)| handler::DashTrackRing {
+                id: track.id,
+                track: track.clone(),
+                ring: ring.clone(),
+            }),
+    });
 
-    let video_ring_task = video_ring.clone();
+    let video_rings_task = video_rings.clone();
     let audio_ring_task = audio_ring.clone();
     let state_task = dash_state.clone();
     let seg_config = SegmenterConfig {
         segment_duration: config.segment_duration,
         lookback_count: config.segment_count,
     };
+    let has_video = !video_tracks.is_empty();
     tokio::spawn(async move {
-        // DASH packages per-track fMP4 segments. The HLS segmenter's
-        // filtered description makes each segmenter write one init and one
-        // media track, matching SRS's video-N.m4s / audio-N.m4s layout.
-        let mut video_segmenter = Segmenter::new(seg_config.clone(), &video_description);
-        // Without video, an audio-only segmenter cuts at 2× its configured
-        // duration, so halve the target to get roughly segment_duration
-        // segments. With video, audio is cut at video boundaries instead;
-        // keep the hard fallback far away so the cut points stay aligned.
+        let mut video_segmenters: Vec<Segmenter> = video_descriptions
+            .iter()
+            .map(|description| Segmenter::new(seg_config.clone(), description))
+            .collect();
+        let mut video_receivers: Vec<_> = video_segmenters
+            .iter()
+            .map(|segmenter| segmenter.subscribe())
+            .collect();
+        let video_index: HashMap<u8, usize> = video_tracks
+            .iter()
+            .enumerate()
+            .map(|(index, track)| (track.id, index))
+            .collect();
+        // Audio is cut at video boundaries; without video the segmenter's
+        // 2× hard cut is used, so halve the target to get ~segment_duration.
         let audio_segment_duration = if has_video {
             seg_config.segment_duration.saturating_mul(2)
         } else {
             seg_config.segment_duration / 2
         };
-        let mut audio_segmenter = Segmenter::new(
-            SegmenterConfig {
-                segment_duration: audio_segment_duration,
-                lookback_count: seg_config.lookback_count,
-            },
-            &audio_description,
-        );
-        let mut video_segments = video_segmenter.subscribe();
-        let mut audio_segments = audio_segmenter.subscribe();
+        let mut audio_segmenter = audio_description.map(|description| {
+            Segmenter::new(
+                SegmenterConfig {
+                    segment_duration: audio_segment_duration,
+                    lookback_count: seg_config.lookback_count,
+                },
+                &description,
+            )
+        });
+        let mut audio_receiver = audio_segmenter
+            .as_ref()
+            .map(|segmenter| segmenter.subscribe());
+        let audio_track_id = audio_track.as_ref().map(|track| track.id);
+
         let startup_keys = rtflow_mount::startup_dedup_keys(&startup);
         let mut startup = VecDeque::from(startup);
         let mut awaiting_keyframe = has_video;
@@ -172,8 +224,8 @@ pub fn create_dash_handlers(
         let mut last_pts: HashMap<u8, Duration> = HashMap::new();
         let mut initialized = false;
         tracing::info!(
-            video_tracks = video_description.tracks.len(),
-            audio_tracks = audio_description.tracks.len(),
+            video_tracks = video_tracks.len(),
+            has_audio = audio_track.is_some(),
             startup_frames = startup.len(),
             "DASH segmenter task started"
         );
@@ -188,8 +240,12 @@ pub fn create_dash_handlers(
                         Ok(unit) => unit,
                         Err(rtflow_mount::FrameRecvError::Lagged(count)) => {
                             tracing::warn!(count, "DASH input lagged; waiting for keyframe");
-                            video_segmenter.reset_after_discontinuity();
-                            audio_segmenter.reset_after_discontinuity();
+                            for segmenter in &mut video_segmenters {
+                                segmenter.reset_after_discontinuity();
+                            }
+                            if let Some(segmenter) = &mut audio_segmenter {
+                                segmenter.reset_after_discontinuity();
+                            }
                             awaiting_keyframe = has_video;
                             continue;
                         }
@@ -239,31 +295,29 @@ pub fn create_dash_handlers(
                 );
                 base_pts = None;
                 last_pts.clear();
-                let offset = video_ring_task
-                    .snapshot()
-                    .last()
-                    .map(|segment| segment.timestamp.saturating_add(segment.duration))
-                    .unwrap_or_default()
-                    .max(
-                        audio_ring_task
-                            .snapshot()
-                            .last()
-                            .map(|segment| segment.timestamp.saturating_add(segment.duration))
-                            .unwrap_or_default(),
-                    );
-                state_task.set_timeline_offset(offset);
-                video_segmenter.reset_after_discontinuity();
-                audio_segmenter.reset_after_discontinuity();
-                awaiting_keyframe = has_video;
-                let is_video_unit = track_kinds
-                    .get(&unit.track_id)
-                    .is_some_and(|kind| *kind == rtflow_media::MediaKind::Video);
-                if has_video && is_video_unit {
-                    if !unit.is_keyframe {
-                        continue;
+                let mut offset = Duration::ZERO;
+                for ring in &video_rings_task {
+                    if let Some(segment) = ring.snapshot().last() {
+                        offset = offset.max(segment.timestamp.saturating_add(segment.duration));
                     }
-                    awaiting_keyframe = false;
                 }
+                if let Some(ring) = &audio_ring_task
+                    && let Some(segment) = ring.snapshot().last()
+                {
+                    offset = offset.max(segment.timestamp.saturating_add(segment.duration));
+                }
+                state_task.set_timeline_offset(offset);
+                for segmenter in &mut video_segmenters {
+                    segmenter.reset_after_discontinuity();
+                }
+                if let Some(segmenter) = &mut audio_segmenter {
+                    segmenter.reset_after_discontinuity();
+                }
+                awaiting_keyframe = has_video;
+                if has_video && video_index.get(&unit.track_id).is_some() && !unit.is_keyframe {
+                    continue;
+                }
+                awaiting_keyframe = false;
             }
 
             if !fmtp_applied {
@@ -274,8 +328,12 @@ pub fn create_dash_handlers(
                     .clone();
                 if !fmtp.is_empty() {
                     tracing::debug!(tracks = fmtp.len(), "DASH applying announce fmtp");
-                    video_segmenter.update_fmtp(&fmtp);
-                    audio_segmenter.update_fmtp(&fmtp);
+                    for segmenter in &mut video_segmenters {
+                        segmenter.update_fmtp(&fmtp);
+                    }
+                    if let Some(segmenter) = &mut audio_segmenter {
+                        segmenter.update_fmtp(&fmtp);
+                    }
                     fmtp_applied = true;
                 }
             }
@@ -286,53 +344,57 @@ pub fn create_dash_handlers(
             if let Some(dts) = unit.dts {
                 unit.dts = Some(dts.saturating_sub(base));
             }
-            match track_kinds.get(&unit.track_id).copied() {
-                Some(rtflow_media::MediaKind::Video) if has_video => {
-                    video_segmenter.push(unit);
-                }
-                Some(rtflow_media::MediaKind::Audio) if has_audio => {
-                    audio_segmenter.push(unit);
-                }
-                _ => {}
+            if let Some(index) = video_index.get(&unit.track_id).copied() {
+                video_segmenters[index].push(unit);
+            } else if audio_track_id == Some(unit.track_id)
+                && let Some(segmenter) = &mut audio_segmenter
+            {
+                segmenter.push(unit);
             }
 
-            while let Ok(mut segment) = video_segments.try_recv() {
-                segment_count += 1;
-                if !initialized {
-                    state_task.set_availability_start(SystemTime::now());
-                    state_task.set_base_timestamp(Duration::ZERO);
-                    state_task.set_timeline_offset(Duration::ZERO);
-                    initialized = true;
+            for (index, receiver) in video_receivers.iter_mut().enumerate() {
+                while let Ok(mut segment) = receiver.try_recv() {
+                    segment_count += 1;
+                    if !initialized {
+                        state_task.set_availability_start(SystemTime::now());
+                        state_task.set_base_timestamp(Duration::ZERO);
+                        state_task.set_timeline_offset(Duration::ZERO);
+                        initialized = true;
+                    }
+                    apply_offset(&state_task, &mut segment);
+                    tracing::debug!(
+                        segment_count,
+                        sequence = segment.sequence,
+                        keyframe_count,
+                        track_id = video_tracks[index].id,
+                        ring_len = video_rings_task[index].len(),
+                        "DASH video segment produced"
+                    );
+                    video_rings_task[index].push(segment);
+                    if let Some(segmenter) = &mut audio_segmenter {
+                        segmenter.cut_current();
+                    }
                 }
-                apply_offset(&state_task, &mut segment);
-                update_dash_meta(&state_task, &segment.init);
-                tracing::debug!(
-                    segment_count,
-                    sequence = segment.sequence,
-                    keyframe_count,
-                    ring_len = video_ring_task.len(),
-                    "DASH video segment produced"
-                );
-                video_ring_task.push(segment);
-                // Reap the audio segment at the video boundary, like SRS.
-                audio_segmenter.cut_current();
             }
-            while let Ok(mut segment) = audio_segments.try_recv() {
-                segment_count += 1;
-                if !initialized {
-                    state_task.set_availability_start(SystemTime::now());
-                    state_task.set_base_timestamp(Duration::ZERO);
-                    state_task.set_timeline_offset(Duration::ZERO);
-                    initialized = true;
+            if let Some(receiver) = audio_receiver.as_mut() {
+                while let Ok(mut segment) = receiver.try_recv() {
+                    segment_count += 1;
+                    if !initialized {
+                        state_task.set_availability_start(SystemTime::now());
+                        state_task.set_base_timestamp(Duration::ZERO);
+                        state_task.set_timeline_offset(Duration::ZERO);
+                        initialized = true;
+                    }
+                    apply_offset(&state_task, &mut segment);
+                    tracing::debug!(
+                        segment_count,
+                        sequence = segment.sequence,
+                        "DASH audio segment produced"
+                    );
+                    if let Some(ring) = &audio_ring_task {
+                        ring.push(segment);
+                    }
                 }
-                apply_offset(&state_task, &mut segment);
-                tracing::debug!(
-                    segment_count,
-                    sequence = segment.sequence,
-                    ring_len = audio_ring_task.len(),
-                    "DASH audio segment produced"
-                );
-                audio_ring_task.push(segment);
             }
         }
 
@@ -342,79 +404,103 @@ pub fn create_dash_handlers(
             segment_count,
             "DASH segmenter task exiting"
         );
-        video_segmenter.flush();
-        audio_segmenter.flush();
-        while let Ok(mut segment) = video_segments.try_recv() {
-            apply_offset(&state_task, &mut segment);
-            update_dash_meta(&state_task, &segment.init);
-            video_ring_task.push(segment);
+        for segmenter in &mut video_segmenters {
+            segmenter.flush();
         }
-        while let Ok(mut segment) = audio_segments.try_recv() {
-            apply_offset(&state_task, &mut segment);
-            audio_ring_task.push(segment);
+        if let Some(segmenter) = &mut audio_segmenter {
+            segmenter.flush();
+        }
+        for (index, receiver) in video_receivers.iter_mut().enumerate() {
+            while let Ok(mut segment) = receiver.try_recv() {
+                apply_offset(&state_task, &mut segment);
+                video_rings_task[index].push(segment);
+            }
+        }
+        if let Some(receiver) = audio_receiver.as_mut() {
+            while let Ok(mut segment) = receiver.try_recv() {
+                apply_offset(&state_task, &mut segment);
+                if let Some(ring) = &audio_ring_task {
+                    ring.push(segment);
+                }
+            }
         }
     });
 
-    let ring_mpd = video_ring.clone();
-    let audio_ring_mpd = audio_ring.clone();
+    let rings_mpd = rings.clone();
     let desc_mpd = description.clone();
     let mpd_config = config.mpd.clone();
     let state_mpd = dash_state.clone();
     tracing::debug!("DASH handlers created");
     let mpd_handler: Handler = Arc::new(move |req, writer| {
-        let video = ring_mpd.clone();
-        let audio = audio_ring_mpd.clone();
+        let rings = rings_mpd.clone();
         let description = desc_mpd.clone();
         let config = mpd_config.clone();
         let state = state_mpd.clone();
         Box::pin(async move {
-            tracing::debug!(
-                video_len = video.len(),
-                audio_len = audio.len(),
-                "DASH MPD requested"
-            );
-            handler::serve_mpd(req, writer, &video, &audio, &description, &config, &state).await
+            handler::serve_mpd(req, writer, &rings, &description, &config, &state).await
         })
     });
 
-    let video_ring_seg = video_ring.clone();
-    let audio_ring_seg = audio_ring.clone();
+    let rings_seg = rings.clone();
     let segment_handler: Handler = Arc::new(move |req, writer| {
         #[cfg(feature = "metrics")]
         let metrics = metrics.clone();
-        let video = video_ring_seg.clone();
-        let audio = audio_ring_seg.clone();
+        let rings = rings_seg.clone();
         Box::pin(async move {
             let file = req.path.rsplit('/').next().unwrap_or("");
-            let is_audio = file.starts_with("audio-");
-            let sequence = file
-                .strip_prefix("video-")
-                .or_else(|| file.strip_prefix("audio-"))
-                .or_else(|| file.strip_prefix("segment_"))
-                .and_then(|name| name.strip_suffix(".m4s"))
-                .and_then(|name| name.parse::<u64>().ok())
-                .unwrap_or(u64::MAX);
+            let (selector, sequence) = parse_segment_name(file);
             #[cfg(feature = "metrics")]
             if let Some(metrics) = &metrics {
                 use std::sync::atomic::Ordering;
                 metrics.dash_segments_served.fetch_add(1, Ordering::Relaxed);
             }
-            handler::serve_segment(req, writer, &video, &audio, sequence, is_audio).await
+            handler::serve_segment(req, writer, &rings, sequence, selector).await
         })
     });
 
-    let video_ring_init = video_ring.clone();
-    let audio_ring_init = audio_ring.clone();
+    let rings_init = rings.clone();
     let init_handler: Handler = Arc::new(move |req, writer| {
-        let video = video_ring_init.clone();
-        let audio = audio_ring_init.clone();
-        Box::pin(async move { handler::serve_init_segment(req, writer, &video, &audio).await })
+        let rings = rings_init.clone();
+        Box::pin(async move { handler::serve_init_segment(req, writer, &rings).await })
     });
 
     (mpd_handler, segment_handler, init_handler)
 }
 
-fn only_kind(description: &MediaDescription, kind: rtflow_media::MediaKind) -> MediaDescription {
+fn parse_segment_name(file: &str) -> (handler::DashTrackSelector, u64) {
+    if let Some(rest) = file.strip_prefix("audio-")
+        && let Some(sequence) = rest
+            .strip_suffix(".m4s")
+            .and_then(|value| value.parse::<u64>().ok())
+    {
+        return (handler::DashTrackSelector::Audio, sequence);
+    }
+    if let Some(rest) = file.strip_prefix("video-") {
+        let body = rest.strip_suffix(".m4s").unwrap_or(rest);
+        if let Some((id, sequence)) = body.split_once('-')
+            && let Ok(id) = id.parse::<u8>()
+            && let Ok(sequence) = sequence.parse::<u64>()
+        {
+            return (handler::DashTrackSelector::Video(Some(id)), sequence);
+        }
+        if let Ok(sequence) = body.parse::<u64>() {
+            return (handler::DashTrackSelector::Video(None), sequence);
+        }
+    }
+    if let Some(sequence) = file
+        .strip_prefix("segment_")
+        .and_then(|value| value.strip_suffix(".m4s"))
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        return (handler::DashTrackSelector::Video(None), sequence);
+    }
+    (handler::DashTrackSelector::Video(None), u64::MAX)
+}
+
+pub(crate) fn only_kind(
+    description: &MediaDescription,
+    kind: rtflow_media::MediaKind,
+) -> MediaDescription {
     let mut filtered = description.clone();
     filtered.tracks.retain(|track| track.kind == kind);
     filtered
@@ -424,20 +510,6 @@ fn apply_offset(state: &DashState, segment: &mut Segment) {
     let offset = state.timeline_offset();
     if !offset.is_zero() {
         segment.timestamp = segment.timestamp.saturating_add(offset);
-    }
-}
-
-fn update_dash_meta(state: &DashState, init: &[u8]) {
-    if let Some(codec) = extract_h264_codec_string(init) {
-        tracing::debug!(codec = %codec, "DASH init segment codec");
-        state.set_codec_string(codec);
-    } else if let Some(codec) = extract_h265_codec_string(init) {
-        tracing::debug!(codec = %codec, "DASH init segment codec");
-        state.set_codec_string(codec);
-    }
-    if let Some((width, height)) = extract_video_dimensions(init) {
-        tracing::debug!(width, height, "DASH init segment dimensions");
-        state.set_video_dimensions(width, height);
     }
 }
 

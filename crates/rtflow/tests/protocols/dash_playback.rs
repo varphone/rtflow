@@ -61,6 +61,18 @@ fn h264_keyframe(seq: u32) -> AccessUnit {
     }
 }
 
+fn h264_keyframe_track(track_id: u8, seq: u32) -> AccessUnit {
+    let mut frame = h264_keyframe(seq);
+    frame.track_id = track_id;
+    frame
+}
+
+fn h264_interframe_track(track_id: u8, seq: u32) -> AccessUnit {
+    let mut frame = h264_interframe(seq);
+    frame.track_id = track_id;
+    frame
+}
+
 fn h264_interframe(seq: u32) -> AccessUnit {
     let mut data = Vec::new();
     data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
@@ -298,6 +310,96 @@ async fn dash_timeline_continues_after_publisher_reconnect() {
         after > before,
         "timeline did not continue: before={before} after={after}"
     );
+    http.shutdown();
+}
+
+#[tokio::test]
+async fn dash_multi_video_representations() {
+    let mut description = h264_description();
+    let mut second = description.tracks[0].clone();
+    second.id = 1;
+    second.width = Some(640);
+    second.height = Some(360);
+    second.control = Arc::from("trackID=1");
+    description.tracks.push(second);
+
+    let mounts = Arc::new(MountRegistry::new(10));
+    let mount = mounts
+        .register(
+            Arc::from("/live/multi"),
+            rtflow::mount::MountConfig::Publisher {
+                description,
+                allow_replace_after_disconnect: true,
+            },
+        )
+        .unwrap();
+    let config = DashConfig {
+        segment_duration: Duration::from_millis(200),
+        segment_count: 5,
+        ..Default::default()
+    };
+    let (mpd_handler, seg_handler, init_handler) = create_dash_handlers(config, &mount);
+    let mut http = HttpServer::bind(HttpConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let addr = http.local_addr();
+    http.add_route(Method::Get, "/live/multi/manifest.mpd", mpd_handler)
+        .await;
+    http.add_route(
+        Method::Get,
+        "/live/multi/video-0-init.mp4",
+        init_handler.clone(),
+    )
+    .await;
+    http.add_route(Method::Get, "/live/multi/video-1-init.mp4", init_handler)
+        .await;
+    http.add_route(
+        Method::Get,
+        "/live/multi/video-0-{seq}.m4s",
+        seg_handler.clone(),
+    )
+    .await;
+    http.add_route(Method::Get, "/live/multi/video-1-{seq}.m4s", seg_handler)
+        .await;
+    http.run().await.unwrap();
+
+    let publisher = mount.publisher().unwrap();
+    for i in 0..120u32 {
+        for track in [0u8, 1] {
+            let frame = if i % 10 == 0 {
+                h264_keyframe_track(track, i)
+            } else {
+                h264_interframe_track(track, i)
+            };
+            let _ = publisher.push(frame);
+        }
+        tokio::time::sleep(Duration::from_millis(4)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let (status, body) = http_get(addr, "/live/multi/manifest.mpd").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body.matches("<Representation id=\"video-").count(),
+        2,
+        "{body}"
+    );
+    assert!(body.contains("video-0-init.mp4"), "{body}");
+    assert!(body.contains("video-1-init.mp4"), "{body}");
+    let start = body
+        .split("startNumber=\"")
+        .nth(1)
+        .and_then(|value| value.split('"').next())
+        .unwrap_or("0");
+    for path in [
+        "/live/multi/video-0-init.mp4".to_string(),
+        "/live/multi/video-1-init.mp4".to_string(),
+        format!("/live/multi/video-0-{start}.m4s"),
+        format!("/live/multi/video-1-{start}.m4s"),
+    ] {
+        let (status, _) = http_get(addr, &path).await;
+        assert_eq!(status, 200, "{path}");
+    }
     http.shutdown();
 }
 

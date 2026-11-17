@@ -8,9 +8,9 @@ track 一个 AdaptationSet。
 
 ```text
 GET /dash/{mount}/manifest.mpd
-GET /dash/{mount}/video-init.mp4
+GET /dash/{mount}/video-{track}-init.mp4
 GET /dash/{mount}/audio-init.mp4
-GET /dash/{mount}/video-{N}.m4s
+GET /dash/{mount}/video-{track}-{N}.m4s
 GET /dash/{mount}/audio-{N}.m4s
 ```
 
@@ -47,18 +47,19 @@ suggested_presentation_delay = "3s"   # 缺省 3 × segment_duration
 ## MPD 结构
 
 - `type="dynamic"`，`availabilityStartTime` 在当前 presentation 内固定；
-- 每个 track 一个 AdaptationSet，`mimeType="video/mp4"` / `"audio/mp4"`；
-- 每个 AdaptationSet 一个 Representation：
-  - 视频：`id="video"`、`codecs`（H.264 从 avcC 提取，H.265 用 hvc1）、
-    `width/height/frameRate`、`video-init.mp4`、`video-$Number$.m4s`；
-  - 音频：`id="audio"`、`codecs`、`audioSamplingRate`、`AudioChannelConfiguration`、
-    `audio-init.mp4`、`audio-$Number$.m4s`；
+- 一个视频 AdaptationSet + 一个音频 AdaptationSet；
+- 视频 AdaptationSet 可包含多个 Representation（每个源视频轨一个）：
+  - `id="video-{track}"`、`codecs`（H.264 从 avcC 提取，H.265 用 hvc1）、
+    `width/height/frameRate`、`video-{track}-init.mp4`、`video-{track}-$Number$.m4s`；
+  - 音频 AdaptationSet 一个 Representation：`id="audio"`、`codecs`、
+    `audioSamplingRate`、`AudioChannelConfiguration`、`audio-init.mp4`、
+    `audio-$Number$.m4s`；
 - 每个 Representation 自带 `SegmentTemplate` + `SegmentTimeline`，`startNumber`
   独立；
 - `UTCTiming` 使用 `urn:mpeg:dash:utc:direct:2014`；
 - `bandwidth` 由各轨实际分片字节数/时长估算；
-- MPD 在两个已声明的 track 都出现首个分片后才返回 200，避免播放器先拿到单轨
-  MPD 后不再添加另一轨。
+- MPD 在所有已声明视频轨和音频轨都出现首个分片后才返回 200，避免播放器先拿到
+  不完整的 Representation 集合。
 
 ## DASH VOD
 
@@ -68,9 +69,9 @@ suggested_presentation_delay = "3s"   # 缺省 3 × segment_duration
 
 ```text
 GET /dash-vod/{id}/manifest.mpd       # static MPD
-GET /dash-vod/{id}/video-init.mp4
+GET /dash-vod/{id}/video-{track}-init.mp4
 GET /dash-vod/{id}/audio-init.mp4
-GET /dash-vod/{id}/video-{N}.m4s
+GET /dash-vod/{id}/video-{track}-{N}.m4s
 GET /dash-vod/{id}/audio-{N}.m4s
 ```
 
@@ -99,8 +100,9 @@ dash.js 也可直接加载该 MPD；`crates/rtflow/examples/protocols/dash_serve
 
 ## 已知限制
 
-- 每个 track 单 Representation，无多码率 ABR；音频/视频分片边界独立，未像 SRS
-  那样逐段严格对齐。
+- 直播多视频轨会生成多个视频 Representation，但需要源端本身提供多 rendition（当前不做转码
+  ladder）；各 rendition 的分片边界独立，MPD 标 `segmentAlignment="false"`，只在源端 GOP
+  对齐时具备完整 ABR 切换体验。音频仍只选首条轨；VOD 暂只取首条视频轨。
 - DASH VOD 目前由服务端的录制目录生成；其他 `VodSource` 可复用同一 manager 接入。暂不支持多码率/多 Period VOD。
 - 不支持 LL-DASH/chunked CMAF、DRM/CENC、多 Period、广告插入。
 - H.264 codec 从 avcC 提取；H.265 从 hvcC 提取 `hvc1` codec（profile/tier/level/constraints），不支持的变体回退到静态字符串。

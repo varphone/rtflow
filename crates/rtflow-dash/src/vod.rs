@@ -18,7 +18,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-const VOD_CACHE_VERSION: u32 = 3;
+const VOD_CACHE_VERSION: u32 = 4;
 
 #[derive(Clone)]
 pub struct DashVodEntry {
@@ -282,15 +282,23 @@ fn generate(
             "DASH VOD {title} produced no segments"
         )));
     }
+    let video_id = video_description
+        .tracks
+        .first()
+        .map(|track| track.id)
+        .unwrap_or(0);
     if let Some(first) = video_segments.first() {
-        std::fs::write(directory.join("video-init.mp4"), &first.init)?;
+        std::fs::write(
+            directory.join(format!("video-{video_id}-init.mp4")),
+            &first.init,
+        )?;
     }
     if let Some(first) = audio_segments.first() {
         std::fs::write(directory.join("audio-init.mp4"), &first.init)?;
     }
     for segment in &video_segments {
         std::fs::write(
-            directory.join(format!("video-{}.m4s", segment.sequence)),
+            directory.join(format!("video-{video_id}-{}.m4s", segment.sequence)),
             &segment.data,
         )?;
     }
@@ -315,14 +323,22 @@ fn generate(
     let dimensions = video_segments
         .first()
         .and_then(|segment| extract_video_dimensions(&segment.init));
+    let video_track = video_description
+        .tracks
+        .first()
+        .map(|track| mpd::MpdVideoTrack {
+            id: track.id,
+            track,
+            segments: &video_segments,
+            codec,
+            dimensions,
+        });
     let manifest = mpd::generate_static_mpd(
-        &video_segments,
+        video_track.as_slice(),
         &audio_segments,
         &description,
         &MpdConfig::default(),
         duration,
-        codec.as_deref(),
-        dimensions,
         "",
     );
     std::fs::write(directory.join("manifest.mpd"), manifest)?;

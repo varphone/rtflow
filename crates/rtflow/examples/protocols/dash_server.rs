@@ -337,9 +337,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Register DASH routes
     let mpd_path = format!("{}/manifest.mpd", args.mount);
-    let video_init_path = format!("{}/video-init.mp4", args.mount);
+    let video_init_path = format!("{}/video-0-init.mp4", args.mount);
     let audio_init_path = format!("{}/audio-init.mp4", args.mount);
-    let video_segment_path = format!("{}/video-{{seq}}.m4s", args.mount);
+    let video_segment_path = format!("{}/video-0-{{seq}}.m4s", args.mount);
     let audio_segment_path = format!("{}/audio-{{seq}}.m4s", args.mount);
     let player_path = format!("{}/player", args.mount);
 

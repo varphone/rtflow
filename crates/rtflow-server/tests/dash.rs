@@ -132,7 +132,7 @@ async fn dash_publish_serves_manifest_init_and_segment() {
 
     let initializations = attrs(&mpd, "initialization");
     assert!(
-        initializations.contains(&"video-init.mp4"),
+        initializations.contains(&"video-0-init.mp4"),
         "{initializations:?}"
     );
     assert!(
@@ -143,7 +143,7 @@ async fn dash_publish_serves_manifest_init_and_segment() {
     let starts = attrs(&mpd, "startNumber");
     let video_media = media
         .iter()
-        .find(|value| value.starts_with("video-"))
+        .find(|value| value.starts_with("video-0-"))
         .expect("video media template");
     let audio_media = media
         .iter()
@@ -156,7 +156,7 @@ async fn dash_publish_serves_manifest_init_and_segment() {
     assert!(!video_segment.starts_with('/'), "{video_segment}");
     assert!(!audio_segment.starts_with('/'), "{audio_segment}");
 
-    for init in ["video-init.mp4", "audio-init.mp4"] {
+    for init in ["video-0-init.mp4", "audio-init.mp4"] {
         let init_url = format!("{http}/dash/live/dash/{init}");
         let response = client.get(&init_url).send().await.unwrap();
         assert_eq!(response.status(), 200, "init URL {init_url}");
@@ -286,12 +286,12 @@ async fn dash_vod_from_recording() {
     assert_eq!(response.status(), 200, "manifest {dash_url}");
     let mpd = response.text().await.unwrap();
     assert!(mpd.contains("type=\"static\""), "{mpd}");
-    assert!(mpd.contains("video-init.mp4"), "{mpd}");
+    assert!(mpd.contains("video-0-init.mp4"), "{mpd}");
     assert!(mpd.contains("audio-init.mp4"), "{mpd}");
     assert_eq!(mpd.matches("<AdaptationSet").count(), 2, "{mpd}");
 
     let base = dash_url.trim_end_matches("/manifest.mpd");
-    for init in ["video-init.mp4", "audio-init.mp4"] {
+    for init in ["video-0-init.mp4", "audio-init.mp4"] {
         let response = client.get(format!("{base}/{init}")).send().await.unwrap();
         assert_eq!(response.status(), 200, "init {init}");
         let data = response.bytes().await.unwrap();

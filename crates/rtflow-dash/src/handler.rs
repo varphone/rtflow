@@ -3,7 +3,8 @@ use super::mpd::{self, MpdConfig};
 use rtflow_core::error::Result;
 use rtflow_hls::segment_ring::SegmentRing;
 use rtflow_http::{HttpRequest, ResponseWriter};
-use rtflow_media::MediaDescription;
+use rtflow_media::{MediaDescription, TrackDescription};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::SystemTime;
 use tokio::io::AsyncWrite;
@@ -147,28 +148,61 @@ fn serialize_query(query: &std::collections::HashMap<String, String>) -> String 
     parts.join("&")
 }
 
+/// One video or audio track's sliding window.
+pub struct DashTrackRing {
+    pub id: u8,
+    pub track: TrackDescription,
+    pub ring: Arc<SegmentRing>,
+}
+
+/// The rings exposed by a DASH handler set.
+pub struct DashRings {
+    pub video: Vec<DashTrackRing>,
+    pub audio: Option<DashTrackRing>,
+}
+
+/// Track selected by an init/segment request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DashTrackSelector {
+    Audio,
+    /// `None` means the first video track (legacy `video-N.m4s` names).
+    Video(Option<u8>),
+}
+
 /// Serve the DASH MPD manifest.
 pub async fn serve_mpd<W: AsyncWrite + Unpin>(
     req: HttpRequest,
     mut writer: ResponseWriter<W>,
-    video: &SegmentRing,
-    audio: &SegmentRing,
+    rings: &DashRings,
     description: &MediaDescription,
     config: &MpdConfig,
     state: &DashState,
 ) -> Result<ResponseWriter<W>> {
-    let video_segments = video.snapshot();
-    let audio_segments = audio.snapshot();
-    let has_video = description
-        .tracks
-        .iter()
-        .any(|track| track.kind == rtflow_media::MediaKind::Video);
+    let mut video_segments = Vec::with_capacity(rings.video.len());
+    for track in &rings.video {
+        let segments = track.ring.snapshot();
+        if segments.is_empty() {
+            writer
+                .write_body(
+                    503,
+                    "application/dash+xml",
+                    b"<MPD/>\n<!-- No segments available yet -->",
+                )
+                .await?;
+            return Ok(writer);
+        }
+        video_segments.push(segments);
+    }
+    let audio_segments = rings
+        .audio
+        .as_ref()
+        .map(|track| track.ring.snapshot())
+        .unwrap_or_default();
     let has_audio = description
         .tracks
         .iter()
         .any(|track| track.kind == rtflow_media::MediaKind::Audio);
-
-    if (has_video && video_segments.is_empty()) || (has_audio && audio_segments.is_empty()) {
+    if has_audio && audio_segments.is_empty() {
         writer
             .write_body(
                 503,
@@ -178,20 +212,38 @@ pub async fn serve_mpd<W: AsyncWrite + Unpin>(
             .await?;
         return Ok(writer);
     }
+    let videos: Vec<mpd::MpdVideoTrack<'_>> = rings
+        .video
+        .iter()
+        .zip(&video_segments)
+        .map(|(track, segments)| {
+            let codec = segments.first().and_then(|segment| {
+                crate::extract_h264_codec_string(&segment.init)
+                    .or_else(|| crate::extract_h265_codec_string(&segment.init))
+            });
+            let dimensions = segments
+                .first()
+                .and_then(|segment| crate::extract_video_dimensions(&segment.init));
+            mpd::MpdVideoTrack {
+                id: track.id,
+                track: &track.track,
+                segments,
+                codec,
+                dimensions,
+            }
+        })
+        .collect();
 
     // Propagate the request query (e.g. ?token=...) into embedded segment
     // URLs so token-protected deployments do not break on segment fetches.
     let query = serialize_query(&req.query);
-    let codec = state.codec_string();
     let body = mpd::generate_mpd_q(
-        &video_segments,
+        &videos,
         &audio_segments,
         description,
         config,
         state.availability_start(),
         state.base_timestamp().unwrap_or_default(),
-        codec.as_deref(),
-        state.video_dimensions(),
         &query,
     );
 
@@ -214,15 +266,29 @@ pub async fn serve_mpd<W: AsyncWrite + Unpin>(
 pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
     req: HttpRequest,
     mut writer: ResponseWriter<W>,
-    video: &SegmentRing,
-    audio: &SegmentRing,
+    rings: &DashRings,
 ) -> Result<ResponseWriter<W>> {
-    let is_audio = req
-        .path
-        .rsplit('/')
-        .next()
-        .is_some_and(|file| file.starts_with("audio-"));
-    let ring = if is_audio { audio } else { video };
+    let file = req.path.rsplit('/').next().unwrap_or("");
+    let is_audio = file.starts_with("audio-");
+    let video_id = file
+        .strip_prefix("video-")
+        .and_then(|rest| rest.strip_suffix("-init.mp4"))
+        .and_then(|id| id.parse::<u8>().ok());
+    let ring = if is_audio {
+        rings.audio.as_ref().map(|track| &track.ring)
+    } else if let Some(id) = video_id {
+        rings
+            .video
+            .iter()
+            .find(|track| track.id == id)
+            .map(|track| &track.ring)
+    } else {
+        rings.video.first().map(|track| &track.ring)
+    };
+    let Some(ring) = ring else {
+        writer.write_body(404, "text/plain", b"not found").await?;
+        return Ok(writer);
+    };
     let content_type = if is_audio { "audio/mp4" } else { "video/mp4" };
     let init = match ring.latest_init() {
         Some(i) => i,
@@ -267,12 +333,24 @@ pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
 pub async fn serve_segment<W: AsyncWrite + Unpin>(
     req: HttpRequest,
     mut writer: ResponseWriter<W>,
-    video: &SegmentRing,
-    audio: &SegmentRing,
+    rings: &DashRings,
     sequence: u64,
-    is_audio: bool,
+    selector: DashTrackSelector,
 ) -> Result<ResponseWriter<W>> {
-    let ring = if is_audio { audio } else { video };
+    let is_audio = selector == DashTrackSelector::Audio;
+    let ring = match selector {
+        DashTrackSelector::Audio => rings.audio.as_ref().map(|track| &track.ring),
+        DashTrackSelector::Video(Some(id)) => rings
+            .video
+            .iter()
+            .find(|track| track.id == id)
+            .map(|track| &track.ring),
+        DashTrackSelector::Video(None) => rings.video.first().map(|track| &track.ring),
+    };
+    let Some(ring) = ring else {
+        writer.write_body(404, "text/plain", b"not found").await?;
+        return Ok(writer);
+    };
     let content_type = if is_audio {
         "audio/iso.segment"
     } else {
