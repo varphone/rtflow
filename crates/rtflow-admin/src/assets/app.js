@@ -1,7 +1,7 @@
 import { api, apiV1, setCsrf } from "./js/api.js";
 import { icon } from "./js/icons.js";
 import { esc } from "./js/format.js";
-import { openCommandPalette, toast } from "./js/ui.js";
+import { openCommandPalette, openDialog, toast } from "./js/ui.js";
 import * as overview from "./js/pages/overview.js";
 import * as live from "./js/pages/live.js";
 import * as vod from "./js/pages/vod.js";
@@ -297,6 +297,35 @@ async function navigate(options = {}) {
   }
 }
 
+function isTyping(event) {
+  const target = event.target;
+  return target instanceof HTMLElement
+    && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
+function focusPageSearch() {
+  const input = document.querySelector(
+    "[data-live-search],[data-path-search],[data-key-search],[data-proxy-search],[data-srt-search],[data-vod-search],[data-rec-search],[data-audit-search]"
+  );
+  if (input) { input.focus(); input.select?.(); }
+}
+
+function openShortcuts() {
+  const row = (keys, description) => `<div class="shortcut-row"><span>${keys.map((key) => `<kbd>${esc(key)}</kbd>`).join(" ")}</span><span>${esc(description)}</span></div>`;
+  openDialog({
+    title: "键盘快捷键",
+    body: `<div class="shortcut-list">
+      ${row(["Ctrl", "K"], "打开命令面板")}
+      ${row(["/"], "聚焦当前页面搜索")}
+      ${row(["↑", "↓"], "命令面板中选择")}
+      ${row(["Enter"], "执行命令")}
+      ${row(["Esc"], "关闭对话框 / 抽屉 / 侧栏")}
+      ${row(["?"], "打开本帮助")}
+    </div>`,
+    footer: `<button class="btn" data-close-dialog>关闭</button>`,
+  });
+}
+
 function openPalette() {
   const pages = Object.entries(routes).map(([route, info]) => ({
     label: info.label, hint: `${info.group} / ${info.label}`, icon: "→", group: "页面",
@@ -311,6 +340,7 @@ function openPalette() {
       localStorage.setItem("rtflow-time", localStorage.getItem("rtflow-time") === "relative" ? "absolute" : "relative");
       navigate({ silent: true });
     } },
+    { label: "键盘快捷键", hint: "查看可用快捷键", icon: "⌘", shortcut: "?", group: "操作", run: () => openShortcuts() },
     { label: "复制当前页面地址", hint: "复制带 hash 的链接", icon: "⧉", group: "操作", run: async () => {
       try { await navigator.clipboard.writeText(location.href); toast("链接已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
     } },
@@ -350,7 +380,11 @@ window.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     if (state.session) openPalette();
+    return;
   }
+  if (!state.session || isTyping(event) || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key === "?") { event.preventDefault(); openShortcuts(); }
+  else if (event.key === "/") { event.preventDefault(); focusPageSearch(); }
 });
 window.addEventListener("hashchange", () => navigate());
 setInterval(() => { if (state.session) refreshCounts(); }, 10000);
