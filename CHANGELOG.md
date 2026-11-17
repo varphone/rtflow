@@ -5,7 +5,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- RTSP 拉流输出：`outputs` 支持 RTSP/HLS/DASH/HTTP-FLV/WebRTC 直播、录制与最大观看数；创建/修改拉流源时自动创建受管路径策略，删除时清理，重启后自动恢复。
+- 拉流录制闭环：录制器识别代理 streaming 状态，拉流源可按路径自动录制，录制分段进入点播目录。
+- 管理台“RTSP 代理”更名为“RTSP 拉流”，列表展示输出与录制状态，详情提供直播/点播入口；路径页标识拉流受管策略。
+- SQLite schema v2：`proxy_mounts` 增加 `outputs` 列，旧数据库自动迁移。
+
 ### Fixed
+
+- 修复 RTSP 拉流在缓存 SDP 或重启后常连模式不再重连：缓存注册沿用 always，重启使用新的取消令牌与代理状态，旧运行时不会覆盖新实例。
+
+- 录制器识别代理 `streaming` 状态，拉流 mount 不再因为 `publisher_connected=false` 而跳过录制。
 
 - 剪贴板 API 不可用或拒绝时回退 execCommand，局域网 HTTP 管理端也可复制。
 

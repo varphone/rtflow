@@ -1,8 +1,8 @@
 # RTSP 拉流代理
 
-`rtflow-server` 内置按需拉流代理：把上游 RTSP/RTSPS 源注册为本地 mount，供 RTSP、
-HLS、DASH、HTTP-FLV、录制等下游使用。一个代理对应一路上游会话，多个下游共享同一
-路媒体。
+`rtflow-server` 内置 RTSP 拉流代理：主动拉取第三方 RTSP/RTSPS 设备并注册为本地
+mount，供直播（RTSP/HLS/DASH/HTTP-FLV/WebRTC）、录制与点播使用。一个拉流源对应
+一路上游会话，多个下游共享同一路媒体；配置 `outputs` 后会自动开通对应路径策略。
 
 ## 配置
 
@@ -27,6 +27,8 @@ enabled = true
 mode = "on-demand"                # on-demand | always
 idle_grace = "5s"                 # 覆盖全局
 description_refresh = "300s"
+outputs = { read = true, hls = true, flv = true, dash = false,
+            webrtc = false, record = true, max_readers = 0 }
 
 [[proxy.mounts.upstreams]]
 url = "rtsp://192.0.2.10:554/live/main"
@@ -42,6 +44,36 @@ jitter = { max_delay = "40ms", max_packets = 128, max_reorder_window = 64 }
 第一个 `upstreams` 为主源，其余为 fallback。代理启动时异步 DESCRIBE；失败进入
 `backoff` 并自动重试，不阻塞其他代理/协议。`persist_runtime=true` 时，运行时 API
 的变更会写入 `state_dir/proxies.toml`（0600），重启后覆盖配置文件的 mount 列表。
+
+## 输出与路径策略
+
+`outputs` 是拉流源对下游输出的声明：
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `read` | `true` | 允许 RTSP/读取访问 |
+| `hls` | `true` | HLS 直播 |
+| `flv` | `true` | HTTP-FLV / WS-FLV 直播 |
+| `dash` | `false` | DASH 直播 |
+| `webrtc` | `false` | WebRTC 直播 |
+| `record` | `false` | 分段录制；要求 `[recording] enabled = true` 且 `auto_start = true` |
+| `max_readers` | `0` | 最大观看数，0 表示不限制 |
+
+创建或修改拉流源时，服务端会为该 mount 路径创建/更新一条 **受管 API PathRecord**：
+
+- `publish = false`：只允许内部代理发布，阻止外部客户端向该路径推流；
+- `read/hls/flv/dash/webrtc/record/max_readers` 来自 `outputs`；
+- `metadata.managed_by = "rtsp-pull"`，路径页会显示“拉流”标记；
+- 删除拉流源时只删除带该标记的策略，不碰人工创建的路径；
+- 若同路径已有非受管 API 策略，创建/更新会返回 409，避免静默覆盖。
+
+不配置 `outputs`（或旧版本创建的代理）时保持旧行为：路径策略仍由 `[paths]` 规则
+或“路径”页单独管理。
+
+**录制与常连**：`mode = "on-demand"` 时需要有观看者触发上游连接，录制才会启动；录制
+自身的订阅会让该连接保持，因此首次观看后会持续录制。需要在无人观看时也立即录制，
+使用 `mode = "always"`（控制台勾选“录制”会自动切换）。录制完成后，分段进入点播目录，
+可在“点播”页按路径搜索和播放。
 
 ## 生命周期
 
@@ -73,8 +105,9 @@ POST /admin/api/v1/proxies/probe?path=%2Fcameras%2Ffront
 ```
 
 状态包含 `state`、`upstream`（脱敏主机）、`subscribers`、`tracks`、`attempts`、
-`retry_in_ms`、`last_error`。`probe` 只做一次 DESCRIBE 并返回轨道摘要，不影响运行中
-的代理。
+`retry_in_ms`、`last_error`，以及当前录制状态 `recording`（`active`、`segments`、
+`bytes`、`directory`）。`/admin/api/v1/proxies/config` 同时返回 `outputs` 与
+`managed`。`probe` 只做一次 DESCRIBE 并返回轨道摘要，不影响运行中的代理。
 
 `restart` 在仍有订阅者时返回 `pending: true`，等待订阅者离开后自动重建，避免
 直接打断观众。
@@ -123,6 +156,7 @@ A/V 对齐。RTP 时间戳回绕由 depacketizer 扩展处理。
 - 重连后的长期时钟漂移尚未做渐进校准（SR 映射在每次连接内生效）。
 - 透明 RTSP 控制面代理、RTSP-over-HTTP、RTSP 2.0 不在范围内。
 - 代理只处理 RTSP/RTSPS 上游；RTMP/SRT 回源使用各自 `[[rtmp.pull]]`/`[[srt.pull]]`。
+- 按需拉流 + 录制时，录制随观看者会话启停；无人观看的持续录制需要 `mode = "always"`。
 
 ## 规模/稳定性测试
 
