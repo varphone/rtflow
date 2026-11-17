@@ -28,6 +28,7 @@
 //! ```
 pub mod handler;
 pub mod mpd;
+pub mod vod;
 
 use handler::DashState;
 use mpd::MpdConfig;
@@ -142,12 +143,18 @@ pub fn create_dash_handlers(
         // filtered description makes each segmenter write one init and one
         // media track, matching SRS's video-N.m4s / audio-N.m4s layout.
         let mut video_segmenter = Segmenter::new(seg_config.clone(), &video_description);
-        // An audio-only segmenter cuts at 2× its configured duration. Halve
-        // the target so audio segments are roughly the same length as video
-        // segments instead of roughly twice as long.
+        // Without video, an audio-only segmenter cuts at 2× its configured
+        // duration, so halve the target to get roughly segment_duration
+        // segments. With video, audio is cut at video boundaries instead;
+        // keep the hard fallback far away so the cut points stay aligned.
+        let audio_segment_duration = if has_video {
+            seg_config.segment_duration.saturating_mul(2)
+        } else {
+            seg_config.segment_duration / 2
+        };
         let mut audio_segmenter = Segmenter::new(
             SegmenterConfig {
-                segment_duration: seg_config.segment_duration / 2,
+                segment_duration: audio_segment_duration,
                 lookback_count: seg_config.lookback_count,
             },
             &audio_description,
@@ -307,6 +314,8 @@ pub fn create_dash_handlers(
                     "DASH video segment produced"
                 );
                 video_ring_task.push(segment);
+                // Reap the audio segment at the video boundary, like SRS.
+                audio_segmenter.cut_current();
             }
             while let Ok(mut segment) = audio_segments.try_recv() {
                 segment_count += 1;
@@ -422,6 +431,9 @@ fn update_dash_meta(state: &DashState, init: &[u8]) {
     if let Some(codec) = extract_h264_codec_string(init) {
         tracing::debug!(codec = %codec, "DASH init segment codec");
         state.set_codec_string(codec);
+    } else if let Some(codec) = extract_h265_codec_string(init) {
+        tracing::debug!(codec = %codec, "DASH init segment codec");
+        state.set_codec_string(codec);
     }
     if let Some((width, height)) = extract_video_dimensions(init) {
         tracing::debug!(width, height, "DASH init segment dimensions");
@@ -432,7 +444,7 @@ fn update_dash_meta(state: &DashState, init: &[u8]) {
 /// Extract the H.264 codec string (e.g., "avc1.640028") from an init segment's avcC box.
 ///
 /// Searches for the `avcC` box marker and reads profile/compat/level bytes.
-fn extract_h264_codec_string(init: &[u8]) -> Option<String> {
+pub(crate) fn extract_h264_codec_string(init: &[u8]) -> Option<String> {
     // Find "avcC" marker in the init segment
     let marker = b"avcC";
     let pos = init.windows(4).position(|window| window == marker)?;
@@ -454,11 +466,49 @@ fn extract_h264_codec_string(init: &[u8]) -> Option<String> {
     ))
 }
 
+/// Extract an HEVC codec string from an init segment's hvcC box.
+///
+/// Format follows ISO/IEC 14496-15 Annex E: profile space/idc, reversed
+/// compatibility flags, tier/level and the non-zero constraint bytes. The
+/// sample entry written by the segmenter is hvc1, so the codec prefix is hvc1.
+pub(crate) fn extract_h265_codec_string(init: &[u8]) -> Option<String> {
+    let position = init.windows(4).position(|window| window == b"hvcC")?;
+    let payload = &init[position + 4..];
+    if payload.len() < 13 || payload[0] != 1 {
+        return None;
+    }
+    let profile_space = (payload[1] >> 6) & 0x03;
+    let tier = (payload[1] >> 5) & 0x01;
+    let profile_idc = payload[1] & 0x1f;
+    let compatibility = u32::from_be_bytes([payload[2], payload[3], payload[4], payload[5]]);
+    let compatibility = compatibility.reverse_bits();
+    let level = payload[12];
+    let space = if profile_space > 0 {
+        ((b'A' + profile_space - 1) as char).to_string()
+    } else {
+        String::new()
+    };
+    let mut codec = format!(
+        "hvc1.{space}{profile_idc}.{compatibility:X}.{}{level}",
+        if tier == 1 { 'H' } else { 'L' }
+    );
+    let mut constraint_end = 6;
+    for (index, byte) in payload[6..12].iter().enumerate() {
+        if *byte != 0 {
+            constraint_end = 6 + index + 1;
+        }
+    }
+    for byte in &payload[6..constraint_end] {
+        codec.push_str(&format!(".{byte:X}"));
+    }
+    Some(codec)
+}
+
 /// Extract video dimensions (width, height) from an init segment's avc1/hvc1 box.
 ///
 /// The width/height fields are at fixed offsets within the visual sample entry:
 /// offset 32 = width (u16), offset 34 = height (u16) from the box start.
-fn extract_video_dimensions(init: &[u8]) -> Option<(u16, u16)> {
+pub(crate) fn extract_video_dimensions(init: &[u8]) -> Option<(u16, u16)> {
     // Search for "avc1" or "hvc1" marker
     let pos = init.windows(4).position(|w| w == b"avc1" || w == b"hvc1")?;
     // The box starts 4 bytes before the marker (size field)
@@ -481,6 +531,21 @@ fn extract_video_dimensions(init: &[u8]) -> Option<(u16, u16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extracts_h265_codec_string() {
+        let mut init = b"\0\0\0\0hvcC".to_vec();
+        let mut payload = [0u8; 13];
+        payload[0] = 1;
+        payload[1] = 0x01; // profile_space 0, tier 0, profile_idc 1
+        payload[12] = 93;
+        init.extend_from_slice(&payload);
+        assert_eq!(
+            extract_h265_codec_string(&init).as_deref(),
+            Some("hvc1.1.0.L93")
+        );
+        assert!(extract_h265_codec_string(b"no hvcC here").is_none());
+    }
 
     #[test]
     fn zero_durations_are_rejected() {

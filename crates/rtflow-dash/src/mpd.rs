@@ -192,6 +192,71 @@ pub fn generate_mpd_q(
     xml
 }
 
+/// Generate a static MPD for DASH VOD.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_static_mpd(
+    video: &[Segment],
+    audio: &[Segment],
+    description: &MediaDescription,
+    config: &MpdConfig,
+    duration: Duration,
+    codec_override: Option<&str>,
+    video_dimensions: Option<(u16, u16)>,
+    query: &str,
+) -> String {
+    let mut xml = String::with_capacity(4096);
+    let duration = if duration.is_zero() {
+        video
+            .iter()
+            .chain(audio)
+            .map(|segment| segment.timestamp.saturating_add(segment.duration))
+            .max()
+            .unwrap_or_default()
+    } else {
+        duration
+    };
+    let suffix = query_suffix(query);
+    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    xml.push_str(&format!(
+        "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" type=\"static\" profiles=\"urn:mpeg:dash:profile:isoff-live:2011\" minBufferTime=\"{}\" mediaPresentationDuration=\"{}\" >\n",
+        format_duration(config.min_buffer_time),
+        format_duration(duration)
+    ));
+    xml.push_str(&format!(
+        "  <Period id=\"0\" start=\"PT0S\" duration=\"{}\">\n",
+        format_duration(duration)
+    ));
+    if let Some(track) = description
+        .tracks
+        .iter()
+        .find(|track| track.kind == MediaKind::Video)
+        && !video.is_empty()
+    {
+        push_video_adaptation_set(
+            &mut xml,
+            video,
+            track,
+            config,
+            Duration::ZERO,
+            codec_override,
+            video_dimensions,
+            &suffix,
+        );
+    }
+    if let Some(track) = description
+        .tracks
+        .iter()
+        .find(|track| track.kind == MediaKind::Audio)
+        && !audio.is_empty()
+    {
+        push_audio_adaptation_set(&mut xml, audio, track, config, Duration::ZERO, &suffix);
+    }
+    xml.push_str("  </Period>\n");
+    xml.push_str("</MPD>\n");
+    xml
+}
+
+/// Push one video AdaptationSet (one Representation).
 #[allow(clippy::too_many_arguments)]
 fn push_video_adaptation_set(
     xml: &mut String,
@@ -203,7 +268,11 @@ fn push_video_adaptation_set(
     video_dimensions: Option<(u16, u16)>,
     suffix: &str,
 ) {
-    let timescale = track.clock_rate.max(1);
+    let timescale = if track.clock_rate > 0 {
+        track.clock_rate
+    } else {
+        config.timescale
+    };
     let start_number = segments
         .first()
         .map(|segment| segment.sequence)
@@ -537,6 +606,30 @@ mod tests {
         assert!(mpd.contains("mimeType=\"audio/mp4\""));
         assert!(!mpd.contains(" video-init.mp4"));
         assert!(mpd.contains("audioSamplingRate=\"44100\""));
+    }
+
+    #[test]
+    fn generates_static_mpd_for_vod() {
+        let video = vec![segment(0, 0), segment(1, 2)];
+        let audio = vec![segment(0, 0), segment(1, 2)];
+        let mpd = generate_static_mpd(
+            &video,
+            &audio,
+            &test_description(),
+            &MpdConfig::default(),
+            Duration::from_secs(4),
+            None,
+            None,
+            "token=abc",
+        );
+        assert!(mpd.contains("type=\"static\""));
+        assert!(mpd.contains("mediaPresentationDuration=\"PT4.000S\""));
+        assert!(mpd.contains("duration=\"PT4.000S\""));
+        assert!(mpd.contains("initialization=\"video-init.mp4?token=abc\""));
+        assert!(mpd.contains("initialization=\"audio-init.mp4?token=abc\""));
+        assert!(mpd.contains("media=\"video-$Number$.m4s?token=abc\""));
+        assert!(mpd.contains("media=\"audio-$Number$.m4s?token=abc\""));
+        assert_eq!(mpd.matches("<AdaptationSet").count(), 2);
     }
 
     #[test]

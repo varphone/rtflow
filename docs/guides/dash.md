@@ -40,8 +40,7 @@ suggested_presentation_delay = "3s"   # 缺省 3 × segment_duration
 ```
 
 - DASH 始终运行自己的 segmenter；缺省值继承 `[hls]`，避免两套参数不一致。
-- 音频轨使用独立的、目标长度约等于 `segment_duration` 的分片器；音视频分片边界
-  可以不同，播放器按 `tfdt`/时间戳对齐。
+- 音频轨在视频分片边界处 reap；没有视频时使用约 `segment_duration` 的音频分片。
 - `time_shift_buffer_depth` 控制 MPD 声明的时移窗口。
 - 配置错误（0 分片、0 窗口、0 缓冲）在启动时拒绝。
 
@@ -60,6 +59,25 @@ suggested_presentation_delay = "3s"   # 缺省 3 × segment_duration
 - `bandwidth` 由各轨实际分片字节数/时长估算；
 - MPD 在两个已声明的 track 都出现首个分片后才返回 200，避免播放器先拿到单轨
   MPD 后不再添加另一轨。
+
+## DASH VOD
+
+录制目录会同时生成 DASH VOD：录制完成后在点播页可复制
+`/dash-vod/{id}/manifest.mpd`。服务端按 `VodSource` 的 fingerprint 在
+`state_dir/dash-vod-cache` 下生成一次 fMP4 缓存：
+
+```text
+GET /dash-vod/{id}/manifest.mpd       # static MPD
+GET /dash-vod/{id}/video-init.mp4
+GET /dash-vod/{id}/audio-init.mp4
+GET /dash-vod/{id}/video-{N}.m4s
+GET /dash-vod/{id}/audio-{N}.m4s
+```
+
+-静态 MPD 的 `mediaPresentationDuration` 来自录制时长，`Period@duration` 同步；
+- 生成缓存按录制目录的 fingerprint 失效，录制删除时同步清理；
+- 与 HLS VOD 相互独立：HLS 使用 MPEG-TS 以兼容 Firefox MSE，DASH 强制 fMP4；
+- 请求 MPD 时携带的 token query 同样会传播到 init/分片。
 
 ## 播放器验证
 
@@ -83,9 +101,9 @@ dash.js 也可直接加载该 MPD；`crates/rtflow/examples/protocols/dash_serve
 
 - 每个 track 单 Representation，无多码率 ABR；音频/视频分片边界独立，未像 SRS
   那样逐段严格对齐。
-- 不支持 DASH VOD/静态 MPD（HLS VOD 使用 MPEG-TS；DASH VOD 需要单独的 fMP4 生成）。
+- DASH VOD 目前由服务端的录制目录生成；其他 `VodSource` 可复用同一 manager 接入。暂不支持多码率/多 Period VOD。
 - 不支持 LL-DASH/chunked CMAF、DRM/CENC、多 Period、广告插入。
-- H.264 codec 从 avcC 提取；H.265 使用 `hvc1` 字符串，未做 hvcC 逐字节解析。
+- H.264 codec 从 avcC 提取；H.265 从 hvcC 提取 `hvc1` codec（profile/tier/level/constraints），不支持的变体回退到静态字符串。
 
 ## 测试
 

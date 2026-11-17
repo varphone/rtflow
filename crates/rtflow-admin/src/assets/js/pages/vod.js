@@ -194,17 +194,20 @@ function openVodDetail(vod, ctx) {
   const recorded = stamp > 1e12 ? dateTime(stamp / 1000) : "—";
   openDrawer({
     title: vod.title,
-    description: "HLS 点播资源详情。",
+    description: "HLS / DASH 点播资源详情。",
     showSubmit: false,
     body: `<div class="stack">
       <div class="detail-grid">
         <div class="detail-item"><span>时长</span><strong class="mono">${vod.duration_ms ? duration(vod.duration_ms) : "生成中"}</strong></div>
         <div class="detail-item"><span>录制时间</span><strong>${esc(recorded)}</strong></div>
-        <div class="detail-item"><span>格式</span><strong>HLS · MPEG-TS</strong></div>
+        <div class="detail-item"><span>格式</span><strong>HLS · MPEG-TS${vod.dash ? " / DASH · fMP4" : ""}</strong></div>
         <div class="detail-item"><span>缓存</span><strong>${vod.cached ? `已生成 · ${bytes(vod.cache_bytes)}` : "未生成"}</strong></div>
         <div class="detail-item"><span>资源 ID</span><strong class="mono">${esc(vod.id)}</strong></div>
       </div>
-      <section class="drawer-section"><h3>播放地址</h3><div class="endpoint"><span class="endpoint-label">HLS</span><code>${esc(location.origin + vod.playlist)}</code><button class="btn small ghost" data-vod-copy>复制</button></div></section>
+      <section class="drawer-section"><h3>播放地址</h3>
+        <div class="endpoint"><span class="endpoint-label">HLS</span><code>${esc(location.origin + vod.playlist)}</code><button class="btn small ghost" data-vod-copy>复制</button></div>
+        ${vod.dash ? `<div class="endpoint"><span class="endpoint-label">DASH</span><code>${esc(location.origin + vod.dash)}</code><button class="btn small ghost" data-vod-copy-dash>复制</button></div>` : ""}
+      </section>
       <div class="actions"><button class="btn small primary" data-vod-play>播放</button><button class="btn small ghost" data-vod-refresh>刷新生成缓存</button><button class="btn small ghost" data-vod-recording>查看录制</button></div>
     </div>`,
     onMount(root) {
@@ -212,6 +215,9 @@ function openVodDetail(vod, ctx) {
       root.querySelector("[data-vod-copy]").onclick = async () => {
         try { await copyText(location.origin + vod.playlist); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
+      root.querySelector("[data-vod-copy-dash]")?.addEventListener("click", async () => {
+        try { await copyText(location.origin + vod.dash); toast("DASH 地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      });
       root.querySelector("[data-vod-play]").onclick = () => { close(); playUrl(vod.playlist, vod.title, { vod: true }); };
       root.querySelector("[data-vod-refresh]").onclick = async () => {
         try { await api(`/vods/${encodeURIComponent(vod.id)}/refresh`, { method: "POST" }); toast("缓存已清除，下次播放重新生成", "ok"); close(); ctx.reload(); }

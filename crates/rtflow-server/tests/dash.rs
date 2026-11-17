@@ -178,3 +178,144 @@ async fn dash_publish_serves_manifest_init_and_segment() {
     let _ = child.wait();
     handle.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dash_vod_from_recording() {
+    if !ffmpeg_available() {
+        eprintln!("ffmpeg not found; skipping DASH VOD test");
+        return;
+    }
+    rtflow::logging::init_with(rtflow::logging::LogConfig {
+        filter: Some("rtflow_server=warn,rtflow_dash=warn".into()),
+        ..Default::default()
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let recordings = dir.path().join("recordings");
+    let mut config = Config::default();
+    config.server.name = "dash-vod".into();
+    config.server.state_dir = dir.path().join("state");
+    config.rtsp.listen = "127.0.0.1:0".parse().unwrap();
+    config.rtmp.listen = "127.0.0.1:0".parse().unwrap();
+    config.srt.enabled = false;
+    config.webrtc.enabled = false;
+    config.flv.enabled = false;
+    config.http.listen = "127.0.0.1:0".parse().unwrap();
+    config.http.admin_password = "testpass".into();
+    config.discovery.public = true;
+    config.hls.segment_duration = Duration::from_secs(1);
+    config.hls.window = 5;
+    config.recording.enabled = true;
+    config.recording.root = recordings;
+    config.recording.segment_duration = Duration::from_secs(2);
+    config.paths.insert(
+        "live/*".into(),
+        rtflow_server::config::PathRule {
+            record: true,
+            ..rtflow_server::config::PathRule::default()
+        },
+    );
+    let handle = ServerApp::start(config).await.unwrap();
+    let rtmp = handle.rtmp_addr.expect("RTMP listener");
+    let http = format!("http://{}", handle.http_addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .unwrap();
+
+    let mut child = Command::new("ffmpeg")
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-re",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=320x240:rate=15",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=44100",
+            "-t",
+            "6",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "15",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "64k",
+            "-f",
+            "flv",
+        ])
+        .arg(format!("rtmp://{rtmp}/live/vod-dash"))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .expect("spawn ffmpeg");
+    let _ = child.wait();
+
+    let mut dash_url = String::new();
+    for _ in 0..80 {
+        let _ = client
+            .post(format!("{http}/admin/api/v1/vods/refresh"))
+            .basic_auth("admin", Some("testpass"))
+            .send()
+            .await;
+        if let Ok(response) = client
+            .get(format!("{http}/admin/api/v1/vods"))
+            .basic_auth("admin", Some("testpass"))
+            .send()
+            .await
+            && let Ok(vods) = response.json::<serde_json::Value>().await
+            && let Some(item) = vods.as_array().and_then(|items| items.first())
+            && let Some(dash) = item["dash"].as_str()
+        {
+            dash_url = format!("{http}{dash}");
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert!(!dash_url.is_empty(), "DASH VOD did not appear");
+    let response = client.get(&dash_url).send().await.unwrap();
+    assert_eq!(response.status(), 200, "manifest {dash_url}");
+    let mpd = response.text().await.unwrap();
+    assert!(mpd.contains("type=\"static\""), "{mpd}");
+    assert!(mpd.contains("video-init.mp4"), "{mpd}");
+    assert!(mpd.contains("audio-init.mp4"), "{mpd}");
+    assert_eq!(mpd.matches("<AdaptationSet").count(), 2, "{mpd}");
+
+    let base = dash_url.trim_end_matches("/manifest.mpd");
+    for init in ["video-init.mp4", "audio-init.mp4"] {
+        let response = client.get(format!("{base}/{init}")).send().await.unwrap();
+        assert_eq!(response.status(), 200, "init {init}");
+        let data = response.bytes().await.unwrap();
+        assert!(data.len() > 8, "{init} too small");
+        assert_eq!(&data[4..8], b"ftyp", "{init} is not fMP4");
+    }
+    let starts = attrs(&mpd, "startNumber");
+    let media = attrs(&mpd, "media");
+    let video = media
+        .iter()
+        .find(|value| value.starts_with("video-"))
+        .expect("video media");
+    let audio = media
+        .iter()
+        .find(|value| value.starts_with("audio-"))
+        .expect("audio media");
+    for (template, start) in [
+        (video, starts.first().copied().unwrap_or("0")),
+        (audio, starts.get(1).copied().unwrap_or("0")),
+    ] {
+        let name = template.replace("$Number$", start);
+        let response = client.get(format!("{base}/{name}")).send().await.unwrap();
+        assert_eq!(response.status(), 200, "segment {name}");
+        assert!(!response.bytes().await.unwrap().is_empty(), "empty {name}");
+    }
+    handle.shutdown().await;
+}

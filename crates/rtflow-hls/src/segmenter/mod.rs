@@ -370,6 +370,26 @@ impl Segmenter {
         }
     }
 
+    /// Finalize the current segment at the last sample's end.
+    ///
+    /// DASH uses this to reap an audio segment when its video counterpart is
+    /// cut, keeping the two tracks' segment boundaries close without changing
+    /// the HLS segmenter's own keyframe-driven cuts.
+    pub fn cut_current(&mut self) {
+        if self.mpeg_ts {
+            return;
+        }
+        let end = self
+            .tracks
+            .iter()
+            .flat_map(|track| track.samples.iter())
+            .map(|sample| sample.pts.saturating_add(sample.duration))
+            .max();
+        if let Some(end) = end {
+            self.finalize_segment(end);
+        }
+    }
+
     /// Drop incomplete samples after a transport gap and mark the next segment.
     pub fn reset_after_discontinuity(&mut self) {
         if let Some(pipeline) = &mut self.ts_pipeline {

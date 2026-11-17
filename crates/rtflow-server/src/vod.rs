@@ -1,6 +1,7 @@
 //! Recording directories to HLS VOD catalog.
 use crate::{config::Config, recording::recording_directories};
 use rtflow::{
+    dash::vod::{DashVodEntry, DashVodManager},
     hls::vod::{HlsVodEntry, HlsVodManager},
     storage::{RecordingCatalog, RecordingVodSource},
 };
@@ -17,19 +18,22 @@ pub struct VodStatus {
     pub title: String,
     pub duration_seconds: f64,
     pub playlist: String,
+    pub dash: String,
 }
 
 pub struct VodCatalog {
     manager: Arc<HlsVodManager>,
+    dash: Arc<DashVodManager>,
     root: PathBuf,
     max_sample_size: usize,
     known: RwLock<HashMap<String, (PathBuf, usize, Duration)>>,
 }
 
 impl VodCatalog {
-    pub fn new(config: &Config, manager: Arc<HlsVodManager>) -> Self {
+    pub fn new(config: &Config, manager: Arc<HlsVodManager>, dash: Arc<DashVodManager>) -> Self {
         Self {
             manager,
+            dash,
             root: config.recording.root.clone(),
             max_sample_size: 8 * 1024 * 1024,
             known: RwLock::new(HashMap::new()),
@@ -70,6 +74,7 @@ impl VodCatalog {
                     .map(|duration| duration.as_secs_f64())
                     .unwrap_or(0.0),
                 playlist: format!("/vod/{}/index.m3u8", entry.id),
+                dash: format!("/dash-vod/{}/manifest.mpd", entry.id),
             })
             .collect()
     }
@@ -93,11 +98,19 @@ impl VodCatalog {
                 continue;
             };
             let duration = catalog.duration();
+            let title = relative_title(&self.root, &directory);
+            let source: Arc<dyn rtflow::storage::VodSource> = Arc::new(source);
+            self.dash.upsert_entry(DashVodEntry {
+                id: id.clone(),
+                title: title.clone(),
+                duration: Some(duration),
+                source: source.clone(),
+            });
             let entry = HlsVodEntry {
                 id: id.clone(),
-                title: relative_title(&self.root, &directory),
+                title,
                 duration: Some(duration),
-                source: Arc::new(source),
+                source,
             };
             // Keep the entry's duration and playlist current while the
             // recording is still being written: a rename-only comparison
@@ -131,6 +144,7 @@ impl VodCatalog {
         };
         for id in stale {
             self.manager.remove_entry(&id);
+            self.dash.remove_entry(&id);
         }
         let mut known = self
             .known
@@ -141,6 +155,7 @@ impl VodCatalog {
     }
 
     pub fn remove(&self, id: &str) -> bool {
+        self.dash.remove_entry(id);
         self.manager.remove_entry(id)
     }
 

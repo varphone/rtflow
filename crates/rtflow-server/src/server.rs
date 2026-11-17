@@ -13,6 +13,7 @@ use crate::{
 use rtflow::{
     MountRegistry,
     admin::{Admin, AdminConfig},
+    dash::vod::{DashVodConfig, DashVodManager, create_dash_vod_handler},
     hls::{
         HlsConfig,
         live::{HlsLiveManager, create_hls_live_handler},
@@ -488,7 +489,18 @@ impl ServerApp {
                 cache_dir: config.server.state_dir.join("vod-cache"),
             },
         ));
-        let vod = Arc::new(VodCatalog::new(&config, vod_manager.clone()));
+        let dash_vod_manager = Arc::new(DashVodManager::new(
+            Vec::new(),
+            DashVodConfig {
+                segment_duration: config.hls.segment_duration,
+                cache_dir: config.server.state_dir.join("dash-vod-cache"),
+            },
+        ));
+        let vod = Arc::new(VodCatalog::new(
+            &config,
+            vod_manager.clone(),
+            dash_vod_manager.clone(),
+        ));
         vod.refresh();
 
         let mut http_config = HttpConfig::new(config.http.listen);
@@ -539,6 +551,7 @@ impl ServerApp {
                     create_hls_vod_handler(vod_manager.clone()),
                     auth.clone(),
                     vod.clone(),
+                    "/vod/",
                 ),
             )
             .await;
@@ -569,6 +582,19 @@ impl ServerApp {
                     "/dash/",
                     rtflow::auth::AccessRole::Read,
                     "dash",
+                ),
+            )
+            .await;
+        }
+        if config.dash.enabled {
+            http.add_route(
+                Method::Get,
+                "/dash-vod/*",
+                crate::media::vod_auth_guard(
+                    create_dash_vod_handler(dash_vod_manager.clone()),
+                    auth.clone(),
+                    vod.clone(),
+                    "/dash-vod/",
                 ),
             )
             .await;

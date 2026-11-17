@@ -7,6 +7,7 @@
 
 ### Added
 
+- DASH VOD：录制目录通过独立 fMP4 缓存生成 static MPD（`/dash-vod/{id}/...`），支持 token、缓存失效和点播页地址；H.265 codec 改从 hvcC 提取。
 - DASH 直播完善：参考 SRS 的按轨独立 fMP4 布局（`video-init.mp4`/`audio-init.mp4` 与 `video-N.m4s`/`audio-N.m4s`），服务端 MPD/init/segment 路由修正为相对 URL，token query 透传到 init/分片，新增 `[dash]` 分片/窗口/缓冲配置、`UTCTiming`、按实际分片估算带宽，发布者重连时保持 AST 并接续时间轴；新增 MPD/服务端端到端测试与 DASH 指南。
 
 - RTSP 拉流定时窗口：`schedule` 支持按周几和本地时间启停拉流，跨天窗口、窗口外状态 `scheduled`，停止时自动结束录制；控制台提供定时表单与列表标记。

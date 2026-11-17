@@ -84,7 +84,12 @@ pub(crate) fn auth_guard(
 
 /// VOD ids are not mount paths: map an id back to the recording's mount path
 /// and authorize against that path's read policy.
-pub(crate) fn vod_auth_guard(inner: Handler, auth: Arc<AppAuth>, vod: Arc<VodCatalog>) -> Handler {
+pub(crate) fn vod_auth_guard(
+    inner: Handler,
+    auth: Arc<AppAuth>,
+    vod: Arc<VodCatalog>,
+    prefix: &'static str,
+) -> Handler {
     Arc::new(move |req, writer| {
         let auth = auth.clone();
         let vod = vod.clone();
@@ -92,9 +97,8 @@ pub(crate) fn vod_auth_guard(inner: Handler, auth: Arc<AppAuth>, vod: Arc<VodCat
         Box::pin(async move {
             let id = req
                 .path
-                .trim_start_matches("/vod/")
-                .split('/')
-                .next()
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.split('/').next())
                 .unwrap_or("")
                 .to_owned();
             let mount_path = vod.source_path(&id).unwrap_or_else(|| id.clone());
