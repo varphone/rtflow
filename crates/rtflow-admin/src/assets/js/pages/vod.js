@@ -22,6 +22,7 @@ export async function render(params) {
       <div class="search">${iconSvg("search")}<input class="input" data-vod-search value="${esc(query)}" placeholder="搜索点播名称或 ID"></div>
       <select class="input" data-vod-sort aria-label="点播排序" style="width:auto"><option value="recent" ${sort === "recent" ? "selected" : ""}>最新录制</option><option value="duration" ${sort === "duration" ? "selected" : ""}>按时长</option><option value="cached" ${sort === "cached" ? "selected" : ""}>已缓存优先</option></select>
       <span class="meta" data-vod-count>${initial.length} 条 · ${initial.filter((vod) => vod.cached).length} 已缓存</span>
+      <button class="btn small ghost" data-vod-copy-bulk disabled>复制所选地址</button>
       <button class="btn small ghost" data-vod-bulk disabled>刷新所选缓存</button></div>
       <div data-vod-results>${initial.length ? cards(initial, new Set()) : empty("暂无可用的点播资源", "完成一次录制或配置文件 VOD 后显示", "vod", `<a class="btn small" href="#/config/recordings">查看录制任务</a>`)}</div>`,
     mount(root, ctx) {
@@ -31,12 +32,15 @@ export async function render(params) {
       const selectAll = root.querySelector("[data-vod-select-all]");
       const sorter = root.querySelector("[data-vod-sort]");
       const bulk = root.querySelector("[data-vod-bulk]");
+      const copyBulk = root.querySelector("[data-vod-copy-bulk]");
       const selected = new Set();
       let allVods = vods;
       let visible = initial;
       const sync = () => {
         bulk.disabled = selected.size === 0;
         bulk.textContent = selected.size ? `刷新所选缓存 (${selected.size})` : "刷新所选缓存";
+        copyBulk.disabled = selected.size === 0;
+        copyBulk.textContent = selected.size ? `复制所选地址 (${selected.size})` : "复制所选地址";
         const picked = visible.filter((item) => selected.has(item.id)).length;
         selectAll.checked = visible.length > 0 && picked === visible.length;
         selectAll.indeterminate = picked > 0 && picked < visible.length;
@@ -62,6 +66,12 @@ export async function render(params) {
           paint();
         }
       });
+      copyBulk.onclick = async () => {
+        if (!selected.size) return;
+        const urls = allVods.filter((item) => selected.has(item.id)).map((item) => location.origin + item.playlist);
+        try { await navigator.clipboard.writeText(urls.join("\n")); toast(`已复制 ${urls.length} 个地址`, "ok"); }
+        catch (_) { toast("复制失败", "bad"); }
+      };
       bulk.onclick = async () => {
         if (!selected.size) return;
         if (!await confirmDialog({ title: "刷新点播缓存", message: `刷新所选 ${selected.size} 个点播的生成缓存？`, confirmLabel: "刷新", danger: false })) return;
