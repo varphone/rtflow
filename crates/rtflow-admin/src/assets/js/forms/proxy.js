@@ -19,16 +19,19 @@ function upstreamRow(upstream = {}, index = 0) {
   </div>`;
 }
 
-export function openProxyDrawer(existing, onSaved) {
-  const mount = existing || { path: "", mode: "on-demand", idle_grace_ms: null, upstreams: [{ url: "", transport: "tcp" }] };
+export function openProxyDrawer(existing, onSaved, options = {}) {
+  const clone = options.clone === true && Boolean(existing);
+  const source = existing || { path: "", mode: "on-demand", idle_grace_ms: null, upstreams: [{ url: "", transport: "tcp" }] };
+  const mount = clone ? { ...source, path: `${source.path}-copy` } : source;
+  const editing = Boolean(existing) && !clone;
   const upstreams = mount.upstreams?.length ? mount.upstreams : [{ url: "", transport: "tcp" }];
   openDrawer({
-    title: existing ? "编辑 RTSP 代理" : "新增 RTSP 代理",
+    title: clone ? "复制 RTSP 代理" : (existing ? "编辑 RTSP 代理" : "新增 RTSP 代理"),
     description: "上游按顺序尝试；密码只写不读。",
     body: `
       <div class="form-section">
         <h3>代理</h3>
-        ${field("路径", textInput("path", mount.path, `required ${existing ? "disabled" : ""} placeholder="/cameras/front"`))}
+        ${field("路径", textInput("path", mount.path, `required ${editing ? "disabled" : ""} placeholder="/cameras/front"`))}
         <div class="field-row">
           ${field("模式", `<select class="input" name="mode">
             <option value="on-demand" ${mount.mode === "on-demand" ? "selected" : ""}>按需</option>
@@ -39,7 +42,7 @@ export function openProxyDrawer(existing, onSaved) {
       </div>
       <div id="upstreams">${upstreams.map((upstream, index) => upstreamRow(upstream, index)).join("")}</div>
       <button type="button" class="btn small" data-add-upstream>添加上游</button>`,
-    submitLabel: existing ? "保存修改" : "创建代理",
+    submitLabel: editing ? "保存修改" : (clone ? "创建副本" : "创建代理"),
     async onSubmit(data, { close }) {
       const rows = [...document.querySelectorAll("#upstreams [data-upstream-row]")];
       const urls = rows.map((row) => ({
@@ -49,15 +52,15 @@ export function openProxyDrawer(existing, onSaved) {
         password: row.querySelector("[name=password]").value || null,
       }));
       const body = {
-        path: existing ? mount.path : data.get("path"),
+        path: editing ? mount.path : data.get("path"),
         enabled: true,
         mode: data.get("mode"),
         idle_grace: data.get("idle_grace") || null,
         upstreams: urls,
       };
-      await apiV1("/proxies", { method: existing ? "PATCH" : "POST", body });
+      await apiV1("/proxies", { method: editing ? "PATCH" : "POST", body });
       close();
-      toast("代理已保存", "ok");
+      toast(editing ? "代理已保存" : "代理已创建", "ok");
       onSaved();
     },
     onMount(root) {
