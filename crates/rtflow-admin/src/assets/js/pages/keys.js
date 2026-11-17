@@ -1,6 +1,6 @@
 import { apiV1 } from "../api.js";
 import { dateTime, empty, esc } from "../format.js";
-import { confirmDialog, secretDialog, syncSortAria, toast } from "../ui.js";
+import { confirmDialog, openDrawer, secretDialog, syncSortAria, toast } from "../ui.js";
 import { openKeyDrawer } from "../forms/key.js";
 
 let query = "";
@@ -63,7 +63,9 @@ export async function render(params, ctx) {
         if (!target) return;
         const item = visible.find((entry) => entry.kid === target.dataset.kid);
         if (!item) return;
-        if (target.dataset.action === "copy") {
+        if (target.dataset.action === "detail") {
+          openKeyDetail(item, ctx);
+        } else if (target.dataset.action === "copy") {
           try { await navigator.clipboard.writeText(item.kid); toast("Key ID 已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
         } else if (target.dataset.action === "revoke") {
           if (target.disabled) return;
@@ -92,7 +94,7 @@ function table(items) {
     <th><button class="sort-btn" data-sort="kid">Key ID${arrow("kid")}</button></th>
     <th><button class="sort-btn" data-sort="name">名称${arrow("name")}</button></th><th>角色</th><th>协议</th><th>路径范围</th>
     <th><button class="sort-btn" data-sort="expires_at">过期${arrow("expires_at")}</button></th><th>状态</th><th></th></tr></thead><tbody>
-    ${items.map((item) => `<tr><td class="mono">${esc(item.kid)}</td><td>${esc(item.name)}</td><td>${esc((item.roles || []).join(", "))}</td>
+    ${items.map((item) => `<tr><td><button class="link-cell mono" data-action="detail" data-kid="${esc(item.kid)}">${esc(item.kid)}</button></td><td>${esc(item.name)}</td><td>${esc((item.roles || []).join(", "))}</td>
       <td>${esc((item.protocols || []).join(", ") || "全部")}</td><td class="mono">${esc((item.paths || []).join(", ") || "全部")}</td>
       <td>${dateTime(item.expires_at)}</td><td>${keyStatus(item)}</td>
       <td><div class="row-actions"><button class="btn small ghost" data-action="copy" data-kid="${esc(item.kid)}">复制</button><button class="btn small danger" data-action="revoke" data-kid="${esc(item.kid)}" ${item.enabled ? "" : "disabled"}>吊销</button></div></td></tr>`).join("")}
@@ -110,4 +112,37 @@ function keyStatus(item) {
   const remaining = Number(item.expires_at || 0) * 1000 - Date.now();
   if (item.expires_at && remaining < 24 * 3600 * 1000) return '<span class="badge warn">即将过期</span>';
   return '<span class="badge ok">有效</span>';
+}
+
+
+function openKeyDetail(item, ctx) {
+  openDrawer({
+    title: item.name || item.kid,
+    description: "推流密钥元数据；secret 仅在签发时显示一次。",
+    showSubmit: false,
+    body: `<div class="stack">
+      <div class="detail-grid">
+        <div class="detail-item"><span>状态</span><strong>${keyStatus(item)}</strong></div>
+        <div class="detail-item"><span>Key ID</span><strong class="mono">${esc(item.kid)}</strong></div>
+        <div class="detail-item"><span>角色</span><strong>${esc((item.roles || []).join(", ") || "—")}</strong></div>
+        <div class="detail-item"><span>协议</span><strong>${esc((item.protocols || []).join(", ") || "全部")}</strong></div>
+        <div class="detail-item"><span>路径范围</span><strong class="mono">${esc((item.paths || []).join(", ") || "全部")}</strong></div>
+        <div class="detail-item"><span>最大连接</span><strong class="mono">${item.max_connections || "∞"}</strong></div>
+        <div class="detail-item"><span>创建</span><strong>${esc(dateTime(item.created_at))}</strong></div>
+        <div class="detail-item"><span>过期</span><strong>${esc(dateTime(item.expires_at))}</strong></div>
+      </div>
+      <div class="actions"><button class="btn small ghost" data-key-copy>复制 Key ID</button><button class="btn small danger" data-key-revoke ${item.enabled ? "" : "disabled"}>吊销</button></div>
+    </div>`,
+    onMount(root) {
+      const close = () => root.querySelector("[data-close-drawer]")?.click();
+      root.querySelector("[data-key-copy]").onclick = async () => {
+        try { await navigator.clipboard.writeText(item.kid); toast("Key ID 已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      };
+      root.querySelector("[data-key-revoke]").onclick = async () => {
+        if (!await confirmDialog({ title: "吊销密钥", message: `吊销 ${item.kid}？`, confirmLabel: "吊销", danger: true })) return;
+        try { await apiV1("/keys/" + encodeURIComponent(item.kid), { method: "DELETE" }); toast("密钥已吊销", "ok"); close(); ctx.reload(); }
+        catch (error) { toast(error.message, "bad"); }
+      };
+    },
+  });
 }
