@@ -7,7 +7,7 @@
 
 ### Added
 
-- DASH 直播完善：服务端 MPD/init/segment 路由修正为相对 URL，音视频改用单 multiplexed Representation，token query 透传到 init/分片，新增 `[dash]` 分片/窗口/缓冲配置、`UTCTiming`、按实际分片估算带宽，发布者重连时保持 AST 并接续时间轴；新增 MPD/服务端端到端测试与 DASH 指南。
+- DASH 直播完善：参考 SRS 的按轨独立 fMP4 布局（`video-init.mp4`/`audio-init.mp4` 与 `video-N.m4s`/`audio-N.m4s`），服务端 MPD/init/segment 路由修正为相对 URL，token query 透传到 init/分片，新增 `[dash]` 分片/窗口/缓冲配置、`UTCTiming`、按实际分片估算带宽，发布者重连时保持 AST 并接续时间轴；新增 MPD/服务端端到端测试与 DASH 指南。
 
 - RTSP 拉流定时窗口：`schedule` 支持按周几和本地时间启停拉流，跨天窗口、窗口外状态 `scheduled`，停止时自动结束录制；控制台提供定时表单与列表标记。
 - ONVIF 设备发现（`onvif` feature，默认关闭）：新增独立 crate `rtflow-onvif`（WS-Discovery、设备信息/GetProfiles/GetStreamUri、HTTP Basic/Digest），`rtflow` 门面导出为 `rtflow::onvif`；控制台“发现设备”可预填 RTSP 拉流。

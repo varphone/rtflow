@@ -228,6 +228,8 @@ fn dash_route(path: &str) -> Option<(&str, DashKind)> {
     }
     if let Some(mount) = path
         .strip_suffix("/init.mp4")
+        .or_else(|| path.strip_suffix("/video-init.mp4"))
+        .or_else(|| path.strip_suffix("/audio-init.mp4"))
         .or_else(|| path.strip_suffix("/init.m4s"))
     {
         return Some((mount, DashKind::Init));

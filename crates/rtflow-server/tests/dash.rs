@@ -14,12 +14,20 @@ fn ffmpeg_available() -> bool {
         .unwrap_or(false)
 }
 
-fn attr<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
+fn attrs<'a>(xml: &'a str, name: &str) -> Vec<&'a str> {
     let needle = format!("{name}=\"");
-    let start = xml.find(&needle)? + needle.len();
-    let rest = &xml[start..];
-    let end = rest.find('"')?;
-    Some(&rest[..end])
+    let mut values = Vec::new();
+    let mut rest = xml;
+    while let Some(start) = rest.find(&needle) {
+        let value_start = start + needle.len();
+        let tail = &rest[value_start..];
+        let Some(end) = tail.find('"') else {
+            break;
+        };
+        values.push(&tail[..end]);
+        rest = &tail[end + 1..];
+    }
+    values
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -108,32 +116,61 @@ async fn dash_publish_serves_manifest_init_and_segment() {
         mpd.contains("<SegmentTimeline>"),
         "DASH manifest did not appear: {mpd}"
     );
-    assert_eq!(mpd.matches("<AdaptationSet").count(), 1, "{mpd}");
+    assert_eq!(mpd.matches("<AdaptationSet").count(), 2, "{mpd}");
     assert!(mpd.contains("mimeType=\"video/mp4\""), "{mpd}");
-    let codecs = attr(&mpd, "codecs").unwrap_or_default();
-    assert!(codecs.contains("avc1"), "codecs={codecs}");
-    assert!(codecs.contains("mp4a"), "codecs={codecs}");
+    assert!(mpd.contains("mimeType=\"audio/mp4\""), "{mpd}");
+    let codecs = attrs(&mpd, "codecs");
+    assert!(
+        codecs.iter().any(|codec| codec.contains("avc1")),
+        "{codecs:?}"
+    );
+    assert!(
+        codecs.iter().any(|codec| codec.contains("mp4a")),
+        "{codecs:?}"
+    );
     assert!(mpd.contains("<UTCTiming"), "{mpd}");
 
-    let initialization = attr(&mpd, "initialization").expect("initialization URL");
-    let media = attr(&mpd, "media").expect("media template");
-    let start_number = attr(&mpd, "startNumber").unwrap_or("1");
-    let segment = media.replace("$Number$", start_number);
-    assert!(!initialization.starts_with('/'), "{initialization}");
-    assert!(!segment.starts_with('/'), "{segment}");
+    let initializations = attrs(&mpd, "initialization");
+    assert!(
+        initializations.contains(&"video-init.mp4"),
+        "{initializations:?}"
+    );
+    assert!(
+        initializations.contains(&"audio-init.mp4"),
+        "{initializations:?}"
+    );
+    let media = attrs(&mpd, "media");
+    let starts = attrs(&mpd, "startNumber");
+    let video_media = media
+        .iter()
+        .find(|value| value.starts_with("video-"))
+        .expect("video media template");
+    let audio_media = media
+        .iter()
+        .find(|value| value.starts_with("audio-"))
+        .expect("audio media template");
+    let video_start = starts.first().copied().unwrap_or("1");
+    let audio_start = starts.get(1).copied().unwrap_or("1");
+    let video_segment = video_media.replace("$Number$", video_start);
+    let audio_segment = audio_media.replace("$Number$", audio_start);
+    assert!(!video_segment.starts_with('/'), "{video_segment}");
+    assert!(!audio_segment.starts_with('/'), "{audio_segment}");
 
-    let init_url = format!("{http}/dash/live/dash/{initialization}");
-    let response = client.get(&init_url).send().await.unwrap();
-    assert_eq!(response.status(), 200, "init URL {init_url}");
-    let init = response.bytes().await.unwrap();
-    assert!(init.len() > 8, "init too small");
-    assert_eq!(&init[4..8], b"ftyp", "init is not an fMP4 init segment");
-
-    let segment_url = format!("{http}/dash/live/dash/{segment}");
-    let response = client.get(&segment_url).send().await.unwrap();
-    assert_eq!(response.status(), 200, "segment URL {segment_url}");
-    let data = response.bytes().await.unwrap();
-    assert!(!data.is_empty(), "segment is empty");
+    for init in ["video-init.mp4", "audio-init.mp4"] {
+        let init_url = format!("{http}/dash/live/dash/{init}");
+        let response = client.get(&init_url).send().await.unwrap();
+        assert_eq!(response.status(), 200, "init URL {init_url}");
+        let data = response.bytes().await.unwrap();
+        assert!(data.len() > 8, "{init} too small");
+        assert_eq!(&data[4..8], b"ftyp", "{init} is not an fMP4 init segment");
+    }
+    for segment in [video_segment, audio_segment] {
+        let segment_url = format!("{http}/dash/live/dash/{segment}");
+        let response = client.get(&segment_url).send().await.unwrap();
+        assert_eq!(response.status(), 200, "segment URL {segment_url}");
+        let data = response.bytes().await.unwrap();
+        assert!(!data.is_empty(), "segment is empty: {segment_url}");
+    }
 
     assert!(mpd.contains("timeShiftBufferDepth=\"PT5.000S\""), "{mpd}");
 

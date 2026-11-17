@@ -337,18 +337,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Register DASH routes
     let mpd_path = format!("{}/manifest.mpd", args.mount);
-    let init_path = format!("{}/init.mp4", args.mount);
-    let segment_path = format!("{}/segment_{{seq}}.m4s", args.mount);
+    let video_init_path = format!("{}/video-init.mp4", args.mount);
+    let audio_init_path = format!("{}/audio-init.mp4", args.mount);
+    let video_segment_path = format!("{}/video-{{seq}}.m4s", args.mount);
+    let audio_segment_path = format!("{}/audio-{{seq}}.m4s", args.mount);
     let player_path = format!("{}/player", args.mount);
 
     http_server
         .add_route(Method::Get, &mpd_path, mpd_handler)
         .await;
     http_server
-        .add_route(Method::Get, &init_path, init_handler)
+        .add_route(Method::Get, &video_init_path, init_handler.clone())
         .await;
     http_server
-        .add_route(Method::Get, &segment_path, segment_handler)
+        .add_route(Method::Get, &audio_init_path, init_handler)
+        .await;
+    http_server
+        .add_route(Method::Get, &video_segment_path, segment_handler.clone())
+        .await;
+    http_server
+        .add_route(Method::Get, &audio_segment_path, segment_handler)
         .await;
 
     // Embedded dash.js player page

@@ -151,14 +151,24 @@ fn serialize_query(query: &std::collections::HashMap<String, String>) -> String 
 pub async fn serve_mpd<W: AsyncWrite + Unpin>(
     req: HttpRequest,
     mut writer: ResponseWriter<W>,
-    ring: &SegmentRing,
+    video: &SegmentRing,
+    audio: &SegmentRing,
     description: &MediaDescription,
     config: &MpdConfig,
     state: &DashState,
 ) -> Result<ResponseWriter<W>> {
-    let segments = ring.snapshot();
+    let video_segments = video.snapshot();
+    let audio_segments = audio.snapshot();
+    let has_video = description
+        .tracks
+        .iter()
+        .any(|track| track.kind == rtflow_media::MediaKind::Video);
+    let has_audio = description
+        .tracks
+        .iter()
+        .any(|track| track.kind == rtflow_media::MediaKind::Audio);
 
-    if segments.is_empty() {
+    if (has_video && video_segments.is_empty()) || (has_audio && audio_segments.is_empty()) {
         writer
             .write_body(
                 503,
@@ -174,7 +184,8 @@ pub async fn serve_mpd<W: AsyncWrite + Unpin>(
     let query = serialize_query(&req.query);
     let codec = state.codec_string();
     let body = mpd::generate_mpd_q(
-        &segments,
+        &video_segments,
+        &audio_segments,
         description,
         config,
         state.availability_start(),
@@ -203,8 +214,16 @@ pub async fn serve_mpd<W: AsyncWrite + Unpin>(
 pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
     req: HttpRequest,
     mut writer: ResponseWriter<W>,
-    ring: &SegmentRing,
+    video: &SegmentRing,
+    audio: &SegmentRing,
 ) -> Result<ResponseWriter<W>> {
+    let is_audio = req
+        .path
+        .rsplit('/')
+        .next()
+        .is_some_and(|file| file.starts_with("audio-"));
+    let ring = if is_audio { audio } else { video };
+    let content_type = if is_audio { "audio/mp4" } else { "video/mp4" };
     let init = match ring.latest_init() {
         Some(i) => i,
         None => {
@@ -231,7 +250,7 @@ pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
 
     let content_length = init.len().to_string();
     let headers = [
-        ("Content-Type", "video/mp4"),
+        ("Content-Type", content_type),
         ("Content-Length", content_length.as_str()),
         ("Cache-Control", "public, max-age=86400, immutable"),
         ("ETag", etag.as_str()),
@@ -248,9 +267,17 @@ pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
 pub async fn serve_segment<W: AsyncWrite + Unpin>(
     req: HttpRequest,
     mut writer: ResponseWriter<W>,
-    ring: &SegmentRing,
+    video: &SegmentRing,
+    audio: &SegmentRing,
     sequence: u64,
+    is_audio: bool,
 ) -> Result<ResponseWriter<W>> {
+    let ring = if is_audio { audio } else { video };
+    let content_type = if is_audio {
+        "audio/iso.segment"
+    } else {
+        "video/iso.segment"
+    };
     let segment = match ring.get(sequence) {
         Some(s) => s,
         None => {
@@ -278,7 +305,7 @@ pub async fn serve_segment<W: AsyncWrite + Unpin>(
 
     let content_length = segment.data.len().to_string();
     let headers = [
-        ("Content-Type", "video/iso.segment"),
+        ("Content-Type", content_type),
         ("Content-Length", content_length.as_str()),
         ("Cache-Control", "public, max-age=3600, immutable"),
         ("ETag", etag.as_str()),
