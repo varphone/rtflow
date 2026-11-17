@@ -1,7 +1,7 @@
 import { api, apiV1, setCsrf } from "./js/api.js";
 import { icon } from "./js/icons.js";
 import { esc } from "./js/format.js";
-import { openCommandPalette, openDialog, toast } from "./js/ui.js";
+import { closeDialog, openCommandPalette, openDialog, toast } from "./js/ui.js";
 import * as overview from "./js/pages/overview.js";
 import * as live from "./js/pages/live.js";
 import * as vod from "./js/pages/vod.js";
@@ -357,7 +357,42 @@ function openShortcuts() {
   });
 }
 
+function savedViews() {
+  try { return JSON.parse(localStorage.getItem("rtflow-views") || "[]"); } catch (_) { return []; }
+}
+
+function saveCurrentView() {
+  const route = currentRoute();
+  const hash = location.hash || `#/${route}`;
+  const suggested = `${routes[route]?.label || route} 视图`;
+  openDialog({
+    title: "保存当前视图",
+    body: `<div class="field"><label for="view-name">视图名称</label><input class="input" id="view-name" maxlength="40" value="${esc(suggested)}" autofocus></div>
+      <div class="note">保存当前页面与筛选条件：<span class="mono">${esc(hash)}</span></div>`,
+    footer: `<button class="btn" data-close-dialog>取消</button><button class="btn primary" data-view-save>保存</button>`,
+    onMount(root) {
+      const input = root.querySelector("#view-name");
+      const save = () => {
+        const name = input.value.trim();
+        if (!name) { toast("请输入视图名称", "bad"); input.focus(); return; }
+        const views = savedViews().filter((view) => view.name !== name);
+        views.unshift({ name, hash, route, ts: Date.now() });
+        localStorage.setItem("rtflow-views", JSON.stringify(views.slice(0, 12)));
+        closeDialog();
+        toast(`视图“${name}”已保存`, "ok");
+      };
+      root.querySelector("[data-view-save]").onclick = save;
+      input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); save(); } });
+      requestAnimationFrame(() => { input.focus(); input.select(); });
+    },
+  });
+}
+
 function openPalette() {
+  const views = savedViews().map((view) => ({
+    label: `视图 · ${view.name}`, hint: view.hash, icon: "★", group: "视图", keywords: "saved view 收藏",
+    run: () => { location.hash = view.hash; },
+  }));
   const pages = Object.entries(routes).map(([route, info]) => ({
     label: info.label, hint: `${info.group} / ${info.label}`, icon: "→", group: "页面",
     keywords: route,
@@ -365,6 +400,7 @@ function openPalette() {
   }));
   const actions = [
     { label: "刷新当前页面", hint: "重新加载当前数据", icon: "↻", shortcut: "R", group: "操作", run: () => navigate({ silent: true }) },
+    { label: "保存当前视图", hint: "保存页面与筛选条件到本地", icon: "★", group: "操作", run: () => saveCurrentView() },
     { label: "导出当前视图", hint: "CSV（当前页面支持时）", icon: "⇩", group: "操作", run: () => exportCurrentView() },
     { label: "切换深浅主题", hint: "在深色与浅色之间切换", icon: "◐", group: "操作", run: () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light") },
     { label: "切换表格密度", hint: "舒适 / 紧凑", icon: "≡", group: "操作", run: () => applyDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact") },
@@ -381,7 +417,7 @@ function openPalette() {
       state.session = null; renderLogin();
     } },
   ];
-  const palette = openCommandPalette([...pages, ...actions]);
+  const palette = openCommandPalette([...pages, ...views, ...actions]);
   (async () => {
     let streams = [], vods = [], paths = [];
     try {
@@ -405,7 +441,7 @@ function openPalette() {
         run: () => { location.hash = `#/vod?q=${encodeURIComponent(vod.title)}`; },
       })),
     ];
-    palette.setCommands([...pages, ...resources, ...actions]);
+    palette.setCommands([...pages, ...views, ...resources, ...actions]);
   })();
 }
 window.addEventListener("keydown", (event) => {
