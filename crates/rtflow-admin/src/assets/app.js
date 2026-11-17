@@ -201,6 +201,7 @@ function renderShell() {
             <button role="menuitem" data-user-time><span>时间显示</span><b data-label-time></b></button>
             <button role="menuitem" data-user-save-view><span>保存当前视图</span><b>★</b></button>
             <button role="menuitem" data-user-manage-views><span>管理视图</span><b>☆</b></button>
+            <button role="menuitem" data-user-shortcuts><span>键盘快捷键</span><b>?</b></button>
             <button data-user-logout class="danger"><span>退出登录</span></button>
           </div>
         </div>
@@ -262,6 +263,7 @@ function renderShell() {
   app.querySelector("[data-user-time]").onclick = () => { localStorage.setItem("rtflow-time", localStorage.getItem("rtflow-time") === "relative" ? "absolute" : "relative"); closeMenu(); navigate({ silent: true }); };
   app.querySelector("[data-user-save-view]").onclick = () => { closeMenu(); saveCurrentView(); };
   app.querySelector("[data-user-manage-views]").onclick = () => { closeMenu(); manageViews(); };
+  app.querySelector("[data-user-shortcuts]").onclick = () => { closeMenu(); openShortcuts(); };
   app.querySelector("[data-user-logout]").onclick = async () => {
     try { await api("/logout", { method: "POST" }); } catch (_) {}
     state.session = null;
