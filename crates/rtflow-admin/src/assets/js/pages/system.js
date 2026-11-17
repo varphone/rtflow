@@ -25,7 +25,7 @@ export async function render() {
   return {
     title: "系统",
     subtitle: "服务配置与存储诊断，均只读。",
-    actions: `<button class="btn small ghost" data-copy-diagnostic>复制诊断信息</button>`,
+    actions: `<button class="btn small ghost" data-download-diagnostic>下载诊断</button><button class="btn small ghost" data-copy-diagnostic>复制诊断信息</button>`,
     html: `<div class="stack">
       <div class="two-col">
         <section class="panel"><div class="panel-head"><h2>服务配置</h2><span class="sub">TOML · 只读</span><div class="actions" style="margin-left:auto"><button class="btn small ghost" data-copy-config>复制</button><button class="btn small ghost" data-download-config>下载</button></div></div>
@@ -97,6 +97,16 @@ export async function render() {
       }, 15000);
       root.querySelector("[data-copy-diagnostic]").onclick = async () => {
         try { await copyText(diagnostic); toast("诊断信息已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      };
+      root.querySelector("[data-download-diagnostic]").onclick = () => {
+        const now = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        const url = URL.createObjectURL(new Blob([diagnostic], { type: "text/plain;charset=utf-8" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `rtflow-diagnostic-${now}.txt`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        toast("诊断信息已下载", "ok");
       };
       root.querySelector("[data-copy-config]").onclick = async () => {
         try { await copyText(configText); toast("配置已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
