@@ -1,6 +1,6 @@
 import { api, apiV1 } from "../api.js";
 import { bytes, esc, uptime } from "../format.js";
-import { toast } from "../ui.js";
+import { copyText, toast } from "../ui.js";
 
 export async function render() {
   const [system, config, storage] = await Promise.all([api("/system"), apiV1("/config"), apiV1("/storage")]);
@@ -96,19 +96,19 @@ export async function render() {
         } catch (_) { /* keep last values */ }
       }, 15000);
       root.querySelector("[data-copy-diagnostic]").onclick = async () => {
-        try { await navigator.clipboard.writeText(diagnostic); toast("诊断信息已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(diagnostic); toast("诊断信息已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
       root.querySelector("[data-copy-config]").onclick = async () => {
-        try { await navigator.clipboard.writeText(configText); toast("配置已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(configText); toast("配置已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
       root.querySelectorAll("[data-copy-base]").forEach((button) => button.onclick = async () => {
-        try { await navigator.clipboard.writeText(button.dataset.copyBase); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(button.dataset.copyBase); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       });
       root.querySelectorAll("[data-copy-value]").forEach((button) => button.onclick = async () => {
-        try { await navigator.clipboard.writeText(button.dataset.copyValue); toast("已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(button.dataset.copyValue); toast("已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       });
       root.querySelector("[data-copy-backup]").onclick = async () => {
-        try { await navigator.clipboard.writeText(backupCommand); toast("命令已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(backupCommand); toast("命令已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
       root.querySelector("[data-download-config]").onclick = () => {
         const url = URL.createObjectURL(new Blob([configText], { type: "text/plain;charset=utf-8" }));

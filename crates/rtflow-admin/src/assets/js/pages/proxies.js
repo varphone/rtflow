@@ -1,6 +1,6 @@
 import { apiV1 } from "../api.js";
 import { bytes, empty, esc, exportCsv, iconSvg, num, stateBadge } from "../format.js";
-import { confirmDialog, openDialog, openDrawer, syncSortAria, toast } from "../ui.js";
+import { confirmDialog, copyText, openDialog, openDrawer, syncSortAria, toast } from "../ui.js";
 import { openProxyDrawer } from "../forms/proxy.js";
 
 let query = "";
@@ -188,7 +188,7 @@ function openProxyDetail(item, ctx, taken = []) {
       };
       timer = setInterval(update, 2000);
       root.querySelector("[data-proxy-copy-all]")?.addEventListener("click", async () => {
-        try { await navigator.clipboard.writeText(upstreams.map((upstream) => upstream.url || "").filter(Boolean).join("\n")); toast("上游列表已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(upstreams.map((upstream) => upstream.url || "").filter(Boolean).join("\n")); toast("上游列表已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       });
       root.querySelector("[data-pd-edit]").onclick = () => { close(); openProxyDrawer(item, () => ctx.reload()); };
       root.querySelector("[data-pd-clone]").onclick = () => { close(); openProxyDrawer(item, () => ctx.reload(), { clone: true, taken }); };

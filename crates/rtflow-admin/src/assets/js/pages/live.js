@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { audioLabel, bytes, empty, esc, exportCsv, fps, iconSvg, num, resolution, statusBadge } from "../format.js";
-import { confirmDialog, openDrawer, syncSortAria, toast } from "../ui.js";
+import { confirmDialog, copyText, openDrawer, syncSortAria, toast } from "../ui.js";
 import { playUrl } from "../player.js";
 
 let query = "";
@@ -191,7 +191,7 @@ export async function render(params) {
         else if (action === "play" || action === "play-ll") {
           playUrl(action === "play" ? stream.hls_url : stream.ll_hls_url, `${stream.name} · ${action === "play" ? "HLS" : "LL-HLS"}`);
         } else if (action === "copy") {
-          try { await navigator.clipboard.writeText(target.dataset.url); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+          try { await copyText(target.dataset.url); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
         } else if (action === "kick") {
           if (!await confirmDialog({ title: "断开流", message: `断开 ${target.dataset.path} 并关闭全部订阅？`, confirmLabel: "断开", danger: true })) return;
           try { await api("/streams?path=" + encodeURIComponent(target.dataset.path), { method: "DELETE" }); selected.delete(target.dataset.path); toast("流已断开", "ok"); ctx.reload(); }
@@ -280,13 +280,13 @@ function openDetail(stream, ctx) {
       };
       timer = setInterval(update, 3000);
       root.querySelectorAll("[data-copy]").forEach((button) => button.onclick = async () => {
-        try { await navigator.clipboard.writeText(button.dataset.copy); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(button.dataset.copy); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       });
       root.querySelector("[data-detail-play=hls]").onclick = () => playUrl(stream.hls_url, `${stream.name} · HLS`);
       root.querySelector("[data-detail-play=ll]").onclick = () => playUrl(stream.ll_hls_url, `${stream.name} · LL-HLS`);
       root.querySelector("[data-detail-copy-all]").onclick = async () => {
         const urls = [stream.hls_url, stream.ll_hls_url, stream.rtsp_url, stream.rtmp_url].filter(Boolean);
-        try { await navigator.clipboard.writeText(urls.join("\n")); toast("播放地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(urls.join("\n")); toast("播放地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
       root.querySelector("[data-detail-kick]").onclick = async () => {
         if (!await confirmDialog({ title: "断开流", message: `断开 ${stream.path} 并关闭全部订阅？`, confirmLabel: "断开", danger: true })) return;

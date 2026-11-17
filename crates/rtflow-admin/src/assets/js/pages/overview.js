@@ -1,5 +1,6 @@
 import { api, apiV1 } from "../api.js";
 import { bytes, dateTime, esc, iconSvg, num, uptime } from "../format.js";
+import { copyText } from "../ui.js";
 
 const actionNames = {
   "path.create": "创建路径", "path.update": "更新路径", "path.delete": "删除路径", "path.kick": "断开路径",
@@ -192,7 +193,7 @@ export async function render() {
       root.addEventListener("click", async (event) => {
         if (!event.target.closest("[data-copy-push]")) return;
         const value = `${current.system.rtmp_base || `rtmp://${location.hostname}:1935`}/live/your-stream`;
-        try { await navigator.clipboard.writeText(value); ctx.toast("推流地址已复制", "ok"); }
+        try { await copyText(value); ctx.toast("推流地址已复制", "ok"); }
         catch (_) { ctx.toast("复制失败", "bad"); }
       });
       setAuto(automatic);

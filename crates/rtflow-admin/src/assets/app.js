@@ -1,7 +1,7 @@
 import { api, apiV1, setCsrf } from "./js/api.js";
 import { icon } from "./js/icons.js";
 import { esc } from "./js/format.js";
-import { closeDialog, confirmDialog, openCommandPalette, openDialog, toast } from "./js/ui.js";
+import { closeDialog, confirmDialog, copyText, openCommandPalette, openDialog, toast } from "./js/ui.js";
 import * as overview from "./js/pages/overview.js";
 import * as live from "./js/pages/live.js";
 import * as vod from "./js/pages/vod.js";
@@ -585,7 +585,7 @@ function openPalette() {
     } },
     { label: "键盘快捷键", hint: "查看可用快捷键", icon: "⌘", shortcut: "?", group: "操作", run: () => openShortcuts() },
     { label: "复制当前页面地址", hint: "复制带 hash 的链接", icon: "⧉", group: "操作", run: async () => {
-      try { await navigator.clipboard.writeText(location.href); toast("链接已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      try { await copyText(location.href); toast("链接已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
     } },
     { label: "退出登录", hint: "结束当前管理员会话", icon: "⏻", group: "操作", run: async () => {
       try { await api("/logout", { method: "POST" }); } catch (_) {}

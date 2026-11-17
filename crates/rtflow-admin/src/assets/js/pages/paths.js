@@ -1,6 +1,6 @@
 import { api, apiV1 } from "../api.js";
 import { dateTime, empty, esc, exportCsv, iconSvg, isoTime } from "../format.js";
-import { confirmDialog, openDrawer, syncSortAria, toast } from "../ui.js";
+import { confirmDialog, copyText, openDrawer, syncSortAria, toast } from "../ui.js";
 import { openPathDrawer } from "../forms/path.js";
 
 let query = "";
@@ -182,7 +182,7 @@ function openPathDetail(item, system, ctx, taken = []) {
     </div>`,
     onMount(root) {
       root.querySelectorAll("[data-copy]").forEach((button) => button.onclick = async () => {
-        try { await navigator.clipboard.writeText(button.dataset.copy); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(button.dataset.copy); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       });
       root.querySelectorAll("[data-goto]").forEach((button) => button.onclick = () => {
         root.querySelector("[data-close-drawer]")?.click();

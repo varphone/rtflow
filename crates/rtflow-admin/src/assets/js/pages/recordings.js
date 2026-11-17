@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { bytes, dateTime, empty, esc, exportCsv, iconSvg, isoTime, num } from "../format.js";
-import { openDrawer, syncSortAria, toast } from "../ui.js";
+import { copyText, openDrawer, syncSortAria, toast } from "../ui.js";
 
 let query = "";
 let status = "all";
@@ -209,7 +209,7 @@ function openRecordingDetail(item, ctx) {
       timer = setInterval(update, 2000);
       const close = () => root.querySelector("[data-close-drawer]")?.click();
       root.querySelector("[data-rec-copy]").onclick = async () => {
-        try { await navigator.clipboard.writeText(item.directory || ""); toast("目录已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(item.directory || ""); toast("目录已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
       root.querySelector("[data-rec-detail-toggle]").onclick = async (event) => {
         const button = event.currentTarget;

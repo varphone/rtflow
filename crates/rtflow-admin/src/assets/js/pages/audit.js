@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { dateTime, empty, esc, iconSvg } from "../format.js";
-import { openDrawer, toast } from "../ui.js";
+import { copyText, openDrawer, toast } from "../ui.js";
 
 const PAGE_SIZE = 25;
 const labels = {
@@ -217,7 +217,7 @@ function openAuditEvent(event) {
         root.querySelector("[data-close-drawer]")?.click();
       });
       root.querySelector("[data-audit-copy]").onclick = async () => {
-        try { await navigator.clipboard.writeText(JSON.stringify(event, null, 2)); toast("JSON 已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(JSON.stringify(event, null, 2)); toast("JSON 已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
     },
   });

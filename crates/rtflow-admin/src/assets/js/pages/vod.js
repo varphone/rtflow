@@ -1,7 +1,7 @@
 import { api } from "../api.js";
 import { bytes, dateTime, duration, empty, esc, exportCsv, iconSvg } from "../format.js";
 import { openDrawer } from "../ui.js";
-import { confirmDialog, toast } from "../ui.js";
+import { confirmDialog, copyText, toast } from "../ui.js";
 import { playUrl } from "../player.js";
 
 let query = "";
@@ -76,7 +76,7 @@ export async function render(params) {
       copyBulk.onclick = async () => {
         if (!selected.size) return;
         const urls = allVods.filter((item) => selected.has(item.id)).map((item) => location.origin + item.playlist);
-        try { await navigator.clipboard.writeText(urls.join("\n")); toast(`已复制 ${urls.length} 个地址`, "ok"); }
+        try { await copyText(urls.join("\n")); toast(`已复制 ${urls.length} 个地址`, "ok"); }
         catch (_) { toast("复制失败", "bad"); }
       };
       bulk.onclick = async () => {
@@ -127,7 +127,7 @@ export async function render(params) {
         if (target.dataset.action === "detail" && vod) openVodDetail(vod, ctx);
         else if (target.dataset.action === "play" && vod) playUrl(vod.playlist, vod.title, { vod: true });
         else if (target.dataset.action === "copy") {
-          try { await navigator.clipboard.writeText(target.dataset.url); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+          try { await copyText(target.dataset.url); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
         } else if (target.dataset.action === "refresh-vod" && vod) {
           try { await api(`/vods/${encodeURIComponent(vod.id)}/refresh`, { method: "POST" }); toast("缓存已清除，下次播放重新生成", "ok"); ctx.reload(); }
           catch (error) { toast(error.message, "bad"); }
@@ -206,7 +206,7 @@ function openVodDetail(vod, ctx) {
     onMount(root) {
       const close = () => root.querySelector("[data-close-drawer]")?.click();
       root.querySelector("[data-vod-copy]").onclick = async () => {
-        try { await navigator.clipboard.writeText(location.origin + vod.playlist); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(location.origin + vod.playlist); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
       root.querySelector("[data-vod-play]").onclick = () => { close(); playUrl(vod.playlist, vod.title, { vod: true }); };
       root.querySelector("[data-vod-refresh]").onclick = async () => {

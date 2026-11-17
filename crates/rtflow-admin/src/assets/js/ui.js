@@ -16,6 +16,28 @@ export function toast(message, kind = "") {
   setTimeout(() => el.remove(), 3600);
 }
 
+export async function copyText(text) {
+  const value = String(text ?? "");
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    try { await navigator.clipboard.writeText(value); return; } catch (_) {}
+  }
+  const active = document.activeElement;
+  const area = document.createElement("textarea");
+  area.value = value;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.top = "-1000px";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
+  area.remove();
+  if (active instanceof HTMLElement) active.focus();
+  if (!ok) throw new Error("复制失败");
+}
+
 function focusFirst(root) {
   const target = root.querySelector("[autofocus]") || root.querySelector("input, select, textarea")
     || root.querySelector(".drawer-body, .modal-body")

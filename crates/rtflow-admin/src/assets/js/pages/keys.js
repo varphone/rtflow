@@ -1,6 +1,6 @@
 import { apiV1 } from "../api.js";
 import { dateTime, empty, esc, exportCsv, iconSvg, isoTime } from "../format.js";
-import { confirmDialog, openDrawer, secretDialog, syncSortAria, toast } from "../ui.js";
+import { confirmDialog, copyText, openDrawer, secretDialog, syncSortAria, toast } from "../ui.js";
 import { openKeyDrawer } from "../forms/key.js";
 
 let query = "";
@@ -88,7 +88,7 @@ export async function render(params, ctx) {
         if (target.dataset.action === "detail") {
           openKeyDetail(item, ctx);
         } else if (target.dataset.action === "copy") {
-          try { await navigator.clipboard.writeText(item.kid); toast("Key ID 已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+          try { await copyText(item.kid); toast("Key ID 已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
         } else if (target.dataset.action === "revoke") {
           if (target.disabled) return;
           if (!await confirmDialog({ title: "吊销密钥", message: `吊销 ${item.kid}？`, confirmLabel: "吊销", danger: true })) return;
@@ -174,7 +174,7 @@ function openKeyDetail(item, ctx) {
         openKeyDrawer((result) => { secretDialog("推流密钥（只显示一次）", result.secret); ctx.reload(); }, item);
       };
       root.querySelector("[data-key-copy]").onclick = async () => {
-        try { await navigator.clipboard.writeText(item.kid); toast("Key ID 已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(item.kid); toast("Key ID 已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
       root.querySelector("[data-key-revoke]").onclick = async (event) => {
         if (!await confirmDialog({ title: "吊销密钥", message: `吊销 ${item.kid}？`, confirmLabel: "吊销", danger: true })) return;

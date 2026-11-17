@@ -1,6 +1,6 @@
 import { apiV1 } from "../api.js";
 import { bytes, empty, esc, exportCsv, iconSvg, num } from "../format.js";
-import { confirmDialog, openDrawer, syncSortAria, toast } from "../ui.js";
+import { confirmDialog, copyText, openDrawer, syncSortAria, toast } from "../ui.js";
 import { openSrtDrawer } from "../forms/srt.js";
 
 let tab = "pull";
@@ -187,7 +187,7 @@ function openSrtDetail(item, tab, ctx, taken = [], takenMounts = []) {
       root.querySelector("[data-srt-edit]").onclick = () => { close(); openSrtDrawer(tab, item, () => ctx.reload()); };
       root.querySelector("[data-srt-clone]").onclick = () => { close(); openSrtDrawer(tab, item, () => ctx.reload(), { clone: true, taken, takenMounts }); };
       root.querySelector("[data-srt-copy]").onclick = async () => {
-        try { await navigator.clipboard.writeText(item.remote || ""); toast("远端地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await copyText(item.remote || ""); toast("远端地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
       root.querySelector("[data-srt-live]")?.addEventListener("click", () => {
         close();
