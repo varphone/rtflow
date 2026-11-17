@@ -244,7 +244,7 @@ function detail(stream) {
       <div class="detail-item"><span>RTP 流量</span><strong class="mono" data-detail="octets">${bytes(stream.rtp_octets)}</strong></div>
     </div></section>
     <section class="drawer-section"><h3>播放地址</h3>${endpoint("HLS", stream.hls_url)}${endpoint("LL-HLS", stream.ll_hls_url)}${endpoint("RTSP", stream.rtsp_url)}${endpoint("RTMP", stream.rtmp_url)}</section>
-    <div class="actions"><button class="btn small" data-detail-play="hls">预览 HLS</button><button class="btn small" data-detail-play="ll">预览 LL-HLS</button><button class="btn small danger" data-detail-kick>断开此流</button></div>
+    <div class="actions"><button class="btn small" data-detail-play="hls">预览 HLS</button><button class="btn small" data-detail-play="ll">预览 LL-HLS</button><button class="btn small ghost" data-detail-copy-all>复制全部地址</button><button class="btn small danger" data-detail-kick>断开此流</button></div>
   </div>`;
 }
 
@@ -283,6 +283,10 @@ function openDetail(stream, ctx) {
       });
       root.querySelector("[data-detail-play=hls]").onclick = () => playUrl(stream.hls_url, `${stream.name} · HLS`);
       root.querySelector("[data-detail-play=ll]").onclick = () => playUrl(stream.ll_hls_url, `${stream.name} · LL-HLS`);
+      root.querySelector("[data-detail-copy-all]").onclick = async () => {
+        const urls = [stream.hls_url, stream.ll_hls_url, stream.rtsp_url, stream.rtmp_url].filter(Boolean);
+        try { await navigator.clipboard.writeText(urls.join("\n")); toast("播放地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      };
       root.querySelector("[data-detail-kick]").onclick = async () => {
         if (!await confirmDialog({ title: "断开流", message: `断开 ${stream.path} 并关闭全部订阅？`, confirmLabel: "断开", danger: true })) return;
         try {

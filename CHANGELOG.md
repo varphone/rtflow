@@ -35,6 +35,8 @@
 
 ### Changed
 
+- 直播详情支持复制全部播放地址（每行一个）。
+
 - 支持 prefers-reduced-motion，关闭过渡与循环动画。
 
 - 全站链接、按钮、输入与可聚焦元素统一 focus-visible 焦点环。
