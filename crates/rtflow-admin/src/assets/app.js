@@ -552,6 +552,11 @@ function openPalette() {
     label: `排序 · ${button.textContent.replace(/[↕↑↓]/g, "").trim()}`, hint: "当前页面", icon: "⇅", group: "排序", keywords: "sort",
     run: () => button.click(),
   }));
+  const paging = [];
+  const auditPrev = document.querySelector("[data-audit-prev]");
+  const auditNext = document.querySelector("[data-audit-next]");
+  if (auditPrev && !auditPrev.disabled) paging.push({ label: "分页 · 上一页", hint: "审计日志", icon: "←", group: "分页", run: () => auditPrev.click() });
+  if (auditNext && !auditNext.disabled) paging.push({ label: "分页 · 下一页", hint: "审计日志", icon: "→", group: "分页", run: () => auditNext.click() });
   const views = savedViews().map((view) => ({
     label: `视图 · ${view.name}`, hint: view.hash, icon: "★", group: "视图", keywords: "saved view 收藏",
     run: () => { location.hash = view.hash; },
@@ -585,7 +590,7 @@ function openPalette() {
       state.session = null; renderLogin();
     } },
   ];
-  const palette = openCommandPalette([...pages, ...filters, ...sorts, ...views, ...actions]);
+  const palette = openCommandPalette([...pages, ...filters, ...sorts, ...paging, ...views, ...actions]);
   (async () => {
     let streams = [], vods = [], paths = [];
     try {
@@ -609,7 +614,7 @@ function openPalette() {
         run: () => { location.hash = `#/vod?q=${encodeURIComponent(vod.title)}`; },
       })),
     ];
-    palette.setCommands([...pages, ...filters, ...sorts, ...views, ...resources, ...actions]);
+    palette.setCommands([...pages, ...filters, ...sorts, ...paging, ...views, ...resources, ...actions]);
   })();
 }
 window.addEventListener("keydown", (event) => {
