@@ -15,6 +15,8 @@ export async function render() {
     srt: ["SRT", "SRT 推流/拉流"],
     record: ["录制", "录制为 VOD"],
   };
+  const backupFile = `rtflow-backup-${new Date().toISOString().slice(0, 10)}.db`;
+  const backupCommand = `rtflow-server --db-backup ${backupFile}`;
   const features = (system.features || []).map((feature) => {
     const [label, description] = featureInfo[feature] || [feature, feature];
     return `<span class="badge" title="${esc(description)}">${esc(label)}</span>`;
@@ -37,7 +39,7 @@ export async function render() {
             <dt>RTMP 基地址</dt><dd class="mono base-value"><span title="${esc(system.rtmp_base || "")}">${esc(system.rtmp_base || "—")}</span>${system.rtmp_base ? `<button class="copy-inline" data-copy-base="${esc(system.rtmp_base)}" aria-label="复制 RTMP 基地址" title="复制">⧉</button>` : ""}</dd></dl></div></section>
           <section class="panel"><div class="panel-head"><h2>存储</h2></div><div class="panel-body"><dl class="kv">
             <dt>Schema</dt><dd class="mono">v${Number(storage.schema_version || 0)}</dd><dt>数据库大小</dt><dd class="mono" data-storage-bytes>${bytes(storage.bytes)}</dd>
-            <dt>备份</dt><dd class="mono">rtflow-server --db-backup FILE</dd></dl>
+            <dt>备份</dt><dd class="mono" style="overflow-wrap:anywhere">${esc(backupCommand)}</dd></dl>
             <div class="actions" style="margin-top:10px"><button class="btn small ghost" data-copy-backup>复制备份命令</button></div></div></section>
           <section class="panel"><div class="panel-head"><h2>构建特性</h2></div><div class="panel-body"><div class="feature-list">${features || '<span class="faint">无</span>'}</div></div></section>
         </div>
@@ -86,7 +88,7 @@ export async function render() {
         try { await navigator.clipboard.writeText(button.dataset.copyValue); toast("已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       });
       root.querySelector("[data-copy-backup]").onclick = async () => {
-        try { await navigator.clipboard.writeText("rtflow-server --db-backup backup.db"); toast("命令已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+        try { await navigator.clipboard.writeText(backupCommand); toast("命令已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
       root.querySelector("[data-download-config]").onclick = () => {
         const url = URL.createObjectURL(new Blob([configText], { type: "text/plain;charset=utf-8" }));
