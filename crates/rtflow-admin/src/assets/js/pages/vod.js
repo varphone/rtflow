@@ -82,6 +82,8 @@ export async function render(params) {
       bulk.onclick = async () => {
         if (!selected.size) return;
         if (!await confirmDialog({ title: "刷新点播缓存", message: `刷新所选 ${selected.size} 个点播的生成缓存？`, confirmLabel: "刷新", danger: false })) return;
+        bulk.disabled = true; bulk.classList.add("loading");
+        copyBulk.disabled = true;
         let failed = 0;
         for (const id of [...selected]) {
           try { await api(`/vods/${encodeURIComponent(id)}/refresh`, { method: "POST" }); }
