@@ -26,7 +26,7 @@ export async function render(params, ctx) {
     title: "RTSP 代理",
     subtitle: "拉流代理配置与运行状态。",
     actions: `<button class="btn small ghost" data-proxy-export>导出</button><button class="btn small primary" data-action="create">新增代理</button><button class="btn small" data-action="refresh">刷新</button>`,
-    html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-proxy-search value="${esc(query)}" placeholder="搜索路径或上游"></div>
+    html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-proxy-search aria-label="搜索 RTSP 代理" value="${esc(query)}" placeholder="搜索路径或上游"></div>
       <div class="seg">${["all", "streaming", "idle", "backoff", "describing"].map((state) => `<button data-proxy-filter="${state}" class="${filter === state ? "active" : ""}">${state === "all" ? "全部" : state}</button>`).join("")}</div>
       <span class="meta" data-proxy-count>${initial.length} 条 · ${initial.filter((item) => item.state === "streaming").length} streaming</span><button class="btn small ghost" data-proxy-reset ${query.trim() || filter !== "all" ? "" : "hidden"}>重置</button></div>
       <section class="panel" data-proxy-panel>${initial.length ? table(initial) : empty("暂无代理", "新增一个 RTSP 拉流代理", "proxy", `<a class="btn small" href="#/config/proxies?new=1">新增代理</a>`)}</section>`,
