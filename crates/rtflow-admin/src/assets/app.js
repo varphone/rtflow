@@ -194,7 +194,7 @@ function renderShell() {
         <div class="crumbs" id="crumbs"></div>
         <div class="top-actions">
           <button class="command-trigger" data-command-open aria-label="打开命令面板">${icon("search")}<span>搜索</span><kbd>Ctrl K</kbd></button>
-          <a class="health" href="#/system" title="查看系统状态"><span class="dot ok"></span>运行中</a>
+          <a class="health" href="#/system" title="查看系统状态" data-health><span class="dot ok"></span><span data-health-label>运行中</span></a>
           <button class="user-chip" data-user-menu aria-haspopup="menu" aria-expanded="false"><span class="avatar">${esc((state.session?.username || "A").slice(0, 1).toUpperCase())}</span><span>${esc(state.session?.username || "admin")}</span><span class="chev">▾</span></button>
           <div class="user-popover" data-user-popover role="menu" aria-label="用户菜单" hidden>
             <div class="user-popover-head"><b>${esc(state.session?.username || "admin")}</b><span>${state.session?.readonly ? "只读模式" : "管理员"}</span></div>
@@ -388,6 +388,27 @@ function openShortcuts() {
     footer: `<button class="btn" data-close-dialog>关闭</button>`,
   });
 }
+
+async function refreshHealth() {
+  if (!state.session) return;
+  const node = document.querySelector("[data-health]");
+  if (!node) return;
+  try {
+    const response = await fetch("/healthz", { cache: "no-store" });
+    const ok = response.ok;
+    node.querySelector(".dot").className = `dot ${ok ? "ok" : "bad"}`;
+    const label = node.querySelector("[data-health-label]");
+    if (label) label.textContent = ok ? "运行中" : "异常";
+    node.title = ok ? "服务运行正常" : "健康检查失败";
+  } catch (_) {
+    node.querySelector(".dot").className = "dot bad";
+    const label = node.querySelector("[data-health-label]");
+    if (label) label.textContent = "异常";
+    node.title = "无法连接服务";
+  }
+}
+window.addEventListener("online", () => { refreshHealth(); });
+setInterval(() => { if (!document.hidden && state.session) refreshHealth(); }, 30000);
 
 function savedViews() {
   try { return JSON.parse(localStorage.getItem("rtflow-views") || "[]"); } catch (_) { return []; }
