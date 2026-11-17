@@ -512,7 +512,11 @@ input[type="search"]::-webkit-search-cancel-button:hover { background: var(--tex
   }
 }
 
-@page { margin: 12mm; }
+@page {
+  margin: 12mm;
+  @bottom-left { content: "rtflow"; color: #666; font-size: 9px; }
+  @bottom-right { content: counter(page) " / " counter(pages); color: #666; font-size: 9px; }
+}
 
 @media print {
   #content::before {

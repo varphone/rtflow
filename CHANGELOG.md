@@ -45,6 +45,8 @@
 
 ### Changed
 
+- 打印页脚显示 rtflow 与页码（counter(page)/counter(pages)）。
+
 - toast 悬停暂停消失、移出后 1.2 秒关闭，点击立即关闭。
 
 - 系统页支持下载诊断信息为带时间戳的文本文件。
