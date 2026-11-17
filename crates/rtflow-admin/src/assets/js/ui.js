@@ -233,9 +233,10 @@ export function syncSortAria(root, sort) {
   root.querySelectorAll("[data-sort]").forEach((button) => {
     const th = button.closest("th");
     if (!th) return;
-    th.setAttribute("aria-sort", sort.field === button.dataset.sort
-      ? (sort.dir > 0 ? "ascending" : "descending")
-      : "none");
+    const active = sort.field === button.dataset.sort;
+    th.setAttribute("aria-sort", active ? (sort.dir > 0 ? "ascending" : "descending") : "none");
+    const label = button.textContent.replace(/[↕↑↓]/g, "").trim();
+    button.setAttribute("aria-label", `按${label}排序${active ? (sort.dir > 0 ? "（升序）" : "（降序）") : ""}`);
   });
 }
 
