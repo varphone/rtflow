@@ -25,7 +25,7 @@ export async function render() {
   return {
     title: "系统",
     subtitle: "服务配置与存储诊断，均只读。",
-    actions: "",
+    actions: `<button class="btn small ghost" data-copy-diagnostic>复制诊断信息</button>`,
     html: `<div class="stack">
       <div class="two-col">
         <section class="panel"><div class="panel-head"><h2>服务配置</h2><span class="sub">TOML · 只读</span><div class="actions" style="margin-left:auto"><button class="btn small ghost" data-copy-config>复制</button><button class="btn small ghost" data-download-config>下载</button></div></div>
@@ -59,6 +59,20 @@ export async function render() {
     </div>`,
     mount(root) {
       const configText = config.toml || "";
+      const diagnostic = [
+        `rtflow ${system.version || ""}`,
+        `time: ${new Date().toISOString()}`,
+        `url: ${location.href}`,
+        `uptime: ${uptime(system.uptime_seconds)}`,
+        `mounts: ${Number(system.mounts || 0)}`,
+        `schema: v${Number(storage.schema_version || 0)}`,
+        `database: ${bytes(storage.bytes)}`,
+        `features: ${(system.features || []).join(", ")}`,
+        `hls: ${system.hls_prefix || "/hls"}`,
+        `rtsp: ${system.rtsp_base || "-"}`,
+        `rtmp: ${system.rtmp_base || "-"}`,
+        `user-agent: ${navigator.userAgent}`,
+      ].join("\n");
       const uptimeNode = root.querySelector("[data-system-uptime]");
       const mountsNode = root.querySelector("[data-system-mounts]");
       const storageNode = root.querySelector("[data-storage-bytes]");
@@ -81,6 +95,9 @@ export async function render() {
           }
         } catch (_) { /* keep last values */ }
       }, 15000);
+      root.querySelector("[data-copy-diagnostic]").onclick = async () => {
+        try { await navigator.clipboard.writeText(diagnostic); toast("诊断信息已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      };
       root.querySelector("[data-copy-config]").onclick = async () => {
         try { await navigator.clipboard.writeText(configText); toast("配置已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
