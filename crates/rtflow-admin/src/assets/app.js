@@ -60,7 +60,9 @@ async function refreshCounts() {
 function currentRoute() {
   let route = (location.hash || "").replace(/^#\/?/, "").split("?")[0];
   if (route === "control") route = "config/paths";
-  return routes[route] ? route : "overview";
+  if (routes[route]) return route;
+  if (route && location.hash) history.replaceState(null, "", "#/overview");
+  return "overview";
 }
 
 function theme() {
