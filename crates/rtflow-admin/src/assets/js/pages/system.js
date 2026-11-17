@@ -17,7 +17,7 @@ export async function render() {
         <div class="stack">
           <section class="panel"><div class="panel-head"><h2>运行</h2></div><div class="panel-body"><dl class="kv">
             <dt>版本</dt><dd class="mono">${esc(system.version || "—")}</dd><dt>运行时长</dt><dd data-system-uptime>${esc(uptime(system.uptime_seconds))}</dd>
-            <dt>在线流</dt><dd class="mono">${Number(system.mounts || 0)}</dd><dt>控制台路径</dt><dd class="mono base-value"><span>${esc(system.base_path || "/admin")}</span><button class="copy-inline" data-copy-value="${esc(system.base_path || "/admin")}" aria-label="复制控制台路径" title="复制">⧉</button></dd>
+            <dt>在线流</dt><dd class="mono" data-system-mounts>${Number(system.mounts || 0)}</dd><dt>控制台路径</dt><dd class="mono base-value"><span>${esc(system.base_path || "/admin")}</span><button class="copy-inline" data-copy-value="${esc(system.base_path || "/admin")}" aria-label="复制控制台路径" title="复制">⧉</button></dd>
             <dt>HLS 前缀</dt><dd class="mono base-value"><span>${esc(system.hls_prefix || "/hls")}</span><button class="copy-inline" data-copy-value="${esc(system.hls_prefix || "/hls")}" aria-label="复制 HLS 前缀" title="复制">⧉</button></dd>
             <dt>RTSP 基地址</dt><dd class="mono base-value"><span title="${esc(system.rtsp_base || "")}">${esc(system.rtsp_base || "—")}</span>${system.rtsp_base ? `<button class="copy-inline" data-copy-base="${esc(system.rtsp_base)}" aria-label="复制 RTSP 基地址" title="复制">⧉</button>` : ""}</dd>
             <dt>RTMP 基地址</dt><dd class="mono base-value"><span title="${esc(system.rtmp_base || "")}">${esc(system.rtmp_base || "—")}</span>${system.rtmp_base ? `<button class="copy-inline" data-copy-base="${esc(system.rtmp_base)}" aria-label="复制 RTMP 基地址" title="复制">⧉</button>` : ""}</dd></dl></div></section>
@@ -41,11 +41,24 @@ export async function render() {
     mount(root) {
       const configText = config.toml || "";
       const uptimeNode = root.querySelector("[data-system-uptime]");
-      const startedAt = Date.now();
-      const baseUptime = Number(system.uptime_seconds || 0);
-      const timer = setInterval(() => {
-        if (document.hidden || !uptimeNode) return;
-        uptimeNode.textContent = uptime(baseUptime + (Date.now() - startedAt) / 1000);
+      const mountsNode = root.querySelector("[data-system-mounts]");
+      let startedAt = Date.now();
+      let baseUptime = Number(system.uptime_seconds || 0);
+      const tick = () => {
+        if (document.hidden) return;
+        if (uptimeNode) uptimeNode.textContent = uptime(baseUptime + (Date.now() - startedAt) / 1000);
+      };
+      const timer = setInterval(async () => {
+        tick();
+        if (document.hidden) return;
+        try {
+          const latest = await api("/system");
+          if (mountsNode) mountsNode.textContent = String(Number(latest.mounts || 0));
+          if (latest.uptime_seconds !== undefined) {
+            baseUptime = Number(latest.uptime_seconds || 0);
+            startedAt = Date.now();
+          }
+        } catch (_) { /* keep local uptime */ }
       }, 15000);
       root.querySelector("[data-copy-config]").onclick = async () => {
         try { await navigator.clipboard.writeText(configText); toast("配置已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
