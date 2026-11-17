@@ -281,8 +281,8 @@ fn push_video_adaptation_set(
     let (width, height) = video_dimensions
         .map(|(width, height)| (width as u32, height as u32))
         .unwrap_or_else(|| (track.width.unwrap_or(1920), track.height.unwrap_or(1080)));
-    let frame_rate = track
-        .frame_rate
+    let frame_rate = video_frame_rate(segments, timescale)
+        .or(track.frame_rate)
         .map(|(numerator, denominator)| format!("{numerator}/{denominator}"))
         .unwrap_or_else(|| "30".to_string());
     let bandwidth = estimated_bandwidth(segments, true);
@@ -361,6 +361,94 @@ fn query_suffix(query: &str) -> String {
     } else {
         format!("?{query}")
     }
+}
+
+/// Estimate average video frame rate from the `trun` sample durations in
+/// fMP4 media segments. Falls back to the track description when the data is
+/// unavailable or not fMP4.
+fn video_frame_rate(segments: &[Segment], timescale: u32) -> Option<(u32, u32)> {
+    if timescale == 0 {
+        return None;
+    }
+    let mut samples: u64 = 0;
+    let mut duration_ticks: u64 = 0;
+    for segment in segments {
+        let Some((count, ticks)) = trun_stats(&segment.data) else {
+            continue;
+        };
+        samples += count as u64;
+        duration_ticks += ticks;
+    }
+    if samples == 0 || duration_ticks == 0 {
+        return None;
+    }
+    let fps = samples as f64 * f64::from(timescale) / duration_ticks as f64;
+    if !(1.0..=240.0).contains(&fps) {
+        return None;
+    }
+    Some((fps.round() as u32, 1))
+}
+
+/// Sum sample count and sample durations over all `trun` boxes in an fMP4
+/// media segment.
+fn trun_stats(data: &[u8]) -> Option<(u32, u64)> {
+    let mut count = 0u32;
+    let mut ticks = 0u64;
+    let mut offset = 0usize;
+    while offset + 16 <= data.len() {
+        let Some(position) = data[offset..]
+            .windows(4)
+            .position(|window| window == b"trun")
+        else {
+            break;
+        };
+        let type_pos = offset + position;
+        let box_start = type_pos.checked_sub(4)?;
+        let size = u32::from_be_bytes(data[box_start..box_start + 4].try_into().ok()?) as usize;
+        let box_end = box_start.checked_add(size)?;
+        if size < 16 || box_end > data.len() {
+            offset = type_pos + 4;
+            continue;
+        }
+        let flags = u32::from_be_bytes(data[type_pos + 4..type_pos + 8].try_into().ok()?);
+        let sample_count = u32::from_be_bytes(data[type_pos + 8..type_pos + 12].try_into().ok()?);
+        let sample_duration = flags & 0x000100 != 0;
+        let sample_size = flags & 0x000200 != 0;
+        let sample_flags = flags & 0x000400 != 0;
+        let sample_cts = flags & 0x000800 != 0;
+        let _data_offset = flags & 0x000001 != 0;
+        // run data starts right after the optional data_offset field, which
+        // occupies the 4 bytes immediately after sample_count.
+        let mut cursor = type_pos + 16;
+        let mut sample_ticks = 0u64;
+        for _ in 0..sample_count {
+            if cursor + 4 > box_end {
+                return None;
+            }
+            if sample_duration {
+                sample_ticks += u64::from(u32::from_be_bytes(
+                    data[cursor..cursor + 4].try_into().ok()?,
+                ));
+                cursor += 4;
+            }
+            if sample_size {
+                cursor += 4;
+            }
+            if sample_flags {
+                cursor += 4;
+            }
+            if sample_cts {
+                cursor += 4;
+            }
+            if cursor > box_end {
+                return None;
+            }
+        }
+        count += sample_count;
+        ticks += sample_ticks;
+        offset = box_end;
+    }
+    (count > 0).then_some((count, ticks))
 }
 
 fn estimated_bandwidth(segments: &[Segment], video: bool) -> u64 {
@@ -562,6 +650,28 @@ mod tests {
         assert!(mpd.contains("height=\"720\""));
         assert!(mpd.contains("frameRate=\"30/1\""));
         assert!(mpd.contains("audioSamplingRate=\"44100\""));
+    }
+
+    #[test]
+    fn estimates_frame_rate_from_trun() {
+        let samples = 2u32;
+        let tick = 3600u32;
+        let trun_size = 20 + samples * 16;
+        let mut data = Vec::new();
+        data.extend_from_slice(&trun_size.to_be_bytes());
+        data.extend_from_slice(b"trun");
+        data.extend_from_slice(&0x000f01u32.to_be_bytes());
+        data.extend_from_slice(&samples.to_be_bytes());
+        data.extend_from_slice(&0u32.to_be_bytes());
+        for _ in 0..samples {
+            data.extend_from_slice(&tick.to_be_bytes());
+            data.extend_from_slice(&0u32.to_be_bytes());
+            data.extend_from_slice(&0u32.to_be_bytes());
+            data.extend_from_slice(&0i32.to_be_bytes());
+        }
+        let mut segment = segment(1, 0);
+        segment.data = Bytes::from(data);
+        assert_eq!(video_frame_rate(&[segment], 90_000), Some((25, 1)));
     }
 
     #[test]

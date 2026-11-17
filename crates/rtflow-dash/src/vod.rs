@@ -18,7 +18,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-const VOD_CACHE_VERSION: u32 = 2;
+const VOD_CACHE_VERSION: u32 = 3;
 
 #[derive(Clone)]
 pub struct DashVodEntry {
@@ -219,14 +219,8 @@ fn generate(
         segment_ms = config.segment_duration.as_millis() as u64,
         "DASH VOD generation started"
     );
-    let mut video_description = description.clone();
-    video_description
-        .tracks
-        .retain(|track| track.kind == MediaKind::Video);
-    let mut audio_description = description.clone();
-    audio_description
-        .tracks
-        .retain(|track| track.kind == MediaKind::Audio);
+    let video_description = crate::only_kind(&description, MediaKind::Video);
+    let audio_description = crate::only_kind(&description, MediaKind::Audio);
     let track_kinds: HashMap<u8, MediaKind> = description
         .tracks
         .iter()
