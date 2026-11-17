@@ -94,8 +94,9 @@ export async function render(params, ctx) {
         if (target.dataset.action === "toggle") {
           const body = { name: item.name, enabled: !item.enabled, remote: item.remote, stream_id: item.stream_id || null,
             mount: item.mount || null, pbkeylen: item.pbkeylen || 0, latency_ms: item.latency_ms || null };
+          target.disabled = true; target.classList.add("loading");
           try { await apiV1(`/srt/${tab === "push" ? "pushes" : "pulls"}/${encodeURIComponent(item.id)}`, { method: "PATCH", body }); toast("状态已更新", "ok"); ctx2.reload(); }
-          catch (error) { toast(error.message, "bad"); }
+          catch (error) { toast(error.message, "bad"); target.disabled = false; target.classList.remove("loading"); }
         }
         if (target.dataset.action === "delete") {
           if (!await confirmDialog({ title: "删除 SRT 端点", message: `删除 ${item.id}？`, confirmLabel: "删除", danger: true })) return;
@@ -192,16 +193,20 @@ function openSrtDetail(item, tab, ctx) {
         close();
         location.hash = `#/live?q=${encodeURIComponent(item.mount || "")}`;
       });
-      root.querySelector("[data-srt-toggle]").onclick = async () => {
+      root.querySelector("[data-srt-toggle]").onclick = async (event) => {
+        const button = event.currentTarget;
         const body = { name: item.name, enabled: !enabled, remote: item.remote, stream_id: item.stream_id || null,
           mount: item.mount || null, pbkeylen: item.pbkeylen || 0, latency_ms: item.latency_ms || null };
+        button.disabled = true; button.classList.add("loading");
         try { await apiV1(`/srt/${tab === "push" ? "pushes" : "pulls"}/${encodeURIComponent(item.id)}`, { method: "PATCH", body }); toast("状态已更新", "ok"); close(); ctx.reload(); }
-        catch (error) { toast(error.message, "bad"); }
+        catch (error) { toast(error.message, "bad"); button.disabled = false; button.classList.remove("loading"); }
       };
-      root.querySelector("[data-srt-delete]").onclick = async () => {
+      root.querySelector("[data-srt-delete]").onclick = async (event) => {
         if (!await confirmDialog({ title: "删除 SRT 端点", message: `删除 ${item.id}？`, confirmLabel: "删除", danger: true })) return;
+        const button = event.currentTarget;
+        button.disabled = true; button.classList.add("loading");
         try { await apiV1(`/srt/${tab === "push" ? "pushes" : "pulls"}/${encodeURIComponent(item.id)}`, { method: "DELETE" }); toast("已删除", "ok"); close(); ctx.reload(); }
-        catch (error) { toast(error.message, "bad"); }
+        catch (error) { toast(error.message, "bad"); button.disabled = false; button.classList.remove("loading"); }
       };
     },
   });
