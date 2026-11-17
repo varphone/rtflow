@@ -4,7 +4,7 @@ impl ProxyService {
     /// Restart a proxy now, or defer until its current subscribers leave.
     /// Returns `true` when the restart was deferred.
     pub fn restart(self: &Arc<Self>, path: &str) -> rtflow_core::error::Result<bool> {
-        let (upstream, options, grace, always, refresh, mount) = {
+        let (mut upstream, options, grace, always, refresh, mount) = {
             let entries = self
                 .entries
                 .lock()
@@ -27,6 +27,7 @@ impl ProxyService {
                 entry.mount.clone(),
             )
         };
+        upstream.reset_state();
         let subscribers = mount
             .as_ref()
             .map(|mount| {

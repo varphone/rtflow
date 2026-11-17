@@ -217,6 +217,12 @@ impl ProxyService {
         if upstream.endpoints().len() > self.policy.max_upstreams {
             return Err(rtflow_core::error::Error::Limit("proxy upstream count"));
         }
+        let mut options = options;
+        // A restart reuses the previous MountOptions; its cancellation token
+        // belongs to the cancelled mount and would stop the new watcher
+        // immediately. Every registration gets a fresh child of the service
+        // token instead.
+        options.cancel = Some(self.cancel.child_token());
         let mut entries = self
             .entries
             .lock()
@@ -259,7 +265,7 @@ impl ProxyService {
                 .clone();
             match self.mounts.register_with(path.clone(), config, options) {
                 Ok(handle) => {
-                    self.start_watch(&handle, self.default_grace, false);
+                    self.start_watch(&handle, grace.unwrap_or(self.default_grace), always);
                     let mut guard = entry
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);

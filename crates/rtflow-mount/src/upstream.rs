@@ -298,6 +298,13 @@ impl UpstreamConfig {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = state;
     }
+
+    /// Detach the shared proxy state from other clones (for example when a
+    /// restart re-registers the same upstream while the old worker is still
+    /// shutting down, so a late `Stopped` cannot overwrite the new state).
+    pub fn reset_state(&mut self) {
+        self.state = Arc::new(Mutex::new(ProxyState::Idle));
+    }
     pub fn next_retry(&self, attempts: u32) -> Duration {
         let ms = (self.reconnect.initial_delay.as_millis() as f32
             * self
