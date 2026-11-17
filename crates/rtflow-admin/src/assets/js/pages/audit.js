@@ -32,7 +32,7 @@ export async function render(params) {
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-audit-search value="${esc(initialQuery)}" placeholder="搜索动作、路径、操作者或详情"></div>
       <div class="seg"><button data-audit-kind="all" class="${initialKind === "all" ? "active" : ""}">全部</button><button data-audit-kind="change" class="${initialKind === "change" ? "active" : ""}">变更</button><button data-audit-kind="auth" class="${initialKind === "auth" ? "active" : ""}">认证</button></div>
       <select class="input" data-audit-category aria-label="事件类型" style="width:auto"><option value="all" ${initialCategory === "all" ? "selected" : ""}>全部类型</option><option value="path" ${initialCategory === "path" ? "selected" : ""}>路径</option><option value="key" ${initialCategory === "key" ? "selected" : ""}>密钥</option><option value="proxy" ${initialCategory === "proxy" ? "selected" : ""}>代理</option><option value="srt" ${initialCategory === "srt" ? "selected" : ""}>SRT</option><option value="record" ${initialCategory === "record" ? "selected" : ""}>录制</option><option value="auth" ${initialCategory === "auth" ? "selected" : ""}>认证</option></select>
-      <span class="meta" data-audit-count>${events.length} 条</span>
+      <span class="meta" data-audit-count>${events.length} 条</span><span class="meta" data-audit-updated style="margin-left:0"></span>
       <button class="btn small ghost" data-audit-reset ${initialQuery.trim() || initialKind !== "all" || initialCategory !== "all" ? "" : "hidden"}>重置</button>
       <button class="btn small ghost" data-audit-new hidden></button></div>
       ${payload.enabled === false ? `<div class="error-banner">审计日志未启用：在服务配置中设置审计路径后重启。</div>` : ""}
@@ -43,6 +43,8 @@ export async function render(params) {
       const search = root.querySelector("[data-audit-search]");
       const tbody = root.querySelector("[data-audit-rows]");
       const count = root.querySelector("[data-audit-count]");
+      const updatedLabel = root.querySelector("[data-audit-updated]");
+      const markUpdated = () => { if (updatedLabel) updatedLabel.textContent = `更新于 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`; };
       const range = root.querySelector("[data-audit-range]");
       const pageLabel = root.querySelector("[data-audit-page]");
       const prev = root.querySelector("[data-audit-prev]");
@@ -78,6 +80,7 @@ export async function render(params) {
         const start = (page - 1) * PAGE_SIZE;
         const slice = items.slice(start, start + PAGE_SIZE);
         count.textContent = `${items.length} 条`;
+        markUpdated();
         range.textContent = items.length ? `${start + 1}–${start + slice.length} / ${items.length}` : "0 条";
         pageLabel.textContent = `${page} / ${pages}`;
         reset.hidden = !(search.value.trim() || kind !== "all" || category !== "all" || page > 1);
@@ -99,6 +102,7 @@ export async function render(params) {
           const known = new Set(current.map(signature));
           newCount += next.filter((event) => !known.has(signature(event))).length;
           pending = next;
+          markUpdated();
           showNew();
           return;
         }
