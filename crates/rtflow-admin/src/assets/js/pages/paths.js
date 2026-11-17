@@ -94,13 +94,15 @@ export async function render(params, ctx) {
           return;
         }
         if (target.dataset.action === "kick") {
+          target.disabled = true; target.classList.add("loading");
           try { await apiV1("/kick?path=" + encodeURIComponent(item.name), { method: "POST" }); toast("已断开", "ok"); ctx.reload(); }
-          catch (error) { toast(error.message, "bad"); }
+          catch (error) { toast(error.message, "bad"); target.disabled = false; target.classList.remove("loading"); }
         }
         if (target.dataset.action === "delete") {
           if (!await confirmDialog({ title: "删除路径", message: `删除 ${item.name}？`, confirmLabel: "删除", danger: true })) return;
+          target.disabled = true; target.classList.add("loading");
           try { await apiV1("/paths/" + encodeURIComponent(item.name), { method: "DELETE" }); toast("路径已删除", "ok"); ctx.reload(); }
-          catch (error) { toast(error.message, "bad"); }
+          catch (error) { toast(error.message, "bad"); target.disabled = false; target.classList.remove("loading"); }
         }
       });
     },
@@ -194,9 +196,11 @@ function openPathDetail(item, system, ctx) {
         root.querySelector("[data-close-drawer]")?.click();
         openPathDrawer(item, () => ctx.reload(), { clone: true });
       };
-      root.querySelector("[data-detail-kick]").onclick = async () => {
+      root.querySelector("[data-detail-kick]").onclick = async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true; button.classList.add("loading");
         try { await apiV1("/kick?path=" + encodeURIComponent(item.name), { method: "POST" }); toast("已断开", "ok"); root.querySelector("[data-close-drawer]")?.click(); ctx.reload(); }
-        catch (error) { toast(error.message, "bad"); }
+        catch (error) { toast(error.message, "bad"); button.disabled = false; button.classList.remove("loading"); }
       };
     },
   });
