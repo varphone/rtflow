@@ -1,7 +1,7 @@
 import { api, apiV1, setCsrf } from "./js/api.js";
 import { icon } from "./js/icons.js";
 import { esc } from "./js/format.js";
-import { closeDialog, confirmDialog, copyText, openCommandPalette, openDialog, toast } from "./js/ui.js";
+import { closeDialog, confirmDialog, copyText, openCommandPalette, openDialog, toast, trapFocus } from "./js/ui.js";
 import * as overview from "./js/pages/overview.js";
 import * as live from "./js/pages/live.js";
 import * as vod from "./js/pages/vod.js";
@@ -213,19 +213,20 @@ function renderShell() {
       <div class="sr-only" aria-live="polite" data-page-announcer></div>
     </div>
   </div>`;
-  app.querySelectorAll("[data-route]").forEach((link) => link.addEventListener("click", () => {
-    document.getElementById("sidebar").classList.remove("open");
-    document.body.classList.remove("nav-open");
-  }));
   const sidebar = document.getElementById("sidebar");
-  const setSidebar = (open) => {
+  const menuButton = app.querySelector("[data-menu]");
+  const setSidebar = (open, restoreFocus = false) => {
     sidebar.classList.toggle("open", open);
-    app.querySelector("[data-menu]").setAttribute("aria-expanded", String(open));
+    menuButton.setAttribute("aria-expanded", String(open));
     document.body.classList.toggle("nav-open", open);
+    if (open) requestAnimationFrame(() => sidebar.querySelector("[data-route]")?.focus());
+    else if (restoreFocus && sidebar.contains(document.activeElement)) menuButton.focus();
   };
-  app.querySelector("[data-menu]").onclick = () => setSidebar(!sidebar.classList.contains("open"));
-  app.querySelector("[data-sidebar-backdrop]").onclick = () => setSidebar(false);
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape") setSidebar(false); });
+  app.querySelectorAll("[data-route]").forEach((link) => link.addEventListener("click", () => setSidebar(false)));
+  menuButton.onclick = () => setSidebar(!sidebar.classList.contains("open"));
+  app.querySelector("[data-sidebar-backdrop]").onclick = () => setSidebar(false, true);
+  sidebar.addEventListener("keydown", (event) => trapFocus(sidebar, event));
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && sidebar.classList.contains("open")) setSidebar(false, true); });
   app.querySelector("[data-command-open]").onclick = () => openPalette();
   app.querySelector("[data-sidebar-toggle]").onclick = () => applySidebar(document.documentElement.dataset.sidebar !== "collapsed");
   const sidebarButton = app.querySelector("[data-sidebar-toggle]");

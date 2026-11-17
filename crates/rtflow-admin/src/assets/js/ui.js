@@ -219,7 +219,7 @@ export function openDrawer({ title, description = "", body, submitLabel = "ä¿å­
   return { close };
 }
 
-function trapFocus(root, event) {
+export function trapFocus(root, event) {
   if (event.key !== "Tab") return;
   const nodes = [...root.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])")]
     .filter((node) => node.offsetParent !== null);

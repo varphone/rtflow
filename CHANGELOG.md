@@ -45,6 +45,8 @@
 
 ### Changed
 
+- 移动端侧栏打开聚焦首个导航项，Esc/遮罩关闭后焦点回到菜单按钮，侧栏内 Tab 循环。
+
 - 顶栏健康状态标签使用 aria-live=polite 播报变化。
 
 - 命令面板按钮补充 dialog/键盘快捷键语义；侧栏折叠按钮同步 aria-expanded。
