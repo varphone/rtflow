@@ -528,5 +528,6 @@ input[type="search"]::-webkit-search-cancel-button:hover { background: var(--tex
   .panel { border-color: #ccc; box-shadow: none; break-inside: avoid; }
   .stat, .quick-action, .vod-card { break-inside: avoid; }
   table.data { font-size: 11px; }
+  table.data th:last-child, table.data td:last-child { display: none; }
   a { color: #111; text-decoration: none; }
 }
