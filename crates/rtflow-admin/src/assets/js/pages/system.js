@@ -4,7 +4,21 @@ import { toast } from "../ui.js";
 
 export async function render() {
   const [system, config, storage] = await Promise.all([api("/system"), apiV1("/config"), apiV1("/storage")]);
-  const features = (system.features || []).map((feature) => `<span class="badge">${esc(feature)}</span>`).join("");
+  const featureInfo = {
+    admin: ["管理控制台", "内置管理 API 与 SPA 控制台"],
+    hls: ["HLS", "HLS / LL-HLS 切片与播放"],
+    "http-flv": ["HTTP-FLV", "HTTP-FLV 低延迟播放"],
+    webrtc: ["WebRTC", "WebRTC 播放输出"],
+    dash: ["DASH", "MPEG-DASH 播放"],
+    rtsp: ["RTSP", "RTSP 推流/拉流"],
+    rtmp: ["RTMP", "RTMP 推流/播放"],
+    srt: ["SRT", "SRT 推流/拉流"],
+    record: ["录制", "录制为 VOD"],
+  };
+  const features = (system.features || []).map((feature) => {
+    const [label, description] = featureInfo[feature] || [feature, feature];
+    return `<span class="badge" title="${esc(description)}">${esc(label)}</span>`;
+  }).join("");
   return {
     title: "系统",
     subtitle: "服务配置与存储诊断，均只读。",
