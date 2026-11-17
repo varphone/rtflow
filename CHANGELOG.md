@@ -45,6 +45,8 @@
 
 ### Changed
 
+- 管理页增加 nosniff、DENY、no-referrer 与 frame-ancestors 安全响应头。
+
 - 管理视图点击 hash 复制完整分享链接。
 
 - 管理端静态资源增加 ETag 与 304 协商缓存，减少重复下载。

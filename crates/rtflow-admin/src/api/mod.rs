@@ -145,6 +145,10 @@ fn index_handler(state: Arc<AdminState>) -> Handler {
                         ("Content-Type", "text/html; charset=utf-8"),
                         ("Content-Length", length.as_str()),
                         ("Cache-Control", "no-store"),
+                        ("X-Content-Type-Options", "nosniff"),
+                        ("X-Frame-Options", "DENY"),
+                        ("Referrer-Policy", "no-referrer"),
+                        ("Content-Security-Policy", "frame-ancestors 'none'"),
                         ("Connection", "close"),
                     ],
                 )
@@ -751,6 +755,10 @@ pub(super) async fn register(http: &HttpServer, state: Arc<AdminState>) {
                         ("Content-Type", "text/html; charset=utf-8"),
                         ("Content-Length", length.as_str()),
                         ("Cache-Control", "no-store"),
+                        ("X-Content-Type-Options", "nosniff"),
+                        ("X-Frame-Options", "DENY"),
+                        ("Referrer-Policy", "no-referrer"),
+                        ("Content-Security-Policy", "frame-ancestors 'none'"),
                         ("Connection", "close"),
                     ],
                 )

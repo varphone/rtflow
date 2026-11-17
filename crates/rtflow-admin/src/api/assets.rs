@@ -147,6 +147,7 @@ pub(super) fn handler(
                         &[
                             ("ETag", etag.as_str()),
                             ("Cache-Control", cache_control),
+                            ("X-Content-Type-Options", "nosniff"),
                             ("Content-Length", "0"),
                             ("Connection", "close"),
                         ],
@@ -164,6 +165,7 @@ pub(super) fn handler(
                         ("Content-Length", length.as_str()),
                         ("Cache-Control", cache_control),
                         ("ETag", etag.as_str()),
+                        ("X-Content-Type-Options", "nosniff"),
                         ("Connection", "close"),
                     ],
                 )
