@@ -143,7 +143,7 @@ function cards(items, selected) {
     const stamp = Number(String(vod.id).split("@").pop());
     return `<article class="vod-card ${selected.has(vod.id) ? "selected" : ""}" data-vod-card="${esc(vod.id)}">
       <label class="vod-check"><input type="checkbox" data-vod-select="${esc(vod.id)}" ${selected.has(vod.id) ? "checked" : ""} aria-label="选择 ${esc(vod.title)}"></label>
-      <div class="vod-thumb"><span class="vod-play">${iconSvg("play")}</span><span class="vod-duration">${vod.duration_ms ? duration(vod.duration_ms) : "生成中"}</span></div>
+      <div class="vod-thumb" style="--hue:${String(vod.id).split("").reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) % 360, 200)}"><span class="vod-play">${iconSvg("play")}</span><span class="vod-duration">${vod.duration_ms ? duration(vod.duration_ms) : "生成中"}</span></div>
       <div class="vod-title"><h3><button class="link-cell" data-action="detail" data-id="${esc(vod.id)}">${esc(vod.title)}</button></h3><div class="cell-sub mono">${esc(vod.id)}</div></div>
       <div class="vod-meta"><span class="badge codec">HLS</span><span class="badge ${vod.cached ? "ok" : ""}" data-vod-cache>${vod.cached ? "已缓存" : "未缓存"}</span>${stamp > 1e12 ? `<span class="cell-sub">${esc(dateTime(stamp / 1000))}</span>` : ""}</div>
       <div class="vod-actions"><button class="btn small primary" data-action="play" data-id="${esc(vod.id)}">播放</button>
