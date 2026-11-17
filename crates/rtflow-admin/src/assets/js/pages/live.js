@@ -122,6 +122,7 @@ export async function render(params) {
       bulk.onclick = async () => {
         if (!selected.size) return;
         if (!await confirmDialog({ title: "批量断开", message: `断开所选 ${selected.size} 条流并关闭全部订阅？`, confirmLabel: "全部断开", danger: true })) return;
+        bulk.disabled = true; bulk.classList.add("loading");
         let failed = 0;
         for (const path of [...selected]) {
           try { await api("/streams?path=" + encodeURIComponent(path), { method: "DELETE" }); }
