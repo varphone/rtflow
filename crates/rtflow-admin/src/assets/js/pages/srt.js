@@ -56,7 +56,7 @@ export async function render(params, ctx) {
         if (target.dataset.action === "detail") return openSrtDetail(item, tab, ctx2);
         if (target.dataset.action === "edit") return openSrtDrawer(tab, item, () => ctx2.reload());
         if (target.dataset.action === "toggle") {
-          const body = { name: item.name, enabled: !item.enabled, remote: item.remote, stream_id: item.stream_id || null,
+          const body = { name: item.name, enabled: !enabled, remote: item.remote, stream_id: item.stream_id || null,
             mount: item.mount || null, pbkeylen: item.pbkeylen || 0, latency_ms: item.latency_ms || null };
           try { await apiV1(`/srt/${tab === "push" ? "pushes" : "pulls"}/${encodeURIComponent(item.id)}`, { method: "PATCH", body }); toast("状态已更新", "ok"); ctx2.reload(); }
           catch (error) { toast(error.message, "bad"); }
@@ -91,27 +91,47 @@ function table(items) {
 
 function openSrtDetail(item, tab, ctx) {
   const direction = tab === "push" ? "推流" : "拉流";
+  let timer = null;
+  let enabled = item.enabled;
   openDrawer({
     title: item.name || item.id,
     description: `SRT ${direction}端点`,
     showSubmit: false,
     body: `<div class="stack">
       <div class="detail-grid">
-        <div class="detail-item"><span>状态</span><strong>${item.enabled ? "启用" : "停用"}</strong></div>
-        <div class="detail-item"><span>连接</span><strong>${item.connected ? "已连接" : "未连接"}</strong></div>
+        <div class="detail-item"><span>状态</span><strong data-srt-detail="status">${item.enabled ? "启用" : "停用"}</strong></div>
+        <div class="detail-item"><span>连接</span><strong data-srt-detail="connected">${item.connected ? "已连接" : "未连接"}</strong></div>
         <div class="detail-item"><span>远端</span><strong class="mono">${esc(item.remote || "—")}</strong></div>
         <div class="detail-item"><span>Mount</span><strong class="mono">${esc(item.mount || "—")}</strong></div>
         <div class="detail-item"><span>Stream ID</span><strong class="mono">${esc(item.stream_id || "—")}</strong></div>
-        <div class="detail-item"><span>已传输</span><strong class="mono">${bytes(item.bytes || 0)}</strong></div>
+        <div class="detail-item"><span>已传输</span><strong class="mono" data-srt-detail="bytes">${bytes(item.bytes || 0)}</strong></div>
         <div class="detail-item"><span>延迟</span><strong class="mono">${item.latency_ms ? `${num(item.latency_ms)} ms` : "默认"}</strong></div>
         <div class="detail-item"><span>加密</span><strong>${item.pbkeylen ? `AES-${item.pbkeylen * 8}` : "未启用"}</strong></div>
       </div>
-      ${item.last_error ? `<div class="error-banner">${esc(item.last_error)}</div>` : ""}
+      <div data-srt-error>${item.last_error ? `<div class="error-banner">${esc(item.last_error)}</div>` : ""}</div>
       <div class="actions"><button class="btn small" data-srt-edit>编辑</button><button class="btn small ghost" data-srt-toggle>${item.enabled ? "停用" : "启用"}</button>
         <button class="btn small ghost" data-srt-copy>复制远端</button>${item.mount ? `<button class="btn small ghost" data-srt-live>查看 Mount</button>` : ""}<button class="btn small danger" data-srt-delete>删除</button></div>
     </div>`,
+    onClose() { if (timer) clearInterval(timer); },
     onMount(root) {
       const close = () => root.querySelector("[data-close-drawer]")?.click();
+      const update = async () => {
+        if (document.hidden) return;
+        let current;
+        try {
+          const payload = await apiV1(`/srt/${tab === "push" ? "pushes" : "pulls"}`);
+          current = (payload.items || []).find((entry) => entry.id === item.id);
+        } catch (_) { return; }
+        const set = (name, value) => { const node = root.querySelector(`[data-srt-detail="${name}"]`); if (node) node.textContent = value; };
+        if (!current) { set("status", "已删除"); set("connected", "—"); return; }
+        enabled = current.enabled;
+        set("status", current.enabled ? "启用" : "停用");
+        set("connected", current.connected ? "已连接" : "未连接");
+        set("bytes", bytes(current.bytes || 0));
+        root.querySelector("[data-srt-error]").innerHTML = current.last_error ? `<div class="error-banner">${esc(current.last_error)}</div>` : "";
+        root.querySelector("[data-srt-toggle]").textContent = current.enabled ? "停用" : "启用";
+      };
+      timer = setInterval(update, 2000);
       root.querySelector("[data-srt-edit]").onclick = () => { close(); openSrtDrawer(tab, item, () => ctx.reload()); };
       root.querySelector("[data-srt-copy]").onclick = async () => {
         try { await navigator.clipboard.writeText(item.remote || ""); toast("远端地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
@@ -121,7 +141,7 @@ function openSrtDetail(item, tab, ctx) {
         location.hash = `#/live?q=${encodeURIComponent(item.mount || "")}`;
       });
       root.querySelector("[data-srt-toggle]").onclick = async () => {
-        const body = { name: item.name, enabled: !item.enabled, remote: item.remote, stream_id: item.stream_id || null,
+        const body = { name: item.name, enabled: !enabled, remote: item.remote, stream_id: item.stream_id || null,
           mount: item.mount || null, pbkeylen: item.pbkeylen || 0, latency_ms: item.latency_ms || null };
         try { await apiV1(`/srt/${tab === "push" ? "pushes" : "pulls"}/${encodeURIComponent(item.id)}`, { method: "PATCH", body }); toast("状态已更新", "ok"); close(); ctx.reload(); }
         catch (error) { toast(error.message, "bad"); }
