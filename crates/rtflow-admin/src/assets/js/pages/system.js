@@ -28,8 +28,14 @@ export async function render() {
           <section class="panel"><div class="panel-head"><h2>构建特性</h2></div><div class="panel-body"><div class="feature-list">${features || '<span class="faint">无</span>'}</div></div></section>
         </div>
       </div>
-      <section class="panel"><div class="panel-head"><h2>安全</h2></div><div class="panel-body note">
-        HttpOnly + SameSite=Strict 会话；写操作要求 CSRF；生产建议 HTTPS 反向代理并设置 <code>secure_cookies</code>。
+      <section class="panel"><div class="panel-head"><h2>安全</h2></div><div class="panel-body">
+        <div class="security-grid">
+          <div><span>会话 Cookie</span><b class="badge ok">HttpOnly · SameSite=Strict</b></div>
+          <div><span>CSRF</span><b class="badge ok">写操作校验</b></div>
+          <div><span>控制台模式</span><b class="badge ${system.readonly ? "" : "ok"}">${system.readonly ? "只读" : "可写"}</b></div>
+          <div><span>传输</span><b class="badge warn">建议 HTTPS 反向代理</b></div>
+        </div>
+        <p class="note" style="margin:12px 0 0">生产环境建议启用 HTTPS，并设置 <code>secure_cookies</code>；管理员密码与 TLS 证书仅通过 <code>rtflow.toml</code> 修改。</p>
       </div></section>
     </div>`,
     mount(root) {

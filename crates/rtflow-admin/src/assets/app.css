@@ -397,6 +397,10 @@ input[type="search"]::-webkit-search-cancel-button:hover { background: var(--tex
 .command-empty { color: var(--faint); padding: 24px; text-align: center; font-size: 12px; }
 .command-foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: 10.5px; }
 
+.security-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.security-grid > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 9px 11px; font-size: 12px; }
+.security-grid > div > span { color: var(--muted); }
+.security-grid .badge { white-space: normal; }
 .view-list { display: grid; gap: 8px; }
 .view-row { display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; }
 .view-row > div { min-width: 0; flex: 1; }
@@ -468,6 +472,7 @@ input[type="search"]::-webkit-search-cancel-button:hover { background: var(--tex
   .stat .value { font-size: 22px; }
   .quick-actions { gap: 8px; }
   .quick-actions { grid-template-columns: 1fr 1fr; }
+  .security-grid { grid-template-columns: 1fr; }
   .traffic-panel .panel-head { flex-wrap: wrap; row-gap: 7px; }
   .traffic-panel .panel-head h2 { flex-basis: 100%; }
   .traffic-panel .panel-head .seg { margin-left: 0 !important; }
@@ -481,6 +486,7 @@ input[type="search"]::-webkit-search-cancel-button:hover { background: var(--tex
   table.data.audit-table th:nth-child(3), table.data.audit-table td:nth-child(3) { display: table-cell; }
   table.data.live-table .row-actions [data-action="detail"], table.data.live-table .row-actions [data-action="play-ll"] { display: none; }
   .quick-actions { grid-template-columns: 1fr 1fr; }
+  .security-grid { grid-template-columns: 1fr; }
   .traffic-panel .panel-head { flex-wrap: wrap; row-gap: 7px; }
   .traffic-panel .panel-head h2 { flex-basis: 100%; }
   .traffic-panel .panel-head .seg { margin-left: 0 !important; }
