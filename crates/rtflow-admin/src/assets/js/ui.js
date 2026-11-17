@@ -208,8 +208,11 @@ export function syncSortAria(root, sort) {
   });
 }
 
+let fieldSequence = 0;
 export function field(label, input, { hint = "", className = "" } = {}) {
-  return `<div class="field ${className}"><label>${esc(label)}</label>${input}${hint ? `<span class="hint">${esc(hint)}</span>` : ""}</div>`;
+  const id = `field-${++fieldSequence}`;
+  const tagged = input.replace(/^<(input|select|textarea)\b/, `<$1 id="${id}"`);
+  return `<div class="field ${className}"><label for="${id}">${esc(label)}</label>${tagged}${hint ? `<span class="hint">${esc(hint)}</span>` : ""}</div>`;
 }
 
 export const checkbox = (name, label, checked = false) =>
