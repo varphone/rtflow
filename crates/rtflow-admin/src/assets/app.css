@@ -344,7 +344,7 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 .base-value > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .copy-inline { border: 0; background: transparent; color: var(--faint); font: inherit; font-size: 10.5px; cursor: pointer; padding: 1px 3px; border-radius: 3px; }
 .copy-inline:hover { color: var(--accent-strong); background: var(--surface-2); }
-.copy-inline { flex: none; margin-left: auto; }
+.copy-inline { flex: none; margin-left: auto; font-size: 14px; }
 .attention-item { display: flex; align-items: center; gap: 10px; justify-content: space-between; border: 1px solid var(--line-soft); border-radius: 8px; padding: 9px 10px; }
 .attention-item > div { min-width: 0; }
 .event-row { display: flex; align-items: flex-start; gap: 8px; }
