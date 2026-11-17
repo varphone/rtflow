@@ -59,10 +59,11 @@ export async function render(params) {
     actions: `<button class="btn small ghost" data-rec-export>导出</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-rec-search value="${esc(query)}" placeholder="搜索录制路径"></div>
       <div class="seg"><button data-rec-status="all" class="${status === "all" ? "active" : ""}">全部</button><button data-rec-status="active" class="${status === "active" ? "active" : ""}">录制中</button><button data-rec-status="inactive" class="${status === "inactive" ? "active" : ""}">已停止</button></div>
-      <span class="meta" data-rec-count>${initial.length} 条 · ${initial.filter((item) => item.active).length} 录制中</span></div>
+      <span class="meta" data-rec-count>${initial.length} 条 · ${initial.filter((item) => item.active).length} 录制中</span><button class="btn small ghost" data-rec-reset ${query.trim() || status !== "all" ? "" : "hidden"}>重置</button></div>
       <section class="panel">${initial.length ? table(initial) : empty("暂无录制任务", "在路径中开启录制，或等待发布者上线", "record", `<a class="btn small" href="#/config/paths">前往路径配置</a>`)}</section>`,
     mount(root, ctx) {
       const search = root.querySelector("[data-rec-search]");
+      const reset = root.querySelector("[data-rec-reset]");
       syncSortAria(root.querySelector(".panel"), sort);
       const count = root.querySelector("[data-rec-count]");
       const panel = root.querySelector("section.panel");
@@ -71,6 +72,7 @@ export async function render(params) {
       const paint = () => {
         visible = view();
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.active).length} 录制中`;
+        reset.hidden = !(query.trim() || status !== "all");
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选", "record", (!query && status === "all") ? `<a class="btn small" href="#/config/paths">前往路径配置</a>` : "");
         syncSortAria(panel, sort);
         sync();
@@ -84,6 +86,7 @@ export async function render(params) {
         if (!tbody || existing.length !== nextPaths.length || existing.some((path, index) => path !== nextPaths[index])) {
           visible = next;
           count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.active).length} 录制中`;
+        reset.hidden = !(query.trim() || status !== "all");
           panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选", "record");
           syncSortAria(panel, sort);
           sync();
@@ -112,6 +115,10 @@ export async function render(params) {
         history.replaceState(null, "", `#/config/recordings${qs ? `?${qs}` : ""}`);
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      reset.onclick = () => {
+        query = ""; status = "all"; search.value = "";
+        sync(); paint(); syncUrl();
+      };
       root.querySelectorAll("[data-rec-status]").forEach((button) => button.onclick = () => { status = button.dataset.recStatus; paint(); syncUrl(); });
       root.addEventListener("click", async (event) => {
         const sorter = event.target.closest("[data-sort]");

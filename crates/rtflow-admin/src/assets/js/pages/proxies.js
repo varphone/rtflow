@@ -28,17 +28,19 @@ export async function render(params, ctx) {
     actions: `<button class="btn small ghost" data-proxy-export>导出</button><button class="btn small primary" data-action="create">新增代理</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-proxy-search value="${esc(query)}" placeholder="搜索路径或上游"></div>
       <div class="seg">${["all", "streaming", "idle", "backoff", "describing"].map((state) => `<button data-proxy-filter="${state}" class="${filter === state ? "active" : ""}">${state === "all" ? "全部" : state}</button>`).join("")}</div>
-      <span class="meta" data-proxy-count>${initial.length} 条 · ${initial.filter((item) => item.state === "streaming").length} streaming</span></div>
+      <span class="meta" data-proxy-count>${initial.length} 条 · ${initial.filter((item) => item.state === "streaming").length} streaming</span><button class="btn small ghost" data-proxy-reset ${query.trim() || filter !== "all" ? "" : "hidden"}>重置</button></div>
       <section class="panel" data-proxy-panel>${initial.length ? table(initial) : empty("暂无代理", "新增一个 RTSP 拉流代理", "proxy", `<a class="btn small" href="#/config/proxies?new=1">新增代理</a>`)}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-proxy-panel]");
       const count = root.querySelector("[data-proxy-count]");
       const search = root.querySelector("[data-proxy-search]");
+      const reset = root.querySelector("[data-proxy-reset]");
       syncSortAria(root.querySelector(".panel"), sort);
       let visible = initial;
       const paint = () => {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.state === "streaming").length} streaming`;
+        reset.hidden = !(query.trim() || filter !== "all");
         root.querySelectorAll("[data-proxy-filter]").forEach((button) => button.classList.toggle("active", button.dataset.proxyFilter === filter));
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的代理", "调整搜索或状态筛选", "proxy");
         syncSortAria(panel, sort);
@@ -53,6 +55,10 @@ export async function render(params, ctx) {
         history.replaceState(null, "", `#/config/proxies${qs ? `?${qs}` : ""}`);
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      reset.onclick = () => {
+        query = ""; filter = "all"; search.value = "";
+        paint(); syncUrl();
+      };
       root.querySelectorAll("[data-proxy-filter]").forEach((button) => button.onclick = () => { filter = button.dataset.proxyFilter; paint(); syncUrl(); });
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
       root.querySelector("[data-proxy-export]").onclick = () => {

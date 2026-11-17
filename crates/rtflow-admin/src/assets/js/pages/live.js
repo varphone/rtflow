@@ -27,6 +27,7 @@ export async function render(params) {
       <div class="search">${iconSvg("search")}<input class="input" type="search" data-live-search value="${esc(query)}" placeholder="搜索名称、路径或编码"></div>
       <div class="seg"><button data-live-status="all">全部</button><button data-live-status="live">直播中</button><button data-live-status="idle">待机</button></div>
       <span class="meta" data-live-count></span><span class="meta" data-live-updated></span>
+      <button class="btn small ghost" data-live-reset ${query.trim() || status !== "all" ? "" : "hidden"}>重置</button>
       <button class="btn small danger" data-bulk-kick disabled>断开所选</button></div>
       <section class="panel" data-live-panel></section>`,
     mount(root, ctx) {
@@ -34,6 +35,7 @@ export async function render(params) {
       const count = root.querySelector("[data-live-count]");
       const bulk = root.querySelector("[data-bulk-kick]");
       const search = root.querySelector("[data-live-search]");
+      const reset = root.querySelector("[data-live-reset]");
       const selected = new Set();
       let liveStreams = streams;
       let visible = [];
@@ -67,6 +69,7 @@ export async function render(params) {
         visible = view();
         markUpdated();
         count.textContent = `${visible.length} 条 · ${visible.filter((stream) => stream.publisher).length} 直播中`;
+        reset.hidden = !(query.trim() || status !== "all");
         panel.innerHTML = visible.length ? table(visible, selected) : empty("没有匹配的流", "调整筛选条件或等待推流", "live");
         syncSortAria(panel, sort);
         const all = panel.querySelector("[data-select-all]");
@@ -88,6 +91,10 @@ export async function render(params) {
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
       root.querySelectorAll("[data-live-status]").forEach((button) => button.onclick = () => { status = button.dataset.liveStatus; paint(); syncUrl(); });
+      reset.onclick = () => {
+        query = ""; status = "all"; search.value = "";
+        syncStatus(); paint(); syncUrl();
+      };
       root.addEventListener("change", (event) => {
         const rowSelect = event.target.closest("[data-select]");
         if (rowSelect) {
