@@ -62,12 +62,14 @@ export function playUrl(url, title, options = {}) {
         });
         hls.loadSource(url);
         hls.attachMedia(video);
-        status.textContent = "hls.js";
+        status.textContent = "正在播放";
+        status.title = "hls.js";
         window.__rtflowHls?.destroy?.();
         window.__rtflowHls = hls;
       } else {
         video.src = url;
-        status.textContent = "浏览器原生 HLS";
+        status.textContent = "正在播放";
+        status.title = "浏览器原生 HLS";
       }
       video.play().catch(() => {});
     }).catch((error) => { status.textContent = error.message; retry.hidden = false; });

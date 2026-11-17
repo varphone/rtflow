@@ -406,6 +406,11 @@ function manageViews() {
           const clean = parsed
             .filter((view) => view && typeof view.name === "string" && view.name.trim() && typeof view.hash === "string" && view.hash.startsWith("#/"))
             .map((view) => ({ name: view.name.trim().slice(0, 40), hash: view.hash, ts: Number(view.ts) || Date.now() }))
+            .filter((view, index, list) => list.findIndex((item) => item.name === view.name) === index)
+            .filter((view) => {
+              const route = view.hash.replace(/^#\//, "").split("?")[0];
+              return route === "control" || Boolean(routes[route]);
+            })
             .slice(0, 12);
           if (!clean.length) throw new Error("empty");
           const merged = [...clean, ...savedViews().filter((view) => !clean.some((item) => item.name === view.name))].slice(0, 12);
