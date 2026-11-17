@@ -64,12 +64,22 @@ function currentRoute() {
 }
 
 function theme() {
-  return localStorage.getItem("rtflow-theme") || "dark";
+  const value = localStorage.getItem("rtflow-theme") || "dark";
+  return ["dark", "light", "system"].includes(value) ? value : "dark";
+}
+function resolveTheme(value) {
+  if (value !== "system") return value;
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 function applyTheme(value) {
-  document.documentElement.dataset.theme = value;
-  localStorage.setItem("rtflow-theme", value);
+  const preference = ["dark", "light", "system"].includes(value) ? value : "dark";
+  document.documentElement.dataset.theme = resolveTheme(preference);
+  document.documentElement.dataset.themePref = preference;
+  localStorage.setItem("rtflow-theme", preference);
 }
+window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+  if (theme() === "system") applyTheme("system");
+});
 applyTheme(theme());
 function density() { return localStorage.getItem("rtflow-density") || "comfortable"; }
 function applyDensity(value) {
@@ -221,7 +231,7 @@ function renderShell() {
     const themeLabel = app.querySelector("[data-label-theme]");
     const densityLabel = app.querySelector("[data-label-density]");
     const timeLabel = app.querySelector("[data-label-time]");
-    if (themeLabel) themeLabel.textContent = document.documentElement.dataset.theme === "light" ? "浅色" : "深色";
+    if (themeLabel) themeLabel.textContent = document.documentElement.dataset.themePref === "system" ? `系统 · ${document.documentElement.dataset.theme === "light" ? "浅色" : "深色"}` : document.documentElement.dataset.theme === "light" ? "浅色" : "深色";
     if (densityLabel) densityLabel.textContent = document.documentElement.dataset.density === "compact" ? "紧凑" : "舒适";
     if (timeLabel) timeLabel.textContent = localStorage.getItem("rtflow-time") === "relative" ? "相对" : "绝对";
   };
@@ -241,7 +251,11 @@ function renderShell() {
   popover.onclick = (event) => event.stopPropagation();
   document.addEventListener("click", () => closeMenu());
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeMenu(true); });
-  app.querySelector("[data-user-theme]").onclick = () => { applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"); syncMenu(); };
+  app.querySelector("[data-user-theme]").onclick = () => {
+    const current = theme();
+    applyTheme(current === "dark" ? "light" : current === "light" ? "system" : "dark");
+    syncMenu();
+  };
   app.querySelector("[data-user-density]").onclick = () => { applyDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact"); syncMenu(); };
   app.querySelector("[data-user-time]").onclick = () => { localStorage.setItem("rtflow-time", localStorage.getItem("rtflow-time") === "relative" ? "absolute" : "relative"); closeMenu(); navigate({ silent: true }); };
   app.querySelector("[data-user-logout]").onclick = async () => {
@@ -473,7 +487,8 @@ function openPalette() {
     { label: "保存当前视图", hint: "保存页面与筛选条件到本地", icon: "★", group: "操作", run: () => saveCurrentView() },
     { label: "管理保存的视图", hint: "查看或删除本地视图", icon: "☆", group: "操作", run: () => manageViews() },
     { label: "导出当前视图", hint: "CSV（当前页面支持时）", icon: "⇩", group: "操作", run: () => exportCurrentView() },
-    { label: "切换深浅主题", hint: "在深色与浅色之间切换", icon: "◐", group: "操作", run: () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light") },
+    { label: "切换深浅主题", hint: "深色 / 浅色 / 跟随系统", icon: "◐", group: "操作", run: () => applyTheme(theme() === "dark" ? "light" : theme() === "light" ? "system" : "dark") },
+    { label: "主题跟随系统", hint: "随操作系统浅色/深色切换", icon: "◑", group: "操作", run: () => applyTheme("system") },
     { label: "切换表格密度", hint: "舒适 / 紧凑", icon: "≡", group: "操作", run: () => applyDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact") },
     { label: "切换时间显示", hint: localStorage.getItem("rtflow-time") === "relative" ? "当前：相对时间" : "当前：绝对时间", icon: "◷", group: "操作", run: () => {
       localStorage.setItem("rtflow-time", localStorage.getItem("rtflow-time") === "relative" ? "absolute" : "relative");
