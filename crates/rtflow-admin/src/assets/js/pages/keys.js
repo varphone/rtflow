@@ -5,9 +5,12 @@ import { openKeyDrawer } from "../forms/key.js";
 
 let query = "";
 let sort = { field: "expires_at", dir: 1 };
+let stateFilter = "all";
 
 export async function render(params, ctx) {
   query = params?.get("q") || "";
+  const linkedState = params?.get("state");
+  stateFilter = ["valid", "soon", "expired", "revoked"].includes(linkedState) ? linkedState : "all";
   const field = params?.get("sort");
   if (["kid", "name", "expires_at"].includes(field)) {
     sort = { field, dir: params?.get("dir") === "-1" ? -1 : 1 };
@@ -21,7 +24,7 @@ export async function render(params, ctx) {
     title: "推流密钥",
     subtitle: "签发一次性 secret，可限定角色、协议与路径。",
     actions: `<button class="btn small ghost" data-action="export">导出</button><button class="btn small primary" data-action="issue">签发密钥</button><button class="btn small" data-action="refresh">刷新</button>`,
-    html: `<div class="toolbar"><div class="search"><input class="input" data-key-search value="${esc(query)}" placeholder="搜索 Key ID 或名称"></div><span class="meta" data-key-count>${initial.length} 条 · ${initial.filter((item) => item.enabled && !isExpired(item)).length} 有效</span></div>
+    html: `<div class="toolbar"><div class="search"><input class="input" data-key-search value="${esc(query)}" placeholder="搜索 Key ID 或名称"></div><div class="seg"><button data-key-state="all" class="${stateFilter === "all" ? "active" : ""}">全部</button><button data-key-state="valid" class="${stateFilter === "valid" ? "active" : ""}">有效</button><button data-key-state="soon" class="${stateFilter === "soon" ? "active" : ""}">将过期</button><button data-key-state="expired" class="${stateFilter === "expired" ? "active" : ""}">过期</button><button data-key-state="revoked" class="${stateFilter === "revoked" ? "active" : ""}">吊销</button></div><span class="meta" data-key-count>${initial.length} 条 · ${initial.filter((item) => item.enabled && !isExpired(item)).length} 有效</span></div>
       <section class="panel" data-key-panel>${initial.length ? table(initial) : empty("暂未签发密钥", "点击“签发密钥”创建第一条", "keys", `<a class="btn small" href="#/config/keys?new=1">签发密钥</a>`)}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-key-panel]");
@@ -38,12 +41,18 @@ export async function render(params, ctx) {
       const syncUrl = () => {
         const params = new URLSearchParams();
         if (query.trim()) params.set("q", query.trim());
+        if (stateFilter !== "all") params.set("state", stateFilter);
         if (sort.field !== "expires_at" || sort.dir !== 1) params.set("sort", sort.field);
         if (sort.dir === -1) params.set("dir", "-1");
         const qs = params.toString();
         history.replaceState(null, "", `#/config/keys${qs ? `?${qs}` : ""}`);
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      root.querySelectorAll("[data-key-state]").forEach((button) => button.onclick = () => {
+        stateFilter = button.dataset.keyState;
+        root.querySelectorAll("[data-key-state]").forEach((item) => item.classList.toggle("active", item === button));
+        paint(); syncUrl();
+      });
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
       root.querySelector("[data-action=export]").onclick = () => {
         exportCsv(`keys-${new Date().toISOString().slice(0, 10)}.csv`,
@@ -86,7 +95,10 @@ export async function render(params, ctx) {
 
 function view(all) {
   const q = query.trim().toLowerCase();
-  const items = all.filter((item) => !q || item.name.toLowerCase().includes(q) || item.kid.toLowerCase().includes(q));
+  const items = all.filter((item) => {
+    const match = !q || item.name.toLowerCase().includes(q) || item.kid.toLowerCase().includes(q);
+    return match && (stateFilter === "all" || keyState(item) === stateFilter);
+  });
   const value = (item) => sort.field === "name" ? item.name.toLowerCase() : sort.field === "kid" ? item.kid : Number(item.expires_at || Number.MAX_SAFE_INTEGER);
   return items.sort((left, right) => {
     const a = value(left), b = value(right);
@@ -112,11 +124,19 @@ function isExpired(item) {
   return Boolean(item.expires_at && Number(item.expires_at) * 1000 < Date.now());
 }
 
-function keyStatus(item) {
-  if (!item.enabled) return '<span class="badge bad">已吊销</span>';
-  if (isExpired(item)) return '<span class="badge bad">已过期</span>';
+function keyState(item) {
+  if (!item.enabled) return "revoked";
+  if (isExpired(item)) return "expired";
   const remaining = Number(item.expires_at || 0) * 1000 - Date.now();
-  if (item.expires_at && remaining < 24 * 3600 * 1000) return '<span class="badge warn">即将过期</span>';
+  if (item.expires_at && remaining < 24 * 3600 * 1000) return "soon";
+  return "valid";
+}
+
+function keyStatus(item) {
+  const state = keyState(item);
+  if (state === "revoked") return '<span class="badge bad">已吊销</span>';
+  if (state === "expired") return '<span class="badge bad">已过期</span>';
+  if (state === "soon") return '<span class="badge warn">即将过期</span>';
   return '<span class="badge ok">有效</span>';
 }
 
