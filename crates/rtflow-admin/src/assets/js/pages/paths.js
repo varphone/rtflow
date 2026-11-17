@@ -5,9 +5,12 @@ import { openPathDrawer } from "../forms/path.js";
 
 let query = "";
 let sort = { field: "name", dir: 1 };
+let stateFilter = "all";
 
 export async function render(params, ctx) {
   query = params?.get("q") || "";
+  const linkedState = params?.get("state");
+  stateFilter = ["enabled", "disabled"].includes(linkedState) ? linkedState : "all";
   const field = params?.get("sort");
   if (["name", "source", "max_readers", "updated_at"].includes(field)) {
     sort = { field, dir: params?.get("dir") === "-1" ? -1 : 1 };
@@ -21,7 +24,7 @@ export async function render(params, ctx) {
     title: "路径",
     subtitle: "路径策略、发布/观看开关与录制。",
     actions: `<button class="btn small ghost" data-action="export">导出</button><button class="btn small primary" data-action="create">新建路径</button><button class="btn small" data-action="refresh">刷新</button>`,
-    html: `<div class="toolbar"><div class="search"><input class="input" data-path-search value="${esc(query)}" placeholder="搜索路径"></div><span class="meta" data-path-count>${initial.length} 条 · ${initial.filter((item) => item.enabled).length} 启用</span></div>
+    html: `<div class="toolbar"><div class="search"><input class="input" data-path-search value="${esc(query)}" placeholder="搜索路径"></div><div class="seg"><button data-path-state="all" class="${stateFilter === "all" ? "active" : ""}">全部</button><button data-path-state="enabled" class="${stateFilter === "enabled" ? "active" : ""}">启用</button><button data-path-state="disabled" class="${stateFilter === "disabled" ? "active" : ""}">停用</button></div><span class="meta" data-path-count>${initial.length} 条 · ${initial.filter((item) => item.enabled).length} 启用</span></div>
       <section class="panel" data-path-panel>${initial.length ? table(initial) : empty("暂无路径记录", "新建路径或通过配置提供 glob 规则", "paths", `<a class="btn small" href="#/config/paths?new=1">新建路径</a>`)}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-path-panel]");
@@ -38,12 +41,18 @@ export async function render(params, ctx) {
       const syncUrl = () => {
         const params = new URLSearchParams();
         if (query.trim()) params.set("q", query.trim());
+        if (stateFilter !== "all") params.set("state", stateFilter);
         if (sort.field !== "name" || sort.dir !== 1) params.set("sort", sort.field);
         if (sort.dir === -1) params.set("dir", "-1");
         const qs = params.toString();
         history.replaceState(null, "", `#/config/paths${qs ? `?${qs}` : ""}`);
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      root.querySelectorAll("[data-path-state]").forEach((button) => button.onclick = () => {
+        stateFilter = button.dataset.pathState;
+        root.querySelectorAll("[data-path-state]").forEach((item) => item.classList.toggle("active", item === button));
+        paint(); syncUrl();
+      });
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
       root.querySelector("[data-action=export]").onclick = () => {
         exportCsv(`paths-${new Date().toISOString().slice(0, 10)}.csv`,
@@ -92,7 +101,11 @@ export async function render(params, ctx) {
 
 function view(all) {
   const q = query.trim().toLowerCase();
-  const items = all.filter((item) => !q || item.name.toLowerCase().includes(q));
+  const items = all.filter((item) => {
+    const match = !q || item.name.toLowerCase().includes(q);
+    const state = stateFilter === "all" || (stateFilter === "enabled" ? item.enabled : !item.enabled);
+    return match && state;
+  });
   const value = (item) => {
     if (sort.field === "name") return item.name.toLowerCase();
     if (sort.field === "updated_at") return Number(item.updated_at || 0);
