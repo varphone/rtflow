@@ -138,7 +138,7 @@ function renderLogin(message = "") {
         <div class="field"><label for="login-pass">密码</label><div class="password-field"><input class="input" id="login-pass" name="password" type="password" autocomplete="current-password" required><button type="button" class="password-toggle" data-toggle-password aria-label="显示密码">${icon("eye")}</button></div></div>
         <button class="btn primary block" type="submit">登录</button>
       </form>
-      <div class="login-foot">rtflow admin</div>
+      <div class="login-foot"><span>rtflow admin</span><span class="login-hint">登录后按 <kbd>?</kbd> 查看快捷键</span></div>
     </section>
   </div></main>`;
   const form = document.getElementById("login-form");

@@ -426,7 +426,8 @@ input[type="search"]::-webkit-search-cancel-button:hover { background: var(--tex
 .password-toggle { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); border: 0; background: transparent; color: var(--faint); padding: 5px; cursor: pointer; display: grid; place-items: center; border-radius: 5px; }
 .password-toggle:hover { color: var(--text); background: var(--surface-2); }
 .password-toggle .icon { width: 16px; height: 16px; }
-.login-foot { color: var(--faint); font-size: 11px; margin-top: 20px; text-align: center; }
+.login-foot { color: var(--faint); font-size: 11px; margin-top: 20px; display: grid; gap: 5px; justify-items: center; }
+.login-foot kbd { color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: 10px; }
 @media (max-width: 760px) {
   .login-shell { grid-template-columns: 1fr; }
   .login-aside { display: none; }
