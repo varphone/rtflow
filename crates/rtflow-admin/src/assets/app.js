@@ -167,7 +167,7 @@ function navCount(route) {
 function renderShell() {
   app.innerHTML = `<div class="layout">
     <aside class="sidebar" id="sidebar">
-      <div class="brand"><span class="brand-logo">R</span><span>rtflow</span></div>
+      <a class="brand" href="#/overview" aria-label="返回概览"><span class="brand-logo">R</span><span>rtflow</span></a>
       ${navGroups.map(([label, items]) => `<nav class="nav-group" aria-label="${label}">
         <div class="nav-label">${label}</div>
         ${items.map(([route, text]) => `<a class="nav-item" data-route="${route}" href="#/${route}" title="${esc(text)}">${icon(navIcons[route] || "overview")}<span>${text}</span>${navCount(route)}</a>`).join("")}
@@ -182,7 +182,7 @@ function renderShell() {
         <div class="crumbs" id="crumbs"></div>
         <div class="top-actions">
           <button class="command-trigger" data-command-open aria-label="打开命令面板">${icon("search")}<span>搜索</span><kbd>Ctrl K</kbd></button>
-          <span class="health"><span class="dot ok"></span>运行中</span>
+          <a class="health" href="#/system" title="查看系统状态"><span class="dot ok"></span>运行中</a>
           <button class="user-chip" data-user-menu aria-haspopup="menu" aria-expanded="false"><span class="avatar">${esc((state.session?.username || "A").slice(0, 1).toUpperCase())}</span><span>${esc(state.session?.username || "admin")}</span><span class="chev">▾</span></button>
           <div class="user-popover" data-user-popover role="menu" aria-label="用户菜单" hidden>
             <div class="user-popover-head"><b>${esc(state.session?.username || "admin")}</b><span>${state.session?.readonly ? "只读模式" : "管理员"}</span></div>
