@@ -5,11 +5,14 @@ import { openSrtDrawer } from "../forms/srt.js";
 
 let tab = "pull";
 let query = "";
+let connection = "all";
 
 export async function render(params, ctx) {
   query = params?.get("q") || "";
   const linkedTab = params?.get("tab");
   tab = ["pull", "push"].includes(linkedTab) ? linkedTab : "pull";
+  const linkedConn = params?.get("conn");
+  connection = ["connected", "offline"].includes(linkedConn) ? linkedConn : "all";
   const [pulls, pushes] = await Promise.all([apiV1("/srt/pulls"), apiV1("/srt/pushes")]);
   const all = { pull: pulls.items || [], push: pushes.items || [] };
   const initial = view(all);
@@ -18,7 +21,7 @@ export async function render(params, ctx) {
     subtitle: "SRT 拉流与推流端点，保存后单端点热更新。",
     actions: `<button class="btn small ghost" data-srt-export>导出</button><button class="btn small primary" data-action="create">${tab === "push" ? "新增推流" : "新增拉流"}</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="tabs"><button class="tab ${tab === "pull" ? "active" : ""}" data-srt-tab="pull">拉流</button><button class="tab ${tab === "push" ? "active" : ""}" data-srt-tab="push">推流</button></div>
-      <div class="toolbar"><div class="search"><input class="input" data-srt-search value="${esc(query)}" placeholder="搜索名称、ID 或远端地址"></div><span class="meta" data-srt-count>${initial.length} 条 · ${initial.filter((item) => item.connected).length} 已连接</span></div>
+      <div class="toolbar"><div class="search"><input class="input" data-srt-search value="${esc(query)}" placeholder="搜索名称、ID 或远端地址"></div><div class="seg"><button data-srt-conn="all" class="${connection === "all" ? "active" : ""}">全部</button><button data-srt-conn="connected" class="${connection === "connected" ? "active" : ""}">已连接</button><button data-srt-conn="offline" class="${connection === "offline" ? "active" : ""}">未连接</button></div><span class="meta" data-srt-count>${initial.length} 条 · ${initial.filter((item) => item.connected).length} 已连接</span></div>
       <section class="panel" data-srt-panel>${initial.length ? table(initial) : empty(`暂无 SRT ${tab === "push" ? "推流" : "拉流"}`, "创建第一个端点开始推流或拉流", "srt", `<a class="btn small" href="#/config/srt?new=1&tab=${tab}">新增${tab === "push" ? "推流" : "拉流"}</a>`)}</section>`,
     mount(root, ctx2) {
       const panel = root.querySelector("[data-srt-panel]");
@@ -37,11 +40,17 @@ export async function render(params, ctx) {
         const params = new URLSearchParams();
         if (tab !== "pull") params.set("tab", tab);
         if (query.trim()) params.set("q", query.trim());
+        if (connection !== "all") params.set("conn", connection);
         const qs = params.toString();
         history.replaceState(null, "", `#/config/srt${qs ? `?${qs}` : ""}`);
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
       root.querySelectorAll("[data-srt-tab]").forEach((button) => button.onclick = () => { tab = button.dataset.srtTab; paint(); syncUrl(); });
+      root.querySelectorAll("[data-srt-conn]").forEach((button) => button.onclick = () => {
+        connection = button.dataset.srtConn;
+        root.querySelectorAll("[data-srt-conn]").forEach((item) => item.classList.toggle("active", item === button));
+        paint(); syncUrl();
+      });
       root.querySelector("[data-action=refresh]").onclick = () => ctx2.reload();
       root.querySelector("[data-srt-export]").onclick = () => {
         exportCsv(`srt-${tab}-${new Date().toISOString().slice(0, 10)}.csv`,
@@ -62,7 +71,7 @@ export async function render(params, ctx) {
         if (target.dataset.action === "detail") return openSrtDetail(item, tab, ctx2);
         if (target.dataset.action === "edit") return openSrtDrawer(tab, item, () => ctx2.reload());
         if (target.dataset.action === "toggle") {
-          const body = { name: item.name, enabled: !enabled, remote: item.remote, stream_id: item.stream_id || null,
+          const body = { name: item.name, enabled: !item.enabled, remote: item.remote, stream_id: item.stream_id || null,
             mount: item.mount || null, pbkeylen: item.pbkeylen || 0, latency_ms: item.latency_ms || null };
           try { await apiV1(`/srt/${tab === "push" ? "pushes" : "pulls"}/${encodeURIComponent(item.id)}`, { method: "PATCH", body }); toast("状态已更新", "ok"); ctx2.reload(); }
           catch (error) { toast(error.message, "bad"); }
