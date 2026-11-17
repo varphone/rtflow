@@ -45,6 +45,8 @@
 
 ### Changed
 
+- 统一细滚动条样式，颜色跟随主题。
+
 - 管理页增加 nosniff、DENY、no-referrer 与 frame-ancestors 安全响应头。
 
 - 管理视图点击 hash 复制完整分享链接。
