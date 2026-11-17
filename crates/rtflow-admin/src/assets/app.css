@@ -120,6 +120,22 @@ textarea.input { resize: vertical; min-height: 80px; }
 .nav-item.active { color: var(--text); background: var(--surface-3); border-color: var(--line); }
 .nav-item .count:empty { display: none; }
 .nav-item .count { margin-left: auto; font-size: 11px; color: var(--faint); background: var(--surface-2); border: 1px solid var(--line); padding: 0 6px; border-radius: 999px; }
+.sidebar-collapse { display: flex; align-items: center; gap: 8px; margin-top: auto; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); border-radius: 7px; padding: 7px 10px; font: inherit; font-size: 11.5px; cursor: pointer; }
+.sidebar-collapse:hover { color: var(--text); background: var(--surface-2); }
+.sidebar-collapse span { font-size: 16px; line-height: 1; }
+@media (min-width: 821px) {
+html[data-sidebar="collapsed"] { --sidebar: 74px; }
+html[data-sidebar="collapsed"] .sidebar { padding: 16px 8px; align-items: center; }
+html[data-sidebar="collapsed"] .brand { justify-content: center; padding: 2px 0; }
+html[data-sidebar="collapsed"] .brand > span:not(.brand-logo),
+html[data-sidebar="collapsed"] .nav-label,
+html[data-sidebar="collapsed"] .nav-item > span:not(.icon),
+html[data-sidebar="collapsed"] .sidebar-foot { display: none; }
+html[data-sidebar="collapsed"] .nav-item { justify-content: center; width: 100%; padding: 8px; }
+html[data-sidebar="collapsed"] .sidebar-collapse { width: 100%; justify-content: center; padding: 7px; }
+html[data-sidebar="collapsed"] .sidebar-collapse em { display: none; }
+}
+
 .sidebar-foot { margin-top: auto; padding: 10px; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: 11.5px; display: grid; gap: 3px; }
 .main { min-width: 0; display: flex; flex-direction: column; }
 .topbar {
@@ -401,6 +417,7 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
   .sidebar.open ~ .sidebar-backdrop { display: block; position: fixed; inset: 0; z-index: 45; border: 0; background: rgba(0, 0, 0, .38); }
   body.nav-open { overflow: hidden; }
   .menu-btn { display: inline-flex; }
+  .sidebar-collapse { display: none; }
   .topbar { padding: 0 10px; gap: 4px; }
   .crumbs { font-size: 12px; overflow: hidden; white-space: nowrap; gap: 4px; }
   .crumbs > span:not(:last-child) { display: none; }

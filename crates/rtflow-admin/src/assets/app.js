@@ -77,6 +77,18 @@ function applyDensity(value) {
   localStorage.setItem("rtflow-density", value);
 }
 applyDensity(density());
+function sidebarCollapsed() { return localStorage.getItem("rtflow-sidebar") === "collapsed"; }
+function applySidebar(collapsed) {
+  document.documentElement.dataset.sidebar = collapsed ? "collapsed" : "open";
+  localStorage.setItem("rtflow-sidebar", collapsed ? "collapsed" : "open");
+  const button = document.querySelector("[data-sidebar-toggle]");
+  if (button) {
+    button.innerHTML = `<span>${collapsed ? "›" : "‹"}</span><em>${collapsed ? "" : "收起"}</em>`;
+    button.setAttribute("aria-label", collapsed ? "展开侧栏" : "收起侧栏");
+    button.title = collapsed ? "展开侧栏" : "收起侧栏";
+  }
+}
+applySidebar(sidebarCollapsed());
 
 async function boot() {
   try {
@@ -158,8 +170,9 @@ function renderShell() {
       <div class="brand"><span class="brand-logo">R</span><span>rtflow</span></div>
       ${navGroups.map(([label, items]) => `<nav class="nav-group" aria-label="${label}">
         <div class="nav-label">${label}</div>
-        ${items.map(([route, text]) => `<a class="nav-item" data-route="${route}" href="#/${route}">${icon(navIcons[route] || "overview")}<span>${text}</span>${navCount(route)}</a>`).join("")}
+        ${items.map(([route, text]) => `<a class="nav-item" data-route="${route}" href="#/${route}" title="${esc(text)}">${icon(navIcons[route] || "overview")}<span>${text}</span>${navCount(route)}</a>`).join("")}
       </nav>`).join("")}
+      <button class="sidebar-collapse" data-sidebar-toggle aria-label="收起侧栏" title="收起侧栏"></button>
       <div class="sidebar-foot"><span>rtflow ${esc(state.session?.version || "")}</span><span>${state.session?.readonly ? "只读模式" : "管理模式"}</span></div>
     </aside>
     <button class="sidebar-backdrop" data-sidebar-backdrop aria-label="关闭菜单"></button>
@@ -197,6 +210,10 @@ function renderShell() {
   app.querySelector("[data-sidebar-backdrop]").onclick = () => setSidebar(false);
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") setSidebar(false); });
   app.querySelector("[data-command-open]").onclick = () => openPalette();
+  app.querySelector("[data-sidebar-toggle]").onclick = () => applySidebar(document.documentElement.dataset.sidebar !== "collapsed");
+  const sidebarButton = app.querySelector("[data-sidebar-toggle]");
+  sidebarButton.innerHTML = `<span>${sidebarCollapsed() ? "›" : "‹"}</span><em>${sidebarCollapsed() ? "" : "收起"}</em>`;
+  sidebarButton.setAttribute("aria-label", sidebarCollapsed() ? "展开侧栏" : "收起侧栏");
   const popover = app.querySelector("[data-user-popover]");
   const userButton = app.querySelector("[data-user-menu]");
   const syncMenu = () => {
