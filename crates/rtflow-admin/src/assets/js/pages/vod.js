@@ -25,7 +25,7 @@ export async function render(params) {
       <div class="search">${iconSvg("search")}<input class="input" type="search" data-vod-search value="${esc(query)}" placeholder="搜索点播名称或 ID"></div>
       <select class="input" data-vod-sort aria-label="点播排序" style="width:auto"><option value="recent" ${sort === "recent" ? "selected" : ""}>最新录制</option><option value="duration" ${sort === "duration" ? "selected" : ""}>按时长</option><option value="cached" ${sort === "cached" ? "selected" : ""}>已缓存优先</option></select>
       <div class="seg"><button data-vod-cache-filter="all" class="${cacheFilter === "all" ? "active" : ""}">全部</button><button data-vod-cache-filter="cached" class="${cacheFilter === "cached" ? "active" : ""}">已缓存</button><button data-vod-cache-filter="uncached" class="${cacheFilter === "uncached" ? "active" : ""}">未缓存</button></div>
-      <span class="meta" data-vod-count>${initial.length} 条 · ${initial.filter((vod) => vod.cached).length} 已缓存</span>
+      <span class="meta" data-vod-count>${initial.length} 条 · ${initial.filter((vod) => vod.cached).length} 已缓存</span><span class="meta" data-vod-updated style="margin-left:0"></span>
       <button class="btn small ghost" data-vod-reset ${query.trim() || cacheFilter !== "all" ? "" : "hidden"}>重置</button>
       <button class="btn small ghost" data-vod-copy-bulk disabled>复制所选地址</button>
       <button class="btn small ghost" data-vod-bulk disabled>刷新所选缓存</button></div>
@@ -35,6 +35,9 @@ export async function render(params) {
       const reset = root.querySelector("[data-vod-reset]");
       const results = root.querySelector("[data-vod-results]");
       const count = root.querySelector("[data-vod-count]");
+      const updatedLabel = root.querySelector("[data-vod-updated]");
+      const markUpdated = () => { if (updatedLabel) updatedLabel.textContent = `更新于 ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`; };
+      markUpdated();
       const selectAll = root.querySelector("[data-vod-select-all]");
       const sorter = root.querySelector("[data-vod-sort]");
       const bulk = root.querySelector("[data-vod-bulk]");
@@ -54,6 +57,7 @@ export async function render(params) {
       const paint = () => {
         visible = filter(allVods, search.value);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.cached).length} 已缓存`;
+        markUpdated();
         reset.hidden = !(query.trim() || cacheFilter !== "all");
         results.innerHTML = visible.length ? cards(visible, selected) : empty("没有匹配的点播", "调整搜索条件", "vod");
         sync();
