@@ -323,6 +323,15 @@ function isTyping(event) {
     && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 }
 
+function exportCurrentView() {
+  const button = document.querySelector(
+    "[data-action=export],[data-rec-export],[data-proxy-export],[data-srt-export],[data-audit-export]"
+  );
+  if (button) { button.click(); return true; }
+  toast("当前页面不支持导出", "bad");
+  return false;
+}
+
 function focusPageSearch() {
   const input = document.querySelector(
     "[data-live-search],[data-path-search],[data-key-search],[data-proxy-search],[data-srt-search],[data-vod-search],[data-rec-search],[data-audit-search]"
@@ -339,6 +348,7 @@ function openShortcuts() {
       ${row(["/"], "聚焦当前页面搜索")}
       ${row(["↑", "↓"], "命令面板中选择")}
       ${row(["Enter"], "执行命令")}
+      ${row(["Ctrl", "E"], "导出当前视图")}
       ${row(["Esc"], "关闭对话框 / 抽屉 / 侧栏")}
       ${row(["?"], "打开本帮助")}
     </div>`,
@@ -354,6 +364,7 @@ function openPalette() {
   }));
   const actions = [
     { label: "刷新当前页面", hint: "重新加载当前数据", icon: "↻", shortcut: "R", group: "操作", run: () => navigate({ silent: true }) },
+    { label: "导出当前视图", hint: "CSV（当前页面支持时）", icon: "⇩", group: "操作", run: () => exportCurrentView() },
     { label: "切换深浅主题", hint: "在深色与浅色之间切换", icon: "◐", group: "操作", run: () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light") },
     { label: "切换表格密度", hint: "舒适 / 紧凑", icon: "≡", group: "操作", run: () => applyDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact") },
     { label: "切换时间显示", hint: localStorage.getItem("rtflow-time") === "relative" ? "当前：相对时间" : "当前：绝对时间", icon: "◷", group: "操作", run: () => {
@@ -402,7 +413,13 @@ window.addEventListener("keydown", (event) => {
     if (state.session) openPalette();
     return;
   }
-  if (!state.session || isTyping(event) || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (!state.session) return;
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "e") {
+    event.preventDefault();
+    exportCurrentView();
+    return;
+  }
+  if (isTyping(event) || event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === "?") { event.preventDefault(); openShortcuts(); }
   else if (event.key === "/") { event.preventDefault(); focusPageSearch(); }
 });
