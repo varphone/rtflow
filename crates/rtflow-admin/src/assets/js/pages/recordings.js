@@ -206,10 +206,12 @@ function openRecordingDetail(item, ctx) {
       root.querySelector("[data-rec-copy]").onclick = async () => {
         try { await navigator.clipboard.writeText(item.directory || ""); toast("目录已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
-      root.querySelector("[data-rec-detail-toggle]").onclick = async () => {
+      root.querySelector("[data-rec-detail-toggle]").onclick = async (event) => {
+        const button = event.currentTarget;
         const action = active ? "stop" : "start";
+        button.disabled = true; button.classList.add("loading");
         try { await api(`/recordings/${action}`, { method: "POST", body: { path: item.path } }); toast("操作已提交", "ok"); close(); ctx.reload(); }
-        catch (error) { toast(error.message, "bad"); }
+        catch (error) { toast(error.message, "bad"); button.disabled = false; button.classList.remove("loading"); }
       };
       root.querySelector("[data-rec-detail-vod]").onclick = () => {
         close();

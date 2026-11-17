@@ -41,6 +41,8 @@
 
 ### Changed
 
+- 录制详情开始/停止按钮提交期间禁用并显示 spinner。
+
 - SRT 详情支持“复制端点”，名称与 mount 预填 -copy。
 
 - 代理详情支持“复制代理”，预填 `/path-copy` 并以 POST 创建。
