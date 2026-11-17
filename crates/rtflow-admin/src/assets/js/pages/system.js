@@ -17,8 +17,8 @@ export async function render() {
         <div class="stack">
           <section class="panel"><div class="panel-head"><h2>运行</h2></div><div class="panel-body"><dl class="kv">
             <dt>版本</dt><dd class="mono">${esc(system.version || "—")}</dd><dt>运行时长</dt><dd>${esc(uptime(system.uptime_seconds))}</dd>
-            <dt>在线流</dt><dd class="mono">${Number(system.mounts || 0)}</dd><dt>控制台路径</dt><dd class="mono">${esc(system.base_path || "/admin")}</dd>
-            <dt>HLS 前缀</dt><dd class="mono">${esc(system.hls_prefix || "/hls")}</dd>
+            <dt>在线流</dt><dd class="mono">${Number(system.mounts || 0)}</dd><dt>控制台路径</dt><dd class="mono base-value"><span>${esc(system.base_path || "/admin")}</span><button class="copy-inline" data-copy-value="${esc(system.base_path || "/admin")}" aria-label="复制控制台路径" title="复制">⧉</button></dd>
+            <dt>HLS 前缀</dt><dd class="mono base-value"><span>${esc(system.hls_prefix || "/hls")}</span><button class="copy-inline" data-copy-value="${esc(system.hls_prefix || "/hls")}" aria-label="复制 HLS 前缀" title="复制">⧉</button></dd>
             <dt>RTSP 基地址</dt><dd class="mono base-value"><span title="${esc(system.rtsp_base || "")}">${esc(system.rtsp_base || "—")}</span>${system.rtsp_base ? `<button class="copy-inline" data-copy-base="${esc(system.rtsp_base)}" aria-label="复制 RTSP 基地址" title="复制">⧉</button>` : ""}</dd>
             <dt>RTMP 基地址</dt><dd class="mono base-value"><span title="${esc(system.rtmp_base || "")}">${esc(system.rtmp_base || "—")}</span>${system.rtmp_base ? `<button class="copy-inline" data-copy-base="${esc(system.rtmp_base)}" aria-label="复制 RTMP 基地址" title="复制">⧉</button>` : ""}</dd></dl></div></section>
           <section class="panel"><div class="panel-head"><h2>存储</h2></div><div class="panel-body"><dl class="kv">
@@ -39,6 +39,9 @@ export async function render() {
       };
       root.querySelectorAll("[data-copy-base]").forEach((button) => button.onclick = async () => {
         try { await navigator.clipboard.writeText(button.dataset.copyBase); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      });
+      root.querySelectorAll("[data-copy-value]").forEach((button) => button.onclick = async () => {
+        try { await navigator.clipboard.writeText(button.dataset.copyValue); toast("已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       });
       root.querySelector("[data-copy-backup]").onclick = async () => {
         try { await navigator.clipboard.writeText("rtflow-server --db-backup backup.db"); toast("命令已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
