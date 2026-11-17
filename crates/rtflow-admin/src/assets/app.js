@@ -194,6 +194,7 @@ function renderShell() {
         </div>
       </header>
       <main class="content" id="content"><div id="page-content"></div></main>
+      <div class="sr-only" aria-live="polite" data-page-announcer></div>
     </div>
   </div>`;
   app.querySelectorAll("[data-route]").forEach((link) => link.addEventListener("click", () => {
@@ -278,6 +279,8 @@ async function navigate(options = {}) {
   const focus = options.keepFocus && document.activeElement && previous.contains(document.activeElement)
     ? { placeholder: document.activeElement.placeholder, start: document.activeElement.selectionStart }
     : null;
+  const contentNode = document.getElementById("content");
+  contentNode?.setAttribute("aria-busy", "true");
   if (!options.silent && (routeChanged || !previous.querySelector("[data-page]"))) {
     previous.innerHTML = `<div class="stack"><div class="skeleton" style="height:72px"></div><div class="skeleton" style="height:300px"></div></div>`;
   }
@@ -296,6 +299,11 @@ async function navigate(options = {}) {
     if (previous.isConnected) previous.replaceWith(target);
     else document.getElementById("content")?.appendChild(target);
     target.scrollTop = scrollTop;
+    contentNode?.setAttribute("aria-busy", "false");
+    if (routeChanged) {
+      const announcer = document.querySelector("[data-page-announcer]");
+      if (announcer) announcer.textContent = `${routes[route].label} 页面`;
+    }
     const cleanup = view.mount?.(target, ctx);
     if (typeof cleanup === "function") pageCleanup = cleanup;
     if (focus?.placeholder) {
@@ -303,6 +311,7 @@ async function navigate(options = {}) {
       if (input) { input.focus(); try { input.setSelectionRange(focus.start, focus.start); } catch (_) {} }
     }
   } catch (error) {
+    contentNode?.setAttribute("aria-busy", "false");
     previous.innerHTML = `<div class="error-banner">${esc(error.message)}<button class="btn small" data-retry>重试</button></div>`;
     previous.querySelector("[data-retry]").onclick = () => navigate();
   }
