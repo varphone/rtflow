@@ -420,6 +420,7 @@ function importViewsFile() {
     const file = input.files?.[0];
     input.remove();
     if (!file) return;
+    if (file.size > 256 * 1024) { toast("导入失败：文件超过 256 KB", "bad"); return; }
     try {
       const clean = parseImportedViews(JSON.parse(await file.text()));
       const merged = [...clean, ...savedViews().filter((view) => !clean.some((item) => item.name === view.name))].slice(0, 12);
