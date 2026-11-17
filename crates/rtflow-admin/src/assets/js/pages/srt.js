@@ -1,5 +1,5 @@
 import { apiV1 } from "../api.js";
-import { bytes, empty, esc, num } from "../format.js";
+import { bytes, empty, esc, exportCsv, num } from "../format.js";
 import { confirmDialog, openDrawer, toast } from "../ui.js";
 import { openSrtDrawer } from "../forms/srt.js";
 
@@ -16,7 +16,7 @@ export async function render(params, ctx) {
   return {
     title: "SRT",
     subtitle: "SRT 拉流与推流端点，保存后单端点热更新。",
-    actions: `<button class="btn small primary" data-action="create">${tab === "push" ? "新增推流" : "新增拉流"}</button><button class="btn small" data-action="refresh">刷新</button>`,
+    actions: `<button class="btn small ghost" data-srt-export>导出</button><button class="btn small primary" data-action="create">${tab === "push" ? "新增推流" : "新增拉流"}</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="tabs"><button class="tab ${tab === "pull" ? "active" : ""}" data-srt-tab="pull">拉流</button><button class="tab ${tab === "push" ? "active" : ""}" data-srt-tab="push">推流</button></div>
       <div class="toolbar"><div class="search"><input class="input" data-srt-search value="${esc(query)}" placeholder="搜索名称、ID 或远端地址"></div><span class="meta" data-srt-count>${initial.length} 条 · ${initial.filter((item) => item.connected).length} 已连接</span></div>
       <section class="panel" data-srt-panel>${initial.length ? table(initial) : empty(`暂无 SRT ${tab === "push" ? "推流" : "拉流"}`, "创建第一个端点开始推流或拉流", "srt", `<a class="btn small" href="#/config/srt?new=1&tab=${tab}">新增${tab === "push" ? "推流" : "拉流"}</a>`)}</section>`,
@@ -43,6 +43,12 @@ export async function render(params, ctx) {
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
       root.querySelectorAll("[data-srt-tab]").forEach((button) => button.onclick = () => { tab = button.dataset.srtTab; paint(); syncUrl(); });
       root.querySelector("[data-action=refresh]").onclick = () => ctx2.reload();
+      root.querySelector("[data-srt-export]").onclick = () => {
+        exportCsv(`srt-${tab}-${new Date().toISOString().slice(0, 10)}.csv`,
+          ["direction", "id", "name", "enabled", "connected", "remote", "mount", "stream_id", "latency_ms", "pbkeylen", "bytes", "last_error"],
+          visible.map((item) => [tab, item.id, item.name || "", item.enabled, item.connected, item.remote || "", item.mount || "", item.stream_id || "", item.latency_ms || "", item.pbkeylen || 0, item.bytes || 0, item.last_error || ""]));
+        toast(`已导出 ${visible.length} 个 SRT 端点`, "ok");
+      };
       create.onclick = () => openSrtDrawer(tab, null, () => ctx2.reload());
       if (params?.get("new") === "1") {
         history.replaceState(null, "", `#/config/srt${tab === "pull" ? "" : "?tab=push"}`);

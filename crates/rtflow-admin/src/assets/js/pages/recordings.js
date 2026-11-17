@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { bytes, dateTime, empty, esc, num } from "../format.js";
+import { bytes, dateTime, empty, esc, exportCsv, isoTime, num } from "../format.js";
 import { openDrawer, syncSortAria, toast } from "../ui.js";
 
 let query = "";
@@ -56,7 +56,7 @@ export async function render(params) {
   return {
     title: "录制",
     subtitle: "当前录制任务，数据每 2 秒原地刷新；按路径的录制开关在“路径”中设置。",
-    actions: `<button class="btn small" data-action="refresh">刷新</button>`,
+    actions: `<button class="btn small ghost" data-rec-export>导出</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search"><input class="input" data-rec-search value="${esc(query)}" placeholder="搜索录制路径"></div>
       <div class="seg"><button data-rec-status="all" class="${status === "all" ? "active" : ""}">全部</button><button data-rec-status="active" class="${status === "active" ? "active" : ""}">录制中</button><button data-rec-status="inactive" class="${status === "inactive" ? "active" : ""}">已停止</button></div>
       <span class="meta" data-rec-count>${initial.length} 条 · ${initial.filter((item) => item.active).length} 录制中</span></div>
@@ -138,6 +138,12 @@ export async function render(params) {
         } catch (error) { toast(error.message, "bad"); }
       });
       root.querySelector("[data-action=refresh]").onclick = () => refresh();
+      root.querySelector("[data-rec-export]").onclick = () => {
+        exportCsv(`recordings-${new Date().toISOString().slice(0, 10)}.csv`,
+          ["path", "active", "started_at", "segments", "bytes", "dropped", "last_error", "directory"],
+          visible.map((item) => [item.path, item.active, isoTime(item.started_at), item.segments, item.bytes, item.dropped, item.last_error || "", item.directory || ""]));
+        toast(`已导出 ${visible.length} 条录制任务`, "ok");
+      };
       const timer = setInterval(refresh, 2000);
       return () => clearInterval(timer);
     },

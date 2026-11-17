@@ -1,5 +1,5 @@
 import { apiV1 } from "../api.js";
-import { bytes, empty, esc, num, stateBadge } from "../format.js";
+import { bytes, empty, esc, exportCsv, num, stateBadge } from "../format.js";
 import { confirmDialog, openDialog, openDrawer, syncSortAria, toast } from "../ui.js";
 import { openProxyDrawer } from "../forms/proxy.js";
 
@@ -25,7 +25,7 @@ export async function render(params, ctx) {
   return {
     title: "RTSP 代理",
     subtitle: "拉流代理配置与运行状态。",
-    actions: `<button class="btn small primary" data-action="create">新增代理</button><button class="btn small" data-action="refresh">刷新</button>`,
+    actions: `<button class="btn small ghost" data-proxy-export>导出</button><button class="btn small primary" data-action="create">新增代理</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search"><input class="input" data-proxy-search value="${esc(query)}" placeholder="搜索路径或上游"></div>
       <div class="seg">${["all", "streaming", "idle", "backoff", "describing"].map((state) => `<button data-proxy-filter="${state}" class="${filter === state ? "active" : ""}">${state === "all" ? "全部" : state}</button>`).join("")}</div>
       <span class="meta" data-proxy-count>${initial.length} 条 · ${initial.filter((item) => item.state === "streaming").length} streaming</span></div>
@@ -55,6 +55,12 @@ export async function render(params, ctx) {
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
       root.querySelectorAll("[data-proxy-filter]").forEach((button) => button.onclick = () => { filter = button.dataset.proxyFilter; paint(); syncUrl(); });
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
+      root.querySelector("[data-proxy-export]").onclick = () => {
+        exportCsv(`proxies-${new Date().toISOString().slice(0, 10)}.csv`,
+          ["path", "state", "mode", "upstreams", "subscribers", "tracks", "attempts", "bytes", "last_error"],
+          visible.map((item) => [item.path, item.state || "", item.mode || "", (item.upstreams || []).map((upstream) => upstream.url).join(" "), item.subscribers || 0, item.tracks || 0, item.attempts || 0, item.bytes || 0, item.last_error || ""]));
+        toast(`已导出 ${visible.length} 条代理`, "ok");
+      };
       root.querySelector("[data-action=create]").onclick = () => openProxyDrawer(null, () => ctx.reload());
       if (params?.get("new") === "1") {
         history.replaceState(null, "", "#/config/proxies");
