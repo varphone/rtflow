@@ -45,6 +45,8 @@
 
 ### Changed
 
+- 命令面板按钮补充 dialog/键盘快捷键语义；侧栏折叠按钮同步 aria-expanded。
+
 - 管理页增加 robots noindex,nofollow，避免被搜索引擎索引。
 
 - 顶栏运行状态每 30 秒检查 /healthz，异常显示红点与“异常”。

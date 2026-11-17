@@ -97,6 +97,7 @@ function applySidebar(collapsed) {
   if (button) {
     button.innerHTML = `<span>${collapsed ? "›" : "‹"}</span><em>${collapsed ? "" : "收起"}</em>`;
     button.setAttribute("aria-label", collapsed ? "展开侧栏" : "收起侧栏");
+    button.setAttribute("aria-expanded", String(!collapsed));
     button.title = collapsed ? "展开侧栏" : "收起侧栏";
   }
 }
@@ -193,7 +194,7 @@ function renderShell() {
         <button class="btn ghost small menu-btn" data-menu aria-label="打开菜单" aria-controls="sidebar" aria-expanded="false">${icon("menu")}</button>
         <div class="crumbs" id="crumbs"></div>
         <div class="top-actions">
-          <button class="command-trigger" data-command-open aria-label="打开命令面板">${icon("search")}<span>搜索</span><kbd>Ctrl K</kbd></button>
+          <button class="command-trigger" data-command-open aria-label="打开命令面板" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K">${icon("search")}<span>搜索</span><kbd>Ctrl K</kbd></button>
           <a class="health" href="#/system" title="查看系统状态" data-health><span class="dot ok"></span><span data-health-label>运行中</span></a>
           <button class="user-chip" data-user-menu aria-haspopup="menu" aria-expanded="false"><span class="avatar">${esc((state.session?.username || "A").slice(0, 1).toUpperCase())}</span><span>${esc(state.session?.username || "admin")}</span><span class="chev">▾</span></button>
           <div class="user-popover" data-user-popover role="menu" aria-label="用户菜单" hidden>
@@ -230,6 +231,7 @@ function renderShell() {
   const sidebarButton = app.querySelector("[data-sidebar-toggle]");
   sidebarButton.innerHTML = `<span>${sidebarCollapsed() ? "›" : "‹"}</span><em>${sidebarCollapsed() ? "" : "收起"}</em>`;
   sidebarButton.setAttribute("aria-label", sidebarCollapsed() ? "展开侧栏" : "收起侧栏");
+  sidebarButton.setAttribute("aria-expanded", String(!sidebarCollapsed()));
   const popover = app.querySelector("[data-user-popover]");
   const userButton = app.querySelector("[data-user-menu]");
   const syncMenu = () => {
