@@ -1,5 +1,5 @@
 import { apiV1 } from "../api.js";
-import { dateTime, empty, esc } from "../format.js";
+import { dateTime, empty, esc, exportCsv } from "../format.js";
 import { confirmDialog, openDrawer, secretDialog, syncSortAria, toast } from "../ui.js";
 import { openKeyDrawer } from "../forms/key.js";
 
@@ -20,7 +20,7 @@ export async function render(params, ctx) {
   return {
     title: "推流密钥",
     subtitle: "签发一次性 secret，可限定角色、协议与路径。",
-    actions: `<button class="btn small primary" data-action="issue">签发密钥</button><button class="btn small" data-action="refresh">刷新</button>`,
+    actions: `<button class="btn small ghost" data-action="export">导出</button><button class="btn small primary" data-action="issue">签发密钥</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search"><input class="input" data-key-search value="${esc(query)}" placeholder="搜索 Key ID 或名称"></div><span class="meta" data-key-count>${initial.length} 条 · ${initial.filter((item) => item.enabled && !isExpired(item)).length} 有效</span></div>
       <section class="panel" data-key-panel>${initial.length ? table(initial) : empty("暂未签发密钥", "点击“签发密钥”创建第一条", "keys", `<a class="btn small" href="#/config/keys?new=1">签发密钥</a>`)}</section>`,
     mount(root) {
@@ -45,6 +45,12 @@ export async function render(params, ctx) {
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
+      root.querySelector("[data-action=export]").onclick = () => {
+        exportCsv(`keys-${new Date().toISOString().slice(0, 10)}.csv`,
+          ["kid", "name", "roles", "protocols", "paths", "max_connections", "created_at", "expires_at", "status"],
+          visible.map((item) => [item.kid, item.name, (item.roles || []).join(" "), (item.protocols || []).join(" "), (item.paths || []).join(" "), item.max_connections || 0, dateTime(item.created_at), dateTime(item.expires_at), isExpired(item) ? "expired" : item.enabled ? "active" : "revoked"]));
+        toast(`已导出 ${visible.length} 条密钥`, "ok");
+      };
       root.querySelector("[data-action=issue]").onclick = () => openKeyDrawer((result) => { secretDialog("推流密钥（只显示一次）", result.secret); ctx.reload(); });
       if (params?.get("new") === "1") {
         history.replaceState(null, "", "#/config/keys");

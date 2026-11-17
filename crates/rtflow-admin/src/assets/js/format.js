@@ -79,3 +79,18 @@ export function iconSvg(name) {
   };
   return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name] || paths.inbox}</svg>`;
 }
+
+
+export function exportCsv(filename, header, rows) {
+  const quote = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const lines = [header.map(quote).join(","), ...rows.map((row) => row.map(quote).join(","))];
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}

@@ -1,5 +1,5 @@
 import { api, apiV1 } from "../api.js";
-import { dateTime, empty, esc } from "../format.js";
+import { dateTime, empty, esc, exportCsv } from "../format.js";
 import { confirmDialog, openDrawer, syncSortAria, toast } from "../ui.js";
 import { openPathDrawer } from "../forms/path.js";
 
@@ -20,7 +20,7 @@ export async function render(params, ctx) {
   return {
     title: "路径",
     subtitle: "路径策略、发布/观看开关与录制。",
-    actions: `<button class="btn small primary" data-action="create">新建路径</button><button class="btn small" data-action="refresh">刷新</button>`,
+    actions: `<button class="btn small ghost" data-action="export">导出</button><button class="btn small primary" data-action="create">新建路径</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search"><input class="input" data-path-search value="${esc(query)}" placeholder="搜索路径"></div><span class="meta" data-path-count>${initial.length} 条 · ${initial.filter((item) => item.enabled).length} 启用</span></div>
       <section class="panel" data-path-panel>${initial.length ? table(initial) : empty("暂无路径记录", "新建路径或通过配置提供 glob 规则", "paths", `<a class="btn small" href="#/config/paths?new=1">新建路径</a>`)}</section>`,
     mount(root) {
@@ -45,6 +45,12 @@ export async function render(params, ctx) {
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
+      root.querySelector("[data-action=export]").onclick = () => {
+        exportCsv(`paths-${new Date().toISOString().slice(0, 10)}.csv`,
+          ["name", "source", "enabled", "publish", "read", "record", "max_readers", "tenant", "updated_at"],
+          visible.map((item) => [item.name, item.source, item.enabled, item.publish, item.read, item.record, item.max_readers || 0, item.tenant || "", dateTime(item.updated_at)]));
+        toast(`已导出 ${visible.length} 条路径`, "ok");
+      };
       root.querySelector("[data-action=create]").onclick = () => openPathDrawer(null, () => ctx.reload());
       if (params?.get("new") === "1") {
         history.replaceState(null, "", "#/config/paths");
