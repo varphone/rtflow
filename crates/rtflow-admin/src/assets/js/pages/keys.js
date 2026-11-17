@@ -1,5 +1,5 @@
 import { apiV1 } from "../api.js";
-import { dateTime, empty, esc, exportCsv } from "../format.js";
+import { dateTime, empty, esc, exportCsv, isoTime } from "../format.js";
 import { confirmDialog, openDrawer, secretDialog, syncSortAria, toast } from "../ui.js";
 import { openKeyDrawer } from "../forms/key.js";
 
@@ -48,7 +48,7 @@ export async function render(params, ctx) {
       root.querySelector("[data-action=export]").onclick = () => {
         exportCsv(`keys-${new Date().toISOString().slice(0, 10)}.csv`,
           ["kid", "name", "roles", "protocols", "paths", "max_connections", "created_at", "expires_at", "status"],
-          visible.map((item) => [item.kid, item.name, (item.roles || []).join(" "), (item.protocols || []).join(" "), (item.paths || []).join(" "), item.max_connections || 0, dateTime(item.created_at), dateTime(item.expires_at), isExpired(item) ? "expired" : item.enabled ? "active" : "revoked"]));
+          visible.map((item) => [item.kid, item.name, (item.roles || []).join(" "), (item.protocols || []).join(" "), (item.paths || []).join(" "), item.max_connections || 0, isoTime(item.created_at), isoTime(item.expires_at), isExpired(item) ? "expired" : item.enabled ? "active" : "revoked"]));
         toast(`已导出 ${visible.length} 条密钥`, "ok");
       };
       root.querySelector("[data-action=issue]").onclick = () => openKeyDrawer((result) => { secretDialog("推流密钥（只显示一次）", result.secret); ctx.reload(); });

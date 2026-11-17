@@ -20,6 +20,7 @@ export function uptime(seconds) {
   return `${m} 分钟`;
 }
 
+export const isoTime = (unix) => unix ? new Date(Number(unix) * 1000).toISOString() : "";
 export function dateTime(unix) {
   if (!unix) return "—";
   const date = new Date(Number(unix) * 1000);

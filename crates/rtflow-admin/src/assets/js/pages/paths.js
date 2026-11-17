@@ -1,5 +1,5 @@
 import { api, apiV1 } from "../api.js";
-import { dateTime, empty, esc, exportCsv } from "../format.js";
+import { dateTime, empty, esc, exportCsv, isoTime } from "../format.js";
 import { confirmDialog, openDrawer, syncSortAria, toast } from "../ui.js";
 import { openPathDrawer } from "../forms/path.js";
 
@@ -48,7 +48,7 @@ export async function render(params, ctx) {
       root.querySelector("[data-action=export]").onclick = () => {
         exportCsv(`paths-${new Date().toISOString().slice(0, 10)}.csv`,
           ["name", "source", "enabled", "publish", "read", "record", "max_readers", "tenant", "updated_at"],
-          visible.map((item) => [item.name, item.source, item.enabled, item.publish, item.read, item.record, item.max_readers || 0, item.tenant || "", dateTime(item.updated_at)]));
+          visible.map((item) => [item.name, item.source, item.enabled, item.publish, item.read, item.record, item.max_readers || 0, item.tenant || "", isoTime(item.updated_at)]));
         toast(`已导出 ${visible.length} 条路径`, "ok");
       };
       root.querySelector("[data-action=create]").onclick = () => openPathDrawer(null, () => ctx.reload());
