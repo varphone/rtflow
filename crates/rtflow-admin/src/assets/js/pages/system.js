@@ -42,7 +42,8 @@ export async function render() {
             <dt>Schema</dt><dd class="mono">v${Number(storage.schema_version || 0)}</dd><dt>数据库大小</dt><dd class="mono" data-storage-bytes>${bytes(storage.bytes)}</dd>
             <dt>备份</dt><dd class="mono" style="overflow-wrap:anywhere">${esc(backupCommand)}</dd>
             <dt>校验</dt><dd class="mono base-value"><span title="${esc(verifyCommand)}">${esc(verifyCommand)}</span><button class="copy-inline" data-copy-value="${esc(verifyCommand)}" aria-label="复制校验命令" title="复制">⧉</button></dd></dl>
-            <div class="actions" style="margin-top:10px"><button class="btn small ghost" data-copy-backup>复制备份命令</button></div></div></section>
+            <div class="actions" style="margin-top:10px"><button class="btn small ghost" data-copy-backup>复制备份命令</button></div>
+            <p class="note" style="margin:10px 0 0">备份包含路径、密钥、代理、SRT 与录制索引，不包含录制媒体文件；建议在低峰期执行。</p></div></section>
           <section class="panel"><div class="panel-head"><h2>构建特性</h2></div><div class="panel-body"><div class="feature-list">${features || '<span class="faint">无</span>'}</div></div></section>
         </div>
       </div>
