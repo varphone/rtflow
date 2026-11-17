@@ -9,7 +9,7 @@ export function openSrtDrawer(direction, existing, onSaved, options = {}) {
   const route = direction === "push" ? "pushes" : "pulls";
   openDrawer({
     title: clone ? "复制 SRT 端点" : (existing ? "编辑 SRT 端点" : (direction === "push" ? "新增 SRT 推流" : "新增 SRT 拉流")),
-    description: direction === "push" ? "把本地 mount 推送到远端 SRT listener。" : "从远端 SRT listener 拉流并注册 mount。",
+    description: direction === "push" ? (clone ? "复制 SRT 推流端点；名称与 mount 不能与现有端点重复。" : "把本地 mount 推送到远端 SRT listener。") : (clone ? "复制 SRT 拉流端点；名称与 mount 不能与现有端点重复。" : "从远端 SRT listener 拉流并注册 mount。"),
     body: `
       <div class="form-section">
         <h3>连接</h3>

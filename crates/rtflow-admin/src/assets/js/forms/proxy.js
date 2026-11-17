@@ -27,7 +27,7 @@ export function openProxyDrawer(existing, onSaved, options = {}) {
   const upstreams = mount.upstreams?.length ? mount.upstreams : [{ url: "", transport: "tcp" }];
   openDrawer({
     title: clone ? "复制 RTSP 代理" : (existing ? "编辑 RTSP 代理" : "新增 RTSP 代理"),
-    description: "上游按顺序尝试；密码只写不读。",
+    description: clone ? "复制上游与模式；路径不能与现有代理重复。" : "上游按顺序尝试；密码只写不读。",
     body: `
       <div class="form-section">
         <h3>代理</h3>

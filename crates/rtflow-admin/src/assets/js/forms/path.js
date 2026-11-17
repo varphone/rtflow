@@ -9,7 +9,7 @@ export function openPathDrawer(existing, onSaved, options = {}) {
   const editing = Boolean(existing) && !clone;
   openDrawer({
     title: clone ? "复制路径" : (existing ? "编辑路径" : "新建路径"),
-    description: "路径策略、输出协议与访问限制。",
+    description: clone ? "基于现有策略创建副本；名称不能与现有路径重复。" : "路径策略、输出协议与访问限制。",
     body: `
       <div class="form-section">
         <h3>基础</h3>
