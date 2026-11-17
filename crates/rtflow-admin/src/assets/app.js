@@ -349,6 +349,7 @@ function openShortcuts() {
       ${row(["↑", "↓"], "命令面板中选择")}
       ${row(["Enter"], "执行命令")}
       ${row(["Ctrl", "E"], "导出当前视图")}
+      ${row(["R"], "刷新当前页面")}
       ${row(["Esc"], "关闭对话框 / 抽屉 / 侧栏")}
       ${row(["?"], "打开本帮助")}
     </div>`,
@@ -422,6 +423,7 @@ window.addEventListener("keydown", (event) => {
   if (isTyping(event) || event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key === "?") { event.preventDefault(); openShortcuts(); }
   else if (event.key === "/") { event.preventDefault(); focusPageSearch(); }
+  else if (event.key.toLowerCase() === "r") { event.preventDefault(); navigate({ silent: true }); }
 });
 window.addEventListener("hashchange", () => navigate());
 setInterval(() => { if (state.session && !document.hidden) refreshCounts(); }, 10000);
