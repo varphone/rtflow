@@ -336,7 +336,7 @@ async function navigate(options = {}) {
     }
   } catch (error) {
     contentNode?.setAttribute("aria-busy", "false");
-    previous.innerHTML = `<div class="error-banner">${esc(error.message)}<button class="btn small" data-retry>重试</button></div>`;
+    previous.innerHTML = `<div class="error-banner" role="alert">${esc(error.message)}<button class="btn small" data-retry>重试</button></div>`;
     previous.querySelector("[data-retry]").onclick = () => navigate();
   }
 }

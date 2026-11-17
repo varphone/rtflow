@@ -177,7 +177,7 @@ export function openDrawer({ title, description = "", body, submitLabel = "‰øùÂ≠
       await onSubmit(new FormData(form), { close: forceClose });
     } catch (error) {
       let box = form.querySelector(".form-error");
-      if (!box) { box = document.createElement("div"); box.className = "form-error"; form.querySelector(".drawer-body").prepend(box); }
+      if (!box) { box = document.createElement("div"); box.className = "form-error"; box.setAttribute("role", "alert"); form.querySelector(".drawer-body").prepend(box); }
       box.textContent = error.message;
     } finally {
       button.disabled = false;
