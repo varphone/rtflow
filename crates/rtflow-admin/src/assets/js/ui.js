@@ -251,4 +251,4 @@ export const checkbox = (name, label, checked = false) =>
   `<label class="checkline"><input type="checkbox" name="${name}" ${checked ? "checked" : ""}> ${esc(label)}</label>`;
 
 export const textInput = (name, value = "", attrs = "") =>
-  `<input class="input" name="${name}" value="${esc(value)}" ${attrs}>`;
+  `<input class="input" name="${name}" value="${esc(value)}" autocomplete="off" autocapitalize="off" spellcheck="false" ${attrs}>`;
