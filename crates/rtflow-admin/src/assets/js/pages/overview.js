@@ -61,9 +61,11 @@ export async function render() {
         <a class="quick-action" href="#/system"><span class="kicker">诊断</span><strong>服务与存储</strong><small>TOML、DB schema、版本</small></a>
       </div>
       <section class="panel traffic-panel">
-        <div class="panel-head"><h2 data-trend-title>接收帧速率</h2><div class="seg" style="margin-left:8px"><button data-trend-metric="frames" class="active">帧率</button><button data-trend-metric="subscribers">订阅</button></div><span class="meta"><span data-trend-rate>—</span> · 近 2 分钟</span><span class="meta" data-trend-peak style="margin-left:auto"></span></div>
+        <div class="panel-head"><h2 data-trend-title>接收帧速率</h2><div class="seg" style="margin-left:8px"><button data-trend-metric="frames" class="active">帧率</button><button data-trend-metric="subscribers">订阅</button></div>
+        <div class="seg" style="margin-left:4px"><button data-trend-window="120" class="active">2m</button><button data-trend-window="300">5m</button><button data-trend-window="900">15m</button></div>
+        <span class="meta"><span data-trend-rate>—</span> · 近 <span data-trend-window-label>2 分钟</span></span><span class="meta" data-trend-peak style="margin-left:auto"></span></div>
         <div class="traffic-chart"><svg viewBox="0 0 1000 90" preserveAspectRatio="none" aria-hidden="true"><path class="traffic-area" data-trend-area></path><path class="traffic-line" data-trend-line></path></svg><span class="traffic-empty" data-trend-empty>等待流量…</span></div>
-        <div class="traffic-axis"><span>2 分钟前</span><span>现在</span></div>
+        <div class="traffic-axis"><span data-trend-axis-start>2 分钟前</span><span>现在</span></div>
       </section>
       <div class="two-col">
         <section class="panel">
@@ -90,6 +92,7 @@ export async function render() {
       let timer = null;
       let samples = [];
       let metric = "frames";
+      let windowSeconds = 120;
       let previous = { frames: Number(data.overview.accepted_frames || 0), at: Date.now() };
       const drawTrend = () => {
         const line = root.querySelector("[data-trend-line]");
@@ -98,11 +101,16 @@ export async function render() {
         const peakLabel = root.querySelector("[data-trend-peak]");
         const empty = root.querySelector("[data-trend-empty]");
         const title = root.querySelector("[data-trend-title]");
-        const values = samples.map((sample) => sample[metric]);
+        const pointsInWindow = Math.max(2, Math.ceil(windowSeconds / 8));
+        const values = samples.slice(-pointsInWindow).map((sample) => sample[metric]);
         const suffix = metric === "frames" ? " fps" : "";
         if (rateLabel) rateLabel.textContent = `${(values[values.length - 1] || 0).toFixed(0)}${suffix}`;
         if (peakLabel) peakLabel.textContent = `峰值 ${Math.max(...values, 0).toFixed(0)}${suffix}`;
         if (title) title.textContent = metric === "frames" ? "接收帧速率" : "订阅连接";
+        const windowLabel = root.querySelector("[data-trend-window-label]");
+        if (windowLabel) windowLabel.textContent = windowSeconds >= 60 ? `${windowSeconds / 60} 分钟` : `${windowSeconds} 秒`;
+        const axisStart = root.querySelector("[data-trend-axis-start]");
+        if (axisStart) axisStart.textContent = windowSeconds >= 60 ? `${windowSeconds / 60} 分钟前` : `${windowSeconds} 秒前`;
         if (empty) {
           empty.textContent = metric === "frames" ? "等待流量…" : "等待订阅…";
           empty.hidden = values.some((value) => value > 0);
@@ -125,9 +133,14 @@ export async function render() {
         const rate = Math.max(0, (frames - previous.frames) / seconds);
         previous = { frames, at: now };
         samples.push({ frames: rate, subscribers: Number(overview.subscribers || 0) });
-        if (samples.length > 15) samples.shift();
+        if (samples.length > 120) samples.shift();
         drawTrend();
       };
+      root.querySelectorAll("[data-trend-window]").forEach((button) => button.onclick = () => {
+        windowSeconds = Number(button.dataset.trendWindow);
+        root.querySelectorAll("[data-trend-window]").forEach((item) => item.classList.toggle("active", item === button));
+        drawTrend();
+      });
       root.querySelectorAll("[data-trend-metric]").forEach((button) => button.onclick = () => {
         metric = button.dataset.trendMetric;
         root.querySelectorAll("[data-trend-metric]").forEach((item) => item.classList.toggle("active", item === button));
