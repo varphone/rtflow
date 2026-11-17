@@ -24,17 +24,19 @@ export async function render(params, ctx) {
     title: "推流密钥",
     subtitle: "签发一次性 secret，可限定角色、协议与路径。",
     actions: `<button class="btn small ghost" data-action="export">导出</button><button class="btn small primary" data-action="issue">签发密钥</button><button class="btn small" data-action="refresh">刷新</button>`,
-    html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-key-search value="${esc(query)}" placeholder="搜索 Key ID 或名称"></div><div class="seg"><button data-key-state="all" class="${stateFilter === "all" ? "active" : ""}">全部</button><button data-key-state="valid" class="${stateFilter === "valid" ? "active" : ""}">有效</button><button data-key-state="soon" class="${stateFilter === "soon" ? "active" : ""}">将过期</button><button data-key-state="expired" class="${stateFilter === "expired" ? "active" : ""}">过期</button><button data-key-state="revoked" class="${stateFilter === "revoked" ? "active" : ""}">吊销</button></div><span class="meta" data-key-count>${initial.length} 条 · ${initial.filter((item) => item.enabled && !isExpired(item)).length} 有效</span></div>
+    html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-key-search value="${esc(query)}" placeholder="搜索 Key ID 或名称"></div><div class="seg"><button data-key-state="all" class="${stateFilter === "all" ? "active" : ""}">全部</button><button data-key-state="valid" class="${stateFilter === "valid" ? "active" : ""}">有效</button><button data-key-state="soon" class="${stateFilter === "soon" ? "active" : ""}">将过期</button><button data-key-state="expired" class="${stateFilter === "expired" ? "active" : ""}">过期</button><button data-key-state="revoked" class="${stateFilter === "revoked" ? "active" : ""}">吊销</button></div><span class="meta" data-key-count>${initial.length} 条 · ${initial.filter((item) => item.enabled && !isExpired(item)).length} 有效</span><button class="btn small ghost" data-key-reset ${query.trim() || stateFilter !== "all" ? "" : "hidden"}>重置</button></div>
       <section class="panel" data-key-panel>${initial.length ? table(initial) : empty("暂未签发密钥", "点击“签发密钥”创建第一条", "keys", `<a class="btn small" href="#/config/keys?new=1">签发密钥</a>`)}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-key-panel]");
       const count = root.querySelector("[data-key-count]");
       const search = root.querySelector("[data-key-search]");
+      const reset = root.querySelector("[data-key-reset]");
       syncSortAria(root.querySelector(".panel"), sort);
       let visible = initial;
       const paint = () => {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.enabled && !isExpired(item)).length} 有效`;
+        reset.hidden = !(query.trim() || stateFilter !== "all");
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的密钥", "调整搜索条件", "keys");
         syncSortAria(panel, sort);
       };
@@ -48,6 +50,11 @@ export async function render(params, ctx) {
         history.replaceState(null, "", `#/config/keys${qs ? `?${qs}` : ""}`);
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      reset.onclick = () => {
+        query = ""; stateFilter = "all"; search.value = "";
+        root.querySelectorAll("[data-key-state]").forEach((item) => item.classList.toggle("active", item.dataset.keyState === "all"));
+        paint(); syncUrl();
+      };
       root.querySelectorAll("[data-key-state]").forEach((button) => button.onclick = () => {
         stateFilter = button.dataset.keyState;
         root.querySelectorAll("[data-key-state]").forEach((item) => item.classList.toggle("active", item === button));

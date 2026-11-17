@@ -21,17 +21,19 @@ export async function render(params, ctx) {
     subtitle: "SRT 拉流与推流端点，保存后单端点热更新。",
     actions: `<button class="btn small ghost" data-srt-export>导出</button><button class="btn small primary" data-action="create">${tab === "push" ? "新增推流" : "新增拉流"}</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="tabs"><button class="tab ${tab === "pull" ? "active" : ""}" data-srt-tab="pull">拉流</button><button class="tab ${tab === "push" ? "active" : ""}" data-srt-tab="push">推流</button></div>
-      <div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-srt-search value="${esc(query)}" placeholder="搜索名称、ID 或远端地址"></div><div class="seg"><button data-srt-conn="all" class="${connection === "all" ? "active" : ""}">全部</button><button data-srt-conn="connected" class="${connection === "connected" ? "active" : ""}">已连接</button><button data-srt-conn="offline" class="${connection === "offline" ? "active" : ""}">未连接</button></div><span class="meta" data-srt-count>${initial.length} 条 · ${initial.filter((item) => item.connected).length} 已连接</span></div>
+      <div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-srt-search value="${esc(query)}" placeholder="搜索名称、ID 或远端地址"></div><div class="seg"><button data-srt-conn="all" class="${connection === "all" ? "active" : ""}">全部</button><button data-srt-conn="connected" class="${connection === "connected" ? "active" : ""}">已连接</button><button data-srt-conn="offline" class="${connection === "offline" ? "active" : ""}">未连接</button></div><span class="meta" data-srt-count>${initial.length} 条 · ${initial.filter((item) => item.connected).length} 已连接</span><button class="btn small ghost" data-srt-reset ${query.trim() || connection !== "all" ? "" : "hidden"}>重置</button></div>
       <section class="panel" data-srt-panel>${initial.length ? table(initial) : empty(`暂无 SRT ${tab === "push" ? "推流" : "拉流"}`, "创建第一个端点开始推流或拉流", "srt", `<a class="btn small" href="#/config/srt?new=1&tab=${tab}">新增${tab === "push" ? "推流" : "拉流"}</a>`)}</section>`,
     mount(root, ctx2) {
       const panel = root.querySelector("[data-srt-panel]");
       const count = root.querySelector("[data-srt-count]");
       const search = root.querySelector("[data-srt-search]");
+      const reset = root.querySelector("[data-srt-reset]");
       const create = root.querySelector("[data-action=create]");
       let visible = initial;
       const paint = () => {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.connected).length} 已连接`;
+        reset.hidden = !(query.trim() || connection !== "all");
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的 SRT 端点", "调整搜索条件或切换推拉流", "srt", `<a class="btn small" href="#/config/srt?new=1&tab=${tab}">新增${tab === "push" ? "推流" : "拉流"}</a>`);
         root.querySelectorAll("[data-srt-tab]").forEach((button) => button.classList.toggle("active", button.dataset.srtTab === tab));
         create.textContent = tab === "push" ? "新增推流" : "新增拉流";
@@ -45,6 +47,11 @@ export async function render(params, ctx) {
         history.replaceState(null, "", `#/config/srt${qs ? `?${qs}` : ""}`);
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      reset.onclick = () => {
+        query = ""; connection = "all"; search.value = "";
+        root.querySelectorAll("[data-srt-conn]").forEach((item) => item.classList.toggle("active", item.dataset.srtConn === "all"));
+        paint(); syncUrl();
+      };
       root.querySelectorAll("[data-srt-tab]").forEach((button) => button.onclick = () => { tab = button.dataset.srtTab; paint(); syncUrl(); });
       root.querySelectorAll("[data-srt-conn]").forEach((button) => button.onclick = () => {
         connection = button.dataset.srtConn;

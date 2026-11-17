@@ -24,17 +24,19 @@ export async function render(params, ctx) {
     title: "路径",
     subtitle: "路径策略、发布/观看开关与录制。",
     actions: `<button class="btn small ghost" data-action="export">导出</button><button class="btn small primary" data-action="create">新建路径</button><button class="btn small" data-action="refresh">刷新</button>`,
-    html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-path-search value="${esc(query)}" placeholder="搜索路径"></div><div class="seg"><button data-path-state="all" class="${stateFilter === "all" ? "active" : ""}">全部</button><button data-path-state="enabled" class="${stateFilter === "enabled" ? "active" : ""}">启用</button><button data-path-state="disabled" class="${stateFilter === "disabled" ? "active" : ""}">停用</button></div><span class="meta" data-path-count>${initial.length} 条 · ${initial.filter((item) => item.enabled).length} 启用</span></div>
+    html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-path-search value="${esc(query)}" placeholder="搜索路径"></div><div class="seg"><button data-path-state="all" class="${stateFilter === "all" ? "active" : ""}">全部</button><button data-path-state="enabled" class="${stateFilter === "enabled" ? "active" : ""}">启用</button><button data-path-state="disabled" class="${stateFilter === "disabled" ? "active" : ""}">停用</button></div><span class="meta" data-path-count>${initial.length} 条 · ${initial.filter((item) => item.enabled).length} 启用</span><button class="btn small ghost" data-path-reset ${query.trim() || stateFilter !== "all" ? "" : "hidden"}>重置</button></div>
       <section class="panel" data-path-panel>${initial.length ? table(initial) : empty("暂无路径记录", "新建路径或通过配置提供 glob 规则", "paths", `<a class="btn small" href="#/config/paths?new=1">新建路径</a>`)}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-path-panel]");
       const count = root.querySelector("[data-path-count]");
       const search = root.querySelector("[data-path-search]");
+      const reset = root.querySelector("[data-path-reset]");
       syncSortAria(root.querySelector(".panel"), sort);
       let visible = initial;
       const paint = () => {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.enabled).length} 启用`;
+        reset.hidden = !(query.trim() || stateFilter !== "all");
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的路径", "调整搜索条件或新建路径", "paths");
         syncSortAria(panel, sort);
       };
@@ -48,6 +50,11 @@ export async function render(params, ctx) {
         history.replaceState(null, "", `#/config/paths${qs ? `?${qs}` : ""}`);
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      reset.onclick = () => {
+        query = ""; stateFilter = "all"; search.value = "";
+        root.querySelectorAll("[data-path-state]").forEach((item) => item.classList.toggle("active", item.dataset.pathState === "all"));
+        paint(); syncUrl();
+      };
       root.querySelectorAll("[data-path-state]").forEach((button) => button.onclick = () => {
         stateFilter = button.dataset.pathState;
         root.querySelectorAll("[data-path-state]").forEach((item) => item.classList.toggle("active", item === button));
