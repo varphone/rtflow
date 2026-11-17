@@ -19,8 +19,8 @@ export async function render() {
             <dt>版本</dt><dd class="mono">${esc(system.version || "—")}</dd><dt>运行时长</dt><dd>${esc(uptime(system.uptime_seconds))}</dd>
             <dt>在线流</dt><dd class="mono">${Number(system.mounts || 0)}</dd><dt>控制台路径</dt><dd class="mono">${esc(system.base_path || "/admin")}</dd>
             <dt>HLS 前缀</dt><dd class="mono">${esc(system.hls_prefix || "/hls")}</dd>
-            <dt>RTSP 基地址</dt><dd class="mono">${esc(system.rtsp_base || "—")}</dd>
-            <dt>RTMP 基地址</dt><dd class="mono">${esc(system.rtmp_base || "—")}</dd></dl></div></section>
+            <dt>RTSP 基地址</dt><dd class="mono base-value"><span>${esc(system.rtsp_base || "—")}</span>${system.rtsp_base ? `<button class="copy-inline" data-copy-base="${esc(system.rtsp_base)}">复制</button>` : ""}</dd>
+            <dt>RTMP 基地址</dt><dd class="mono base-value"><span>${esc(system.rtmp_base || "—")}</span>${system.rtmp_base ? `<button class="copy-inline" data-copy-base="${esc(system.rtmp_base)}">复制</button>` : ""}</dd></dl></div></section>
           <section class="panel"><div class="panel-head"><h2>存储</h2></div><div class="panel-body"><dl class="kv">
             <dt>Schema</dt><dd class="mono">v${Number(storage.schema_version || 0)}</dd><dt>数据库大小</dt><dd class="mono">${bytes(storage.bytes)}</dd>
             <dt>备份</dt><dd class="mono">rtflow-server --db-backup FILE</dd></dl>
@@ -37,6 +37,9 @@ export async function render() {
       root.querySelector("[data-copy-config]").onclick = async () => {
         try { await navigator.clipboard.writeText(configText); toast("配置已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
+      root.querySelectorAll("[data-copy-base]").forEach((button) => button.onclick = async () => {
+        try { await navigator.clipboard.writeText(button.dataset.copyBase); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
+      });
       root.querySelector("[data-copy-backup]").onclick = async () => {
         try { await navigator.clipboard.writeText("rtflow-server --db-backup backup.db"); toast("命令已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
