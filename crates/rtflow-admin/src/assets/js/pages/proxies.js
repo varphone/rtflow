@@ -40,7 +40,7 @@ export async function render(params, ctx) {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.state === "streaming").length} streaming`;
         root.querySelectorAll("[data-proxy-filter]").forEach((button) => button.classList.toggle("active", button.dataset.proxyFilter === filter));
-        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的代理", "调整搜索或状态筛选");
+        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的代理", "调整搜索或状态筛选", "proxy");
         syncSortAria(panel, sort);
       };
       const syncUrl = () => {

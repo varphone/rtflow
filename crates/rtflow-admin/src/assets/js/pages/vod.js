@@ -48,7 +48,7 @@ export async function render(params) {
       const paint = () => {
         visible = filter(allVods, search.value);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.cached).length} 已缓存`;
-        results.innerHTML = visible.length ? cards(visible, selected) : empty("没有匹配的点播", "调整搜索条件");
+        results.innerHTML = visible.length ? cards(visible, selected) : empty("没有匹配的点播", "调整搜索条件", "vod");
         sync();
       };
       root.addEventListener("change", (event) => {

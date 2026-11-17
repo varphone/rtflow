@@ -32,7 +32,7 @@ export async function render(params, ctx) {
       const paint = () => {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.enabled && !isExpired(item)).length} 有效`;
-        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的密钥", "调整搜索条件");
+        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的密钥", "调整搜索条件", "keys");
         syncSortAria(panel, sort);
       };
       const syncUrl = () => {

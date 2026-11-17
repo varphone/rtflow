@@ -71,7 +71,7 @@ export async function render(params) {
       const paint = () => {
         visible = view();
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.active).length} 录制中`;
-        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选", "inbox", (!query && status === "all") ? `<a class="btn small" href="#/config/paths">前往路径配置</a>` : "");
+        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选", "record", (!query && status === "all") ? `<a class="btn small" href="#/config/paths">前往路径配置</a>` : "");
         syncSortAria(panel, sort);
         sync();
       };
@@ -84,7 +84,7 @@ export async function render(params) {
         if (!tbody || existing.length !== nextPaths.length || existing.some((path, index) => path !== nextPaths[index])) {
           visible = next;
           count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.active).length} 录制中`;
-          panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选");
+          panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的录制任务", "调整搜索或状态筛选", "record");
           syncSortAria(panel, sort);
           sync();
           return;

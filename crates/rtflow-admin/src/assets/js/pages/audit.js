@@ -77,7 +77,7 @@ export async function render(params) {
         pageLabel.textContent = `${page} / ${pages}`;
         prev.disabled = page <= 1;
         next.disabled = page >= pages;
-        tbody.innerHTML = slice.length ? rows(slice) : `<tr><td colspan="7">${empty("没有匹配的审计事件", "调整搜索条件或等待新的操作")}</td></tr>`;
+        tbody.innerHTML = slice.length ? rows(slice) : `<tr><td colspan="7">${empty("没有匹配的审计事件", "调整搜索条件或等待新的操作", "audit")}</td></tr>`;
         tbody.querySelectorAll("[data-audit-detail]").forEach((button, index) => {
           button.onclick = () => openAuditEvent(slice[index]);
         });

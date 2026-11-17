@@ -32,7 +32,7 @@ export async function render(params, ctx) {
       const paint = () => {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.enabled).length} 启用`;
-        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的路径", "调整搜索条件或新建路径");
+        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的路径", "调整搜索条件或新建路径", "paths");
         syncSortAria(panel, sort);
       };
       const syncUrl = () => {
