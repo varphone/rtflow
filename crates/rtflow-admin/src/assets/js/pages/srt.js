@@ -1,16 +1,21 @@
 import { apiV1 } from "../api.js";
 import { bytes, empty, esc, exportCsv, iconSvg, num } from "../format.js";
-import { confirmDialog, openDrawer, toast } from "../ui.js";
+import { confirmDialog, openDrawer, syncSortAria, toast } from "../ui.js";
 import { openSrtDrawer } from "../forms/srt.js";
 
 let tab = "pull";
 let query = "";
 let connection = "all";
+let sort = { field: "name", dir: 1 };
 
 export async function render(params, ctx) {
   query = params?.get("q") || "";
   const linkedTab = params?.get("tab");
   tab = ["pull", "push"].includes(linkedTab) ? linkedTab : "pull";
+  const field = params?.get("sort");
+  sort = ["name", "remote", "connected", "bytes"].includes(field)
+    ? { field, dir: params?.get("dir") === "-1" ? -1 : 1 }
+    : { field: "name", dir: 1 };
   const linkedConn = params?.get("conn");
   connection = ["connected", "offline"].includes(linkedConn) ? linkedConn : "all";
   const [pulls, pushes] = await Promise.all([apiV1("/srt/pulls"), apiV1("/srt/pushes")]);
@@ -29,12 +34,14 @@ export async function render(params, ctx) {
       const search = root.querySelector("[data-srt-search]");
       const reset = root.querySelector("[data-srt-reset]");
       const create = root.querySelector("[data-action=create]");
+      syncSortAria(panel, sort);
       let visible = initial;
       const paint = () => {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.connected).length} 已连接`;
         reset.hidden = !(query.trim() || connection !== "all");
         panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的 SRT 端点", "调整搜索条件或切换推拉流", "srt", `<a class="btn small" href="#/config/srt?new=1&tab=${tab}">新增${tab === "push" ? "推流" : "拉流"}</a>`);
+        syncSortAria(panel, sort);
         root.querySelectorAll("[data-srt-tab]").forEach((button) => button.classList.toggle("active", button.dataset.srtTab === tab));
         create.textContent = tab === "push" ? "新增推流" : "新增拉流";
       };
@@ -43,10 +50,17 @@ export async function render(params, ctx) {
         if (tab !== "pull") params.set("tab", tab);
         if (query.trim()) params.set("q", query.trim());
         if (connection !== "all") params.set("conn", connection);
+        if (sort.field !== "name" || sort.dir !== 1) params.set("sort", sort.field);
+        if (sort.dir === -1) params.set("dir", "-1");
         const qs = params.toString();
         history.replaceState(null, "", `#/config/srt${qs ? `?${qs}` : ""}`);
       };
       search.oninput = () => { query = search.value; paint(); syncUrl(); };
+      root.querySelectorAll("[data-sort]").forEach((button) => button.onclick = () => {
+        const field = button.dataset.sort;
+        sort = { field, dir: sort.field === field ? -sort.dir : 1 };
+        paint(); syncUrl();
+      });
       reset.onclick = () => {
         query = ""; connection = "all"; search.value = "";
         root.querySelectorAll("[data-srt-conn]").forEach((item) => item.classList.toggle("active", item.dataset.srtConn === "all"));
@@ -95,11 +109,26 @@ export async function render(params, ctx) {
 
 function view(all) {
   const q = query.trim().toLowerCase();
-  return (all[tab] || []).filter((item) => !q || `${item.name || ""} ${item.id} ${item.remote || ""}`.toLowerCase().includes(q));
+  const items = (all[tab] || []).filter((item) => {
+    const match = !q || `${item.name || ""} ${item.id} ${item.remote || ""}`.toLowerCase().includes(q);
+    const conn = connection === "all" || (connection === "connected" ? item.connected : !item.connected);
+    return match && conn;
+  });
+  const value = (item) => {
+    if (sort.field === "remote") return String(item.remote || "");
+    if (sort.field === "connected") return Number(Boolean(item.connected));
+    if (sort.field === "bytes") return Number(item.bytes || 0);
+    return String(item.name || item.id || "");
+  };
+  return items.sort((left, right) => {
+    const a = value(left), b = value(right);
+    return (a < b ? -1 : a > b ? 1 : 0) * sort.dir;
+  });
 }
 
 function table(items) {
-  return `<div class="table-wrap"><table class="data"><caption class="sr-only">共 ${items.length} 个 SRT 端点</caption><thead><tr><th>名称</th><th>状态</th><th>远端</th><th>Mount</th><th>连接</th><th>流量</th><th>错误</th><th></th></tr></thead><tbody>
+  const arrow = (field) => sort.field === field ? (sort.dir > 0 ? " ↑" : " ↓") : " ↕";
+  return `<div class="table-wrap"><table class="data"><caption class="sr-only">共 ${items.length} 个 SRT 端点</caption><thead><tr><th><button class="sort-btn" data-sort="name">名称${arrow("name")}</button></th><th>状态</th><th><button class="sort-btn" data-sort="remote">远端${arrow("remote")}</button></th><th>Mount</th><th><button class="sort-btn" data-sort="connected">连接${arrow("connected")}</button></th><th><button class="sort-btn" data-sort="bytes">流量${arrow("bytes")}</button></th><th>错误</th><th></th></tr></thead><tbody>
     ${items.map((item) => `<tr><td><button class="link-cell" data-action="detail" data-id="${esc(item.id)}">${esc(item.name || item.id)}</button><div class="cell-sub mono">${esc(item.id)}</div></td>
       <td>${item.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge">停用</span>'}</td><td class="mono">${esc(item.remote)}</td>
       <td class="mono">${esc(item.mount || "—")}</td><td>${item.connected ? '<span class="badge ok">已连接</span>' : "—"}</td><td class="mono">${bytes(item.bytes || 0)}</td>
