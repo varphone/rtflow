@@ -10,7 +10,9 @@ export function toast(message, kind = "") {
   el.setAttribute("role", "status");
   el.setAttribute("aria-live", "polite");
   el.textContent = message;
-  toastRoot().appendChild(el);
+  const root = toastRoot();
+  while (root.children.length >= 3) root.firstElementChild.remove();
+  root.appendChild(el);
   setTimeout(() => el.remove(), 3600);
 }
 
