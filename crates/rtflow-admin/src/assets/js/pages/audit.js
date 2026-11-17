@@ -33,6 +33,7 @@ export async function render(params) {
       <div class="seg"><button data-audit-kind="all" class="${initialKind === "all" ? "active" : ""}">全部</button><button data-audit-kind="change" class="${initialKind === "change" ? "active" : ""}">变更</button><button data-audit-kind="auth" class="${initialKind === "auth" ? "active" : ""}">认证</button></div>
       <select class="input" data-audit-category aria-label="事件类型" style="width:auto"><option value="all" ${initialCategory === "all" ? "selected" : ""}>全部类型</option><option value="path" ${initialCategory === "path" ? "selected" : ""}>路径</option><option value="key" ${initialCategory === "key" ? "selected" : ""}>密钥</option><option value="proxy" ${initialCategory === "proxy" ? "selected" : ""}>代理</option><option value="srt" ${initialCategory === "srt" ? "selected" : ""}>SRT</option><option value="record" ${initialCategory === "record" ? "selected" : ""}>录制</option><option value="auth" ${initialCategory === "auth" ? "selected" : ""}>认证</option></select>
       <span class="meta" data-audit-count>${events.length} 条</span>
+      <button class="btn small ghost" data-audit-reset ${initialQuery.trim() || initialKind !== "all" || initialCategory !== "all" ? "" : "hidden"}>重置</button>
       <button class="btn small ghost" data-audit-new hidden></button></div>
       ${payload.enabled === false ? `<div class="error-banner">审计日志未启用：在服务配置中设置审计路径后重启。</div>` : ""}
       <section class="panel"><div class="table-wrap audit-table"><table class="data audit-table"><thead><tr><th>时间</th><th>动作</th><th>结果</th><th>对象</th><th>操作者</th><th>详情</th><th></th></tr></thead><tbody data-audit-rows></tbody></table></div>
@@ -48,6 +49,8 @@ export async function render(params) {
       const next = root.querySelector("[data-audit-next]");
       const auto = root.querySelector("[data-audit-auto]");
       const newButton = root.querySelector("[data-audit-new]");
+      const reset = root.querySelector("[data-audit-reset]");
+      const categorySelect = root.querySelector("[data-audit-category]");
       let current = events;
       let pending = null;
       let newCount = 0;
@@ -75,6 +78,7 @@ export async function render(params) {
         count.textContent = `${items.length} 条`;
         range.textContent = items.length ? `${start + 1}–${start + slice.length} / ${items.length}` : "0 条";
         pageLabel.textContent = `${page} / ${pages}`;
+        reset.hidden = !(search.value.trim() || kind !== "all" || category !== "all" || page > 1);
         prev.disabled = page <= 1;
         next.disabled = page >= pages;
         tbody.innerHTML = slice.length ? rows(slice) : `<tr><td colspan="7">${empty("没有匹配的审计事件", "调整搜索条件或等待新的操作", "audit")}</td></tr>`;
@@ -129,7 +133,7 @@ export async function render(params) {
         history.replaceState(null, "", `#/audit${query ? `?${query}` : ""}`);
       };
       search.oninput = () => { page = 1; paint(); syncUrl(); };
-      root.querySelector("[data-audit-category]").onchange = (event) => {
+      categorySelect.onchange = (event) => {
         category = event.target.value;
         page = 1;
         paint();
@@ -142,6 +146,12 @@ export async function render(params) {
         paint();
         syncUrl();
       });
+      reset.onclick = () => {
+        search.value = ""; kind = "all"; category = "all"; page = 1;
+        categorySelect.value = "all";
+        root.querySelectorAll("[data-audit-kind]").forEach((item) => item.classList.toggle("active", item.dataset.auditKind === "all"));
+        paint(); syncUrl();
+      };
       prev.onclick = () => { page -= 1; paint(); syncUrl(); };
       next.onclick = () => { page += 1; paint(); syncUrl(); };
       auto.onclick = () => setAuto(!automatic);
