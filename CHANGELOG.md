@@ -35,6 +35,8 @@
 
 ### Changed
 
+- 抽屉保存按钮提交期间显示加载 spinner 与 aria-busy，避免重复提交。
+
 - 主题支持“跟随系统”，随 prefers-color-scheme 实时切换。
 
 - 管理视图对话框点击名称直接打开对应筛选视图。

@@ -171,6 +171,8 @@ export function openDrawer({ title, description = "", body, submitLabel = "‰øùÂ≠
     event.preventDefault();
     const button = form.querySelector("button[type=submit]");
     button.disabled = true;
+    button.classList.add("loading");
+    button.setAttribute("aria-busy", "true");
     try {
       await onSubmit(new FormData(form), { close: forceClose });
     } catch (error) {
@@ -179,6 +181,8 @@ export function openDrawer({ title, description = "", body, submitLabel = "‰øùÂ≠
       box.textContent = error.message;
     } finally {
       button.disabled = false;
+      button.classList.remove("loading");
+      button.removeAttribute("aria-busy");
     }
   });
   onMount?.(root);
