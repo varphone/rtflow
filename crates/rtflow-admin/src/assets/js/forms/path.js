@@ -1,11 +1,11 @@
 import { openDrawer, field, textInput, checkbox, toast } from "../ui.js";
 import { apiV1 } from "../api.js";
-import { esc } from "../format.js";
+import { esc, uniqueName } from "../format.js";
 
 export function openPathDrawer(existing, onSaved, options = {}) {
   const clone = options.clone === true && Boolean(existing);
   const source = existing || { name: "", enabled: true, publish: true, read: true, record: false, hls: true, dash: true, flv: true, webrtc: true, max_readers: 0, tenant: null };
-  const item = clone ? { ...source, name: `${source.name}-copy` } : source;
+  const item = clone ? { ...source, name: uniqueName(`${source.name}-copy`, options.taken || []) } : source;
   const editing = Boolean(existing) && !clone;
   openDrawer({
     title: clone ? "复制路径" : (existing ? "编辑路径" : "新建路径"),

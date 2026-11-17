@@ -87,7 +87,7 @@ export async function render(params, ctx) {
         const item = visible.find((entry) => entry.path === path);
         if (!item) return;
         if (target.dataset.action === "detail") {
-          openProxyDetail(item, ctx);
+          openProxyDetail(item, ctx, all.map((entry) => entry.path));
         } else if (target.dataset.action === "edit") {
           openProxyDrawer(item, () => ctx.reload());
         } else if (target.dataset.action === "restart") {
@@ -141,7 +141,7 @@ async function probeProxy(path) {
   } catch (error) { toast(error.message, "bad"); }
 }
 
-function openProxyDetail(item, ctx) {
+function openProxyDetail(item, ctx, taken = []) {
   const upstreams = item.upstreams || [];
   let timer = null;
   openDrawer({
@@ -191,7 +191,7 @@ function openProxyDetail(item, ctx) {
         try { await navigator.clipboard.writeText(upstreams.map((upstream) => upstream.url || "").filter(Boolean).join("\n")); toast("上游列表已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       });
       root.querySelector("[data-pd-edit]").onclick = () => { close(); openProxyDrawer(item, () => ctx.reload()); };
-      root.querySelector("[data-pd-clone]").onclick = () => { close(); openProxyDrawer(item, () => ctx.reload(), { clone: true }); };
+      root.querySelector("[data-pd-clone]").onclick = () => { close(); openProxyDrawer(item, () => ctx.reload(), { clone: true, taken }); };
       root.querySelector("[data-pd-restart]").onclick = async (event) => {
         const button = event.currentTarget;
         button.disabled = true; button.classList.add("loading");

@@ -1,10 +1,15 @@
 import { openDrawer, field, textInput, toast } from "../ui.js";
+import { uniqueName } from "../format.js";
 import { apiV1 } from "../api.js";
 
 export function openSrtDrawer(direction, existing, onSaved, options = {}) {
   const clone = options.clone === true && Boolean(existing);
   const source = existing || { name: "", enabled: true, remote: "", stream_id: "", mount: direction === "push" ? "/live/cam" : "", pbkeylen: 0, latency_ms: null };
-  const item = clone ? { ...source, name: `${source.name || ""}-copy`, mount: source.mount ? `${source.mount}-copy` : "" } : source;
+  const item = clone ? {
+    ...source,
+    name: uniqueName(`${source.name || ""}-copy`, options.taken || []),
+    mount: source.mount ? uniqueName(`${source.mount}-copy`, options.takenMounts || []) : "",
+  } : source;
   const editing = Boolean(existing) && !clone;
   const route = direction === "push" ? "pushes" : "pulls";
   openDrawer({

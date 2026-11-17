@@ -99,3 +99,12 @@ export function exportCsv(filename, header, rows) {
   link.remove();
   URL.revokeObjectURL(url);
 }
+
+
+export function uniqueName(base, taken = []) {
+  const names = new Set(taken || []);
+  if (!names.has(base)) return base;
+  let index = 2;
+  while (names.has(`${base}-${index}`)) index += 1;
+  return `${base}-${index}`;
+}

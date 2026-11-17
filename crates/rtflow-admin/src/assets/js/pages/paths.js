@@ -85,7 +85,7 @@ export async function render(params, ctx) {
         if (!target || !["detail", "edit", "toggle", "kick", "delete"].includes(target.dataset.action)) return;
         const item = visible.find((entry) => entry.name === target.dataset.name);
         if (!item) return;
-        if (target.dataset.action === "detail") return openPathDetail(item, system, ctx);
+        if (target.dataset.action === "detail") return openPathDetail(item, system, ctx, all.map((entry) => entry.name));
         if (target.dataset.action === "edit") return openPathDrawer(item, () => ctx.reload());
         if (target.dataset.action === "toggle") {
           target.disabled = true; target.classList.add("loading");
@@ -147,7 +147,7 @@ function table(items) {
 }
 
 
-function openPathDetail(item, system, ctx) {
+function openPathDetail(item, system, ctx, taken = []) {
   const base = String(system.rtmp_base || `rtmp://${location.hostname}:1935`).replace(/\/$/, "");
   const rtsp = String(system.rtsp_base || `rtsp://${location.hostname}:8554`).replace(/\/$/, "");
   const hls = `${location.origin}${system.hls_prefix || "/hls"}/${item.name}/index.m3u8`;
@@ -194,7 +194,7 @@ function openPathDetail(item, system, ctx) {
       };
       root.querySelector("[data-detail-clone]").onclick = () => {
         root.querySelector("[data-close-drawer]")?.click();
-        openPathDrawer(item, () => ctx.reload(), { clone: true });
+        openPathDrawer(item, () => ctx.reload(), { clone: true, taken });
       };
       root.querySelector("[data-detail-kick]").onclick = async (event) => {
         const button = event.currentTarget;

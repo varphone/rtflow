@@ -1,6 +1,6 @@
 import { openDrawer, field, textInput, toast } from "../ui.js";
 import { apiV1 } from "../api.js";
-import { esc } from "../format.js";
+import { esc, uniqueName } from "../format.js";
 
 function upstreamRow(upstream = {}, index = 0) {
   return `<div class="form-section" data-upstream-row>
@@ -22,7 +22,7 @@ function upstreamRow(upstream = {}, index = 0) {
 export function openProxyDrawer(existing, onSaved, options = {}) {
   const clone = options.clone === true && Boolean(existing);
   const source = existing || { path: "", mode: "on-demand", idle_grace_ms: null, upstreams: [{ url: "", transport: "tcp" }] };
-  const mount = clone ? { ...source, path: `${source.path}-copy` } : source;
+  const mount = clone ? { ...source, path: uniqueName(`${source.path}-copy`, options.taken || []) } : source;
   const editing = Boolean(existing) && !clone;
   const upstreams = mount.upstreams?.length ? mount.upstreams : [{ url: "", transport: "tcp" }];
   openDrawer({

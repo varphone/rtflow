@@ -89,7 +89,7 @@ export async function render(params, ctx) {
         if (!target || target === create) return;
         const item = visible.find((entry) => entry.id === target.dataset.id);
         if (!item) return;
-        if (target.dataset.action === "detail") return openSrtDetail(item, tab, ctx2);
+        if (target.dataset.action === "detail") return openSrtDetail(item, tab, ctx2, all[tab].map((entry) => entry.name), all[tab].map((entry) => entry.mount).filter(Boolean));
         if (target.dataset.action === "edit") return openSrtDrawer(tab, item, () => ctx2.reload());
         if (target.dataset.action === "toggle") {
           const body = { name: item.name, enabled: !item.enabled, remote: item.remote, stream_id: item.stream_id || null,
@@ -141,7 +141,7 @@ function table(items) {
 }
 
 
-function openSrtDetail(item, tab, ctx) {
+function openSrtDetail(item, tab, ctx, taken = [], takenMounts = []) {
   const direction = tab === "push" ? "推流" : "拉流";
   let timer = null;
   let enabled = item.enabled;
@@ -185,7 +185,7 @@ function openSrtDetail(item, tab, ctx) {
       };
       timer = setInterval(update, 2000);
       root.querySelector("[data-srt-edit]").onclick = () => { close(); openSrtDrawer(tab, item, () => ctx.reload()); };
-      root.querySelector("[data-srt-clone]").onclick = () => { close(); openSrtDrawer(tab, item, () => ctx.reload(), { clone: true }); };
+      root.querySelector("[data-srt-clone]").onclick = () => { close(); openSrtDrawer(tab, item, () => ctx.reload(), { clone: true, taken, takenMounts }); };
       root.querySelector("[data-srt-copy]").onclick = async () => {
         try { await navigator.clipboard.writeText(item.remote || ""); toast("远端地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
