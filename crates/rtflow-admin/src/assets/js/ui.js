@@ -13,7 +13,10 @@ export function toast(message, kind = "") {
   const root = toastRoot();
   while (root.children.length >= 3) root.firstElementChild.remove();
   root.appendChild(el);
-  setTimeout(() => el.remove(), 3600);
+  let timer = setTimeout(() => el.remove(), 3600);
+  el.addEventListener("mouseenter", () => clearTimeout(timer));
+  el.addEventListener("mouseleave", () => { timer = setTimeout(() => el.remove(), 1200); });
+  el.addEventListener("click", () => el.remove());
 }
 
 export async function copyText(text) {
