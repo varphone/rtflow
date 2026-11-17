@@ -548,6 +548,10 @@ function openPalette() {
     label: `筛选 · ${button.textContent.trim()}`, hint: "当前页面", icon: "▦", group: "筛选", keywords: "filter",
     run: () => button.click(),
   }));
+  const sorts = [...document.querySelectorAll(".panel [data-sort]")].map((button) => ({
+    label: `排序 · ${button.textContent.replace(/[↕↑↓]/g, "").trim()}`, hint: "当前页面", icon: "⇅", group: "排序", keywords: "sort",
+    run: () => button.click(),
+  }));
   const views = savedViews().map((view) => ({
     label: `视图 · ${view.name}`, hint: view.hash, icon: "★", group: "视图", keywords: "saved view 收藏",
     run: () => { location.hash = view.hash; },
@@ -581,7 +585,7 @@ function openPalette() {
       state.session = null; renderLogin();
     } },
   ];
-  const palette = openCommandPalette([...pages, ...filters, ...views, ...actions]);
+  const palette = openCommandPalette([...pages, ...filters, ...sorts, ...views, ...actions]);
   (async () => {
     let streams = [], vods = [], paths = [];
     try {
@@ -605,7 +609,7 @@ function openPalette() {
         run: () => { location.hash = `#/vod?q=${encodeURIComponent(vod.title)}`; },
       })),
     ];
-    palette.setCommands([...pages, ...filters, ...views, ...resources, ...actions]);
+    palette.setCommands([...pages, ...filters, ...sorts, ...views, ...resources, ...actions]);
   })();
 }
 window.addEventListener("keydown", (event) => {
