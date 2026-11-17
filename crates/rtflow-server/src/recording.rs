@@ -201,15 +201,23 @@ impl RecordingSupervisor {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .contains(name);
+                // A pull/proxy mount publishes through the shared frame bus
+                // instead of a LocalPublisher, so `publisher_connected` stays
+                // false; its upstream state is the equivalent signal.
+                let proxy_streaming = matches!(
+                    snapshot.proxy_state,
+                    Some(rtflow::mount::upstream::ProxyState::Streaming)
+                );
                 let wanted = self.policy().enabled
                     && self.policy().auto_start
                     && !suppressed
                     && record.record
-                    && snapshot.publisher_connected;
+                    && (snapshot.publisher_connected || proxy_streaming);
                 tracing::debug!(
                     path = %name,
                     record = record.record,
                     publisher = snapshot.publisher_connected,
+                    proxy_streaming,
                     wanted,
                     "recording decision"
                 );

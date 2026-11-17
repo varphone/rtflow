@@ -11,6 +11,7 @@ pub mod media;
 pub mod metrics;
 pub mod paths;
 pub mod proxy_control;
+mod pull_policy;
 pub mod recording;
 pub mod server;
 pub mod srt_pull;

@@ -742,6 +742,7 @@ impl ServerApp {
 
         crate::proxy_control::register_configured(
             &config.proxy,
+            &paths,
             &proxies,
             event_sink.clone(),
             &cancel,

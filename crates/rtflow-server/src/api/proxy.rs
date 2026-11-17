@@ -6,7 +6,31 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
         Method::Get,
         "/admin/api/v1/proxies",
         api_json(state.clone(), |state, _req| async move {
-            Ok(serde_json::json!({ "proxies": proxy_json(&state) }))
+            let mut proxies = proxy_json(&state);
+            let recordings = state.recording.status();
+            for entry in &mut proxies {
+                let path = entry
+                    .get("path")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .trim_start_matches('/');
+                entry["recording"] = recordings
+                    .iter()
+                    .find(|recording| recording.path == path)
+                    .map(|recording| {
+                        serde_json::json!({
+                            "active": recording.active,
+                            "started_at": recording.started_at,
+                            "segments": recording.segments,
+                            "bytes": recording.bytes,
+                            "dropped": recording.dropped,
+                            "directory": recording.directory,
+                            "last_error": recording.last_error,
+                        })
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+            }
+            Ok(serde_json::json!({ "proxies": proxies }))
         }),
     )
     .await;
@@ -28,6 +52,10 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
                         "mode": mount.mode,
                         "idle_grace_ms": mount.idle_grace.map(|value| value.as_millis() as u64),
                         "description_refresh_ms": mount.description_refresh.map(|value| value.as_millis() as u64),
+                        "outputs": mount
+                            .outputs
+                            .or_else(|| crate::pull_policy::outputs(&state.paths, &mount.path)),
+                        "managed": crate::pull_policy::managed(&state.paths, &mount.path),
                         "upstreams": mount.upstreams.iter().map(|upstream| serde_json::json!({
                             "url": upstream.url,
                             "transport": upstream.transport,
@@ -103,6 +131,7 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
                 .mounts
                 .remove(index);
             state.proxies.remove(&path);
+            crate::pull_policy::remove(&state.paths, &path);
             audit(&state, AuditEvent::new("proxy.delete", "ok").path(&path));
             Ok(serde_json::json!({"deleted": path}))
         }),
@@ -194,48 +223,79 @@ fn proxy_upsert(
     mount.validate().map_err(|error| (400, error))?;
     let mut mount = mount;
     let path = mount.path.clone();
-    let existed = state
+    let previous = state
         .proxy_config
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .mounts
         .iter()
-        .any(|entry| entry.path == path);
+        .find(|entry| entry.path == path)
+        .cloned();
+    let existed = previous.is_some();
     if existed && !replace {
         return Err((409, "proxy already exists".into()));
     }
-    if existed {
-        let previous = state
-            .proxy_config
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .mounts
-            .iter()
-            .find(|entry| entry.path == path)
-            .cloned();
-        if let Some(previous) = previous {
-            for upstream in &mut mount.upstreams {
-                if upstream.password.is_none()
-                    && let Some(old) = previous
-                        .upstreams
-                        .iter()
-                        .find(|old| old.url == upstream.url)
-                {
-                    upstream.password = old.password.clone();
-                }
+    if let Some(previous) = &previous {
+        for upstream in &mut mount.upstreams {
+            if upstream.password.is_none()
+                && let Some(old) = previous
+                    .upstreams
+                    .iter()
+                    .find(|old| old.url == upstream.url)
+            {
+                upstream.password = old.password.clone();
             }
         }
+    }
+    let revision = if existed {
         let revision = crate::store::proxies::revision(&state.store, &path)
             .map_err(|error| (500, error.to_string()))?
             .ok_or((404, "proxy not found".into()))?;
         if expected.is_some_and(|expected| expected != revision) {
             return Err((412, "precondition failed".into()));
         }
+        Some(revision)
+    } else {
+        None
+    };
+    // A PATCH that omits outputs keeps the source's current outputs; removing
+    // management is a separate, explicit operation (not exposed yet).
+    if mount.outputs.is_none() {
+        mount.outputs = previous.as_ref().and_then(|mount| mount.outputs);
+    }
+    let upstream = mount.upstream_config().map_err(|error| (400, error))?;
+    if let Some(outputs) = mount.outputs {
+        if outputs.record {
+            if !state.config.recording.enabled {
+                return Err((
+                    400,
+                    "recording is disabled in [recording]; cannot enable pull recording".into(),
+                ));
+            }
+            if !state.config.recording.auto_start {
+                return Err((
+                    400,
+                    "recording.auto_start is false; pull recording would not start".into(),
+                ));
+            }
+        }
+        crate::pull_policy::apply(&state.paths, &path, &outputs).map_err(|error| (409, error))?;
+    }
+    let restore_policy = || {
+        if let Some(outputs) = previous.as_ref().and_then(|mount| mount.outputs) {
+            let _ = crate::pull_policy::apply(&state.paths, &path, &outputs);
+        } else {
+            crate::pull_policy::remove(&state.paths, &path);
+        }
+    };
+    let persisted = if let Some(revision) = revision {
         crate::store::proxies::update(&state.store, &mount, revision)
-            .map_err(|error| (500, error.to_string()))?;
     } else {
         crate::store::proxies::insert(&state.store, &mount)
-            .map_err(|error| (500, error.to_string()))?;
+    };
+    if let Err(error) = persisted {
+        restore_policy();
+        return Err((500, error.to_string()));
     }
     {
         let mut config = state
@@ -247,7 +307,6 @@ fn proxy_upsert(
         }
         config.mounts.push(mount.clone());
     }
-    let upstream = mount.upstream_config().map_err(|error| (400, error))?;
     let options = rtflow::mount::MountOptions::builder()
         .event_sink(state.proxy_event_sink.clone())
         .startup_cache_config(upstream.startup_cache)

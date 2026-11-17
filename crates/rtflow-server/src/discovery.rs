@@ -6,6 +6,7 @@ use crate::{
 use rtflow::{
     MountRegistry,
     media::{MediaKind, TrackDescription},
+    mount::upstream::ProxyState,
 };
 use serde::Serialize;
 use std::{
@@ -137,9 +138,11 @@ impl DiscoveryService {
             Some(handle) => {
                 let snapshot = handle.snapshot();
                 let description = handle.description();
+                let publisher = snapshot.publisher_connected
+                    || matches!(snapshot.proxy_state, Some(ProxyState::Streaming));
                 (
                     true,
-                    snapshot.publisher_connected,
+                    publisher,
                     snapshot.subscriber_count.max(snapshot.broadcast_receivers),
                     snapshot.stats.rtp_octets,
                     description

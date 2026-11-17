@@ -52,7 +52,53 @@ pub struct ProxyMount {
     pub idle_grace: Option<Duration>,
     #[serde(default, with = "humantime_serde")]
     pub description_refresh: Option<Duration>,
+    /// When present, the pull source owns a managed path policy at `path`
+    /// (live outputs, recording and reader limit). `None` keeps the legacy
+    /// behaviour where path policy is configured separately.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outputs: Option<ProxyOutputs>,
     pub upstreams: Vec<ProxyUpstream>,
+}
+
+/// Live/recording outputs provisioned for a pull-source mount.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ProxyOutputs {
+    /// Allow RTSP/read access to the pulled mount.
+    pub read: bool,
+    /// HLS live output.
+    pub hls: bool,
+    /// DASH live output.
+    pub dash: bool,
+    /// HTTP-FLV / WS-FLV live output.
+    pub flv: bool,
+    /// WebRTC live output.
+    pub webrtc: bool,
+    /// Segment recording; requires `[recording] enabled` and `auto_start`.
+    pub record: bool,
+    /// 0 means unlimited.
+    pub max_readers: usize,
+}
+
+impl Default for ProxyOutputs {
+    fn default() -> Self {
+        Self {
+            read: true,
+            hls: true,
+            dash: false,
+            flv: true,
+            webrtc: false,
+            record: false,
+            max_readers: 0,
+        }
+    }
+}
+
+impl ProxyOutputs {
+    /// Any protocol view enabled for the pulled stream.
+    pub fn live_enabled(self) -> bool {
+        self.hls || self.dash || self.flv || self.webrtc
+    }
 }
 
 /// Proxy connection mode.
@@ -96,6 +142,7 @@ impl Default for ProxyMount {
             mode: ProxyMode::default(),
             idle_grace: None,
             description_refresh: None,
+            outputs: None,
             upstreams: Vec::new(),
         }
     }
@@ -168,6 +215,16 @@ impl ProxyMount {
         }
         for upstream in &self.upstreams {
             upstream.endpoint()?;
+        }
+        if self.outputs.is_some_and(|outputs| {
+            !outputs.read
+                && !outputs.hls
+                && !outputs.dash
+                && !outputs.flv
+                && !outputs.webrtc
+                && !outputs.record
+        }) {
+            return Err("proxy outputs enable neither live view nor recording".into());
         }
         Ok(())
     }

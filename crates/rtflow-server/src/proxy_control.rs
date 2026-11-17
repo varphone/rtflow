@@ -71,6 +71,7 @@ pub(crate) fn save_overlay(state_dir: &Path, section: &ProxySection) {
 
 pub(crate) fn register_configured(
     config: &ProxySection,
+    paths: &Arc<crate::paths::PathStore>,
     proxies: &Arc<ProxyService>,
     event_sink: Arc<dyn rtflow::EventSink>,
     cancel: &CancellationToken,
@@ -84,6 +85,11 @@ pub(crate) fn register_configured(
             continue;
         }
         let path: Arc<str> = Arc::from(mount.path.as_str());
+        if let Some(outputs) = mount.outputs
+            && let Err(error) = crate::pull_policy::apply(paths, &mount.path, &outputs)
+        {
+            tracing::warn!(path = %mount.path, %error, "pull output policy rejected");
+        }
         let Ok(upstream) = mount.upstream_config_with(config.redirect_policy) else {
             continue;
         };

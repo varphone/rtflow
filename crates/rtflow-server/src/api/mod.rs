@@ -313,6 +313,18 @@ pub(crate) async fn register_api_routes(
             let Some(name) = req.path.strip_prefix("/admin/api/v1/paths/") else {
                 return Err((400, "missing path".to_string()));
             };
+            if state.paths.get(name).is_some_and(|record| {
+                record
+                    .metadata
+                    .get("managed_by")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("rtsp-pull")
+            }) {
+                return Err((
+                    409,
+                    "path is managed by an RTSP pull source; delete the pull source instead".into(),
+                ));
+            }
             let record = match state.paths.remove(name) {
                 Ok(record) => record,
                 Err(error) => {

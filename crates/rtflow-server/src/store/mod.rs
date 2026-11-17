@@ -167,6 +167,9 @@ impl Store {
             }
             let transaction = connection.transaction()?;
             transaction.execute_batch(schema::MIGRATION_V1)?;
+            if current < 2 {
+                transaction.execute_batch(schema::MIGRATION_V2)?;
+            }
             transaction.pragma_update(None, "user_version", schema::VERSION)?;
             transaction.commit()?;
         }

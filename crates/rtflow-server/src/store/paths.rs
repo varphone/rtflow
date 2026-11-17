@@ -50,6 +50,56 @@ pub(crate) fn insert(store: &Store, record: &PathRecord) -> StoreResult<()> {
     Ok(())
 }
 
+/// Insert or replace a record by name, including its source. Used when a
+/// dynamic path is upgraded to an API record by a pull source.
+pub(crate) fn upsert(store: &Store, record: &PathRecord) -> StoreResult<()> {
+    let connection = store.connection();
+    connection.execute(
+        "INSERT INTO paths (name, enabled, publish, read, record, hls, dash, flv,
+                            webrtc, max_readers, tenant, labels, metadata, source,
+                            created_at, updated_at, expires_at, revision)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
+         ON CONFLICT(name) DO UPDATE SET
+            enabled=excluded.enabled,
+            publish=excluded.publish,
+            read=excluded.read,
+            record=excluded.record,
+            hls=excluded.hls,
+            dash=excluded.dash,
+            flv=excluded.flv,
+            webrtc=excluded.webrtc,
+            max_readers=excluded.max_readers,
+            tenant=excluded.tenant,
+            labels=excluded.labels,
+            metadata=excluded.metadata,
+            source=excluded.source,
+            updated_at=excluded.updated_at,
+            expires_at=excluded.expires_at,
+            revision=excluded.revision",
+        params![
+            record.name,
+            record.enabled as i64,
+            record.publish as i64,
+            record.read as i64,
+            record.record as i64,
+            record.hls as i64,
+            record.dash as i64,
+            record.flv as i64,
+            record.webrtc as i64,
+            record.max_readers as i64,
+            record.tenant,
+            json(&record.labels)?,
+            record.metadata.to_string(),
+            source_str(record.source),
+            record.created_at as i64,
+            record.updated_at as i64,
+            record.expires_at.map(|value| value as i64),
+            record.revision as i64,
+        ],
+    )?;
+    Ok(())
+}
+
 pub(crate) fn update(store: &Store, record: &PathRecord, expected: Option<u64>) -> StoreResult<()> {
     let connection = store.connection();
     let changed = connection.execute(

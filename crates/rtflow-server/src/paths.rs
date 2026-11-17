@@ -333,6 +333,32 @@ impl PathStore {
         Ok(record)
     }
 
+    /// Insert or replace a concrete API record. Dynamic records created by
+    /// the runtime are upgraded in place; used by pull sources that own
+    /// their path policy.
+    pub fn upsert_api(&self, name: &str, spec: PathSpec) -> Result<PathRecord, PathError> {
+        validate_name(name)?;
+        let mut records = self
+            .records
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let existing = records.get(name).cloned();
+        if existing
+            .as_ref()
+            .is_some_and(|record| record.source == PathSource::Config)
+        {
+            return Err(PathError::ReadOnly(name.into()));
+        }
+        let mut record = spec.into_record(name, PathSource::Api);
+        if let Some(existing) = &existing {
+            record.created_at = existing.created_at;
+            record.revision = existing.revision.saturating_add(1);
+        }
+        store::paths::upsert(&self.store, &record).map_err(path_store_error)?;
+        records.insert(name.to_owned(), record.clone());
+        Ok(record)
+    }
+
     pub fn patch(&self, name: &str, patch: PathPatch) -> Result<PathRecord, PathError> {
         validate_name(name)?;
         let mut records = self

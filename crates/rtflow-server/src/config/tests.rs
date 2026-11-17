@@ -163,3 +163,34 @@ fn env_expansion_requires_values() {
     assert_eq!(expand_env("x=${RTFLOW_TEST_TOKEN}").unwrap(), "x=abc");
     assert!(expand_env("x=${RTFLOW_TEST_MISSING}").is_err());
 }
+
+#[test]
+fn proxy_outputs_defaults_and_validation() {
+    let outputs: ProxyOutputs = serde_json::from_str(r#"{"record":true}"#).unwrap();
+    assert!(outputs.read && outputs.hls && outputs.flv);
+    assert!(!outputs.dash && !outputs.webrtc && outputs.record);
+    assert_eq!(outputs.max_readers, 0);
+
+    let mut mount = ProxyMount {
+        path: "/pull/cam".into(),
+        outputs: Some(ProxyOutputs {
+            read: false,
+            hls: false,
+            dash: false,
+            flv: false,
+            webrtc: false,
+            record: false,
+            max_readers: 0,
+        }),
+        ..ProxyMount::default()
+    };
+    mount.upstreams.push(ProxyUpstream {
+        url: "rtsp://127.0.0.1/live".into(),
+        ..ProxyUpstream::default()
+    });
+    let error = mount.validate().unwrap_err();
+    assert!(error.contains("neither live view nor recording"), "{error}");
+
+    mount.outputs = None;
+    assert!(mount.validate().is_ok());
+}
