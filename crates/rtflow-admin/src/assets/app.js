@@ -183,12 +183,12 @@ function renderShell() {
         <div class="top-actions">
           <button class="command-trigger" data-command-open aria-label="打开命令面板">${icon("search")}<span>搜索</span><kbd>Ctrl K</kbd></button>
           <span class="health"><span class="dot ok"></span>运行中</span>
-          <button class="user-chip" data-user-menu aria-haspopup="menu"><span class="avatar">${esc((state.session?.username || "A").slice(0, 1).toUpperCase())}</span><span>${esc(state.session?.username || "admin")}</span><span class="chev">▾</span></button>
-          <div class="user-popover" data-user-popover hidden>
+          <button class="user-chip" data-user-menu aria-haspopup="menu" aria-expanded="false"><span class="avatar">${esc((state.session?.username || "A").slice(0, 1).toUpperCase())}</span><span>${esc(state.session?.username || "admin")}</span><span class="chev">▾</span></button>
+          <div class="user-popover" data-user-popover role="menu" aria-label="用户菜单" hidden>
             <div class="user-popover-head"><b>${esc(state.session?.username || "admin")}</b><span>${state.session?.readonly ? "只读模式" : "管理员"}</span></div>
-            <button data-user-theme><span>外观</span><b data-label-theme></b></button>
-            <button data-user-density><span>表格密度</span><b data-label-density></b></button>
-            <button data-user-time><span>时间显示</span><b data-label-time></b></button>
+            <button role="menuitem" data-user-theme><span>外观</span><b data-label-theme></b></button>
+            <button role="menuitem" data-user-density><span>表格密度</span><b data-label-density></b></button>
+            <button role="menuitem" data-user-time><span>时间显示</span><b data-label-time></b></button>
             <button data-user-logout class="danger"><span>退出登录</span></button>
           </div>
         </div>
@@ -224,11 +224,22 @@ function renderShell() {
     if (densityLabel) densityLabel.textContent = document.documentElement.dataset.density === "compact" ? "紧凑" : "舒适";
     if (timeLabel) timeLabel.textContent = localStorage.getItem("rtflow-time") === "relative" ? "相对" : "绝对";
   };
-  const closeMenu = () => { popover.hidden = true; userButton.setAttribute("aria-expanded", "false"); };
-  userButton.onclick = (event) => { event.stopPropagation(); popover.hidden = !popover.hidden; userButton.setAttribute("aria-expanded", String(!popover.hidden)); syncMenu(); };
+  const closeMenu = (restoreFocus = false) => {
+    const wasOpen = !popover.hidden;
+    popover.hidden = true;
+    userButton.setAttribute("aria-expanded", "false");
+    if (wasOpen && restoreFocus) userButton.focus();
+  };
+  userButton.onclick = (event) => {
+    event.stopPropagation();
+    popover.hidden = !popover.hidden;
+    userButton.setAttribute("aria-expanded", String(!popover.hidden));
+    syncMenu();
+    if (!popover.hidden) requestAnimationFrame(() => popover.querySelector('[role="menuitem"]')?.focus());
+  };
   popover.onclick = (event) => event.stopPropagation();
   document.addEventListener("click", () => closeMenu());
-  document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeMenu(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeMenu(true); });
   app.querySelector("[data-user-theme]").onclick = () => { applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"); syncMenu(); };
   app.querySelector("[data-user-density]").onclick = () => { applyDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact"); syncMenu(); };
   app.querySelector("[data-user-time]").onclick = () => { localStorage.setItem("rtflow-time", localStorage.getItem("rtflow-time") === "relative" ? "absolute" : "relative"); closeMenu(); navigate({ silent: true }); };
