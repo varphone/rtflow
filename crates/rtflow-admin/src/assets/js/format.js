@@ -83,7 +83,11 @@ export function iconSvg(name) {
 
 
 export function exportCsv(filename, header, rows) {
-  const quote = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const quote = (value) => {
+    let text = String(value ?? "");
+    if (typeof value === "string" && /^[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
   const lines = [header.map(quote).join(","), ...rows.map((row) => row.map(quote).join(","))];
   const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);

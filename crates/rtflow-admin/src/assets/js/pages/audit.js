@@ -210,7 +210,11 @@ function openAuditEvent(event) {
 
 function exportCsv(events) {
   if (!events.length) return;
-  const quote = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const quote = (value) => {
+    let text = String(value ?? "");
+    if (typeof value === "string" && /^[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
   const header = ["time", "action", "result", "user", "role", "protocol", "path", "key_id", "peer", "detail"];
   const lines = [header.join(",")];
   for (const event of events) {
