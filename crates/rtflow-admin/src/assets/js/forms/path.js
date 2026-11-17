@@ -2,15 +2,18 @@ import { openDrawer, field, textInput, checkbox, toast } from "../ui.js";
 import { apiV1 } from "../api.js";
 import { esc } from "../format.js";
 
-export function openPathDrawer(existing, onSaved) {
-  const item = existing || { name: "", enabled: true, publish: true, read: true, record: false, hls: true, dash: true, flv: true, webrtc: true, max_readers: 0, tenant: null };
+export function openPathDrawer(existing, onSaved, options = {}) {
+  const clone = options.clone === true && Boolean(existing);
+  const source = existing || { name: "", enabled: true, publish: true, read: true, record: false, hls: true, dash: true, flv: true, webrtc: true, max_readers: 0, tenant: null };
+  const item = clone ? { ...source, name: `${source.name}-copy` } : source;
+  const editing = Boolean(existing) && !clone;
   openDrawer({
-    title: existing ? "编辑路径" : "新建路径",
+    title: clone ? "复制路径" : (existing ? "编辑路径" : "新建路径"),
     description: "路径策略、输出协议与访问限制。",
     body: `
       <div class="form-section">
         <h3>基础</h3>
-        ${field("路径名", textInput("name", item.name, `required ${existing ? "disabled" : ""} placeholder="live/cam"`), { hint: "由字母、数字、- _ . ~ / 组成，不能以 / 开头或结尾。" })}
+        ${field("路径名", textInput("name", item.name, `required ${editing ? "disabled" : ""} placeholder="live/cam"`), { hint: "由字母、数字、- _ . ~ / 组成，不能以 / 开头或结尾。" })}
         ${checkbox("enabled", "启用该路径", item.enabled !== false)}
       </div>
       <div class="form-section">
@@ -32,7 +35,7 @@ export function openPathDrawer(existing, onSaved) {
           ${field("租户", textInput("tenant", item.tenant || "", "placeholder=\"可选\""))}
         </div>
       </div>`,
-    submitLabel: existing ? "保存修改" : "创建路径",
+    submitLabel: editing ? "保存修改" : (clone ? "创建副本" : "创建路径"),
     async onSubmit(data, { close }) {
       const body = {
         enabled: data.get("enabled") === "on",
@@ -46,13 +49,13 @@ export function openPathDrawer(existing, onSaved) {
         max_readers: Number(data.get("max_readers") || 0),
         tenant: data.get("tenant") || null,
       };
-      if (existing) {
+      if (editing) {
         await apiV1("/paths/" + encodeURIComponent(item.name), { method: "PATCH", body });
       } else {
         await apiV1("/paths", { method: "POST", body: Object.assign({ name: data.get("name") }, body) });
       }
       close();
-      toast("路径已保存", "ok");
+      toast(editing ? "路径已保存" : "路径已创建", "ok");
       onSaved();
     },
   });

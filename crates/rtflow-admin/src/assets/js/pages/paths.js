@@ -176,7 +176,7 @@ function openPathDetail(item, system, ctx) {
         <button class="btn small" data-goto="#/vod?q=${encodeURIComponent(item.name)}">查看点播</button>
         <button class="btn small" data-goto="#/config/recordings?q=${encodeURIComponent(item.name)}">查看录制</button>
       </div></section>
-      <div class="actions"><button class="btn small" data-detail-edit>编辑策略</button><button class="btn small danger" data-detail-kick>断开该路径</button></div>
+      <div class="actions"><button class="btn small" data-detail-edit>编辑策略</button><button class="btn small ghost" data-detail-clone>复制路径</button><button class="btn small danger" data-detail-kick>断开该路径</button></div>
     </div>`,
     onMount(root) {
       root.querySelectorAll("[data-copy]").forEach((button) => button.onclick = async () => {
@@ -189,6 +189,10 @@ function openPathDetail(item, system, ctx) {
       root.querySelector("[data-detail-edit]").onclick = () => {
         root.querySelector("[data-close-drawer]")?.click();
         openPathDrawer(item, () => ctx.reload());
+      };
+      root.querySelector("[data-detail-clone]").onclick = () => {
+        root.querySelector("[data-close-drawer]")?.click();
+        openPathDrawer(item, () => ctx.reload(), { clone: true });
       };
       root.querySelector("[data-detail-kick]").onclick = async () => {
         try { await apiV1("/kick?path=" + encodeURIComponent(item.name), { method: "POST" }); toast("已断开", "ok"); root.querySelector("[data-close-drawer]")?.click(); ctx.reload(); }
