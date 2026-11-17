@@ -45,6 +45,8 @@
 
 ### Changed
 
+- 顶栏健康状态标签使用 aria-live=polite 播报变化。
+
 - 命令面板按钮补充 dialog/键盘快捷键语义；侧栏折叠按钮同步 aria-expanded。
 
 - 管理页增加 robots noindex,nofollow，避免被搜索引擎索引。

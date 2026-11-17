@@ -195,7 +195,7 @@ function renderShell() {
         <div class="crumbs" id="crumbs"></div>
         <div class="top-actions">
           <button class="command-trigger" data-command-open aria-label="打开命令面板" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K">${icon("search")}<span>搜索</span><kbd>Ctrl K</kbd></button>
-          <a class="health" href="#/system" title="查看系统状态" data-health><span class="dot ok"></span><span data-health-label>运行中</span></a>
+          <a class="health" href="#/system" title="查看系统状态" data-health><span class="dot ok"></span><span data-health-label aria-live="polite">运行中</span></a>
           <button class="user-chip" data-user-menu aria-haspopup="menu" aria-expanded="false"><span class="avatar">${esc((state.session?.username || "A").slice(0, 1).toUpperCase())}</span><span>${esc(state.session?.username || "admin")}</span><span class="chev">▾</span></button>
           <div class="user-popover" data-user-popover role="menu" aria-label="用户菜单" hidden>
             <div class="user-popover-head"><b>${esc(state.session?.username || "admin")}</b><span>${state.session?.readonly ? "只读模式" : "管理员"}</span></div>
