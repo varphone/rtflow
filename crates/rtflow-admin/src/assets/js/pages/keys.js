@@ -92,8 +92,9 @@ export async function render(params, ctx) {
         } else if (target.dataset.action === "revoke") {
           if (target.disabled) return;
           if (!await confirmDialog({ title: "吊销密钥", message: `吊销 ${item.kid}？`, confirmLabel: "吊销", danger: true })) return;
+          target.disabled = true; target.classList.add("loading");
           try { await apiV1("/keys/" + encodeURIComponent(item.kid), { method: "DELETE" }); toast("密钥已吊销", "ok"); ctx.reload(); }
-          catch (error) { toast(error.message, "bad"); }
+          catch (error) { toast(error.message, "bad"); target.disabled = false; target.classList.remove("loading"); }
         }
       });
     },
@@ -175,10 +176,12 @@ function openKeyDetail(item, ctx) {
       root.querySelector("[data-key-copy]").onclick = async () => {
         try { await navigator.clipboard.writeText(item.kid); toast("Key ID 已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
-      root.querySelector("[data-key-revoke]").onclick = async () => {
+      root.querySelector("[data-key-revoke]").onclick = async (event) => {
         if (!await confirmDialog({ title: "吊销密钥", message: `吊销 ${item.kid}？`, confirmLabel: "吊销", danger: true })) return;
+        const button = event.currentTarget;
+        button.disabled = true; button.classList.add("loading");
         try { await apiV1("/keys/" + encodeURIComponent(item.kid), { method: "DELETE" }); toast("密钥已吊销", "ok"); close(); ctx.reload(); }
-        catch (error) { toast(error.message, "bad"); }
+        catch (error) { toast(error.message, "bad"); button.disabled = false; button.classList.remove("loading"); }
       };
     },
   });
