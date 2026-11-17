@@ -138,11 +138,13 @@ export async function render(params) {
         }
         if (target.dataset.action === "vod") { location.hash = `#/vod?q=${encodeURIComponent(target.dataset.path)}`; return; }
         if (!["start", "stop"].includes(target.dataset.action)) return;
+        target.disabled = true; target.classList.add("loading");
         try {
           await api(`/recordings/${target.dataset.action}`, { method: "POST", body: { path: target.dataset.path } });
           toast("操作已提交", "ok");
           await refresh();
         } catch (error) { toast(error.message, "bad"); }
+        finally { target.disabled = false; target.classList.remove("loading"); }
       });
       root.querySelector("[data-action=refresh]").onclick = () => refresh();
       root.querySelector("[data-rec-export]").onclick = () => {

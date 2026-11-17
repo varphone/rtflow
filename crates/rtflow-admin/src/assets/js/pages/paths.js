@@ -88,8 +88,9 @@ export async function render(params, ctx) {
         if (target.dataset.action === "detail") return openPathDetail(item, system, ctx);
         if (target.dataset.action === "edit") return openPathDrawer(item, () => ctx.reload());
         if (target.dataset.action === "toggle") {
+          target.disabled = true; target.classList.add("loading");
           try { await apiV1("/paths/" + encodeURIComponent(item.name), { method: "PATCH", body: { enabled: !item.enabled } }); toast(item.enabled ? "路径已停用" : "路径已启用", "ok"); ctx.reload(); }
-          catch (error) { toast(error.message, "bad"); }
+          catch (error) { toast(error.message, "bad"); target.disabled = false; target.classList.remove("loading"); }
           return;
         }
         if (target.dataset.action === "kick") {
