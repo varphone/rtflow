@@ -383,52 +383,70 @@ function savedViews() {
   try { return JSON.parse(localStorage.getItem("rtflow-views") || "[]"); } catch (_) { return []; }
 }
 
+function parseImportedViews(parsed) {
+  if (!Array.isArray(parsed)) throw new Error("format");
+  const clean = parsed
+    .filter((view) => view && typeof view.name === "string" && view.name.trim() && typeof view.hash === "string" && view.hash.startsWith("#/"))
+    .map((view) => ({ name: view.name.trim().slice(0, 40), hash: view.hash, ts: Number(view.ts) || Date.now() }))
+    .filter((view, index, list) => list.findIndex((item) => item.name === view.name) === index)
+    .filter((view) => {
+      const route = view.hash.replace(/^#\//, "").split("?")[0];
+      return route === "control" || Boolean(routes[route]);
+    })
+    .slice(0, 12);
+  if (!clean.length) throw new Error("empty");
+  return clean;
+}
+
+function exportViewsFile() {
+  const views = savedViews();
+  if (!views.length) { toast("还没有可导出的视图", "bad"); return; }
+  const blob = new Blob([JSON.stringify(views, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `rtflow-views-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast("视图已导出", "ok");
+}
+
+function importViewsFile() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json,.json";
+  input.hidden = true;
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    input.remove();
+    if (!file) return;
+    try {
+      const clean = parseImportedViews(JSON.parse(await file.text()));
+      const merged = [...clean, ...savedViews().filter((view) => !clean.some((item) => item.name === view.name))].slice(0, 12);
+      localStorage.setItem("rtflow-views", JSON.stringify(merged));
+      toast(`已导入 ${clean.length} 个视图`, "ok");
+      manageViews();
+    } catch (_) { toast("导入失败：文件格式不正确", "bad"); }
+  };
+  document.body.appendChild(input);
+  input.click();
+}
+
 function manageViews() {
   const views = savedViews();
   const rows = views.map((view, index) => `<div class="view-row">
       <div><button class="link-cell" data-open-view="${index}" title="打开视图">${esc(view.name)}</button><div class="cell-sub mono">${esc(view.hash)}</div></div>
       <div class="row-actions"><button class="btn small ghost" data-move-view="${index}" data-dir="-1" aria-label="上移" ${index === 0 ? "disabled" : ""}>↑</button><button class="btn small ghost" data-move-view="${index}" data-dir="1" aria-label="下移" ${index === views.length - 1 ? "disabled" : ""}>↓</button><button class="btn small ghost" data-rename-view="${index}">重命名</button><button class="btn small danger" data-delete-view="${index}">删除</button></div>
     </div>`).join("");
-  const body = `<input type="file" accept="application/json,.json" data-import-views-file hidden>${rows ? `<div class="view-list">${rows}</div>` : `<div class="note">还没有保存的视图。在命令面板中选择“保存当前视图”。</div>`}`;
+  const body = rows ? `<div class="view-list">${rows}</div>` : `<div class="note">还没有保存的视图。在命令面板中选择“保存当前视图”。</div>`;
   const footer = `<button class="btn ghost" data-import-views>导入</button>${rows ? `<button class="btn ghost" data-export-views>导出</button><button class="btn danger ghost" data-clear-views>清空全部</button>` : ""}<button class="btn" data-close-dialog>关闭</button>`;
   openDialog({
     title: "保存的视图",
     body,
     footer,
     onMount(root) {
-      root.querySelector("[data-import-views]").onclick = () => root.querySelector("[data-import-views-file]").click();
-      root.querySelector("[data-import-views-file]").onchange = async (event) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        try {
-          const parsed = JSON.parse(await file.text());
-          if (!Array.isArray(parsed)) throw new Error("format");
-          const clean = parsed
-            .filter((view) => view && typeof view.name === "string" && view.name.trim() && typeof view.hash === "string" && view.hash.startsWith("#/"))
-            .map((view) => ({ name: view.name.trim().slice(0, 40), hash: view.hash, ts: Number(view.ts) || Date.now() }))
-            .filter((view, index, list) => list.findIndex((item) => item.name === view.name) === index)
-            .filter((view) => {
-              const route = view.hash.replace(/^#\//, "").split("?")[0];
-              return route === "control" || Boolean(routes[route]);
-            })
-            .slice(0, 12);
-          if (!clean.length) throw new Error("empty");
-          const merged = [...clean, ...savedViews().filter((view) => !clean.some((item) => item.name === view.name))].slice(0, 12);
-          localStorage.setItem("rtflow-views", JSON.stringify(merged));
-          toast(`已导入 ${clean.length} 个视图`, "ok");
-          manageViews();
-        } catch (_) { toast("导入失败：文件格式不正确", "bad"); }
-      };
-      root.querySelector("[data-export-views]")?.addEventListener("click", () => {
-        const blob = new Blob([JSON.stringify(savedViews(), null, 2)], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `rtflow-views-${new Date().toISOString().slice(0, 10)}.json`;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        toast("视图已导出", "ok");
-      });
+      root.querySelector("[data-import-views]").onclick = importViewsFile;
+      root.querySelector("[data-export-views]")?.addEventListener("click", exportViewsFile);
       root.querySelectorAll("[data-open-view]").forEach((button) => button.onclick = () => {
         const view = savedViews()[Number(button.dataset.openView)];
         if (!view) return;
@@ -530,6 +548,8 @@ function openPalette() {
     { label: "刷新当前页面", hint: "重新加载当前数据", icon: "↻", shortcut: "R", group: "操作", run: () => navigate({ silent: true }) },
     { label: "保存当前视图", hint: "保存页面与筛选条件到本地", icon: "★", group: "操作", run: () => saveCurrentView() },
     { label: "管理保存的视图", hint: "查看或删除本地视图", icon: "☆", group: "操作", run: () => manageViews() },
+    { label: "导入视图", hint: "从 JSON 合并筛选视图", icon: "⇧", group: "操作", run: () => importViewsFile() },
+    { label: "导出视图", hint: "下载 JSON 备份", icon: "⇩", group: "操作", run: () => exportViewsFile() },
     { label: "导出当前视图", hint: "CSV（当前页面支持时）", icon: "⇩", group: "操作", run: () => exportCurrentView() },
     { label: "切换深浅主题", hint: "深色 / 浅色 / 跟随系统", icon: "◐", group: "操作", run: () => applyTheme(theme() === "dark" ? "light" : theme() === "light" ? "system" : "dark") },
     { label: "主题跟随系统", hint: "随操作系统浅色/深色切换", icon: "◑", group: "操作", run: () => applyTheme("system") },
