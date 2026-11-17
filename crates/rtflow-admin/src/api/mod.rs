@@ -156,32 +156,6 @@ fn index_handler(state: Arc<AdminState>) -> Handler {
     })
 }
 
-fn asset_handler(
-    asset: &'static [u8],
-    content_type: &'static str,
-    cache_control: &'static str,
-) -> Handler {
-    Arc::new(move |_req, mut writer: ResponseWriter<_>| {
-        Box::pin(async move {
-            let length = asset.len().to_string();
-            writer
-                .write_headers(
-                    200,
-                    &[
-                        ("Content-Type", content_type),
-                        ("Content-Length", length.as_str()),
-                        ("Cache-Control", cache_control),
-                        ("Connection", "close"),
-                    ],
-                )
-                .await?;
-            writer.write_raw(asset).await?;
-            writer.flush().await?;
-            Ok(writer)
-        })
-    })
-}
-
 async fn login<W: tokio::io::AsyncWrite + Unpin>(
     state: Arc<AdminState>,
     req: HttpRequest,
@@ -601,7 +575,7 @@ pub(super) async fn register(http: &HttpServer, state: Arc<AdminState>) {
         http.add_route(
             Method::Get,
             &format!("{base}/assets/{}", asset.path),
-            asset_handler(asset.bytes, asset.content_type, "no-cache"),
+            assets::handler(asset.bytes, asset.content_type, "no-cache"),
         )
         .await;
     }

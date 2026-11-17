@@ -45,6 +45,8 @@
 
 ### Changed
 
+- 管理端静态资源增加 ETag 与 304 协商缓存，减少重复下载。
+
 - 打印页脚显示 rtflow 与页码（counter(page)/counter(pages)）。
 
 - toast 悬停暂停消失、移出后 1.2 秒关闭，点击立即关闭。

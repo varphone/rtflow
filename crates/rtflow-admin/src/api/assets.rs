@@ -1,4 +1,8 @@
 //! Embedded admin SPA assets.
+use rtflow_http::{Handler, ResponseWriter};
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+
 pub(super) struct Asset {
     pub path: &'static str,
     pub bytes: &'static [u8],
@@ -124,3 +128,49 @@ pub(super) const ASSETS: &[Asset] = &[
         "text/javascript; charset=utf-8"
     ),
 ];
+
+pub(super) fn handler(
+    asset: &'static [u8],
+    content_type: &'static str,
+    cache_control: &'static str,
+) -> Handler {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    asset.hash(&mut hasher);
+    let etag = format!("\"{:x}\"", hasher.finish());
+    Arc::new(move |req, mut writer: ResponseWriter<_>| {
+        let etag = etag.clone();
+        Box::pin(async move {
+            if req.header("if-none-match").map(str::trim) == Some(etag.as_str()) {
+                writer
+                    .write_headers(
+                        304,
+                        &[
+                            ("ETag", etag.as_str()),
+                            ("Cache-Control", cache_control),
+                            ("Content-Length", "0"),
+                            ("Connection", "close"),
+                        ],
+                    )
+                    .await?;
+                writer.flush().await?;
+                return Ok(writer);
+            }
+            let length = asset.len().to_string();
+            writer
+                .write_headers(
+                    200,
+                    &[
+                        ("Content-Type", content_type),
+                        ("Content-Length", length.as_str()),
+                        ("Cache-Control", cache_control),
+                        ("ETag", etag.as_str()),
+                        ("Connection", "close"),
+                    ],
+                )
+                .await?;
+            writer.write_raw(asset).await?;
+            writer.flush().await?;
+            Ok(writer)
+        })
+    })
+}
