@@ -192,11 +192,18 @@ function openProxyDetail(item, ctx) {
       });
       root.querySelector("[data-pd-edit]").onclick = () => { close(); openProxyDrawer(item, () => ctx.reload()); };
       root.querySelector("[data-pd-clone]").onclick = () => { close(); openProxyDrawer(item, () => ctx.reload(), { clone: true }); };
-      root.querySelector("[data-pd-restart]").onclick = async () => {
+      root.querySelector("[data-pd-restart]").onclick = async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true; button.classList.add("loading");
         try { await apiV1("/proxies/restart?path=" + encodeURIComponent(item.path), { method: "POST" }); toast("重启已提交", "ok"); close(); ctx.reload(); }
-        catch (error) { toast(error.message, "bad"); }
+        catch (error) { toast(error.message, "bad"); button.disabled = false; button.classList.remove("loading"); }
       };
-      root.querySelector("[data-pd-probe]").onclick = () => probeProxy(item.path);
+      root.querySelector("[data-pd-probe]").onclick = async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true; button.classList.add("loading");
+        try { await probeProxy(item.path); }
+        finally { button.disabled = false; button.classList.remove("loading"); }
+      };
       root.querySelector("[data-pd-live]").onclick = () => { close(); location.hash = `#/live?q=${encodeURIComponent(item.path)}`; };
       root.querySelector("[data-pd-delete]").onclick = async () => {
         if (!await confirmDialog({ title: "删除代理", message: `删除 ${item.path}？`, confirmLabel: "删除", danger: true })) return;
