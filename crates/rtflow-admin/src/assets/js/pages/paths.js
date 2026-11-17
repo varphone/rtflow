@@ -60,11 +60,16 @@ export async function render(params, ctx) {
           return;
         }
         const target = event.target.closest("[data-action]");
-        if (!target || !["detail", "edit", "kick", "delete"].includes(target.dataset.action)) return;
+        if (!target || !["detail", "edit", "toggle", "kick", "delete"].includes(target.dataset.action)) return;
         const item = visible.find((entry) => entry.name === target.dataset.name);
         if (!item) return;
         if (target.dataset.action === "detail") return openPathDetail(item, system, ctx);
         if (target.dataset.action === "edit") return openPathDrawer(item, () => ctx.reload());
+        if (target.dataset.action === "toggle") {
+          try { await apiV1("/paths/" + encodeURIComponent(item.name), { method: "PATCH", body: { enabled: !item.enabled } }); toast(item.enabled ? "路径已停用" : "路径已启用", "ok"); ctx.reload(); }
+          catch (error) { toast(error.message, "bad"); }
+          return;
+        }
         if (target.dataset.action === "kick") {
           try { await apiV1("/kick?path=" + encodeURIComponent(item.name), { method: "POST" }); toast("已断开", "ok"); ctx.reload(); }
           catch (error) { toast(error.message, "bad"); }
@@ -106,6 +111,7 @@ function table(items) {
       <td><span class="badge">${esc(item.source)}</span></td><td>${item.publish ? '<span class="badge ok">发布</span>' : ""} ${item.read ? '<span class="badge ok">观看</span>' : '<span class="badge bad">不可读</span>'}</td>
       <td>${item.record ? '<span class="badge ok">开启</span>' : "—"}</td><td class="mono">${item.max_readers || "∞"}</td><td>${dateTime(item.updated_at)}</td>
       <td><div class="row-actions"><button class="btn small" data-action="edit" data-name="${esc(item.name)}">编辑</button>
+        <button class="btn small ghost" data-action="toggle" data-name="${esc(item.name)}">${item.enabled ? "停用" : "启用"}</button>
         <button class="btn small ghost" data-action="kick" data-name="${esc(item.name)}">断开</button>
         <button class="btn small danger" data-action="delete" data-name="${esc(item.name)}">删除</button></div></td></tr>`).join("")}
   </tbody></table></div>`;
