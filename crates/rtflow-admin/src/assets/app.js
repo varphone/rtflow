@@ -645,5 +645,12 @@ window.addEventListener("beforeprint", () => {
 window.addEventListener("offline", () => { if (state.session) toast("网络连接已断开", "bad"); });
 window.addEventListener("online", () => { if (state.session) toast("网络连接已恢复", "ok"); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden && state.session) refreshCounts(); });
+function renderBootError(message) {
+  const app = document.getElementById("app");
+  if (!app || app.childElementCount) return;
+  app.innerHTML = `<div class="boot-error"><div class="panel"><h1>控制台加载失败</h1><p class="note">页面脚本未能完成初始化，请刷新重试。若持续出现，请检查浏览器控制台或服务日志。</p><pre class="code wrap">${esc(message || "未知错误")}</pre><button class="btn primary" onclick="location.reload()">重新加载</button></div></div>`;
+}
+window.addEventListener("error", (event) => renderBootError(event.message));
+window.addEventListener("unhandledrejection", (event) => renderBootError(String(event.reason)));
 window.addEventListener("rtflow:unauthorized", () => { state.session = null; renderLogin("登录已过期"); });
 boot();
