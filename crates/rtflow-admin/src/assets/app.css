@@ -459,7 +459,7 @@ input[type="search"]::-webkit-search-cancel-button:hover { background: var(--tex
   .top-actions { position: relative; gap: 2px; }
   .top-actions .btn { padding: 6px; }
   .command-trigger { padding: 7px; }
-  .command-trigger span, .command-trigger kbd { display: none; }
+  .command-trigger > span:not(.icon), .command-trigger kbd { display: none; }
   .command-trigger .icon { width: 16px; height: 16px; }
   .content { padding: 14px 14px 36px; }
   .page-head h1 { font-size: 18px; }

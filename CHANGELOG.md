@@ -7,6 +7,8 @@
 
 ### Fixed
 
+- 移动端命令面板按钮不再被 `span` 隐藏规则清空，放大镜图标正常显示。
+
 - 全局 `[hidden] { display:none !important }`，修复重置/重试/新事件按钮在无内容时仍显示的问题。
 
 - 未知 hash 路由回退到概览并规范化为 `#/overview`。
