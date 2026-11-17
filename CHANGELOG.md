@@ -7,6 +7,8 @@
 
 ### Fixed
 
+- 全局 `[hidden] { display:none !important }`，修复重置/重试/新事件按钮在无内容时仍显示的问题。
+
 - 未知 hash 路由回退到概览并规范化为 `#/overview`。
 
 - CSV 导出对以 = + - @ 开头的字符串加前缀，防止 Excel 公式注入。
