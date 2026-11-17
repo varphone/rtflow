@@ -34,7 +34,7 @@ use rtflow_hls::segment_ring::SegmentRing;
 use rtflow_hls::segmenter::{Segmenter, SegmenterConfig};
 use rtflow_http::Handler;
 use rtflow_media::MediaDescription;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -55,6 +55,9 @@ impl DashConfig {
     pub fn validate(&self) -> rtflow_core::error::Result<()> {
         if self.segment_duration.is_zero() {
             return Err(rtflow_core::error::Error::Limit("DASH segment duration"));
+        }
+        if self.segment_count == 0 {
+            return Err(rtflow_core::error::Error::Limit("DASH segment count"));
         }
         self.mpd.validate()
     }
@@ -113,7 +116,6 @@ pub fn create_dash_handlers(
     }
     let (mut receiver, startup) = mount.subscribe_with_startup();
     let cancel = mount.cancellation_token();
-    let asset_prefix: Arc<str> = Arc::from(mount.path());
     let mount_source = mount.announce_fmtp_source();
 
     // Spawn segmenter task
@@ -143,6 +145,8 @@ pub fn create_dash_handlers(
         // Timestamp normalization: subtract first frame's PTS so media segment
         // tfdt values start near 0, matching the MPD SegmentTimeline.
         let mut base_pts: Option<Duration> = None;
+        let mut last_pts: HashMap<u8, Duration> = HashMap::new();
+        let mut init_hash: Option<u64> = None;
         tracing::info!(
             tracks = desc_segmenter.tracks.len(),
             has_video,
@@ -217,25 +221,37 @@ pub fn create_dash_handlers(
             }
 
             // Normalize timestamps relative to first frame (so tfdt starts near 0)
-            // Detect publisher reconnection: large backward PTS jump means a new
-            // timestamp epoch.  Reset normalization base and DASH timeline state.
-            if let Some(base) = base_pts
-                && unit.pts < base
-                && base - unit.pts > Duration::from_secs(5)
+            // Detect publisher reconnection: a large backward PTS jump means a
+            // new timestamp epoch. Compare against the last PTS of the same
+            // track, not the normalization base (which is the first PTS and
+            // therefore never moves).
+            let previous_pts = last_pts.insert(unit.track_id, unit.pts);
+            if let Some(previous) = previous_pts
+                && unit.pts.saturating_add(Duration::from_secs(5)) < previous
             {
                 tracing::info!(
-                    old_base_ms = base.as_millis() as u64,
+                    old_pts_ms = previous.as_millis() as u64,
                     new_pts_ms = unit.pts.as_millis() as u64,
                     "DASH timestamp discontinuity detected (publisher reconnect?), resetting"
                 );
                 base_pts = None;
-                state_clone.reset_timeline();
+                last_pts.clear();
+                // Keep the original availability start time: a reconnect is
+                // the same presentation. New segments are placed after the
+                // last segment on the timeline so `S@t` never goes backwards.
+                let offset = ring_clone
+                    .snapshot()
+                    .last()
+                    .map(|segment| segment.timestamp.saturating_add(segment.duration))
+                    .unwrap_or_default();
+                state_clone.set_timeline_offset(offset);
                 segmenter.reset_after_discontinuity();
                 awaiting_keyframe = has_video;
                 // Skip non-keyframe data until we get a clean starting point
                 if has_video && !unit.is_keyframe {
                     continue;
                 }
+                awaiting_keyframe = false;
             }
             let mut unit = (*unit).clone();
             let base = *base_pts.get_or_insert(unit.pts);
@@ -245,7 +261,7 @@ pub fn create_dash_handlers(
             }
 
             segmenter.push(unit);
-            while let Ok(segment) = segments.try_recv() {
+            while let Ok(mut segment) = segments.try_recv() {
                 segment_count += 1;
                 tracing::debug!(
                     segment_count,
@@ -254,24 +270,32 @@ pub fn create_dash_handlers(
                     ring_len = ring_clone.len(),
                     "DASH segment produced"
                 );
-                if state_clone.availability_start() == SystemTime::UNIX_EPOCH {
-                    state_clone.set_availability_start(SystemTime::now());
-                    state_clone.set_base_timestamp(segment.timestamp);
-                    // Derive actual codec string from init segment's avcC box
-                    if let Some(codec_str) = extract_h264_codec_string(&segment.init) {
-                        tracing::debug!(codec = %codec_str, "DASH init segment codec");
-                        state_clone.set_codec_string(codec_str);
-                    } else {
-                        tracing::warn!(
-                            init_len = segment.init.len(),
-                            "DASH init segment has no valid avcC"
-                        );
+                let hash = hash_bytes(&segment.init);
+                match init_hash {
+                    None => {
+                        state_clone.set_availability_start(SystemTime::now());
+                        state_clone.set_base_timestamp(Duration::ZERO);
+                        state_clone.set_timeline_offset(Duration::ZERO);
+                        update_dash_meta(&state_clone, &segment.init);
+                        init_hash = Some(hash);
                     }
-                    // Extract video dimensions from init segment's avc1/hvc1 box
-                    if let Some((w, h)) = extract_video_dimensions(&segment.init) {
-                        tracing::debug!(width = w, height = h, "DASH init segment dimensions");
-                        state_clone.set_video_dimensions(w, h);
+                    Some(previous) if previous != hash && !ring_clone.is_empty() => {
+                        // Codec configuration changed: start a new
+                        // presentation. Players refetch the MPD and init.
+                        tracing::info!("DASH init segment changed; starting new presentation");
+                        ring_clone.clear();
+                        state_clone.reset_timeline();
+                        state_clone.set_availability_start(SystemTime::now());
+                        state_clone.set_base_timestamp(segment.timestamp);
+                        state_clone.set_timeline_offset(Duration::ZERO);
+                        update_dash_meta(&state_clone, &segment.init);
+                        init_hash = Some(hash);
                     }
+                    _ => {}
+                }
+                let offset = state_clone.timeline_offset();
+                if !offset.is_zero() {
+                    segment.timestamp = segment.timestamp.saturating_add(offset);
                 }
                 ring_clone.push(segment);
             }
@@ -284,7 +308,11 @@ pub fn create_dash_handlers(
             "DASH segmenter task exiting"
         );
         segmenter.flush();
-        while let Ok(segment) = segments.try_recv() {
+        while let Ok(mut segment) = segments.try_recv() {
+            let offset = state_clone.timeline_offset();
+            if !offset.is_zero() {
+                segment.timestamp = segment.timestamp.saturating_add(offset);
+            }
             ring_clone.push(segment);
         }
     });
@@ -293,18 +321,16 @@ pub fn create_dash_handlers(
     let ring_mpd = ring.clone();
     let desc_mpd = description.clone();
     let mpd_config = config.mpd.clone();
-    let prefix_mpd = asset_prefix.clone();
     let state_mpd = dash_state.clone();
     tracing::debug!("DASH handlers created");
     let mpd_handler: Handler = Arc::new(move |req, writer| {
         let r = ring_mpd.clone();
         let d = desc_mpd.clone();
         let c = mpd_config.clone();
-        let p = prefix_mpd.clone();
         let s = state_mpd.clone();
         Box::pin(async move {
             tracing::debug!(ring_len = r.len(), "DASH MPD requested");
-            handler::serve_mpd(req, writer, &r, &d, &c, &p, &s).await
+            handler::serve_mpd(req, writer, &r, &d, &c, &s).await
         })
     });
 
@@ -342,6 +368,28 @@ pub fn create_dash_handlers(
     });
 
     (mpd_handler, segment_handler, init_handler)
+}
+
+fn update_dash_meta(state: &DashState, init: &[u8]) {
+    if let Some(codec) = extract_h264_codec_string(init) {
+        tracing::debug!(codec = %codec, "DASH init segment codec");
+        state.set_codec_string(codec);
+    } else if !init.is_empty() {
+        tracing::warn!(init_len = init.len(), "DASH init segment has no valid avcC");
+    }
+    if let Some((width, height)) = extract_video_dimensions(init) {
+        tracing::debug!(width, height, "DASH init segment dimensions");
+        state.set_video_dimensions(width, height);
+    }
+}
+
+fn hash_bytes(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 /// Extract the H.264 codec string (e.g., "avc1.640028") from an init segment's avcC box.
@@ -406,6 +454,11 @@ mod tests {
         assert!(config.validate().is_err());
         let mut config = DashConfig::default();
         config.mpd.timescale = 0;
+        assert!(config.validate().is_err());
+        let config = DashConfig {
+            segment_count: 0,
+            ..DashConfig::default()
+        };
         assert!(config.validate().is_err());
     }
 }

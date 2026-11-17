@@ -94,6 +94,12 @@ low_latency = true
 
 [dash]
 enabled = true
+# 可选：缺省继承 [hls] 的分片时长/窗口。
+# segment_duration = "1s"
+# window = 5
+# min_buffer_time = "2s"
+# time_shift_buffer_depth = "5s"
+# suggested_presentation_delay = "3s"
 
 [flv]
 enabled = true

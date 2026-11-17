@@ -11,8 +11,8 @@
 | 业务数据 | `state/rtflow.db` | 管理 API/控制台 |
 | 录制文件/VOD | `recording.root` 等 | 文件系统/录制 API |
 
-服务配置包括监听地址、TLS、日志、鉴权、限额、HLS/DASH、全局录制策略、
-`[storage]` 和 `[paths]` glob 策略。路径记录、推流密钥、RTSP 代理、SRT pull/push
+服务配置包括监听地址、TLS、日志、鉴权、限额、HLS/DASH（见 [dash.md](dash.md)）、
+全局录制策略、`[storage]` 和 `[paths]` glob 策略。路径记录、推流密钥、RTSP 代理、SRT pull/push
 属于业务数据，见 [storage.md](storage.md)。
 
 ## 最小示例

@@ -204,6 +204,103 @@ async fn dash_mpd_and_segments_after_publish() {
     http.shutdown();
 }
 
+fn attribute<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
+    let needle = format!("{name}=\"");
+    let start = xml.find(&needle)? + needle.len();
+    let rest = &xml[start..];
+    Some(&rest[..rest.find('"')?])
+}
+
+fn last_segment_time(xml: &str) -> Option<u64> {
+    xml.rsplit("<S t=\"")
+        .next()?
+        .split('"')
+        .next()?
+        .parse()
+        .ok()
+}
+
+#[tokio::test]
+async fn dash_timeline_continues_after_publisher_reconnect() {
+    let mounts = Arc::new(MountRegistry::new(10));
+    let mount = mounts
+        .register(
+            Arc::from("/live/reconnect"),
+            rtflow::mount::MountConfig::Publisher {
+                description: h264_description(),
+                allow_replace_after_disconnect: true,
+            },
+        )
+        .unwrap();
+    let config = DashConfig {
+        segment_duration: Duration::from_millis(200),
+        segment_count: 5,
+        ..Default::default()
+    };
+    let (mpd_handler, _seg_handler, _init_handler) = create_dash_handlers(config, &mount);
+    let mut http = HttpServer::bind(HttpConfig::new("127.0.0.1:0".parse().unwrap()))
+        .await
+        .unwrap();
+    let addr = http.local_addr();
+    http.add_route(Method::Get, "/live/reconnect/manifest.mpd", mpd_handler)
+        .await;
+    http.run().await.unwrap();
+    let publisher = mount.publisher().unwrap();
+    for i in 0..400u32 {
+        let frame = if i % 10 == 0 {
+            h264_keyframe(i)
+        } else {
+            h264_interframe(i)
+        };
+        let _ = publisher.push(frame);
+        tokio::time::sleep(Duration::from_millis(4)).await;
+    }
+    let mut first = String::new();
+    for _ in 0..60 {
+        let (status, body) = http_get(addr, "/live/reconnect/manifest.mpd").await;
+        if status == 200 && last_segment_time(&body).is_some_and(|time| time > 0) {
+            first = body;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(!first.is_empty(), "no MPD before reconnect");
+    let ast = attribute(&first, "availabilityStartTime")
+        .unwrap_or_default()
+        .to_owned();
+    let before = last_segment_time(&first).unwrap();
+
+    // New timestamp epoch with a keyframe: the segmenter resets, the DASH
+    // timeline must continue after the previous segment.
+    for i in 0..100u32 {
+        let frame = if i % 10 == 0 {
+            h264_keyframe(i)
+        } else {
+            h264_interframe(i)
+        };
+        let _ = publisher.push(frame);
+        tokio::time::sleep(Duration::from_millis(4)).await;
+    }
+    let mut after = 0;
+    for _ in 0..60 {
+        let (status, body) = http_get(addr, "/live/reconnect/manifest.mpd").await;
+        if status == 200 && last_segment_time(&body).is_some_and(|time| time > before) {
+            after = last_segment_time(&body).unwrap();
+            assert_eq!(
+                attribute(&body, "availabilityStartTime"),
+                Some(ast.as_str())
+            );
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        after > before,
+        "timeline did not continue: before={before} after={after}"
+    );
+    http.shutdown();
+}
+
 #[tokio::test]
 async fn dash_init_returns_404_without_segments() {
     let mounts = Arc::new(MountRegistry::new(10));

@@ -17,10 +17,12 @@ pub struct DashState {
     /// The raw segment timestamp (microseconds) of the very first segment produced.
     /// Used as the base for computing absolute SegmentTimeline `t` values.
     base_timestamp_micros: AtomicI64,
+    /// Timeline offset added to media timestamps after a publisher reconnect.
+    timeline_offset_micros: AtomicI64,
     /// The actual H.264 codec string derived from the SPS (e.g., "avc1.640028").
-    codec_string: std::sync::OnceLock<String>,
+    codec_string: std::sync::RwLock<Option<String>>,
     /// Video dimensions (width, height) parsed from the init segment's avcC/hvcC.
-    video_dimensions: std::sync::OnceLock<(u16, u16)>,
+    video_dimensions: std::sync::RwLock<Option<(u16, u16)>>,
 }
 
 impl Default for DashState {
@@ -34,8 +36,9 @@ impl DashState {
         Self {
             availability_epoch_secs: AtomicI64::new(0),
             base_timestamp_micros: AtomicI64::new(-1),
-            codec_string: std::sync::OnceLock::new(),
-            video_dimensions: std::sync::OnceLock::new(),
+            timeline_offset_micros: AtomicI64::new(0),
+            codec_string: std::sync::RwLock::new(None),
+            video_dimensions: std::sync::RwLock::new(None),
         }
     }
 
@@ -70,31 +73,66 @@ impl DashState {
         }
     }
 
-    /// Set the actual codec string derived from the init segment's avcC.
-    pub fn set_codec_string(&self, s: String) {
-        let _ = self.codec_string.set(s);
+    /// Set the actual codec string derived from the init segment.
+    pub fn set_codec_string(&self, value: String) {
+        *self
+            .codec_string
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(value);
     }
 
     /// Get the actual codec string, or None if not yet determined.
-    pub fn codec_string(&self) -> Option<&str> {
-        self.codec_string.get().map(|s| s.as_str())
+    pub fn codec_string(&self) -> Option<String> {
+        self.codec_string
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Set the video dimensions parsed from the init segment.
     pub fn set_video_dimensions(&self, width: u16, height: u16) {
-        let _ = self.video_dimensions.set((width, height));
+        *self
+            .video_dimensions
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((width, height));
     }
 
     /// Get the video dimensions, or None if not yet determined.
     pub fn video_dimensions(&self) -> Option<(u16, u16)> {
-        self.video_dimensions.get().copied()
+        *self
+            .video_dimensions
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Reset timeline state when a publisher reconnects (new timestamp epoch).
-    /// Allows `set_availability_start` and `set_base_timestamp` to be called again.
+    /// Add a timeline offset for segments produced after a reconnect.
+    pub fn set_timeline_offset(&self, offset: std::time::Duration) {
+        self.timeline_offset_micros.store(
+            offset.as_micros().min(i64::MAX as u128) as i64,
+            Ordering::Release,
+        );
+    }
+
+    pub fn timeline_offset(&self) -> std::time::Duration {
+        std::time::Duration::from_micros(
+            self.timeline_offset_micros.load(Ordering::Acquire).max(0) as u64
+        )
+    }
+
+    /// Reset presentation state: a new availability start, timeline origin,
+    /// offset and codec metadata. Used when the init segment changes.
     pub fn reset_timeline(&self) {
         self.availability_epoch_secs.store(0, Ordering::Release);
         self.base_timestamp_micros.store(-1, Ordering::Release);
+        self.timeline_offset_micros.store(0, Ordering::Release);
+        *self
+            .codec_string
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *self
+            .video_dimensions
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 }
 
@@ -116,7 +154,6 @@ pub async fn serve_mpd<W: AsyncWrite + Unpin>(
     ring: &SegmentRing,
     description: &MediaDescription,
     config: &MpdConfig,
-    asset_prefix: &str,
     state: &DashState,
 ) -> Result<ResponseWriter<W>> {
     let segments = ring.snapshot();
@@ -135,14 +172,14 @@ pub async fn serve_mpd<W: AsyncWrite + Unpin>(
     // Propagate the request query (e.g. ?token=...) into embedded segment
     // URLs so token-protected deployments do not break on segment fetches.
     let query = serialize_query(&req.query);
+    let codec = state.codec_string();
     let body = mpd::generate_mpd_q(
         &segments,
         description,
         config,
-        asset_prefix,
         state.availability_start(),
         state.base_timestamp().unwrap_or_default(),
-        state.codec_string(),
+        codec.as_deref(),
         state.video_dimensions(),
         &query,
     );

@@ -233,3 +233,33 @@ fn proxy_schedule_windows_and_overnight() {
         "zero-length windows are rejected"
     );
 }
+
+#[test]
+fn dash_section_parses_and_validates() {
+    let config = Config::from_toml(
+        "[dash]\nsegment_duration = \"1s\"\nwindow = 6\nmin_buffer_time = \"3s\"\ntime_shift_buffer_depth = \"6s\"\nsuggested_presentation_delay = \"4s\"\n",
+    )
+    .unwrap();
+    assert_eq!(config.dash.segment_duration, Some(Duration::from_secs(1)));
+    assert_eq!(config.dash.window, Some(6));
+    assert_eq!(config.dash.min_buffer_time, Duration::from_secs(3));
+    assert_eq!(
+        config.dash.time_shift_buffer_depth,
+        Some(Duration::from_secs(6))
+    );
+    assert_eq!(
+        config.dash.suggested_presentation_delay,
+        Some(Duration::from_secs(4))
+    );
+    config.validate().unwrap();
+
+    let mut invalid = Config::default();
+    invalid.dash.window = Some(0);
+    assert!(invalid.validate().is_err());
+    invalid.dash.window = None;
+    invalid.dash.segment_duration = Some(Duration::ZERO);
+    assert!(invalid.validate().is_err());
+    invalid.dash.segment_duration = None;
+    invalid.dash.time_shift_buffer_depth = Some(Duration::ZERO);
+    assert!(invalid.validate().is_err());
+}

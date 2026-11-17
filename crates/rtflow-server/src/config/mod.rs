@@ -226,11 +226,65 @@ impl Default for HlsSection {
 #[serde(deny_unknown_fields, default)]
 pub struct DashSection {
     pub enabled: bool,
+    /// Segment duration; defaults to `[hls].segment_duration`.
+    #[serde(default, with = "humantime_serde")]
+    pub segment_duration: Option<Duration>,
+    /// Sliding window size; defaults to `[hls].window`.
+    pub window: Option<usize>,
+    #[serde(with = "humantime_serde")]
+    pub min_buffer_time: Duration,
+    /// Time-shift buffer; defaults to segment duration × window.
+    #[serde(default, with = "humantime_serde")]
+    pub time_shift_buffer_depth: Option<Duration>,
+    /// Live-edge delay; defaults to 3 × segment duration.
+    #[serde(default, with = "humantime_serde")]
+    pub suggested_presentation_delay: Option<Duration>,
+}
+
+impl DashSection {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self
+            .segment_duration
+            .is_some_and(|duration| duration.is_zero())
+        {
+            return Err(ConfigError::Invalid("dash.segment_duration is zero".into()));
+        }
+        if self.window == Some(0) {
+            return Err(ConfigError::Invalid("dash.window is zero".into()));
+        }
+        if self.min_buffer_time.is_zero() {
+            return Err(ConfigError::Invalid("dash.min_buffer_time is zero".into()));
+        }
+        if self
+            .time_shift_buffer_depth
+            .is_some_and(|duration| duration.is_zero())
+        {
+            return Err(ConfigError::Invalid(
+                "dash.time_shift_buffer_depth is zero".into(),
+            ));
+        }
+        if self
+            .suggested_presentation_delay
+            .is_some_and(|duration| duration.is_zero())
+        {
+            return Err(ConfigError::Invalid(
+                "dash.suggested_presentation_delay is zero".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl Default for DashSection {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            segment_duration: None,
+            window: None,
+            min_buffer_time: Duration::from_secs(2),
+            time_shift_buffer_depth: None,
+            suggested_presentation_delay: None,
+        }
     }
 }
 
@@ -594,6 +648,7 @@ impl Config {
             ));
         }
         self.proxy.validate()?;
+        self.dash.validate()?;
         if self.hooks.timeout.is_zero() {
             return Err(ConfigError::Invalid("hooks.timeout is zero".into()));
         }

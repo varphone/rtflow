@@ -2,7 +2,7 @@
 use crate::{auth::AppAuth, config::Config, vod::VodCatalog};
 use rtflow::{
     MountRegistry,
-    dash::{DashConfig, DashHandlers, create_dash_router},
+    dash::{DashConfig, DashHandlers, create_dash_router, mpd::MpdConfig},
     http::Handler,
     http_flv::handler::serve_flv_stream,
 };
@@ -135,9 +135,36 @@ pub(crate) fn flv_handler(mounts: Arc<MountRegistry>) -> Handler {
     })
 }
 
+struct CachedDash {
+    mount: Arc<rtflow::mount::Mount>,
+    handlers: Arc<DashHandlers>,
+}
+
+fn dash_config(config: &Config) -> DashConfig {
+    let segment_duration = config
+        .dash
+        .segment_duration
+        .unwrap_or(config.hls.segment_duration);
+    let segment_count = config.dash.window.unwrap_or(config.hls.window);
+    let time_shift_buffer_depth = config
+        .dash
+        .time_shift_buffer_depth
+        .unwrap_or_else(|| segment_duration.saturating_mul(segment_count as u32));
+    DashConfig {
+        segment_duration,
+        segment_count,
+        mpd: MpdConfig {
+            min_buffer_time: config.dash.min_buffer_time,
+            time_shift_buffer_depth,
+            segment_duration,
+            suggested_presentation_delay: config.dash.suggested_presentation_delay,
+            ..MpdConfig::default()
+        },
+    }
+}
+
 pub(crate) fn dash_handler(mounts: Arc<MountRegistry>, config: Arc<Config>) -> Handler {
-    let cache: Arc<Mutex<HashMap<String, Arc<DashHandlers>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let cache: Arc<Mutex<HashMap<String, CachedDash>>> = Arc::new(Mutex::new(HashMap::new()));
     Arc::new(move |req, writer| {
         let mounts = mounts.clone();
         let config = config.clone();
@@ -159,18 +186,23 @@ pub(crate) fn dash_handler(mounts: Arc<MountRegistry>, config: Arc<Config>) -> H
                 let mut cache = cache
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let current = handle.mount();
+                let stale = cache
+                    .get(mount_path)
+                    .is_none_or(|entry| !Arc::ptr_eq(&entry.mount, current));
+                if stale {
+                    cache.insert(
+                        mount_path.to_owned(),
+                        CachedDash {
+                            mount: current.clone(),
+                            handlers: Arc::new(create_dash_router(dash_config(&config), &handle)),
+                        },
+                    );
+                }
                 cache
-                    .entry(mount_path.to_owned())
-                    .or_insert_with(|| {
-                        Arc::new(create_dash_router(
-                            DashConfig {
-                                segment_duration: config.hls.segment_duration,
-                                segment_count: config.hls.window,
-                                ..DashConfig::default()
-                            },
-                            &handle,
-                        ))
-                    })
+                    .get(mount_path)
+                    .expect("just inserted")
+                    .handlers
                     .clone()
             };
             let handler = match kind {
@@ -194,7 +226,10 @@ fn dash_route(path: &str) -> Option<(&str, DashKind)> {
     if let Some(mount) = path.strip_suffix("/manifest.mpd") {
         return Some((mount, DashKind::Manifest));
     }
-    if let Some(mount) = path.strip_suffix("/init.m4s") {
+    if let Some(mount) = path
+        .strip_suffix("/init.mp4")
+        .or_else(|| path.strip_suffix("/init.m4s"))
+    {
         return Some((mount, DashKind::Init));
     }
     let (mount, file) = path.rsplit_once('/')?;

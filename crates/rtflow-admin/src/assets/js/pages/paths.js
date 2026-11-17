@@ -151,6 +151,7 @@ function openPathDetail(item, system, ctx, taken = []) {
   const base = String(system.rtmp_base || `rtmp://${location.hostname}:1935`).replace(/\/$/, "");
   const rtsp = String(system.rtsp_base || `rtsp://${location.hostname}:8554`).replace(/\/$/, "");
   const hls = `${location.origin}${system.hls_prefix || "/hls"}/${item.name}/index.m3u8`;
+  const dash = `${location.origin}/dash/${item.name}/manifest.mpd`;
   const endpoint = (label, url) => `<div class="endpoint"><span class="endpoint-label">${label}</span><code>${esc(url)}</code><button class="btn small ghost" data-copy="${esc(url)}">复制</button></div>`;
   const flags = [item.publish && "发布", item.read && "观看", item.record && "录制"].filter(Boolean).join(" · ") || "无";
   const protocols = [item.hls && "HLS", item.dash && "DASH", item.flv && "HTTP-FLV", item.webrtc && "WebRTC"].filter(Boolean).join(" · ") || "未开启输出";
@@ -172,7 +173,7 @@ function openPathDetail(item, system, ctx, taken = []) {
         <div class="detail-item"><span>创建</span><strong>${esc(dateTime(item.created_at))}</strong></div>
         <div class="detail-item"><span>更新</span><strong>${esc(dateTime(item.updated_at))}</strong></div>
       </div></section>
-      <section class="drawer-section"><h3>访问地址</h3>${endpoint("HLS", hls)}${endpoint("RTSP", `${rtsp}/${item.name}`)}${endpoint("RTMP", `${base}/${item.name}`)}</section>
+      <section class="drawer-section"><h3>访问地址</h3>${endpoint("HLS", hls)}${item.dash ? endpoint("DASH", dash) : ""}${endpoint("RTSP", `${rtsp}/${item.name}`)}${endpoint("RTMP", `${base}/${item.name}`)}</section>
       <section class="drawer-section"><h3>关联资源</h3><div class="actions">
         <button class="btn small" data-goto="#/live?q=${encodeURIComponent(item.name)}">查看直播</button>
         <button class="btn small" data-goto="#/vod?q=${encodeURIComponent(item.name)}">查看点播</button>
