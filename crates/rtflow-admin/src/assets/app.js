@@ -296,6 +296,8 @@ async function navigate(options = {}) {
   const routeChanged = state.route !== route;
   state.route = route;
   setCrumbs(route);
+  const contentEl = document.getElementById("content");
+  if (contentEl) contentEl.dataset.printTitle = routes[route].label;
   const previous = content();
   if (!previous) return;
   const focus = options.keepFocus && document.activeElement && previous.contains(document.activeElement)
@@ -636,6 +638,10 @@ window.addEventListener("keydown", (event) => {
 });
 window.addEventListener("hashchange", () => navigate());
 setInterval(() => { if (state.session && !document.hidden) refreshCounts(); }, 10000);
+window.addEventListener("beforeprint", () => {
+  const contentEl = document.getElementById("content");
+  if (contentEl) contentEl.dataset.printTime = new Date().toLocaleString("zh-CN", { hour12: false });
+});
 window.addEventListener("offline", () => { if (state.session) toast("网络连接已断开", "bad"); });
 window.addEventListener("online", () => { if (state.session) toast("网络连接已恢复", "ok"); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden && state.session) refreshCounts(); });
