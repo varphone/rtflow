@@ -45,6 +45,8 @@
 
 ### Changed
 
+- 管理视图点击 hash 复制完整分享链接。
+
 - 管理端静态资源增加 ETag 与 304 协商缓存，减少重复下载。
 
 - 打印页脚显示 rtflow 与页码（counter(page)/counter(pages)）。

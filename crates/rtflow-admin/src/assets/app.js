@@ -446,7 +446,7 @@ function importViewsFile() {
 function manageViews() {
   const views = savedViews();
   const rows = views.map((view, index) => `<div class="view-row">
-      <div><button class="link-cell" data-open-view="${index}" title="打开视图">${esc(view.name)}</button><div class="cell-sub mono">${esc(view.hash)}</div></div>
+      <div><button class="link-cell" data-open-view="${index}" title="打开视图">${esc(view.name)}</button><button class="cell-sub mono view-hash" data-copy-view="${index}" title="复制链接">${esc(view.hash)}</button></div>
       <div class="row-actions"><button class="btn small ghost" data-move-view="${index}" data-dir="-1" aria-label="上移" ${index === 0 ? "disabled" : ""}>↑</button><button class="btn small ghost" data-move-view="${index}" data-dir="1" aria-label="下移" ${index === views.length - 1 ? "disabled" : ""}>↓</button><button class="btn small ghost" data-rename-view="${index}">重命名</button><button class="btn small danger" data-delete-view="${index}">删除</button></div>
     </div>`).join("");
   const body = rows ? `<div class="view-list">${rows}</div>` : `<div class="note">还没有保存的视图。在命令面板中选择“保存当前视图”。</div>`;
@@ -458,6 +458,12 @@ function manageViews() {
     onMount(root) {
       root.querySelector("[data-import-views]").onclick = importViewsFile;
       root.querySelector("[data-export-views]")?.addEventListener("click", exportViewsFile);
+      root.querySelectorAll("[data-copy-view]").forEach((button) => button.onclick = async () => {
+        const view = savedViews()[Number(button.dataset.copyView)];
+        if (!view) return;
+        try { await copyText(`${location.origin}${location.pathname}${view.hash}`); toast("视图链接已复制", "ok"); }
+        catch (_) { toast("复制失败", "bad"); }
+      });
       root.querySelectorAll("[data-open-view]").forEach((button) => button.onclick = () => {
         const view = savedViews()[Number(button.dataset.openView)];
         if (!view) return;
