@@ -34,7 +34,7 @@ function view() {
 
 function table(items) {
   const arrow = (field) => sort.field === field ? (sort.dir > 0 ? " ↑" : " ↓") : " ↕";
-  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data"><caption class="sr-only">共 ${items.length} 条录制任务</caption>
+  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data recordings-table"><caption class="sr-only">共 ${items.length} 条录制任务</caption>
     <thead><tr><th><button class="sort-btn" data-sort="path">路径${arrow("path")}</button></th><th>状态</th>
       <th><button class="sort-btn" data-sort="segments">分段${arrow("segments")}</button></th>
       <th><button class="sort-btn" data-sort="bytes">大小${arrow("bytes")}</button></th><th>错误</th><th></th></tr></thead>
@@ -56,7 +56,7 @@ export async function render(params) {
   return {
     title: "录制",
     subtitle: "当前录制任务，数据每 2 秒原地刷新；按路径的录制开关在“路径”中设置。",
-    actions: `<button class="btn small ghost" data-rec-export>导出</button><button class="btn small" data-action="refresh">刷新</button>`,
+    actions: `<button class="btn small" data-rec-export>导出</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-rec-search aria-label="搜索录制任务" value="${esc(query)}" placeholder="搜索录制路径"></div>
       <div class="seg"><button data-rec-status="all" class="${status === "all" ? "active" : ""}">全部</button><button data-rec-status="active" class="${status === "active" ? "active" : ""}">录制中</button><button data-rec-status="inactive" class="${status === "inactive" ? "active" : ""}">已停止</button></div>
       <span class="meta" data-rec-count>${initial.length} 条 · ${initial.filter((item) => item.active).length} 录制中</span><span class="meta" data-rec-updated style="margin-left:0"></span><button class="btn small ghost" data-rec-reset ${query.trim() || status !== "all" ? "" : "hidden"}>重置</button></div>

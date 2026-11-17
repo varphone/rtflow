@@ -23,7 +23,7 @@ export async function render(params, ctx) {
   return {
     title: "路径",
     subtitle: "路径策略、发布/观看开关与录制。",
-    actions: `<button class="btn small ghost" data-action="export">导出</button><button class="btn small primary" data-action="create">新建路径</button><button class="btn small" data-action="refresh">刷新</button>`,
+    actions: `<button class="btn small" data-action="export">导出</button><button class="btn small primary" data-action="create">新建路径</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-path-search aria-label="搜索路径" value="${esc(query)}" placeholder="搜索路径"></div><div class="seg"><button data-path-state="all" class="${stateFilter === "all" ? "active" : ""}">全部</button><button data-path-state="enabled" class="${stateFilter === "enabled" ? "active" : ""}">启用</button><button data-path-state="disabled" class="${stateFilter === "disabled" ? "active" : ""}">停用</button></div><span class="meta" data-path-count>${initial.length} 条 · ${initial.filter((item) => item.enabled).length} 启用</span><button class="btn small ghost" data-path-reset ${query.trim() || stateFilter !== "all" ? "" : "hidden"}>重置</button></div>
       <section class="panel" data-path-panel>${initial.length ? table(initial) : empty("暂无路径记录", "新建路径或通过配置提供 glob 规则", "paths", `<a class="btn small" href="#/config/paths?new=1">新建路径</a>`)}</section>`,
     mount(root) {
@@ -130,7 +130,7 @@ function view(all) {
 
 function table(items) {
   const arrow = (field) => sort.field === field ? (sort.dir > 0 ? " ↑" : " ↓") : " ↕";
-  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data"><caption>共 ${items.length} 条路径</caption><thead><tr>
+  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data paths-table"><caption>共 ${items.length} 条路径</caption><thead><tr>
     <th><button class="sort-btn" data-sort="name">路径${arrow("name")}</button></th>
     <th><button class="sort-btn" data-sort="source">来源${arrow("source")}</button></th>
     <th>发布 / 观看</th><th>录制</th>

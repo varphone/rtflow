@@ -90,16 +90,25 @@ function applyDensity(value) {
 }
 applyDensity(density());
 function sidebarCollapsed() { return localStorage.getItem("rtflow-sidebar") === "collapsed"; }
+function isNarrowLayout() { return window.matchMedia("(max-width: 820px)").matches; }
+function syncSidebarToggle() {
+  const button = document.querySelector("[data-menu]");
+  if (!button) return;
+  if (isNarrowLayout()) {
+    button.setAttribute("aria-label", "打开菜单");
+    button.title = "打开菜单";
+    button.setAttribute("aria-expanded", String(document.getElementById("sidebar")?.classList.contains("open") || false));
+    return;
+  }
+  const collapsed = document.documentElement.dataset.sidebar === "collapsed";
+  button.setAttribute("aria-label", collapsed ? "展开侧栏" : "收起侧栏");
+  button.title = collapsed ? "展开侧栏" : "收起侧栏";
+  button.setAttribute("aria-expanded", String(!collapsed));
+}
 function applySidebar(collapsed) {
   document.documentElement.dataset.sidebar = collapsed ? "collapsed" : "open";
   localStorage.setItem("rtflow-sidebar", collapsed ? "collapsed" : "open");
-  const button = document.querySelector("[data-sidebar-toggle]");
-  if (button) {
-    button.innerHTML = `<span>${collapsed ? "›" : "‹"}</span><em>${collapsed ? "" : "收起"}</em>`;
-    button.setAttribute("aria-label", collapsed ? "展开侧栏" : "收起侧栏");
-    button.setAttribute("aria-expanded", String(!collapsed));
-    button.title = collapsed ? "展开侧栏" : "收起侧栏";
-  }
+  syncSidebarToggle();
 }
 applySidebar(sidebarCollapsed());
 
@@ -185,7 +194,6 @@ function renderShell() {
         <div class="nav-label">${label}</div>
         ${items.map(([route, text]) => `<a class="nav-item" data-route="${route}" href="#/${route}" title="${esc(text)}">${icon(navIcons[route] || "overview")}<span>${text}</span>${navCount(route)}</a>`).join("")}
       </nav>`).join("")}
-      <button class="sidebar-collapse" data-sidebar-toggle aria-label="收起侧栏" title="收起侧栏"></button>
       <div class="sidebar-foot"><span>rtflow ${esc(state.session?.version || "")}</span><span>${state.session?.readonly ? "只读模式" : "管理模式"}</span></div>
     </aside>
     <button class="sidebar-backdrop" data-sidebar-backdrop aria-label="关闭菜单"></button>
@@ -217,22 +225,25 @@ function renderShell() {
   const menuButton = app.querySelector("[data-menu]");
   const setSidebar = (open, restoreFocus = false) => {
     sidebar.classList.toggle("open", open);
-    menuButton.setAttribute("aria-expanded", String(open));
     document.body.classList.toggle("nav-open", open);
+    syncSidebarToggle();
     if (open) requestAnimationFrame(() => sidebar.querySelector("[data-route]")?.focus());
     else if (restoreFocus && sidebar.contains(document.activeElement)) menuButton.focus();
   };
   app.querySelectorAll("[data-route]").forEach((link) => link.addEventListener("click", () => setSidebar(false)));
-  menuButton.onclick = () => setSidebar(!sidebar.classList.contains("open"));
+  menuButton.onclick = () => {
+    if (isNarrowLayout()) setSidebar(!sidebar.classList.contains("open"));
+    else applySidebar(document.documentElement.dataset.sidebar !== "collapsed");
+  };
   app.querySelector("[data-sidebar-backdrop]").onclick = () => setSidebar(false, true);
   sidebar.addEventListener("keydown", (event) => trapFocus(sidebar, event));
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && sidebar.classList.contains("open")) setSidebar(false, true); });
   app.querySelector("[data-command-open]").onclick = () => openPalette();
-  app.querySelector("[data-sidebar-toggle]").onclick = () => applySidebar(document.documentElement.dataset.sidebar !== "collapsed");
-  const sidebarButton = app.querySelector("[data-sidebar-toggle]");
-  sidebarButton.innerHTML = `<span>${sidebarCollapsed() ? "›" : "‹"}</span><em>${sidebarCollapsed() ? "" : "收起"}</em>`;
-  sidebarButton.setAttribute("aria-label", sidebarCollapsed() ? "展开侧栏" : "收起侧栏");
-  sidebarButton.setAttribute("aria-expanded", String(!sidebarCollapsed()));
+  syncSidebarToggle();
+  window.matchMedia("(max-width: 820px)").addEventListener("change", () => {
+    setSidebar(false);
+    syncSidebarToggle();
+  });
   const popover = app.querySelector("[data-user-popover]");
   const userButton = app.querySelector("[data-user-menu]");
   const syncMenu = () => {

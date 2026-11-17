@@ -23,7 +23,7 @@ export async function render(params, ctx) {
   return {
     title: "推流密钥",
     subtitle: "签发一次性 secret，可限定角色、协议与路径。",
-    actions: `<button class="btn small ghost" data-action="export">导出</button><button class="btn small primary" data-action="issue">签发密钥</button><button class="btn small" data-action="refresh">刷新</button>`,
+    actions: `<button class="btn small" data-action="export">导出</button><button class="btn small primary" data-action="issue">签发密钥</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-key-search aria-label="搜索推流密钥" value="${esc(query)}" placeholder="搜索 Key ID 或名称"></div><div class="seg"><button data-key-state="all" class="${stateFilter === "all" ? "active" : ""}">全部</button><button data-key-state="valid" class="${stateFilter === "valid" ? "active" : ""}">有效</button><button data-key-state="soon" class="${stateFilter === "soon" ? "active" : ""}">将过期</button><button data-key-state="expired" class="${stateFilter === "expired" ? "active" : ""}">过期</button><button data-key-state="revoked" class="${stateFilter === "revoked" ? "active" : ""}">吊销</button></div><span class="meta" data-key-count>${initial.length} 条 · ${initial.filter((item) => item.enabled && !isExpired(item)).length} 有效</span><button class="btn small ghost" data-key-reset ${query.trim() || stateFilter !== "all" ? "" : "hidden"}>重置</button></div>
       <section class="panel" data-key-panel>${initial.length ? table(initial) : empty("暂未签发密钥", "点击“签发密钥”创建第一条", "keys", `<a class="btn small" href="#/config/keys?new=1">签发密钥</a>`)}</section>`,
     mount(root) {
@@ -116,7 +116,7 @@ function view(all) {
 
 function table(items) {
   const arrow = (field) => sort.field === field ? (sort.dir > 0 ? " ↑" : " ↓") : " ↕";
-  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data"><caption class="sr-only">共 ${items.length} 条推流密钥</caption><thead><tr>
+  return `<div class="table-wrap" tabindex="0" role="region" aria-label="数据表，可横向滚动"><table class="data keys-table"><caption class="sr-only">共 ${items.length} 条推流密钥</caption><thead><tr>
     <th><button class="sort-btn" data-sort="kid">Key ID${arrow("kid")}</button></th>
     <th><button class="sort-btn" data-sort="name">名称${arrow("name")}</button></th><th>角色</th><th>协议</th><th>路径范围</th>
     <th><button class="sort-btn" data-sort="expires_at">过期${arrow("expires_at")}</button></th><th>状态</th><th></th></tr></thead><tbody>

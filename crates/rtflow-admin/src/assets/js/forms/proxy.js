@@ -40,7 +40,7 @@ export function openProxyDrawer(existing, onSaved, options = {}) {
           ${field("空闲断开", textInput("idle_grace", mount.idle_grace_ms ? Math.round(mount.idle_grace_ms / 1000) + "s" : "", "placeholder=\"5s\""))}
         </div>
       </div>
-      <div id="upstreams">${upstreams.map((upstream, index) => upstreamRow(upstream, index)).join("")}</div>
+      <div id="upstreams" class="form-list">${upstreams.map((upstream, index) => upstreamRow(upstream, index)).join("")}</div>
       <button type="button" class="btn small" data-add-upstream>添加上游</button>`,
     submitLabel: editing ? "保存修改" : (clone ? "创建副本" : "创建代理"),
     async onSubmit(data, { close }) {

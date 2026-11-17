@@ -28,7 +28,7 @@ export async function render(params) {
   return {
     title: "审计日志",
     subtitle: "谁在何时改了什么；配置变更、流控制与认证拒绝。",
-    actions: `<button class="btn small ghost" data-audit-auto>自动刷新：开</button><button class="btn small ghost" data-audit-export>导出 CSV</button><button class="btn small" data-audit-refresh>刷新</button>`,
+    actions: `<button class="btn small ghost" data-audit-auto>自动刷新：开</button><button class="btn small" data-audit-export>导出 CSV</button><button class="btn small" data-audit-refresh>刷新</button>`,
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-audit-search aria-label="搜索审计事件" value="${esc(initialQuery)}" placeholder="搜索动作、路径、操作者或详情"></div>
       <div class="seg"><button data-audit-kind="all" class="${initialKind === "all" ? "active" : ""}">全部</button><button data-audit-kind="change" class="${initialKind === "change" ? "active" : ""}">变更</button><button data-audit-kind="auth" class="${initialKind === "auth" ? "active" : ""}">认证</button></div>
       <select class="input" data-audit-category aria-label="事件类型" style="width:auto"><option value="all" ${initialCategory === "all" ? "selected" : ""}>全部类型</option><option value="path" ${initialCategory === "path" ? "selected" : ""}>路径</option><option value="key" ${initialCategory === "key" ? "selected" : ""}>密钥</option><option value="proxy" ${initialCategory === "proxy" ? "selected" : ""}>代理</option><option value="srt" ${initialCategory === "srt" ? "selected" : ""}>SRT</option><option value="record" ${initialCategory === "record" ? "selected" : ""}>录制</option><option value="auth" ${initialCategory === "auth" ? "selected" : ""}>认证</option></select>
@@ -174,9 +174,16 @@ export async function render(params) {
   };
 }
 
+function timeCell(ts) {
+  const stamp = dateTime(ts);
+  const match = stamp.match(/^(\d{4}\/\d{1,2}\/\d{1,2})\s+(.+)$/);
+  if (!match) return `<td class="mono time-cell">${esc(stamp)}</td>`;
+  return `<td class="mono time-cell"><div>${esc(match[1])}</div><div class="cell-sub">${esc(match[2])}</div></td>`;
+}
+
 function rows(events) {
   return events.map((event) => `<tr>
-    <td class="mono cell-sub">${esc(dateTime(event.ts))}</td>
+    ${timeCell(event.ts)}
     <td><div class="cell-main"><span class="audit-dot ${esc(String(event.action).split(".")[0])}"></span>${esc(labels[event.action] || event.action)}</div><div class="cell-sub mono">${esc(event.action)}</div></td>
     <td>${resultBadge(event.result)}</td>
     <td><div class="cell-main mono">${esc(detail(event.path || event.key_id || event.detail))}</div><div class="cell-sub">${esc(event.protocol || "")}</div></td>

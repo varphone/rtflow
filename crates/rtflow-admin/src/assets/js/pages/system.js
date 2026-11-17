@@ -25,7 +25,7 @@ export async function render() {
   return {
     title: "系统",
     subtitle: "服务配置与存储诊断，均只读。",
-    actions: `<button class="btn small ghost" data-download-diagnostic>下载诊断</button><button class="btn small ghost" data-copy-diagnostic>复制诊断信息</button>`,
+    actions: `<button class="btn small" data-download-diagnostic>下载诊断</button><button class="btn small" data-copy-diagnostic>复制诊断信息</button>`,
     html: `<div class="stack">
       <div class="two-col">
         <section class="panel"><div class="panel-head"><h2>服务配置</h2><span class="sub">TOML · 只读</span><div class="actions" style="margin-left:auto"><button class="btn small ghost" data-copy-config>复制</button><button class="btn small ghost" data-download-config>下载</button></div></div>
@@ -41,7 +41,7 @@ export async function render() {
           <section class="panel"><div class="panel-head"><h2>存储</h2></div><div class="panel-body"><dl class="kv">
             <dt>Schema</dt><dd class="mono">v${Number(storage.schema_version || 0)}</dd><dt>数据库大小</dt><dd class="mono" data-storage-bytes>${bytes(storage.bytes)}</dd>
             <dt>备份</dt><dd class="mono" style="overflow-wrap:anywhere">${esc(backupCommand)}</dd>
-            <dt>校验</dt><dd class="mono base-value"><span title="${esc(verifyCommand)}">${esc(verifyCommand)}</span><button class="copy-inline" data-copy-value="${esc(verifyCommand)}" aria-label="复制校验命令" title="复制">⧉</button></dd></dl>
+            <dt>校验</dt><dd class="mono base-value wrap"><span title="${esc(verifyCommand)}">${esc(verifyCommand)}</span><button class="copy-inline" data-copy-value="${esc(verifyCommand)}" aria-label="复制校验命令" title="复制">⧉</button></dd></dl>
             <div class="actions" style="margin-top:10px"><button class="btn small ghost" data-copy-backup>复制备份命令</button></div>
             <p class="note" style="margin:10px 0 0">备份包含路径、密钥、代理、SRT 与录制索引，不包含录制媒体文件；建议在低峰期执行。</p></div></section>
           <section class="panel"><div class="panel-head"><h2>构建特性</h2></div><div class="panel-body"><div class="feature-list">${features || '<span class="faint">无</span>'}</div></div></section>
