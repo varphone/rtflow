@@ -1,6 +1,8 @@
 //! HTTP control-plane API (paths, keys, recordings, VOD, discovery).
 mod helper;
 use helper::expected_revision;
+#[cfg(feature = "onvif")]
+mod onvif;
 mod proxy;
 mod srt;
 mod status;
@@ -430,6 +432,8 @@ pub(crate) async fn register_api_routes(
     )
     .await;
     proxy::register(http, state.clone()).await;
+    #[cfg(feature = "onvif")]
+    onvif::register(http, state.clone()).await;
     srt::register(http, state.clone()).await;
     http.add_route(
         Method::Get,

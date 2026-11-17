@@ -170,6 +170,9 @@ impl Store {
             if current < 2 {
                 transaction.execute_batch(schema::MIGRATION_V2)?;
             }
+            if current < 3 {
+                transaction.execute_batch(schema::MIGRATION_V3)?;
+            }
             transaction.pragma_update(None, "user_version", schema::VERSION)?;
             transaction.commit()?;
         }

@@ -2,6 +2,16 @@ import { openDrawer, field, textInput, toast } from "../ui.js";
 import { apiV1 } from "../api.js";
 import { esc, uniqueName } from "../format.js";
 
+const SCHEDULE_DAYS = [
+  ["mon", "周一"],
+  ["tue", "周二"],
+  ["wed", "周三"],
+  ["thu", "周四"],
+  ["fri", "周五"],
+  ["sat", "周六"],
+  ["sun", "周日"],
+];
+
 const NEW_OUTPUTS = {
   read: true,
   hls: true,
@@ -12,7 +22,7 @@ const NEW_OUTPUTS = {
   max_readers: 0,
 };
 
-function upstreamRow(upstream = {}, index = 0) {
+function upstreamRow(upstream = {}, index = 0, prefillPassword = false) {
   return `<div class="form-section" data-upstream-row>
     <div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">上游 ${index + 1}</h3>
       <button type="button" class="btn ghost small" data-remove-upstream style="margin-left:auto">移除</button></div>
@@ -25,7 +35,7 @@ function upstreamRow(upstream = {}, index = 0) {
       </select>`)}
       ${field("用户名", textInput("username", upstream.username || ""))}
     </div>
-    ${field("密码", `<input class="input" type="password" name="password" autocomplete="new-password" spellcheck="false" placeholder="${upstream.password ? "留空保持不变" : ""}">`)}
+    ${field("密码", `<input class="input" type="password" name="password" autocomplete="new-password" spellcheck="false" value="${prefillPassword ? esc(upstream.password || "") : ""}" placeholder="${upstream.password && !prefillPassword ? "留空保持不变" : ""}">`)}
   </div>`;
 }
 
@@ -36,12 +46,15 @@ function outputChecks(outputs) {
 
 export function openProxyDrawer(existing, onSaved, options = {}) {
   const clone = options.clone === true && Boolean(existing);
-  const source = existing || { path: "", mode: "on-demand", idle_grace_ms: null, upstreams: [{ url: "", transport: "tcp" }] };
+  const source = existing || options.draft || { path: "", mode: "on-demand", idle_grace_ms: null, upstreams: [{ url: "", transport: "tcp" }] };
   const mount = clone ? { ...source, path: uniqueName(`${source.path}-copy`, options.taken || []) } : source;
   const editing = Boolean(existing) && !clone;
   const upstreams = mount.upstreams?.length ? mount.upstreams : [{ url: "", transport: "tcp" }];
+  const prefillPassword = !existing && Boolean(options.draft);
   const managed = Boolean(existing) && !clone ? Boolean(existing.managed) : true;
   const outputs = Object.assign({}, NEW_OUTPUTS, mount.outputs || {});
+  const schedule = mount.schedule || { days: SCHEDULE_DAYS.map(([value]) => value), start: "08:00", end: "18:00" };
+  const scheduleOn = Boolean(mount.schedule);
   openDrawer({
     title: clone ? "复制 RTSP 拉流" : (existing ? "编辑 RTSP 拉流" : "新增 RTSP 拉流"),
     description: clone ? "复制上游、模式与输出；路径不能与现有拉流源重复。" : "主动拉取第三方 RTSP 设备；密码只写不读。",
@@ -68,7 +81,21 @@ export function openProxyDrawer(existing, onSaved, options = {}) {
         </div>
         ${!managed ? `<span class="hint">关闭时沿用“路径”页为该路径配置的输出策略。</span>` : ""}
       </div>
-      <div id="upstreams" class="form-list">${upstreams.map((upstream, index) => upstreamRow(upstream, index)).join("")}</div>
+      <div class="form-section">
+        <h3>定时</h3>
+        <label class="checkline"><input type="checkbox" data-schedule-enabled ${scheduleOn ? "checked" : ""}> 启用定时拉流</label>
+        <div data-schedule-fields ${scheduleOn ? "" : "hidden"}>
+          <div style="display:flex;flex-wrap:wrap;gap:8px 14px">
+            ${SCHEDULE_DAYS.map(([value, label]) => `<label class="checkline"><input type="checkbox" name="schedule_day_${value}" ${(schedule.days || []).includes(value) ? "checked" : ""}> ${label}</label>`).join("")}
+          </div>
+          <div class="field-row">
+            ${field("开始", `<input class="input" type="time" name="schedule_start" value="${esc(schedule.start || "08:00")}">`)}
+            ${field("结束", `<input class="input" type="time" name="schedule_end" value="${esc(schedule.end || "18:00")}">`)}
+          </div>
+          <span class="hint">按服务器本地时间执行；结束早于开始表示跨天。窗口外停止拉流并结束录制。</span>
+        </div>
+      </div>
+      <div id="upstreams" class="form-list">${upstreams.map((upstream, index) => upstreamRow(upstream, index, prefillPassword)).join("")}</div>
       <button type="button" class="btn small" data-add-upstream>添加上游</button>`,
     submitLabel: editing ? "保存修改" : (clone ? "创建副本" : "创建拉流"),
     async onSubmit(data, { close }) {
@@ -99,6 +126,18 @@ export function openProxyDrawer(existing, onSaved, options = {}) {
           max_readers: Number(data.get("output_max_readers") || 0),
         };
       }
+      const scheduleOn = document.querySelector("[data-schedule-enabled]")?.checked;
+      if (scheduleOn) {
+        const days = SCHEDULE_DAYS.filter(([value]) => data.get(`schedule_day_${value}`) === "on").map(([value]) => value);
+        if (!days.length) throw new Error("定时拉流至少选择一天");
+        body.schedule = {
+          days,
+          start: data.get("schedule_start"),
+          end: data.get("schedule_end"),
+        };
+      } else {
+        body.schedule = null;
+      }
       await apiV1("/proxies", { method: editing ? "PATCH" : "POST", body });
       close();
       toast(editing ? "拉流源已保存" : "拉流源已创建", "ok");
@@ -109,6 +148,16 @@ export function openProxyDrawer(existing, onSaved, options = {}) {
       const fields = root.querySelector("[data-outputs-fields]");
       const record = root.querySelector('[name="output_record"]');
       const mode = root.querySelector('[name="mode"]');
+      const scheduleToggle = root.querySelector("[data-schedule-enabled]");
+      const scheduleFields = root.querySelector("[data-schedule-fields]");
+      const syncSchedule = () => {
+        if (scheduleToggle && scheduleFields) {
+          scheduleFields.hidden = !scheduleToggle.checked;
+          scheduleFields.querySelectorAll("input").forEach((input) => { input.disabled = !scheduleToggle.checked; });
+        }
+      };
+      scheduleToggle?.addEventListener("change", syncSchedule);
+      syncSchedule();
       const sync = () => {
         if (takeover && fields) {
           fields.hidden = !takeover.checked;

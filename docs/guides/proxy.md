@@ -29,6 +29,9 @@ idle_grace = "5s"                 # 覆盖全局
 description_refresh = "300s"
 outputs = { read = true, hls = true, flv = true, dash = false,
             webrtc = false, record = true, max_readers = 0 }
+# 可选：按服务器本地时间定时拉流（窗口外停止拉流并结束录制）。
+schedule = { days = ["mon", "tue", "wed", "thu", "fri"],
+             start = "08:00", end = "18:00" }
 
 [[proxy.mounts.upstreams]]
 url = "rtsp://192.0.2.10:554/live/main"
@@ -74,6 +77,53 @@ jitter = { max_delay = "40ms", max_packets = 128, max_reorder_window = 64 }
 自身的订阅会让该连接保持，因此首次观看后会持续录制。需要在无人观看时也立即录制，
 使用 `mode = "always"`（控制台勾选“录制”会自动切换）。录制完成后，分段进入点播目录，
 可在“点播”页按路径搜索和播放。
+
+## 定时拉流
+
+`schedule` 定义每周的拉流窗口，使用服务器本地时区，结束时间不包含在窗口内：
+
+```toml
+schedule = { days = ["mon", "tue", "wed", "thu", "fri"],
+             start = "08:00", end = "18:00" }
+```
+
+- `days` 取 `mon`…`sun`，至少一天且不能重复；
+- 结束早于开始表示跨天（例如 `22:00`–`06:00` 会延续到次日）；
+- 窗口开始后服务端自动 `ensure` 拉流源并应用输出策略；窗口结束后自动停止拉流，
+  mount 消失，录制器 finalize 当前分段；
+- 调度器每 15 秒检查一次，边界最多有 15 秒延迟；
+- 窗口外状态在控制台显示为 `scheduled`，配置仍保留，窗口开始时自动恢复；
+- 未配置 `schedule` 的拉流源保持原来的按需/常连行为。
+
+## ONVIF 设备发现（feature: onvif）
+
+ONVIF 是**编译期可选**能力，默认不编译。启用：
+
+```bash
+cargo build -p rtflow-server --features onvif
+# 或
+cargo run -p rtflow-server --features onvif -- --config rtflow.toml
+```
+
+启用后控制台“RTSP 拉流”页出现“发现设备”按钮；后端新增：
+
+```text
+GET  /admin/api/v1/onvif/status
+POST /admin/api/v1/onvif/discover   { "timeout_ms": 3000 }
+POST /admin/api/v1/onvif/inspect    { "xaddr": "http://.../onvif/device_service",
+                                       "username": "...", "password": "..." }
+```
+
+`discover` 用 WS-Discovery 在 `239.255.255.250:3702` 搜索 NetworkVideoTransmitter；
+`inspect` 读取设备信息、GetCapabilities(Media)、GetProfiles 和每个 profile 的
+GetStreamUri。控制台选择 profile 后会把 RTSP 地址、账号密码预填到新建拉流抽屉。
+
+实现边界：
+
+- 仅支持 ONVIF ver10 media service；部分只实现 ver20 的设备可能需要在 UI 中手工填写 RTSP 地址；
+- 支持 HTTP Basic / Digest；不支持 WS-Security UsernameToken；
+- HTTPS 证书按系统信任链校验，自签名设备请使用 HTTP 或配置可信 CA；
+- 发现依赖服务器所在网段的组播可达；跨 VLAN/禁组播时需手工填写 RTSP 地址。
 
 ## 生命周期
 

@@ -1,4 +1,4 @@
-pub(super) const VERSION: u32 = 2;
+pub(super) const VERSION: u32 = 3;
 
 pub(super) const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (
@@ -84,4 +84,9 @@ CREATE INDEX IF NOT EXISTS idempotency_created ON idempotency_keys(created_at);
 /// v2: pull-source outputs (live/recording policy projection).
 pub(super) const MIGRATION_V2: &str = r#"
 ALTER TABLE proxy_mounts ADD COLUMN outputs TEXT;
+"#;
+
+/// v3: optional weekly pull window.
+pub(super) const MIGRATION_V3: &str = r#"
+ALTER TABLE proxy_mounts ADD COLUMN schedule TEXT;
 "#;

@@ -1,6 +1,6 @@
 import { apiV1 } from "../api.js";
 import { bytes, empty, esc, exportCsv, iconSvg, num, stateBadge } from "../format.js";
-import { confirmDialog, copyText, openDialog, openDrawer, syncSortAria, toast } from "../ui.js";
+import { closeDialog, confirmDialog, copyText, openDialog, openDrawer, syncSortAria, toast } from "../ui.js";
 import { openProxyDrawer } from "../forms/proxy.js";
 
 let query = "";
@@ -10,7 +10,7 @@ let sort = { field: "path", dir: 1 };
 export async function render(params, ctx) {
   query = params?.get("q") || "";
   const linkedState = params?.get("state");
-  filter = ["all", "streaming", "idle", "backoff", "describing"].includes(linkedState) ? linkedState : "all";
+  filter = ["all", "streaming", "idle", "backoff", "describing", "scheduled"].includes(linkedState) ? linkedState : "all";
   const field = params?.get("sort");
   if (["path", "state", "attempts"].includes(field)) {
     sort = { field, dir: params?.get("dir") === "-1" ? -1 : 1 };
@@ -18,6 +18,8 @@ export async function render(params, ctx) {
     sort = { field: "path", dir: 1 };
   }
   const [status, config] = await Promise.all([apiV1("/proxies"), apiV1("/proxies/config")]);
+  let onvif = false;
+  try { await apiV1("/onvif/status"); onvif = true; } catch (_) { /* feature disabled */ }
   const statuses = status.proxies || [];
   const configs = config.mounts || [];
   const all = statuses.map((entry) => Object.assign({}, configs.find((mount) => mount.path === entry.path) || {}, entry));
@@ -25,9 +27,9 @@ export async function render(params, ctx) {
   return {
     title: "RTSP 拉流",
     subtitle: "主动拉取第三方 RTSP 设备，支持直播、录制与点播。",
-    actions: `<button class="btn small" data-proxy-export>导出</button><button class="btn small primary" data-action="create">新增拉流</button><button class="btn small" data-action="refresh">刷新</button>`,
+    actions: `${onvif ? '<button class="btn small" data-onvif-discover>发现设备</button>' : ""}<button class="btn small" data-proxy-export>导出</button><button class="btn small primary" data-action="create">新增拉流</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-proxy-search aria-label="搜索 RTSP 拉流" value="${esc(query)}" placeholder="搜索路径或上游"></div>
-      <div class="seg">${["all", "streaming", "idle", "backoff", "describing"].map((state) => `<button data-proxy-filter="${state}" class="${filter === state ? "active" : ""}">${state === "all" ? "全部" : state}</button>`).join("")}</div>
+      <div class="seg">${["all", "streaming", "idle", "backoff", "describing", "scheduled"].map((state) => `<button data-proxy-filter="${state}" class="${filter === state ? "active" : ""}">${state === "all" ? "全部" : state}</button>`).join("")}</div>
       <span class="meta" data-proxy-count>${initial.length} 条 · ${initial.filter((item) => item.state === "streaming").length} streaming · ${initial.filter((item) => item.recording?.active).length} 录制中</span><button class="btn small ghost" data-proxy-reset ${query.trim() || filter !== "all" ? "" : "hidden"}>重置</button></div>
       <section class="panel" data-proxy-panel>${initial.length ? table(initial) : empty("暂无拉流源", "新增一个 RTSP 上游开始主动拉流", "proxy", `<a class="btn small" href="#/config/proxies?new=1">新增拉流</a>`)}</section>`,
     mount(root) {
@@ -63,11 +65,12 @@ export async function render(params, ctx) {
       root.querySelector("[data-action=refresh]").onclick = () => ctx.reload();
       root.querySelector("[data-proxy-export]").onclick = () => {
         exportCsv(`proxies-${new Date().toISOString().slice(0, 10)}.csv`,
-          ["path", "state", "mode", "outputs", "recording", "upstreams", "subscribers", "tracks", "attempts", "bytes", "last_error"],
-          visible.map((item) => [item.path, item.state || "", item.mode || "", outputsSummary(item.outputs), item.recording?.active ? "recording" : "", (item.upstreams || []).map((upstream) => upstream.url).join(" "), item.subscribers || 0, item.tracks || 0, item.attempts || 0, item.bytes || 0, item.last_error || ""]));
+          ["path", "state", "mode", "outputs", "schedule", "recording", "upstreams", "subscribers", "tracks", "attempts", "bytes", "last_error"],
+          visible.map((item) => [item.path, item.state || "", item.mode || "", outputsSummary(item.outputs), item.schedule ? scheduleSummary(item.schedule) : "", item.recording?.active ? "recording" : "", (item.upstreams || []).map((upstream) => upstream.url).join(" "), item.subscribers || 0, item.tracks || 0, item.attempts || 0, item.bytes || 0, item.last_error || ""]));
         toast(`已导出 ${visible.length} 条拉流源`, "ok");
       };
       root.querySelector("[data-action=create]").onclick = () => openProxyDrawer(null, () => ctx.reload());
+      if (onvif) root.querySelector("[data-onvif-discover]").onclick = () => openOnvifDiscovery(ctx, all.map((item) => item.path));
       if (params?.get("new") === "1") {
         history.replaceState(null, "", "#/config/proxies");
         openProxyDrawer(null, () => ctx.reload());
@@ -121,6 +124,16 @@ function view(all) {
   });
 }
 
+function scheduleSummary(schedule) {
+  if (!schedule) return "—";
+  const names = { mon: "周一", tue: "周二", wed: "周三", thu: "周四", fri: "周五", sat: "周六", sun: "周日" };
+  const days = schedule.days || [];
+  const workdays = days.length === 5 && days.every((day) => ["mon", "tue", "wed", "thu", "fri"].includes(day));
+  const label = days.length === 7 ? "每天" : workdays ? "工作日" : days.map((day) => names[day] || day).join("、");
+  const overnight = String(schedule.start) > String(schedule.end);
+  return `${label} ${schedule.start}–${overnight ? "次日 " : ""}${schedule.end}`;
+}
+
 function outputsSummary(outputs) {
   if (!outputs) return "输出由路径策略管理";
   const parts = [];
@@ -155,10 +168,10 @@ function table(items) {
     <th><button class="sort-btn" data-sort="path">路径${arrow("path")}</button></th>
     <th><button class="sort-btn" data-sort="state">状态${arrow("state")}</button></th><th>上游</th><th>订阅</th><th>轨道</th>
     <th><button class="sort-btn" data-sort="attempts">重试${arrow("attempts")}</button></th><th>错误</th><th></th></tr></thead><tbody>
-    ${items.map((item) => `<tr><td><button class="link-cell mono" data-action="detail" data-path="${esc(item.path)}">${esc(item.path)}</button><div class="cell-sub">${esc(outputsSummary(item.outputs))}${item.recording?.active ? ' <span class="badge ok">录制中</span>' : ""}</div></td><td>${stateBadge(item.state)}</td><td class="mono">${esc(item.upstream || "—")}</td>
+    ${items.map((item) => `<tr><td><button class="link-cell mono" data-action="detail" data-path="${esc(item.path)}">${esc(item.path)}</button><div class="cell-sub">${esc(outputsSummary(item.outputs))}${item.recording?.active ? ' <span class="badge ok">录制中</span>' : ""}${item.schedule ? ` <span class="badge" title="${esc(scheduleSummary(item.schedule))}">定时</span>` : ""}</div></td><td>${stateBadge(item.state)}</td><td class="mono">${esc(item.upstream || "—")}</td>
       <td class="mono">${num(item.subscribers)}</td><td class="mono">${num(item.tracks)}</td><td class="mono">${num(item.attempts)}</td><td class="cell-sub">${esc(item.last_error || "—")}</td>
       <td><div class="row-actions"><button class="btn small" data-action="edit" data-path="${esc(item.path)}">编辑</button>
-        <button class="btn small ghost" data-action="restart" data-path="${esc(item.path)}">重启</button>
+        <button class="btn small ghost" data-action="restart" data-path="${esc(item.path)}" ${item.state === "scheduled" ? "disabled" : ""}>重启</button>
         <button class="btn small ghost" data-action="probe" data-path="${esc(item.path)}">探测</button>
         <button class="btn small danger" data-action="delete" data-path="${esc(item.path)}">删除</button></div></td></tr>`).join("")}
   </tbody></table></div>`;
@@ -170,6 +183,119 @@ async function probeProxy(path) {
     const result = await apiV1("/proxies/probe?path=" + encodeURIComponent(path), { method: "POST" });
     openDialog({ title: "上游探测", body: `<div class="note">${esc(result.session_name || "")}</div><pre class="code">${esc(JSON.stringify(result.tracks || [], null, 2))}</pre>`, footer: `<button class="btn" data-close-dialog>关闭</button>` });
   } catch (error) { toast(error.message, "bad"); }
+}
+
+function openOnvifDiscovery(ctx, taken = []) {
+  const takenPaths = new Set(taken);
+  const uniquePath = (host, token) => {
+    const safe = String(token || "profile").replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "profile";
+    const base = `/onvif/${String(host || "device").replace(/[^A-Za-z0-9_.-]+/g, "-")}/${safe}`;
+    let path = base;
+    let index = 2;
+    while (takenPaths.has(path)) path = `${base}-${index++}`;
+    takenPaths.add(path);
+    return path;
+  };
+  openDialog({
+    title: "ONVIF 设备发现",
+    body: `<div class="stack">
+      <div class="note">扫描局域网中的 ONVIF 设备（WS-Discovery，约 3 秒）。选择设备后输入账号密码获取 RTSP 地址。</div>
+      <div data-onvif-results><div class="skeleton" style="height:60px"></div></div>
+    </div>`,
+    footer: `<button class="btn" data-onvif-rescan>重新扫描</button><button class="btn" data-close-dialog>关闭</button>`,
+    onMount(root) {
+      const results = root.querySelector("[data-onvif-results]");
+      let scanning = false;
+      const scan = async () => {
+        if (scanning) return;
+        scanning = true;
+        results.innerHTML = `<div class="note">正在扫描局域网…</div>`;
+        try {
+          const payload = await apiV1("/onvif/discover", { method: "POST", body: { timeout_ms: 3000 } });
+          const devices = payload.devices || [];
+          if (!devices.length) {
+            results.innerHTML = `<div class="empty"><h3>没有发现设备</h3><div class="faint">确认设备与服务器在同一网段，且已启用 ONVIF。</div></div>`;
+            return;
+          }
+          results.innerHTML = `<div class="stack">${devices.map(deviceCard).join("")}</div>`;
+          bindDevices();
+        } catch (error) {
+          results.innerHTML = `<div class="error-banner" role="alert">${esc(error.message)}</div>`;
+        } finally {
+          scanning = false;
+        }
+      };
+      const deviceCard = (device, index) => `<div class="detail-item" data-onvif-device data-index="${index}" data-xaddr="${esc(device.xaddr || "")}">
+        <span>${esc(device.name || "ONVIF 设备")}</span>
+        <strong class="mono">${esc(device.xaddr || device.endpoint || "—")}</strong>
+        <small>${esc(device.types || "")}</small>
+        <div class="field-row" style="margin-top:8px">
+          <input class="input" data-onvif-user placeholder="用户名" autocomplete="username">
+          <input class="input" type="password" data-onvif-pass placeholder="密码" autocomplete="current-password">
+        </div>
+        <div class="actions" style="margin-top:8px"><button class="btn small" data-onvif-inspect>获取流地址</button></div>
+        <div data-onvif-profiles></div>
+      </div>`;
+      const bindDevices = () => {
+        root.querySelectorAll("[data-onvif-device]").forEach((card) => {
+          const button = card.querySelector("[data-onvif-inspect]");
+          button.onclick = async () => {
+            button.disabled = true;
+            button.classList.add("loading");
+            const profiles = card.querySelector("[data-onvif-profiles]");
+            profiles.innerHTML = `<div class="note">正在读取设备信息与流地址…</div>`;
+            try {
+              const details = await apiV1("/onvif/inspect", { method: "POST", body: {
+                xaddr: card.dataset.xaddr,
+                username: card.querySelector("[data-onvif-user]").value.trim() || null,
+                password: card.querySelector("[data-onvif-pass]").value || null,
+              } });
+              renderProfiles(card, details);
+            } catch (error) {
+              profiles.innerHTML = `<div class="error-banner" role="alert">${esc(error.message)}</div>`;
+            } finally {
+              button.disabled = false;
+              button.classList.remove("loading");
+            }
+          };
+        });
+      };
+      const renderProfiles = (card, details) => {
+        const info = details.device || {};
+        const summary = [info.manufacturer, info.model, info.firmware_version].filter(Boolean).join(" · ");
+        const profiles = details.profiles || [];
+        const container = card.querySelector("[data-onvif-profiles]");
+        container.innerHTML = `<div class="stack" style="margin-top:8px">
+          <div class="note">${esc(summary || "已连接设备")}${details.media_xaddr ? ` · ${esc(details.media_xaddr)}` : ""}</div>
+          ${profiles.length ? profiles.map((profile, index) => `<div class="detail-item">
+            <span>${esc(profile.name || profile.token)}</span>
+            <strong class="mono">${esc(profile.uri || profile.error || "无可用地址")}</strong>
+            ${profile.uri ? `<div class="actions" style="margin-top:6px"><button class="btn small" data-onvif-use="${index}">使用此流</button></div>` : ""}
+          </div>`).join("") : `<div class="note">设备未返回媒体配置。</div>`}
+        </div>`;
+        container.querySelectorAll("[data-onvif-use]").forEach((button) => {
+          button.onclick = () => {
+            const profile = profiles[Number(button.dataset.onvifUse)];
+            if (!profile?.uri) return;
+            const host = (() => {
+              try { return new URL(card.dataset.xaddr).hostname; } catch (_) { return "onvif"; }
+            })();
+            const username = card.querySelector("[data-onvif-user]").value.trim() || null;
+            const password = card.querySelector("[data-onvif-pass]").value || null;
+            closeDialog();
+            openProxyDrawer(null, () => ctx.reload(), { draft: {
+              path: uniquePath(host, profile.token),
+              mode: "on-demand",
+              upstreams: [{ url: profile.uri, transport: "tcp", username, password }],
+              outputs: { read: true, hls: true, flv: true, dash: false, webrtc: false, record: false, max_readers: 0 },
+            } });
+          };
+        });
+      };
+      root.querySelector("[data-onvif-rescan]").onclick = scan;
+      scan();
+    },
+  });
 }
 
 function openProxyDetail(item, ctx, taken = []) {
@@ -200,11 +326,14 @@ function openProxyDetail(item, ctx, taken = []) {
         </div>
         ${recording?.directory ? `<div class="note mono" style="margin-top:8px;overflow-wrap:anywhere">${esc(recording.directory)}</div>` : ""}
       </section>
+      <section class="drawer-section"><h3>定时</h3>
+        ${item.schedule ? `<div class="detail-grid"><div class="detail-item"><span>窗口</span><strong>${esc(scheduleSummary(item.schedule))}</strong></div><div class="detail-item"><span>执行</span><strong>按服务器本地时间</strong></div></div>` : `<div class="note">未启用定时拉流，保持配置中的按需/常连模式。</div>`}
+      </section>
       <section class="drawer-section"><h3>上游列表</h3>${upstreams.length ? upstreams.map((upstream, index) => `
         <div class="endpoint"><span class="endpoint-label">#${index + 1}</span><code>${esc(upstream.url || "—")}</code><span class="cell-sub">${esc(upstream.transport || "auto")}</span></div>`).join("") : `<div class="note">未配置上游。</div>`}
         ${upstreams.length ? `<div class="actions" style="margin-top:8px"><button class="btn small ghost" data-proxy-copy-all>复制上游列表</button></div>` : ""}</section>
       <div data-proxy-error>${item.last_error ? `<div class="error-banner">${esc(item.last_error)}</div>` : ""}</div>
-      <div class="actions"><button class="btn small" data-pd-edit>编辑</button><button class="btn small ghost" data-pd-clone>复制拉流</button><button class="btn small ghost" data-pd-restart>重启</button><button class="btn small ghost" data-pd-probe>探测上游</button><button class="btn small ghost" data-pd-live>查看直播</button><button class="btn small ghost" data-pd-vod>查看点播</button><button class="btn small danger" data-pd-delete>删除</button></div>
+      <div class="actions"><button class="btn small" data-pd-edit>编辑</button><button class="btn small ghost" data-pd-clone>复制拉流</button><button class="btn small ghost" data-pd-restart ${item.state === "scheduled" ? "disabled" : ""}>重启</button><button class="btn small ghost" data-pd-probe>探测上游</button><button class="btn small ghost" data-pd-live>查看直播</button><button class="btn small ghost" data-pd-vod>查看点播</button><button class="btn small danger" data-pd-delete>删除</button></div>
     </div>`,
     onClose() { if (timer) clearInterval(timer); },
     onMount(root) {

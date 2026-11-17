@@ -1,5 +1,6 @@
 //! Runtime proxy management routes.
 use super::*;
+use std::collections::HashSet;
 
 pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
     http.add_route(
@@ -30,6 +31,42 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
                     })
                     .unwrap_or(serde_json::Value::Null);
             }
+            let now = chrono::Local::now();
+            let known: HashSet<String> = proxies
+                .iter()
+                .filter_map(|entry| entry.get("path").and_then(serde_json::Value::as_str))
+                .map(str::to_owned)
+                .collect();
+            let section = state
+                .proxy_config
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            for mount in &section.mounts {
+                if known.contains(&mount.path) {
+                    continue;
+                }
+                let scheduled_off = mount
+                    .schedule
+                    .as_ref()
+                    .is_some_and(|schedule| !schedule.allows(now));
+                if !scheduled_off {
+                    continue;
+                }
+                proxies.push(serde_json::json!({
+                    "path": mount.path,
+                    "state": "scheduled",
+                    "subscribers": 0,
+                    "bytes": 0,
+                    "tracks": 0,
+                    "upstream": upstream_display(mount),
+                    "attempts": 0,
+                    "retry_in_ms": null,
+                    "last_error": null,
+                    "schedule": mount.schedule,
+                    "recording": null,
+                }));
+            }
             Ok(serde_json::json!({ "proxies": proxies }))
         }),
     )
@@ -52,6 +89,7 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
                         "mode": mount.mode,
                         "idle_grace_ms": mount.idle_grace.map(|value| value.as_millis() as u64),
                         "description_refresh_ms": mount.description_refresh.map(|value| value.as_millis() as u64),
+                        "schedule": mount.schedule,
                         "outputs": mount
                             .outputs
                             .or_else(|| crate::pull_policy::outputs(&state.paths, &mount.path)),
@@ -214,6 +252,23 @@ pub(super) async fn register(http: &HttpServer, state: Arc<ApiState>) {
     .await;
 }
 
+fn upstream_display(mount: &crate::config::ProxyMount) -> String {
+    let Some(upstream) = mount.upstreams.first() else {
+        return String::new();
+    };
+    let Ok(url) = url::Url::parse(&upstream.url) else {
+        return String::new();
+    };
+    match url.port() {
+        Some(port) => format!(
+            "{}://{}:{port}",
+            url.scheme(),
+            url.host_str().unwrap_or("?")
+        ),
+        None => format!("{}://{}", url.scheme(), url.host_str().unwrap_or("?")),
+    }
+}
+
 fn proxy_upsert(
     state: &ApiState,
     mount: crate::config::ProxyMount,
@@ -263,7 +318,7 @@ fn proxy_upsert(
     if mount.outputs.is_none() {
         mount.outputs = previous.as_ref().and_then(|mount| mount.outputs);
     }
-    let upstream = mount.upstream_config().map_err(|error| (400, error))?;
+    mount.upstream_config().map_err(|error| (400, error))?;
     if let Some(outputs) = mount.outputs {
         if outputs.record {
             if !state.config.recording.enabled {
@@ -307,35 +362,42 @@ fn proxy_upsert(
         }
         config.mounts.push(mount.clone());
     }
-    let options = rtflow::mount::MountOptions::builder()
-        .event_sink(state.proxy_event_sink.clone())
-        .startup_cache_config(upstream.startup_cache)
-        .cancel(state.proxy_cancel.child_token())
-        .build();
     state.proxies.remove(&path);
-    state
-        .proxies
-        .ensure(
-            std::sync::Arc::from(path.as_str()),
-            upstream,
-            options,
-            mount.idle_grace,
-            mount.mode.is_always(),
-            mount.description_refresh.or(Some(
-                state
-                    .proxy_config
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .description_refresh,
-            )),
+    let scheduled_off = mount
+        .schedule
+        .as_ref()
+        .is_some_and(|schedule| !schedule.allows(chrono::Local::now()));
+    let mut state_name = if scheduled_off {
+        "scheduled"
+    } else {
+        "disabled"
+    };
+    if !scheduled_off && mount.enabled {
+        let section = state
+            .proxy_config
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        crate::proxy_control::ensure_mount(
+            &section,
+            &state.paths,
+            &state.proxies,
+            &state.proxy_event_sink,
+            &state.proxy_cancel,
+            &mount,
         )
-        .map_err(|error| (500, error.to_string()))?;
+        .map_err(|error| (500, error))?;
+        state_name = "describing";
+    }
     audit(state, AuditEvent::new("proxy.upsert", "ok").path(&path));
+    if scheduled_off {
+        return Ok(serde_json::json!({"path": path, "state": "scheduled"}));
+    }
     let status = state
         .proxies
         .status(&path)
         .map(|status| proxy_status_value(&status))
-        .unwrap_or_else(|| serde_json::json!({"path": path, "state": "describing"}));
+        .unwrap_or_else(|| serde_json::json!({"path": path, "state": state_name}));
     Ok(status)
 }
 

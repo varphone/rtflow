@@ -69,6 +69,38 @@ pub(crate) fn save_overlay(state_dir: &Path, section: &ProxySection) {
     }
 }
 
+pub(crate) fn ensure_mount(
+    config: &ProxySection,
+    paths: &Arc<crate::paths::PathStore>,
+    proxies: &Arc<ProxyService>,
+    event_sink: &Arc<dyn rtflow::EventSink>,
+    cancel: &CancellationToken,
+    mount: &ProxyMount,
+) -> Result<(), String> {
+    if let Some(outputs) = mount.outputs {
+        crate::pull_policy::apply(paths, &mount.path, &outputs)?;
+    }
+    let upstream = mount.upstream_config_with(config.redirect_policy)?;
+    let startup_cache = upstream.startup_cache;
+    let options = rtflow::mount::MountOptions::builder()
+        .event_sink(event_sink.clone())
+        .startup_cache_config(startup_cache)
+        .cancel(cancel.child_token())
+        .build();
+    proxies
+        .ensure(
+            Arc::from(mount.path.as_str()),
+            upstream,
+            options,
+            mount.idle_grace,
+            mount.mode.is_always(),
+            mount
+                .description_refresh
+                .or(Some(config.description_refresh)),
+        )
+        .map_err(|error| error.to_string())
+}
+
 pub(crate) fn register_configured(
     config: &ProxySection,
     paths: &Arc<crate::paths::PathStore>,
@@ -79,41 +111,31 @@ pub(crate) fn register_configured(
     if !config.enabled {
         return;
     }
+    let now = chrono::Local::now();
     let mut active = proxies.statuses().len();
     for mount in &config.mounts {
         if !mount.enabled {
             continue;
         }
-        let path: Arc<str> = Arc::from(mount.path.as_str());
-        if let Some(outputs) = mount.outputs
-            && let Err(error) = crate::pull_policy::apply(paths, &mount.path, &outputs)
+        if let Some(schedule) = &mount.schedule
+            && !schedule.allows(now)
         {
-            tracing::warn!(path = %mount.path, %error, "pull output policy rejected");
-        }
-        let Ok(upstream) = mount.upstream_config_with(config.redirect_policy) else {
+            // Keep the managed output policy so the source is ready when its
+            // window opens; the scheduler registers it later.
+            if let Some(outputs) = mount.outputs
+                && let Err(error) = crate::pull_policy::apply(paths, &mount.path, &outputs)
+            {
+                tracing::warn!(path = %mount.path, %error, "pull output policy rejected");
+            }
+            tracing::info!(path = %mount.path, "pull source outside schedule; deferred");
             continue;
-        };
-        let startup_cache = upstream.startup_cache;
-        let options = rtflow::mount::MountOptions::builder()
-            .event_sink(event_sink.clone())
-            .startup_cache_config(startup_cache)
-            .cancel(cancel.child_token())
-            .build();
+        }
         if active >= config.max_proxies {
             tracing::warn!(path = %mount.path, max = config.max_proxies, "proxy limit reached");
             continue;
         }
         active += 1;
-        if let Err(error) = proxies.ensure(
-            path,
-            upstream,
-            options,
-            mount.idle_grace,
-            mount.mode.is_always(),
-            mount
-                .description_refresh
-                .or(Some(config.description_refresh)),
-        ) {
+        if let Err(error) = ensure_mount(config, paths, proxies, &event_sink, cancel, mount) {
             tracing::warn!(path = %mount.path, %error, "proxy config rejected");
         }
     }

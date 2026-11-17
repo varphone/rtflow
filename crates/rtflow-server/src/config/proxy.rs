@@ -1,5 +1,6 @@
 //! RTSP pull-proxy configuration.
 use super::ConfigError;
+use chrono::{DateTime, Datelike, Local, NaiveTime};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -57,6 +58,10 @@ pub struct ProxyMount {
     /// behaviour where path policy is configured separately.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outputs: Option<ProxyOutputs>,
+    /// Optional weekly pull window (server-local time). `None` pulls whenever
+    /// the source is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<ProxySchedule>,
     pub upstreams: Vec<ProxyUpstream>,
 }
 
@@ -98,6 +103,95 @@ impl ProxyOutputs {
     /// Any protocol view enabled for the pulled stream.
     pub fn live_enabled(self) -> bool {
         self.hls || self.dash || self.flv || self.webrtc
+    }
+}
+
+/// Weekly pull window in the server's local time zone.
+///
+/// `start == end` is rejected. A window whose end is before its start spans
+/// midnight (for example Mon 22:00–06:00 runs into Tuesday).
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct ProxySchedule {
+    pub days: Vec<ScheduleDay>,
+    /// `HH:MM` in 24-hour local time.
+    pub start: String,
+    /// `HH:MM` in 24-hour local time; exclusive.
+    pub end: String,
+}
+
+#[derive(Clone, Copy, Debug, Hash, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ScheduleDay {
+    Mon,
+    Tue,
+    Wed,
+    Thu,
+    Fri,
+    Sat,
+    Sun,
+}
+
+impl ScheduleDay {
+    fn from_weekday(day: chrono::Weekday) -> Self {
+        match day {
+            chrono::Weekday::Mon => Self::Mon,
+            chrono::Weekday::Tue => Self::Tue,
+            chrono::Weekday::Wed => Self::Wed,
+            chrono::Weekday::Thu => Self::Thu,
+            chrono::Weekday::Fri => Self::Fri,
+            chrono::Weekday::Sat => Self::Sat,
+            chrono::Weekday::Sun => Self::Sun,
+        }
+    }
+}
+
+fn parse_clock(value: &str) -> Result<NaiveTime, String> {
+    let (hour, minute) = value
+        .split_once(':')
+        .ok_or_else(|| "expected HH:MM".to_string())?;
+    if hour.is_empty() || hour.len() > 2 || minute.len() != 2 {
+        return Err("expected HH:MM".into());
+    }
+    let hour: u32 = hour.parse().map_err(|_| "invalid hour".to_string())?;
+    let minute: u32 = minute.parse().map_err(|_| "invalid minute".to_string())?;
+    NaiveTime::from_hms_opt(hour, minute, 0).ok_or_else(|| "invalid time".into())
+}
+
+impl ProxySchedule {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.days.is_empty() {
+            return Err("schedule.days is empty".into());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for day in &self.days {
+            if !seen.insert(*day) {
+                return Err(format!("schedule.days contains duplicate {day:?}"));
+            }
+        }
+        let start = parse_clock(&self.start).map_err(|error| format!("schedule.start: {error}"))?;
+        let end = parse_clock(&self.end).map_err(|error| format!("schedule.end: {error}"))?;
+        if start == end {
+            return Err("schedule.start equals schedule.end".into());
+        }
+        Ok(())
+    }
+
+    /// Whether `now` falls inside the weekly window (start inclusive, end
+    /// exclusive). Overnight windows continue into the following day.
+    pub fn allows(&self, now: DateTime<Local>) -> bool {
+        let (Ok(start), Ok(end)) = (parse_clock(&self.start), parse_clock(&self.end)) else {
+            return false;
+        };
+        let today = ScheduleDay::from_weekday(now.weekday());
+        let yesterday = ScheduleDay::from_weekday(now.weekday().pred());
+        let time = now.time();
+        if start < end {
+            self.days.contains(&today) && time >= start && time < end
+        } else {
+            (self.days.contains(&today) && time >= start)
+                || (self.days.contains(&yesterday) && time < end)
+        }
     }
 }
 
@@ -143,6 +237,7 @@ impl Default for ProxyMount {
             idle_grace: None,
             description_refresh: None,
             outputs: None,
+            schedule: None,
             upstreams: Vec::new(),
         }
     }
@@ -225,6 +320,11 @@ impl ProxyMount {
                 && !outputs.record
         }) {
             return Err("proxy outputs enable neither live view nor recording".into());
+        }
+        if let Some(schedule) = &self.schedule {
+            schedule
+                .validate()
+                .map_err(|error| format!("proxy schedule: {error}"))?;
         }
         Ok(())
     }

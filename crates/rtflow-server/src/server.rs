@@ -747,6 +747,14 @@ impl ServerApp {
             event_sink.clone(),
             &cancel,
         );
+        crate::pull_schedule::spawn(
+            proxy_config.clone(),
+            paths.clone(),
+            proxies.clone(),
+            event_sink.clone(),
+            cancel.clone(),
+            &mut tasks,
+        );
 
         crate::proxy_control::spawn_metrics(
             proxies.clone(),

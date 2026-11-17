@@ -49,7 +49,7 @@ export function statusBadge(stream) {
 }
 
 export function stateBadge(state) {
-  const cls = state === "streaming" ? "ok" : state === "backoff" ? "warn" : state === "idle" ? "" : "codec";
+  const cls = state === "streaming" ? "ok" : state === "backoff" ? "warn" : state === "scheduled" ? "" : state === "idle" ? "" : "codec";
   return `<span class="badge ${cls}">${esc(state || "—")}</span>`;
 }
 

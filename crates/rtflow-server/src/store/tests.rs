@@ -4,16 +4,16 @@ use super::*;
 fn migrations_and_store_info() {
     let store = Store::open_in_memory().unwrap();
     let info = store.info().unwrap();
-    assert_eq!(info.schema_version, 2);
-    let outputs: i64 = store
+    assert_eq!(info.schema_version, 3);
+    let columns: i64 = store
         .connection()
         .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('proxy_mounts') WHERE name='outputs'",
+            "SELECT COUNT(*) FROM pragma_table_info('proxy_mounts') WHERE name IN ('outputs','schedule')",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(outputs, 1);
+    assert_eq!(columns, 2);
     let connection = store.connection();
     let table: String = connection
         .query_row(
@@ -52,6 +52,14 @@ fn proxy_outputs_roundtrip() {
             record: true,
             max_readers: 4,
             ..ProxyOutputs::default()
+        }),
+        schedule: Some(crate::config::ProxySchedule {
+            days: vec![
+                crate::config::ScheduleDay::Mon,
+                crate::config::ScheduleDay::Fri,
+            ],
+            start: "08:00".into(),
+            end: "18:00".into(),
         }),
         upstreams: vec![ProxyUpstream {
             url: "rtsp://127.0.0.1/live".into(),
@@ -104,7 +112,7 @@ fn upgrades_v1_database_and_keeps_legacy_proxy() {
         connection.pragma_update(None, "user_version", 1).unwrap();
     }
     let store = Store::open(&crate::config::StorageSection::default(), state).unwrap();
-    assert_eq!(store.info().unwrap().schema_version, 2);
+    assert_eq!(store.info().unwrap().schema_version, 3);
     let mounts = super::proxies::load_all(&store).unwrap();
     assert_eq!(mounts.len(), 1);
     assert_eq!(mounts[0].path, "/legacy");

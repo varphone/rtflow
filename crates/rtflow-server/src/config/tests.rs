@@ -194,3 +194,42 @@ fn proxy_outputs_defaults_and_validation() {
     mount.outputs = None;
     assert!(mount.validate().is_ok());
 }
+
+#[test]
+fn proxy_schedule_windows_and_overnight() {
+    use chrono::{Local, TimeZone};
+
+    let mut schedule = ProxySchedule {
+        days: vec![ScheduleDay::Wed],
+        start: "08:00".into(),
+        end: "18:00".into(),
+    };
+    schedule.validate().unwrap();
+    let wed_10 = Local.with_ymd_and_hms(2026, 11, 18, 10, 30, 0).unwrap();
+    let wed_18 = Local.with_ymd_and_hms(2026, 11, 18, 18, 0, 0).unwrap();
+    let tue_10 = Local.with_ymd_and_hms(2026, 11, 17, 10, 30, 0).unwrap();
+    assert!(schedule.allows(wed_10));
+    assert!(!schedule.allows(wed_18), "end is exclusive");
+    assert!(!schedule.allows(tue_10));
+
+    schedule.start = "22:00".into();
+    schedule.end = "06:00".into();
+    schedule.validate().unwrap();
+    let wed_23 = Local.with_ymd_and_hms(2026, 11, 18, 23, 0, 0).unwrap();
+    let thu_03 = Local.with_ymd_and_hms(2026, 11, 19, 3, 0, 0).unwrap();
+    let thu_07 = Local.with_ymd_and_hms(2026, 11, 19, 7, 0, 0).unwrap();
+    let tue_23 = Local.with_ymd_and_hms(2026, 11, 17, 23, 0, 0).unwrap();
+    assert!(schedule.allows(wed_23));
+    assert!(schedule.allows(thu_03), "overnight continues into Thursday");
+    assert!(!schedule.allows(thu_07));
+    assert!(!schedule.allows(tue_23));
+
+    schedule.days.clear();
+    assert!(schedule.validate().is_err());
+    schedule.days.push(ScheduleDay::Wed);
+    schedule.end = "22:00".into();
+    assert!(
+        schedule.validate().is_err(),
+        "zero-length windows are rejected"
+    );
+}

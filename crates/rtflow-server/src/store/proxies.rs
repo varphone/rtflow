@@ -6,7 +6,7 @@ pub(crate) fn load_all(store: &Store) -> StoreResult<Vec<ProxyMount>> {
     let connection = store.connection();
     let mut statement = connection.prepare(
         "SELECT path, enabled, mode, idle_grace_ms, description_refresh_ms,
-                upstreams_enc, outputs, revision FROM proxy_mounts ORDER BY path",
+                upstreams_enc, outputs, schedule, revision FROM proxy_mounts ORDER BY path",
     )?;
     let rows = statement.query_map([], |row| row_to_mount(store, row))?;
     let mut mounts = Vec::new();
@@ -25,12 +25,18 @@ pub(crate) fn insert(store: &Store, mount: &ProxyMount) -> StoreResult<()> {
         .map(|value| serde_json::to_string(&value))
         .transpose()
         .map_err(|error| StoreError::Data(error.to_string()))?;
+    let schedule = mount
+        .schedule
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| StoreError::Data(error.to_string()))?;
     let now = crate::paths::unix_now() as i64;
     store.connection().execute(
         "INSERT INTO proxy_mounts (path, enabled, mode, idle_grace_ms,
                                    description_refresh_ms, upstreams_enc, outputs,
-                                   created_at, updated_at, revision)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8,1)",
+                                   schedule, created_at, updated_at, revision)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,1)",
         params![
             mount.path,
             mount.enabled as i64,
@@ -41,6 +47,7 @@ pub(crate) fn insert(store: &Store, mount: &ProxyMount) -> StoreResult<()> {
                 .map(|value| value.as_millis() as i64),
             sealed,
             outputs,
+            schedule,
             now,
         ],
     )?;
@@ -56,11 +63,18 @@ pub(crate) fn update(store: &Store, mount: &ProxyMount, expected: u64) -> StoreR
         .map(|value| serde_json::to_string(&value))
         .transpose()
         .map_err(|error| StoreError::Data(error.to_string()))?;
+    let schedule = mount
+        .schedule
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| StoreError::Data(error.to_string()))?;
     let changed = store.connection().execute(
         "UPDATE proxy_mounts SET enabled=?2, mode=?3, idle_grace_ms=?4,
                                 description_refresh_ms=?5, upstreams_enc=?6,
-                                outputs=?7, updated_at=?8, revision=revision+1
-         WHERE path=?1 AND revision=?9",
+                                outputs=?7, schedule=?8, updated_at=?9,
+                                revision=revision+1
+         WHERE path=?1 AND revision=?10",
         params![
             mount.path,
             mount.enabled as i64,
@@ -71,6 +85,7 @@ pub(crate) fn update(store: &Store, mount: &ProxyMount, expected: u64) -> StoreR
                 .map(|value| value.as_millis() as i64),
             sealed,
             outputs,
+            schedule,
             crate::paths::unix_now() as i64,
             expected as i64,
         ],
@@ -109,7 +124,7 @@ pub(crate) fn get(store: &Store, path: &str) -> StoreResult<Option<ProxyMount>> 
     Ok(connection
         .query_row(
             "SELECT path, enabled, mode, idle_grace_ms, description_refresh_ms,
-                    upstreams_enc, outputs, revision FROM proxy_mounts WHERE path=?1",
+                    upstreams_enc, outputs, schedule, revision FROM proxy_mounts WHERE path=?1",
             [path],
             |row| row_to_mount(store, row),
         )
@@ -127,6 +142,9 @@ fn row_to_mount(store: &Store, row: &rusqlite::Row<'_>) -> rusqlite::Result<Prox
     let outputs = row
         .get::<_, Option<String>>(6)?
         .and_then(|value| serde_json::from_str(&value).ok());
+    let schedule = row
+        .get::<_, Option<String>>(7)?
+        .and_then(|value| serde_json::from_str(&value).ok());
     Ok(ProxyMount {
         path,
         enabled: row.get::<_, i64>(1)? != 0,
@@ -142,6 +160,7 @@ fn row_to_mount(store: &Store, row: &rusqlite::Row<'_>) -> rusqlite::Result<Prox
             .get::<_, Option<i64>>(4)?
             .map(|value| std::time::Duration::from_millis(value as u64)),
         outputs,
+        schedule,
         upstreams,
     })
 }
