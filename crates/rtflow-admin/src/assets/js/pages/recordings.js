@@ -144,7 +144,7 @@ export async function render(params) {
           visible.map((item) => [item.path, item.active, isoTime(item.started_at), item.segments, item.bytes, item.dropped, item.last_error || "", item.directory || ""]));
         toast(`已导出 ${visible.length} 条录制任务`, "ok");
       };
-      const timer = setInterval(refresh, 2000);
+      const timer = setInterval(() => { if (!document.hidden) refresh(); }, 2000);
       return () => clearInterval(timer);
     },
   };

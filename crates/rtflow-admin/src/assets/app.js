@@ -424,6 +424,7 @@ window.addEventListener("keydown", (event) => {
   else if (event.key === "/") { event.preventDefault(); focusPageSearch(); }
 });
 window.addEventListener("hashchange", () => navigate());
-setInterval(() => { if (state.session) refreshCounts(); }, 10000);
+setInterval(() => { if (state.session && !document.hidden) refreshCounts(); }, 10000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && state.session) refreshCounts(); });
 window.addEventListener("rtflow:unauthorized", () => { state.session = null; renderLogin("登录已过期"); });
 boot();
