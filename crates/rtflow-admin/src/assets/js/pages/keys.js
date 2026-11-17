@@ -164,10 +164,14 @@ function openKeyDetail(item, ctx) {
         <div class="detail-item"><span>创建</span><strong>${esc(dateTime(item.created_at))}</strong></div>
         <div class="detail-item"><span>过期</span><strong>${esc(dateTime(item.expires_at))}</strong></div>
       </div>
-      <div class="actions"><button class="btn small ghost" data-key-copy>复制 Key ID</button><button class="btn small danger" data-key-revoke ${item.enabled ? "" : "disabled"}>吊销</button></div>
+      <div class="actions"><button class="btn small ghost" data-key-copy>复制 Key ID</button><button class="btn small ghost" data-key-renew>重新签发</button><button class="btn small danger" data-key-revoke ${item.enabled ? "" : "disabled"}>吊销</button></div>
     </div>`,
     onMount(root) {
       const close = () => root.querySelector("[data-close-drawer]")?.click();
+      root.querySelector("[data-key-renew]").onclick = () => {
+        close();
+        openKeyDrawer((result) => { secretDialog("推流密钥（只显示一次）", result.secret); ctx.reload(); }, item);
+      };
       root.querySelector("[data-key-copy]").onclick = async () => {
         try { await navigator.clipboard.writeText(item.kid); toast("Key ID 已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
