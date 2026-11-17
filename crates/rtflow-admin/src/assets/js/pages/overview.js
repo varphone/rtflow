@@ -63,6 +63,7 @@ export async function render() {
       <section class="panel traffic-panel">
         <div class="panel-head"><h2 data-trend-title>接收帧速率</h2><div class="seg" style="margin-left:8px"><button data-trend-metric="frames" class="active">帧率</button><button data-trend-metric="subscribers">订阅</button></div><span class="meta"><span data-trend-rate>—</span> · 近 2 分钟</span><span class="meta" data-trend-peak style="margin-left:auto"></span></div>
         <div class="traffic-chart"><svg viewBox="0 0 1000 90" preserveAspectRatio="none" aria-hidden="true"><path class="traffic-area" data-trend-area></path><path class="traffic-line" data-trend-line></path></svg><span class="traffic-empty" data-trend-empty>等待流量…</span></div>
+        <div class="traffic-axis"><span>2 分钟前</span><span>现在</span></div>
       </section>
       <div class="two-col">
         <section class="panel">
@@ -195,7 +196,7 @@ function activeHtml(active, system) {
         <td class="mono"><span style="color:var(--ok)">${num(stream.accepted_frames)}</span> / <span style="color:var(--bad)">${num(stream.dropped_frames)}</span></td></tr>`).join("")}
     </tbody></table></div>`;
   }
-  return `<div class="empty">${iconSvg("inbox")}<h3>暂无直播流</h3>
+  return `<div class="empty">${iconSvg("live")}<h3>暂无直播流</h3>
     <div class="faint">使用 RTMP / RTSP / SRT 推流后出现在这里；也可以先注册一条路径。</div>
     <div class="actions" style="justify-content:center;margin-top:14px"><a class="btn small" href="#/config/paths?new=1">新建路径</a>
       <button class="btn small ghost" data-copy-push>复制推流地址</button></div>

@@ -19,7 +19,7 @@ export async function render(params, ctx) {
     actions: `<button class="btn small primary" data-action="create">${tab === "push" ? "新增推流" : "新增拉流"}</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="tabs"><button class="tab ${tab === "pull" ? "active" : ""}" data-srt-tab="pull">拉流</button><button class="tab ${tab === "push" ? "active" : ""}" data-srt-tab="push">推流</button></div>
       <div class="toolbar"><div class="search"><input class="input" data-srt-search value="${esc(query)}" placeholder="搜索名称、ID 或远端地址"></div><span class="meta" data-srt-count>${initial.length} 条 · ${initial.filter((item) => item.connected).length} 已连接</span></div>
-      <section class="panel" data-srt-panel>${initial.length ? table(initial) : empty(`暂无 SRT ${tab === "push" ? "推流" : "拉流"}`, "创建第一个端点开始推流或拉流", "inbox", `<a class="btn small" href="#/config/srt?new=1&tab=${tab}">新增${tab === "push" ? "推流" : "拉流"}</a>`)}</section>`,
+      <section class="panel" data-srt-panel>${initial.length ? table(initial) : empty(`暂无 SRT ${tab === "push" ? "推流" : "拉流"}`, "创建第一个端点开始推流或拉流", "srt", `<a class="btn small" href="#/config/srt?new=1&tab=${tab}">新增${tab === "push" ? "推流" : "拉流"}</a>`)}</section>`,
     mount(root, ctx2) {
       const panel = root.querySelector("[data-srt-panel]");
       const count = root.querySelector("[data-srt-count]");
@@ -29,7 +29,7 @@ export async function render(params, ctx) {
       const paint = () => {
         visible = view(all);
         count.textContent = `${visible.length} 条 · ${visible.filter((item) => item.connected).length} 已连接`;
-        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的 SRT 端点", "调整搜索条件或切换推拉流", "inbox", `<a class="btn small" href="#/config/srt?new=1&tab=${tab}">新增${tab === "push" ? "推流" : "拉流"}</a>`);
+        panel.innerHTML = visible.length ? table(visible) : empty("没有匹配的 SRT 端点", "调整搜索条件或切换推拉流", "srt", `<a class="btn small" href="#/config/srt?new=1&tab=${tab}">新增${tab === "push" ? "推流" : "拉流"}</a>`);
         root.querySelectorAll("[data-srt-tab]").forEach((button) => button.classList.toggle("active", button.dataset.srtTab === tab));
         create.textContent = tab === "push" ? "新增推流" : "新增拉流";
       };

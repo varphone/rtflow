@@ -313,6 +313,7 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 .traffic-area { fill: color-mix(in srgb, var(--accent) 18%, transparent); stroke: none; }
 .traffic-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); font-size: 11.5px; }
 .traffic-empty[hidden] { display: none; }
+.traffic-axis { display: flex; justify-content: space-between; color: var(--faint); font-size: 10px; margin: 2px 14px 10px; }
 .audit-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--muted); }
 .audit-dot.auth { background: var(--accent-strong); }
 .audit-dot.path { background: var(--ok); }

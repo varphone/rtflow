@@ -22,7 +22,7 @@ export async function render(params, ctx) {
     subtitle: "路径策略、发布/观看开关与录制。",
     actions: `<button class="btn small primary" data-action="create">新建路径</button><button class="btn small" data-action="refresh">刷新</button>`,
     html: `<div class="toolbar"><div class="search"><input class="input" data-path-search value="${esc(query)}" placeholder="搜索路径"></div><span class="meta" data-path-count>${initial.length} 条 · ${initial.filter((item) => item.enabled).length} 启用</span></div>
-      <section class="panel" data-path-panel>${initial.length ? table(initial) : empty("暂无路径记录", "新建路径或通过配置提供 glob 规则", "inbox", `<a class="btn small" href="#/config/paths?new=1">新建路径</a>`)}</section>`,
+      <section class="panel" data-path-panel>${initial.length ? table(initial) : empty("暂无路径记录", "新建路径或通过配置提供 glob 规则", "paths", `<a class="btn small" href="#/config/paths?new=1">新建路径</a>`)}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-path-panel]");
       const count = root.querySelector("[data-path-count]");
