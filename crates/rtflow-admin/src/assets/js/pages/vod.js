@@ -22,7 +22,7 @@ export async function render(params) {
     subtitle: "录制目录与文件 VOD 资源。",
     actions: `<button class="btn small ghost" data-vod-export>导出</button><button class="btn small" data-vod-refresh>刷新</button>`,
     html: `<div class="toolbar"><label class="checkline"><input type="checkbox" data-vod-select-all> 全选</label>
-      <div class="search">${iconSvg("search")}<input class="input" data-vod-search value="${esc(query)}" placeholder="搜索点播名称或 ID"></div>
+      <div class="search">${iconSvg("search")}<input class="input" type="search" data-vod-search value="${esc(query)}" placeholder="搜索点播名称或 ID"></div>
       <select class="input" data-vod-sort aria-label="点播排序" style="width:auto"><option value="recent" ${sort === "recent" ? "selected" : ""}>最新录制</option><option value="duration" ${sort === "duration" ? "selected" : ""}>按时长</option><option value="cached" ${sort === "cached" ? "selected" : ""}>已缓存优先</option></select>
       <div class="seg"><button data-vod-cache-filter="all" class="${cacheFilter === "all" ? "active" : ""}">全部</button><button data-vod-cache-filter="cached" class="${cacheFilter === "cached" ? "active" : ""}">已缓存</button><button data-vod-cache-filter="uncached" class="${cacheFilter === "uncached" ? "active" : ""}">未缓存</button></div>
       <span class="meta" data-vod-count>${initial.length} 条 · ${initial.filter((vod) => vod.cached).length} 已缓存</span>

@@ -1,5 +1,5 @@
 import { api, apiV1 } from "../api.js";
-import { dateTime, empty, esc, exportCsv, isoTime } from "../format.js";
+import { dateTime, empty, esc, exportCsv, iconSvg, isoTime } from "../format.js";
 import { confirmDialog, openDrawer, syncSortAria, toast } from "../ui.js";
 import { openPathDrawer } from "../forms/path.js";
 
@@ -24,7 +24,7 @@ export async function render(params, ctx) {
     title: "路径",
     subtitle: "路径策略、发布/观看开关与录制。",
     actions: `<button class="btn small ghost" data-action="export">导出</button><button class="btn small primary" data-action="create">新建路径</button><button class="btn small" data-action="refresh">刷新</button>`,
-    html: `<div class="toolbar"><div class="search"><input class="input" data-path-search value="${esc(query)}" placeholder="搜索路径"></div><div class="seg"><button data-path-state="all" class="${stateFilter === "all" ? "active" : ""}">全部</button><button data-path-state="enabled" class="${stateFilter === "enabled" ? "active" : ""}">启用</button><button data-path-state="disabled" class="${stateFilter === "disabled" ? "active" : ""}">停用</button></div><span class="meta" data-path-count>${initial.length} 条 · ${initial.filter((item) => item.enabled).length} 启用</span></div>
+    html: `<div class="toolbar"><div class="search">${iconSvg("search")}<input class="input" type="search" data-path-search value="${esc(query)}" placeholder="搜索路径"></div><div class="seg"><button data-path-state="all" class="${stateFilter === "all" ? "active" : ""}">全部</button><button data-path-state="enabled" class="${stateFilter === "enabled" ? "active" : ""}">启用</button><button data-path-state="disabled" class="${stateFilter === "disabled" ? "active" : ""}">停用</button></div><span class="meta" data-path-count>${initial.length} 条 · ${initial.filter((item) => item.enabled).length} 启用</span></div>
       <section class="panel" data-path-panel>${initial.length ? table(initial) : empty("暂无路径记录", "新建路径或通过配置提供 glob 规则", "paths", `<a class="btn small" href="#/config/paths?new=1">新建路径</a>`)}</section>`,
     mount(root) {
       const panel = root.querySelector("[data-path-panel]");
