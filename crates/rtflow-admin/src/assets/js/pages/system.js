@@ -22,7 +22,7 @@ export async function render() {
             <dt>RTSP 基地址</dt><dd class="mono base-value"><span title="${esc(system.rtsp_base || "")}">${esc(system.rtsp_base || "—")}</span>${system.rtsp_base ? `<button class="copy-inline" data-copy-base="${esc(system.rtsp_base)}" aria-label="复制 RTSP 基地址" title="复制">⧉</button>` : ""}</dd>
             <dt>RTMP 基地址</dt><dd class="mono base-value"><span title="${esc(system.rtmp_base || "")}">${esc(system.rtmp_base || "—")}</span>${system.rtmp_base ? `<button class="copy-inline" data-copy-base="${esc(system.rtmp_base)}" aria-label="复制 RTMP 基地址" title="复制">⧉</button>` : ""}</dd></dl></div></section>
           <section class="panel"><div class="panel-head"><h2>存储</h2></div><div class="panel-body"><dl class="kv">
-            <dt>Schema</dt><dd class="mono">v${Number(storage.schema_version || 0)}</dd><dt>数据库大小</dt><dd class="mono">${bytes(storage.bytes)}</dd>
+            <dt>Schema</dt><dd class="mono">v${Number(storage.schema_version || 0)}</dd><dt>数据库大小</dt><dd class="mono" data-storage-bytes>${bytes(storage.bytes)}</dd>
             <dt>备份</dt><dd class="mono">rtflow-server --db-backup FILE</dd></dl>
             <div class="actions" style="margin-top:10px"><button class="btn small ghost" data-copy-backup>复制备份命令</button></div></div></section>
           <section class="panel"><div class="panel-head"><h2>构建特性</h2></div><div class="panel-body"><div class="feature-list">${features || '<span class="faint">无</span>'}</div></div></section>
@@ -42,6 +42,7 @@ export async function render() {
       const configText = config.toml || "";
       const uptimeNode = root.querySelector("[data-system-uptime]");
       const mountsNode = root.querySelector("[data-system-mounts]");
+      const storageNode = root.querySelector("[data-storage-bytes]");
       let startedAt = Date.now();
       let baseUptime = Number(system.uptime_seconds || 0);
       const tick = () => {
@@ -52,13 +53,14 @@ export async function render() {
         tick();
         if (document.hidden) return;
         try {
-          const latest = await api("/system");
+          const [latest, latestStorage] = await Promise.all([api("/system"), apiV1("/storage")]);
           if (mountsNode) mountsNode.textContent = String(Number(latest.mounts || 0));
+          if (storageNode) storageNode.textContent = bytes(latestStorage.bytes);
           if (latest.uptime_seconds !== undefined) {
             baseUptime = Number(latest.uptime_seconds || 0);
             startedAt = Date.now();
           }
-        } catch (_) { /* keep local uptime */ }
+        } catch (_) { /* keep last values */ }
       }, 15000);
       root.querySelector("[data-copy-config]").onclick = async () => {
         try { await navigator.clipboard.writeText(configText); toast("配置已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
