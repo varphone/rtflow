@@ -102,7 +102,15 @@ pub fn create_webrtc_handlers(
         config.max_sessions_per_mount,
         config.session_max_lifetime,
     ) {
-        Ok(s) => Arc::new(s),
+        Ok(sessions) => {
+            #[cfg(feature = "metrics")]
+            let sessions = if let Some(metrics) = config.metrics.clone() {
+                sessions.with_metrics(metrics)
+            } else {
+                sessions
+            };
+            Arc::new(sessions)
+        }
         Err(e) => {
             tracing::error!("Failed to create WebRTC session registry: {e}");
             // Return dummy handlers that return 500

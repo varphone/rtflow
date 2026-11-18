@@ -91,6 +91,15 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
   本地时钟相减，取 120 帧分位。该结果包含源生成/x264/RTMP/服务端/WebRTC/浏览器，
   不含 HI3516 硬件 VENC 与真实网络。
 
+## 指标
+
+`/metrics` 暴露：
+
+- `rtflow_webrtc_sessions_total`
+- `rtflow_webrtc_sessions_active`
+
+会话创建/回收时更新，可用于观察 WebRTC 泄漏和容量。
+
 ## 低内存/嵌入式
 
 - 默认 `embedded-gateway` 不包含 WebRTC；启用后新增 `webrtc`/DTLS/SRTP 依赖；

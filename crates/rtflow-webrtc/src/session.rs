@@ -168,6 +168,8 @@ pub struct SessionRegistry {
     max_sessions: usize,
     max_sessions_per_mount: usize,
     max_lifetime: Duration,
+    #[cfg(feature = "metrics")]
+    metrics: Option<Arc<rtflow_core::metrics::MetricsRegistry>>,
 }
 
 impl SessionRegistry {
@@ -189,7 +191,16 @@ impl SessionRegistry {
             max_sessions,
             max_sessions_per_mount,
             max_lifetime,
+            #[cfg(feature = "metrics")]
+            metrics: None,
         })
+    }
+
+    /// Attach a metrics registry for session counters.
+    #[cfg(feature = "metrics")]
+    pub fn with_metrics(mut self, metrics: Arc<rtflow_core::metrics::MetricsRegistry>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     /// Create a new session.
@@ -228,6 +239,16 @@ impl SessionRegistry {
             .await
             .insert(id.clone(), session.clone());
 
+        #[cfg(feature = "metrics")]
+        if let Some(metrics) = &self.metrics {
+            use std::sync::atomic::Ordering;
+            metrics
+                .webrtc_sessions_total
+                .fetch_add(1, Ordering::Relaxed);
+            metrics
+                .webrtc_sessions_active
+                .fetch_add(1, Ordering::Relaxed);
+        }
         info!("WebRTC session created: {id} ({session_type:?})");
         Ok(session)
     }
@@ -243,6 +264,15 @@ impl SessionRegistry {
         if let Some(s) = &session {
             let mut s = s.write().await;
             let _ = s.close().await;
+        }
+        #[cfg(feature = "metrics")]
+        if session.is_some()
+            && let Some(metrics) = &self.metrics
+        {
+            use std::sync::atomic::Ordering;
+            metrics
+                .webrtc_sessions_active
+                .fetch_sub(1, Ordering::Relaxed);
         }
         session
     }

@@ -635,6 +635,7 @@ impl ServerApp {
             if let Some(lifetime) = config.webrtc.session_max_lifetime {
                 webrtc_config.session_max_lifetime = lifetime;
             }
+            webrtc_config.metrics = Some(metrics.clone());
             let (whip, whep) = create_webrtc_handlers(webrtc_config, mounts.clone());
             http.add_route(
                 Method::Post,
