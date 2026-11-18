@@ -18,7 +18,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-const VOD_CACHE_VERSION: u32 = 4;
+const VOD_CACHE_VERSION: u32 = 5;
 
 #[derive(Clone)]
 pub struct DashVodEntry {
@@ -219,88 +219,133 @@ fn generate(
         segment_ms = config.segment_duration.as_millis() as u64,
         "DASH VOD generation started"
     );
-    let video_description = crate::only_kind(&description, MediaKind::Video);
-    let audio_description = crate::only_kind(&description, MediaKind::Audio);
-    let track_kinds: HashMap<u8, MediaKind> = description
+    let video_tracks: Vec<rtflow_media::TrackDescription> = description
         .tracks
         .iter()
-        .map(|track| (track.id, track.kind))
+        .filter(|track| track.kind == MediaKind::Video)
+        .cloned()
+        .collect();
+    let audio_track = description
+        .tracks
+        .iter()
+        .find(|track| track.kind == MediaKind::Audio)
+        .cloned();
+    let video_descriptions: Vec<rtflow_media::MediaDescription> = video_tracks
+        .iter()
+        .map(|track| {
+            let mut filtered = description.clone();
+            filtered.tracks = vec![track.clone()];
+            filtered
+        })
+        .collect();
+    let audio_description = audio_track.as_ref().map(|track| {
+        let mut filtered = description.clone();
+        filtered.tracks = vec![track.clone()];
+        filtered
+    });
+    let video_index: HashMap<u8, usize> = video_tracks
+        .iter()
+        .enumerate()
+        .map(|(index, track)| (track.id, index))
         .collect();
 
     let segmenter_config = SegmenterConfig {
         segment_duration: config.segment_duration,
         lookback_count: 2,
     };
-    let audio_segment_duration = if video_description.tracks.is_empty() {
+    let audio_segment_duration = if video_tracks.is_empty() {
         config.segment_duration / 2
     } else {
         config.segment_duration.saturating_mul(2)
     };
-    let mut video = Segmenter::new(segmenter_config, &video_description);
-    let mut audio = Segmenter::new(
-        SegmenterConfig {
-            segment_duration: audio_segment_duration,
-            lookback_count: 2,
-        },
-        &audio_description,
-    );
-    let mut video_rx = video.subscribe();
-    let mut audio_rx = audio.subscribe();
-    let mut video_segments: Vec<Segment> = Vec::new();
+    let mut video_segmenters: Vec<Segmenter> = video_descriptions
+        .iter()
+        .map(|description| Segmenter::new(segmenter_config.clone(), description))
+        .collect();
+    let mut video_receivers: Vec<_> = video_segmenters
+        .iter()
+        .map(|segmenter| segmenter.subscribe())
+        .collect();
+    let mut video_segments: Vec<Vec<Segment>> = vec![Vec::new(); video_segmenters.len()];
+    let mut audio = audio_description.map(|description| {
+        Segmenter::new(
+            SegmenterConfig {
+                segment_duration: audio_segment_duration,
+                lookback_count: 2,
+            },
+            &description,
+        )
+    });
+    let mut audio_receiver = audio.as_ref().map(|segmenter| segmenter.subscribe());
+    let audio_track_id = audio_track.as_ref().map(|track| track.id);
     let mut audio_segments: Vec<Segment> = Vec::new();
     let mut demuxer = source.open()?;
     while let Some(sample) = demuxer.next_sample()? {
-        match track_kinds.get(&sample.unit.track_id).copied() {
-            Some(MediaKind::Video) => video.push(sample.unit),
-            Some(MediaKind::Audio) => audio.push(sample.unit),
-            None => {}
+        if let Some(index) = video_index.get(&sample.unit.track_id).copied() {
+            video_segmenters[index].push(sample.unit);
+        } else if audio_track_id == Some(sample.unit.track_id)
+            && let Some(segmenter) = &mut audio
+        {
+            segmenter.push(sample.unit);
         }
-        while let Ok(segment) = video_rx.try_recv() {
-            video_segments.push(segment);
-            audio.cut_current();
+        for (index, receiver) in video_receivers.iter_mut().enumerate() {
+            while let Ok(segment) = receiver.try_recv() {
+                video_segments[index].push(segment);
+                if let Some(segmenter) = &mut audio {
+                    segmenter.cut_current();
+                }
+            }
         }
-        while let Ok(segment) = audio_rx.try_recv() {
+        if let Some(receiver) = audio_receiver.as_mut() {
+            while let Ok(segment) = receiver.try_recv() {
+                audio_segments.push(segment);
+            }
+        }
+    }
+    for segmenter in &mut video_segmenters {
+        segmenter.flush();
+    }
+    if let Some(segmenter) = &mut audio {
+        segmenter.flush();
+    }
+    for (index, receiver) in video_receivers.iter_mut().enumerate() {
+        while let Ok(segment) = receiver.try_recv() {
+            video_segments[index].push(segment);
+        }
+    }
+    if let Some(receiver) = audio_receiver.as_mut() {
+        while let Ok(segment) = receiver.try_recv() {
             audio_segments.push(segment);
         }
     }
-    video.flush();
-    audio.flush();
-    while let Ok(segment) = video_rx.try_recv() {
-        video_segments.push(segment);
-    }
-    while let Ok(segment) = audio_rx.try_recv() {
-        audio_segments.push(segment);
-    }
     tracing::info!(
         title,
-        video_segments = video_segments.len(),
+        video_segments = video_segments.iter().map(Vec::len).sum::<usize>(),
         audio_segments = audio_segments.len(),
         "DASH VOD generation finished"
     );
-    if video_segments.is_empty() && audio_segments.is_empty() {
+    if video_segments.iter().all(Vec::is_empty) && audio_segments.is_empty() {
         return Err(rtflow_core::error::Error::Media(format!(
             "DASH VOD {title} produced no segments"
         )));
     }
-    let video_id = video_description
-        .tracks
-        .first()
-        .map(|track| track.id)
-        .unwrap_or(0);
-    if let Some(first) = video_segments.first() {
+    for (track, segments) in video_tracks.iter().zip(&video_segments) {
+        let Some(first) = segments.first() else {
+            continue;
+        };
         std::fs::write(
-            directory.join(format!("video-{video_id}-init.mp4")),
+            directory.join(format!("video-{}-init.mp4", track.id)),
             &first.init,
         )?;
+        for segment in segments {
+            std::fs::write(
+                directory.join(format!("video-{}-{}.m4s", track.id, segment.sequence)),
+                &segment.data,
+            )?;
+        }
     }
     if let Some(first) = audio_segments.first() {
         std::fs::write(directory.join("audio-init.mp4"), &first.init)?;
-    }
-    for segment in &video_segments {
-        std::fs::write(
-            directory.join(format!("video-{video_id}-{}.m4s", segment.sequence)),
-            &segment.data,
-        )?;
     }
     for segment in &audio_segments {
         std::fs::write(
@@ -311,30 +356,35 @@ fn generate(
     let duration = duration.unwrap_or_else(|| {
         video_segments
             .iter()
+            .flat_map(|segments| segments.iter())
             .chain(&audio_segments)
             .map(|segment| segment.timestamp.saturating_add(segment.duration))
             .max()
             .unwrap_or_default()
     });
-    let codec = video_segments.first().and_then(|segment| {
-        extract_h264_codec_string(&segment.init)
-            .or_else(|| extract_h265_codec_string(&segment.init))
-    });
-    let dimensions = video_segments
-        .first()
-        .and_then(|segment| extract_video_dimensions(&segment.init));
-    let video_track = video_description
-        .tracks
-        .first()
-        .map(|track| mpd::MpdVideoTrack {
-            id: track.id,
-            track,
-            segments: &video_segments,
-            codec,
-            dimensions,
-        });
+    let video_reps: Vec<mpd::MpdVideoTrack<'_>> = video_tracks
+        .iter()
+        .zip(&video_segments)
+        .filter(|(_, segments)| !segments.is_empty())
+        .map(|(track, segments)| {
+            let codec = segments.first().and_then(|segment| {
+                extract_h264_codec_string(&segment.init)
+                    .or_else(|| extract_h265_codec_string(&segment.init))
+            });
+            let dimensions = segments
+                .first()
+                .and_then(|segment| extract_video_dimensions(&segment.init));
+            mpd::MpdVideoTrack {
+                id: track.id,
+                track,
+                segments,
+                codec,
+                dimensions,
+            }
+        })
+        .collect();
     let manifest = mpd::generate_static_mpd(
-        video_track.as_slice(),
+        &video_reps,
         &audio_segments,
         &description,
         &MpdConfig::default(),

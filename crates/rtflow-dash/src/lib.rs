@@ -497,15 +497,6 @@ fn parse_segment_name(file: &str) -> (handler::DashTrackSelector, u64) {
     (handler::DashTrackSelector::Video(None), u64::MAX)
 }
 
-pub(crate) fn only_kind(
-    description: &MediaDescription,
-    kind: rtflow_media::MediaKind,
-) -> MediaDescription {
-    let mut filtered = description.clone();
-    filtered.tracks.retain(|track| track.kind == kind);
-    filtered
-}
-
 fn apply_offset(state: &DashState, segment: &mut Segment) {
     let offset = state.timeline_offset();
     if !offset.is_zero() {

@@ -102,7 +102,7 @@ dash.js 也可直接加载该 MPD；`crates/rtflow/examples/protocols/dash_serve
 
 - 直播多视频轨会生成多个视频 Representation，但需要源端本身提供多 rendition（当前不做转码
   ladder）；各 rendition 的分片边界独立，MPD 标 `segmentAlignment="false"`，只在源端 GOP
-  对齐时具备完整 ABR 切换体验。音频仍只选首条轨；VOD 暂只取首条视频轨。
+  对齐时具备完整 ABR 切换体验。音频仍只选首条轨。VOD 同样为每条视频轨生成 Representation。
 - DASH VOD 目前由服务端的录制目录生成；其他 `VodSource` 可复用同一 manager 接入。暂不支持多码率/多 Period VOD。
 - 不支持 LL-DASH/chunked CMAF、DRM/CENC、多 Period、广告插入。
 - H.264 codec 从 avcC 提取；H.265 从 hvcC 提取 `hvc1` codec（profile/tier/level/constraints），不支持的变体回退到静态字符串。
