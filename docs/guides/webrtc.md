@@ -65,7 +65,9 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 
 - 640×360：p50 ≈36 ms，p95 ≈52 ms；
 - 1280×720：p50 ≈77 ms，p95 ≈145 ms；
-- 1920×1080：软件 x264 单线程 p50 ≈73 ms / p95 ≈188 ms；4 线程一次 p95≈148 ms，复测又出现 228 ms，波动大，不能作为稳定达标；VAAPI p50≈126/p95≈178；
+- 1920×1080：软件 x264 单线程 p50≈73/p95≈188 ms；2 线程 p95≈238 ms；
+  3 线程 p95≈183 ms；4 线程一次 148 ms、复测 228 ms；VAAPI p50≈126/p95≈178 ms；
+  波动大，不能作为稳定 <150 ms 的证据；
 - 波动主要来自 Python 源生成/x264 队列和系统调度，不是 WebRTC 本身；
 - 服务端 ingest→packetize→SRTP 通常 **<10 ms**；
 - localhost 结果不含 HI3516 硬件 VENC 和真实网络，不能直接当作产品端到端承诺；
@@ -102,7 +104,8 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 
 ## 低内存/嵌入式
 
-- 默认 `embedded-gateway` 不包含 WebRTC；启用后新增 `webrtc`/DTLS/SRTP 依赖；
+- 默认 `embedded-gateway` 不包含 WebRTC（`cargo check --no-default-features
+  --features embedded-gateway` 通过）；启用后新增 `webrtc`/DTLS/SRTP 依赖；
 - 每个会话有独立 PeerConnection/ICE socket，建议按内存设置 `max_sessions`；
 - 可用上限：`max_sessions`、`max_sessions_per_mount`、`max_tracks`、`max_frame_bytes`、
   `max_ice_candidates`、`session_timeout`、`session_max_lifetime`；
