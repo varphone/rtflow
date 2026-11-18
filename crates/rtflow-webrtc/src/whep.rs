@@ -16,8 +16,8 @@ use rtc::rtp_transceiver::rtp_sender::{
     RTCRtpCodec, RTCRtpCodingParameters, RTCRtpEncodingParameters, RtpCodecKind,
 };
 use tokio::sync::RwLock;
-use webrtc::media_stream::track_local::TrackLocal;
 use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
+use webrtc::media_stream::track_local::{TrackLocal, TrackLocalEvent};
 use webrtc::media_stream::{MediaStreamId, MediaStreamTrack, MediaStreamTrackId};
 use webrtc::peer_connection::{
     PeerConnection, RTCIceServer, RTCIceTransportPolicy, RTCSessionDescription,
@@ -26,6 +26,9 @@ use webrtc::peer_connection::{
 use super::session::{SessionRegistry, SessionState, SessionType, WebrtcSession};
 use super::transport::{
     GATHER_TIMEOUT, PcHandler, PcState, build_peer_connection, sender_payload_type,
+};
+use rtc::rtcp::payload_feedbacks::{
+    full_intra_request::FullIntraRequest, picture_loss_indication::PictureLossIndication,
 };
 use rtflow_core::error::{Error, Result};
 use rtflow_http::ResponseWriter;
@@ -454,11 +457,13 @@ async fn spawn_play_task(
 
     let task_session = session.clone();
     let task = tokio::spawn(async move {
+        let mut publisher = None;
         let (mut rx, mut startup) = match mounts.get_handle(&mount_path) {
             Some(mount) => {
                 let (rx, startup) = mount.subscribe_with_startup();
-                if let Ok(publisher) = mount.publisher() {
-                    publisher.request_keyframe(track_id);
+                if let Ok(handle) = mount.publisher() {
+                    handle.request_keyframe(track_id);
+                    publisher = Some(handle);
                 }
                 (rx, startup)
             }
@@ -493,6 +498,20 @@ async fn spawn_play_task(
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => break,
+                event = track.poll() => {
+                    let Some(TrackLocalEvent::OnRtcpPacket(packets)) = event else {
+                        break;
+                    };
+                    let wants_keyframe = packets.iter().any(|packet| {
+                        packet.as_any().downcast_ref::<PictureLossIndication>().is_some()
+                            || packet.as_any().downcast_ref::<FullIntraRequest>().is_some()
+                    });
+                    if wants_keyframe {
+                        if let Some(publisher) = &publisher {
+                            publisher.request_keyframe(track_id);
+                        }
+                    }
+                }
                 frame = async {
                     if let Some(unit) = startup_iter.next() {
                         Ok(unit)
