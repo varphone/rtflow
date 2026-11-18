@@ -79,6 +79,7 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 - Chromium 143 通过 WHEP 播放 H.264（含音轨时也正常）；控制台“预览 WebRTC”可播放；
 - 带 `stun:stun.l.google.com:19302` 时 answer 同时包含 host 和 `typ srflx` candidate；
 - PATCH 完整 SDP offer 可完成 ICE restart/renegotiation；
+- WHEP 侧监听浏览器 PLI/FIR，并转发为源端 IDR 请求（丢包恢复）；
 - 本机基准方法：Python 实时生成 640×360 原始帧，帧顶栏编码毫秒值，x264
   `zerolatency` 编码后 RTMP 推流；Chromium WHEP 播放，canvas 解码每帧毫秒值并与
   本地时钟相减，取 120 帧分位。该结果包含源生成/x264/RTMP/服务端/WebRTC/浏览器，
@@ -106,4 +107,4 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 
 - 不做 SFU/多人、simulcast/SVC、DataChannel、转码；
 - 不做 TURN 服务器；
-- 完整 RTCP 反馈/关键帧 PLI 转发仍在完善中。
+- 完整 RTCP NACK 重传/拥塞控制、TURN relay 实测仍在完善中。
