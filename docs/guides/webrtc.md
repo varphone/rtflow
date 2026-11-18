@@ -105,7 +105,7 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 
 - `getUserMedia`（WHIP 发布）要求 HTTPS 或 `localhost`；
 - 浏览器必须支持源 codec；Chrome 对 H.264/Opus 最稳；
-- 播放端可设置 `playbackDelayHint` / `jitterBufferTarget` 降低缓冲，但浏览器可能忽略；
+- 播放端可设置 `RTCRtpReceiver.playoutDelayHint` / `jitterBufferTarget`（控制台播放器已设置 0）降低缓冲，但浏览器可能忽略；
 - 当前 WebRTC 仍标记为实验性，生产前按目标浏览器做互操作验证。
 
 ## 限制

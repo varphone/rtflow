@@ -146,6 +146,8 @@ export function playUrl(url, title, options = {}) {
     pc.addTransceiver("audio", { direction: "recvonly" });
     pc.ontrack = (event) => {
       stream.addTrack(event.track);
+      try { event.receiver.playoutDelayHint = 0; } catch (_) {}
+      try { event.receiver.jitterBufferTarget = 0; } catch (_) {}
       video.srcObject = stream;
     };
     pc.onconnectionstatechange = () => {
