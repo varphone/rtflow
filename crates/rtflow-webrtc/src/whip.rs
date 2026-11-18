@@ -172,8 +172,9 @@ pub async fn handle_whip_post(
             201,
             &[
                 ("Location", &format!("/whip/{}", session.read().await.id)),
-                ("Access-Control-Expose-Headers", "Location"),
+                ("Access-Control-Expose-Headers", "Location, ETag"),
                 ("Access-Control-Allow-Origin", "*"),
+                ("ETag", &format!("\"{}\"", session.read().await.id)),
                 ("Cache-Control", "no-store"),
                 ("Content-Type", "application/sdp"),
                 ("Content-Length", &answer_len),
@@ -354,6 +355,50 @@ async fn negotiated_codec(track: &Arc<dyn TrackRemote>) -> Option<(Codec, u32)> 
     mapped.map(|c| (c, codec.clock_rate.max(1)))
 }
 
+/// Handle WHIP PATCH: add trickled ICE candidates to a session.
+pub async fn handle_whip_patch(
+    req: &rtflow_http::HttpRequest,
+    writer: ResponseWriter<rtflow_http::ConnWriter>,
+    body: &[u8],
+    sessions: Arc<SessionRegistry>,
+) -> Result<ResponseWriter<rtflow_http::ConnWriter>> {
+    let Some(id) = session_id_from_path(&req.path) else {
+        return respond_plain(writer, 400, "missing session id").await;
+    };
+    if let Some(expected) = req.header("if-match")
+        && expected.trim_matches('"') != id
+    {
+        return respond_plain(writer, 412, "etag mismatch").await;
+    }
+    let Some(session) = sessions.get_session(&id).await else {
+        return respond_plain(writer, 404, "session not found").await;
+    };
+    let s = session.read().await;
+    let Some(pc) = s.pc.clone() else {
+        return respond_plain(writer, 409, "session has no peer connection").await;
+    };
+    drop(s);
+    let candidates = super::transport::candidates_from_sdp(&String::from_utf8_lossy(body));
+    for candidate in candidates {
+        if let Err(e) = pc.add_ice_candidate(candidate).await {
+            tracing::debug!("WHIP: PATCH add_ice_candidate failed: {e}");
+        }
+    }
+    session.write().await.touch();
+    let mut writer = writer;
+    writer
+        .write_headers(
+            204,
+            &[
+                ("Access-Control-Allow-Origin", "*"),
+                ("Content-Length", "0"),
+                ("Cache-Control", "no-store"),
+            ],
+        )
+        .await?;
+    Ok(writer)
+}
+
 /// Handle WHIP DELETE: stop the session.
 pub async fn handle_whip_delete(
     req: &rtflow_http::HttpRequest,
@@ -374,7 +419,25 @@ pub async fn handle_whip_options(
     writer: ResponseWriter<rtflow_http::ConnWriter>,
 ) -> Result<ResponseWriter<rtflow_http::ConnWriter>> {
     let mut writer = writer;
-    writer.write_body(204, "text/plain", b"").await?;
+    writer
+        .write_headers(
+            204,
+            &[
+                ("Access-Control-Allow-Origin", "*"),
+                (
+                    "Access-Control-Allow-Methods",
+                    "POST, PATCH, DELETE, OPTIONS",
+                ),
+                (
+                    "Access-Control-Allow-Headers",
+                    "Content-Type, If-Match, Authorization",
+                ),
+                ("Access-Control-Expose-Headers", "Location, ETag"),
+                ("Access-Control-Max-Age", "86400"),
+                ("Content-Length", "0"),
+            ],
+        )
+        .await?;
     Ok(writer)
 }
 

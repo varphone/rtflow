@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use rtc::rtp::header::Header as RtpHeader;
 use rtc::rtp::packet::Packet as RtpPacket;
@@ -222,7 +223,7 @@ pub async fn handle_whep_post(
             }],
         )));
         match pc.add_track(media_track.clone()).await {
-            Ok(sender) => senders.push((media_track, sender, kind, codec, track_ssrc)),
+            Ok(sender) => senders.push((media_track, sender, kind, codec, track_ssrc, track.id)),
             Err(e) => {
                 tracing::warn!("WHEP: add_track failed: {e}");
             }
@@ -254,7 +255,7 @@ pub async fn handle_whep_post(
     let answer_sdp = assemble_answer_sdp(pc_state.clone(), &answer).await;
 
     // Start the play pipeline: mount → packetizer → RTP sender.
-    for (track, sender, kind, codec, ssrc) in &senders {
+    for (track, sender, kind, codec, ssrc, track_id) in &senders {
         let Some(pt) = sender_payload_type(sender, mime_for(*codec)).await else {
             tracing::warn!("WHEP: sender has no negotiated payload type");
             continue;
@@ -271,6 +272,7 @@ pub async fn handle_whep_post(
             Some(*ssrc),
             track.clone(),
             config.mtu,
+            *track_id,
         )
         .await;
     }
@@ -287,8 +289,9 @@ pub async fn handle_whep_post(
             201,
             &[
                 ("Location", &format!("/whep/{}", session.read().await.id)),
-                ("Access-Control-Expose-Headers", "Location"),
+                ("Access-Control-Expose-Headers", "Location, ETag"),
                 ("Access-Control-Allow-Origin", "*"),
+                ("ETag", &format!("\"{}\"", session.read().await.id)),
                 ("Cache-Control", "no-store"),
                 ("Content-Type", "application/sdp"),
                 ("Content-Length", &answer_len),
@@ -395,6 +398,23 @@ async fn assemble_answer_sdp(pc_state: Arc<PcState>, answer: &RTCSessionDescript
     super::transport::append_candidates(&answer.sdp, &candidates)
 }
 
+/// Keep only a short, keyframe-aligned startup window. Replaying a full
+/// cached GOP would add its whole duration to the first displayed frame.
+fn trim_startup(frames: &mut Vec<Arc<rtflow_media::AccessUnit>>, codec: Codec, max: Duration) {
+    let Some(last) = frames.iter().rfind(|frame| frame.codec == codec) else {
+        return;
+    };
+    let cutoff = last.pts.saturating_sub(max);
+    let Some(position) = frames
+        .iter()
+        .position(|frame| frame.codec == codec && frame.is_keyframe && frame.pts >= cutoff)
+    else {
+        frames.clear();
+        return;
+    };
+    frames.drain(..position);
+}
+
 /// The play loop: subscribe to the mount, packetize access units and
 /// write them to the RTP sender. H.264/H.265/VP8/VP9 Annex-B frames are
 /// converted by the shared packetizer; RTP timestamps come from the
@@ -411,15 +431,19 @@ async fn spawn_play_task(
     ssrc: Option<u32>,
     track: Arc<TrackLocalStaticRTP>,
     mtu: usize,
+    track_id: u8,
 ) {
     let cancel = session.read().await.cancel.clone();
     let ssrc_value = ssrc.unwrap_or(0);
 
     let task_session = session.clone();
     let task = tokio::spawn(async move {
-        let (mut rx, startup) = match mounts.get_handle(&mount_path) {
+        let (mut rx, mut startup) = match mounts.get_handle(&mount_path) {
             Some(mount) => {
                 let (rx, startup) = mount.subscribe_with_startup();
+                if let Ok(publisher) = mount.publisher() {
+                    publisher.request_keyframe(track_id);
+                }
                 (rx, startup)
             }
             None => {
@@ -434,6 +458,16 @@ async fn spawn_play_task(
                 return;
             }
         };
+        if matches!(
+            codec,
+            rtflow_media::Codec::H264
+                | rtflow_media::Codec::H265
+                | rtflow_media::Codec::Vp8
+                | rtflow_media::Codec::Vp9
+                | rtflow_media::Codec::Av1
+        ) {
+            trim_startup(&mut startup, codec, Duration::from_millis(150));
+        }
         let mut startup_iter = startup.into_iter();
         let mut awaiting_key = codec == rtflow_media::Codec::H264
             || codec == rtflow_media::Codec::H265
@@ -455,6 +489,11 @@ async fn spawn_play_task(
                         Err(rtflow_mount::FrameRecvError::Lagged(count)) => {
                             tracing::debug!(count, "WHEP lagged; waiting for a keyframe");
                             awaiting_key = true;
+                            if let Some(mount) = mounts.get_handle(&mount_path)
+                                && let Ok(publisher) = mount.publisher()
+                            {
+                                publisher.request_keyframe(track_id);
+                            }
                             continue;
                         }
                         Err(rtflow_mount::FrameRecvError::Closed) => break,
@@ -507,6 +546,50 @@ async fn spawn_play_task(
     session.write().await.spawn_media_task(task);
 }
 
+/// Handle WHEP PATCH: add trickled ICE candidates to a session.
+pub async fn handle_whep_patch(
+    req: &rtflow_http::HttpRequest,
+    writer: ResponseWriter<rtflow_http::ConnWriter>,
+    body: &[u8],
+    sessions: Arc<SessionRegistry>,
+) -> Result<ResponseWriter<rtflow_http::ConnWriter>> {
+    let Some(id) = session_id_from_path(&req.path) else {
+        return respond_plain(writer, 400, "missing session id").await;
+    };
+    if let Some(expected) = req.header("if-match")
+        && expected.trim_matches('"') != id
+    {
+        return respond_plain(writer, 412, "etag mismatch").await;
+    }
+    let Some(session) = sessions.get_session(&id).await else {
+        return respond_plain(writer, 404, "session not found").await;
+    };
+    let s = session.read().await;
+    let Some(pc) = s.pc.clone() else {
+        return respond_plain(writer, 409, "session has no peer connection").await;
+    };
+    drop(s);
+    let candidates = super::transport::candidates_from_sdp(&String::from_utf8_lossy(body));
+    for candidate in candidates {
+        if let Err(e) = pc.add_ice_candidate(candidate).await {
+            tracing::debug!("WHEP: PATCH add_ice_candidate failed: {e}");
+        }
+    }
+    session.write().await.touch();
+    let mut writer = writer;
+    writer
+        .write_headers(
+            204,
+            &[
+                ("Access-Control-Allow-Origin", "*"),
+                ("Content-Length", "0"),
+                ("Cache-Control", "no-store"),
+            ],
+        )
+        .await?;
+    Ok(writer)
+}
+
 /// Handle WHEP DELETE: release the session.
 pub async fn handle_whep_delete(
     req: &rtflow_http::HttpRequest,
@@ -527,7 +610,25 @@ pub async fn handle_whep_options(
     writer: ResponseWriter<rtflow_http::ConnWriter>,
 ) -> Result<ResponseWriter<rtflow_http::ConnWriter>> {
     let mut writer = writer;
-    writer.write_body(204, "text/plain", b"").await?;
+    writer
+        .write_headers(
+            204,
+            &[
+                ("Access-Control-Allow-Origin", "*"),
+                (
+                    "Access-Control-Allow-Methods",
+                    "POST, PATCH, DELETE, OPTIONS",
+                ),
+                (
+                    "Access-Control-Allow-Headers",
+                    "Content-Type, If-Match, Authorization",
+                ),
+                ("Access-Control-Expose-Headers", "Location, ETag"),
+                ("Access-Control-Max-Age", "86400"),
+                ("Content-Length", "0"),
+            ],
+        )
+        .await?;
     Ok(writer)
 }
 

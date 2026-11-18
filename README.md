@@ -158,6 +158,8 @@ HLS 三种模式播放（`--no-web` 可只留 RTSP）。
 基于 `webrtc` crate（0.20，纯 Rust ICE/DTLS/SRTP）的浏览器原生实时
 协议，`webrtc` feature 启用：
 
+详见 [WebRTC 指南](docs/guides/webrtc.md)。
+
 - **WHEP 播放**（draft-ietf-wish-whep）：浏览器 `POST` SDP offer 到
   `/whep{path}`，服务器应答（含完整 ICE 候选）后把 mount 的 H.264/
   H.265/VP8/VP9 视频与 Opus/G.711/AAC-LC 音频打包为 RTP 推给浏览器

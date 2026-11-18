@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // WHIP (ingest) and WHEP (playback) share the RTSP mount registry.
     let (whip, whep) = create_webrtc_handlers(WebRtcConfig::default(), rtsp_server.registry());
     for (path, handler) in [("/whip/*", whip), ("/whep/*", whep)] {
-        for method in [Method::Post, Method::Delete, Method::Options] {
+        for method in [Method::Post, Method::Patch, Method::Delete, Method::Options] {
             http_server.add_route(method, path, handler.clone()).await;
         }
     }

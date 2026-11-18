@@ -143,6 +143,9 @@ pub fn create_webrtc_handlers(
                 rtflow_http::Method::Delete => {
                     whip::handle_whip_delete(&req, writer, sessions).await
                 }
+                rtflow_http::Method::Patch => {
+                    whip::handle_whip_patch(&req, writer, &body, sessions).await
+                }
                 _ => whip::handle_whip_options(&req, writer).await,
             }
         })
@@ -164,6 +167,9 @@ pub fn create_webrtc_handlers(
                 }
                 rtflow_http::Method::Delete => {
                     whep::handle_whep_delete(&req, writer, sessions).await
+                }
+                rtflow_http::Method::Patch => {
+                    whep::handle_whep_patch(&req, writer, &body, sessions).await
                 }
                 _ => whep::handle_whep_options(&req, writer).await,
             }

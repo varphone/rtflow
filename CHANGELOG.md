@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+- WebRTC：修复 WHEP/WHIP 浏览器 SDP、鉴权路径和响应 Content-Length；按浏览器 offer 过滤 codec；新增 STUN/TURN 配置、PATCH trickle ICE、ETag/CORS；WHEP 启动裁剪到最近 150 ms 关键帧窗口并请求源端 IDR；本机 640×360 视频-only 基准 p50≈29 ms/p95≈47 ms。
+
 ### Added
 
 - 控制台内置 dash.js：直播/点播按 URL 自动选择 HLS 或 DASH 播放，路径/详情/卡片提供 DASH 播放与地址复制。

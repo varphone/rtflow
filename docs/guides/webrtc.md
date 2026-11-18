@@ -1,0 +1,95 @@
+# WebRTC（WHIP/WHEP）
+
+WebRTC 是当前延迟最低的输出/输入协议，适合局域网预览和嵌入式网关。
+`webrtc` feature 默认不进入 `embedded-gateway`；需要时显式启用。
+
+## 端点
+
+```text
+POST   /whip/{mount}         # WHIP 发布，body 为 SDP offer
+PATCH  /whip/{session_id}    # trickle ICE 候选（application/trickle-ice-sdpfrag）
+DELETE /whip/{session_id}
+OPTIONS /whip/{mount}
+
+POST   /whep/{mount}         # WHEP 播放，body 为 SDP offer
+PATCH  /whep/{session_id}    # trickle ICE 候选
+DELETE /whep/{session_id}
+OPTIONS /whep/{mount}
+```
+
+WHEP 返回 `201`、`Location`、`ETag`、`Access-Control-Expose-Headers`；
+PATCH 使用 `If-Match`（可选）匹配 ETag。浏览器预检走 OPTIONS。
+
+## Codec
+
+默认只协商浏览器 offer 中出现的 codec：
+
+| 类型 | 默认 | 说明 |
+|---|---|---|
+| H.264 | 是 | packetization-mode=1；fmtp 优先取源 SPS/fmtp |
+| VP8/VP9 | 是 | 源和浏览器都支持时启用 |
+| Opus | 是 | 48 kHz，`minptime=10;useinbandfec=1` |
+| G.711 PCMA/PCMU | 是 | 8 kHz mono，直通 |
+| H.265 | 否 | 非 WebRTC 标准，需显式实验开关 |
+| AAC-LC | 否 | 浏览器支持不一致，需显式实验开关 |
+| AV1 | 否 | 当前 RTP packetizer 不完整 |
+
+不做转码；源 codec 不在浏览器 offer 中时 WHEP 返回 406，而不是添加一个
+浏览器无法接收的 track。
+
+## ICE / NAT
+
+```toml
+[webrtc]
+enabled = true
+ice_servers = ["stun:stun.example.org:3478", "turn:turn.example.org:3478?transport=udp"]
+ice_username = "${TURN_USER}"
+ice_credential = "${TURN_PASS}"
+ice_transport_policy = "all"   # all | relay
+```
+
+- 空 `ice_servers` 只收集 host candidate，适合同机/局域网；
+- 公网/跨 NAT 至少配置 STUN，对称 NAT 需要 TURN；
+- `relay` 强制走 TURN（调试/合规场景）；
+- `turns:` 需要 TURN TLS 服务。
+
+当前 WHIP/WHEP 的 answer 会带 gathered candidate；PATCH 支持后续 trickle。
+ICE restart 见后续版本。
+
+## 延迟
+
+端到端延迟由 VENC、服务端转发、网络、浏览器 jitter buffer 和解码/显示组成。
+本机 x86 基准（640×360@30，H.264，视频-only，Live 源含软件 x264 编码）：
+
+| 分位 | 延迟 |
+|---|---|
+| p50 | ≈29 ms |
+| p95 | ≈47 ms |
+
+这是 localhost 的服务器+WebRTC+Chromium 开销，不含 HI3516 硬件 VENC 和真实网络；
+不能直接当作产品端到端承诺。目标：
+
+- LAN、Chrome、720p30：**p95 < 150 ms**，争取 100 ms；
+- 需要 `zerolatency`、无 B 帧、GOP 0.5–1 s、host ICE、客户端低 jitter buffer；
+- WHEP 启动只回放最近 150 ms、关键帧对齐的窗口，不在加入时回放整段缓存；
+- 视频-only 比带音频更容易压低延迟；A/V 同步会增加视频侧等待。
+
+## 低内存/嵌入式
+
+- 默认 `embedded-gateway` 不包含 WebRTC；启用后新增 `webrtc`/DTLS/SRTP 依赖；
+- 每个会话有独立 PeerConnection/ICE socket，建议按内存设置 `max_sessions`；
+- 不要同时启用不用的 codec/平台；H.265/AAC 默认关闭；
+- 具体 RSS 以目标板实测为准；本机不提供嵌入式内存承诺。
+
+## 浏览器要求
+
+- `getUserMedia`（WHIP 发布）要求 HTTPS 或 `localhost`；
+- 浏览器必须支持源 codec；Chrome 对 H.264/Opus 最稳；
+- 播放端可设置 `playbackDelayHint` / `jitterBufferTarget` 降低缓冲，但浏览器可能忽略；
+- 当前 WebRTC 仍标记为实验性，生产前按目标浏览器做互操作验证。
+
+## 限制
+
+- 不做 SFU/多人、simulcast/SVC、DataChannel、转码；
+- 不做 TURN 服务器；
+- ICE restart、会话资源配额、完整 RTCP 反馈仍在完善中。
