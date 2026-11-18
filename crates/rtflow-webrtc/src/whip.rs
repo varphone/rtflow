@@ -178,6 +178,12 @@ pub async fn handle_whip_post(
     }
     let mut writer = writer;
     let answer_len = answer_sdp.len().to_string();
+    let ice_link = config
+        .ice_servers
+        .iter()
+        .map(|url| format!("<{url}>; rel=\"ice-server\""))
+        .collect::<Vec<_>>()
+        .join(", ");
     writer
         .write_headers(
             201,
@@ -186,12 +192,13 @@ pub async fn handle_whip_post(
                     "Location",
                     &format!("/whip{}/{}", path, session.read().await.id),
                 ),
-                ("Access-Control-Expose-Headers", "Location, ETag"),
+                ("Access-Control-Expose-Headers", "Location, ETag, Link"),
                 ("Access-Control-Allow-Origin", "*"),
                 ("ETag", &format!("\"{}\"", session.read().await.id)),
                 ("Cache-Control", "no-store"),
                 ("Content-Type", "application/sdp"),
                 ("Content-Length", &answer_len),
+                ("Link", &ice_link),
             ],
         )
         .await?;
@@ -500,7 +507,7 @@ pub async fn handle_whip_options(
                     "Access-Control-Allow-Headers",
                     "Content-Type, If-Match, Authorization",
                 ),
-                ("Access-Control-Expose-Headers", "Location, ETag"),
+                ("Access-Control-Expose-Headers", "Location, ETag, Link"),
                 ("Access-Control-Max-Age", "86400"),
                 ("Content-Length", "0"),
             ],

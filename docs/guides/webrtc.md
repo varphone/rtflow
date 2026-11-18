@@ -17,7 +17,8 @@ DELETE /whep/{session_id}
 OPTIONS /whep/{mount}
 ```
 
-WHEP 返回 `201`、`Location`、`ETag`、`Access-Control-Expose-Headers`；
+WHEP 返回 `201`、`Location`、`ETag`、`Link: <stun/turn>; rel="ice-server"`、
+`Access-Control-Expose-Headers`；
 PATCH 使用 `If-Match`（可选）匹配 ETag。浏览器预检走 OPTIONS。
 
 ## Codec
