@@ -183,6 +183,48 @@ async fn dash_publish_serves_manifest_init_and_segment() {
 
     assert!(mpd.contains("timeShiftBufferDepth=\"PT5.000S\""), "{mpd}");
 
+    // Low-latency DASH: per-track chunked CMAF, served with chunked transfer.
+    let ll_url = format!("{http}/dash-ll/live/dash/manifest.mpd");
+    let mut ll = String::new();
+    for _ in 0..80 {
+        if let Ok(response) = client.get(&ll_url).send().await
+            && response.status().is_success()
+        {
+            let body = response.text().await.unwrap_or_default();
+            if body.contains("availabilityTimeComplete=\"false\"") {
+                ll = body;
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    assert!(ll.contains("availabilityTimeComplete=\"false\""), "{ll}");
+    assert!(ll.contains("availabilityTimeOffset=\"0.800\""), "{ll}");
+    assert!(ll.contains("<Latency target=\"2000\""), "{ll}");
+    let ll_init = attrs(&ll, "initialization")
+        .into_iter()
+        .find(|value| value.starts_with("video-"))
+        .expect("LL video init");
+    let ll_media = attrs(&ll, "media")
+        .into_iter()
+        .find(|value| value.starts_with("video-"))
+        .expect("LL video media");
+    let ll_segment = ll_media.replace("$Number$", "1");
+    let response = client
+        .get(format!("{http}/dash-ll/live/dash/{ll_init}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "LL init {ll_init}");
+    let response = client
+        .get(format!("{http}/dash-ll/live/dash/{ll_segment}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "LL segment {ll_segment}");
+    let data = response.bytes().await.unwrap();
+    assert_eq!(&data[4..8], b"styp", "LL chunk lacks styp");
+
     let _ = child.kill();
     let _ = child.wait();
     handle.shutdown().await;

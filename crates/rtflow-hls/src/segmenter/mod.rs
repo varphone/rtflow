@@ -8,7 +8,8 @@ mod entries;
 mod init;
 mod media;
 mod sps;
-pub(crate) mod ts;
+mod ts;
+pub use self::ts::track_spec;
 pub(crate) mod util;
 
 use self::init::build_init_segment;

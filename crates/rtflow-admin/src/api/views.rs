@@ -29,6 +29,7 @@ pub(super) struct StreamView {
     pub hls_url: String,
     pub ll_hls_url: String,
     pub dash_url: String,
+    pub dash_ll_url: String,
     pub rtmp_url: String,
     pub rtsp_url: String,
     pub protocols: Vec<&'static str>,
@@ -81,6 +82,7 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
         path
     );
     let dash_url = format!("/dash/{}/manifest.mpd", path.trim_start_matches('/'));
+    let dash_ll_url = format!("/dash-ll/{}/manifest.mpd", path.trim_start_matches('/'));
     let rtmp_url = format!(
         "{}{}",
         state
@@ -114,9 +116,10 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
         hls_url,
         ll_hls_url,
         dash_url,
+        dash_ll_url,
         rtmp_url,
         rtsp_url,
-        protocols: vec!["HLS", "DASH", "RTSP"],
+        protocols: vec!["HLS", "DASH", "LL-DASH", "RTSP"],
     })
 }
 

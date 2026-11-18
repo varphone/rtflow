@@ -239,6 +239,15 @@ pub struct DashSection {
     /// Live-edge delay; defaults to 3 × segment duration.
     #[serde(default, with = "humantime_serde")]
     pub suggested_presentation_delay: Option<Duration>,
+    /// LL-DASH chunk duration; defaults to 200ms.
+    #[serde(default, with = "humantime_serde")]
+    pub ll_chunk_duration: Option<Duration>,
+    /// LL-DASH target latency; defaults to 2s.
+    #[serde(default, with = "humantime_serde")]
+    pub ll_latency_target: Option<Duration>,
+    /// LL-DASH time-shift buffer; defaults to 6 × DASH segment duration.
+    #[serde(default, with = "humantime_serde")]
+    pub ll_time_shift: Option<Duration>,
 }
 
 impl DashSection {
@@ -271,6 +280,28 @@ impl DashSection {
                 "dash.suggested_presentation_delay is zero".into(),
             ));
         }
+        if self
+            .ll_chunk_duration
+            .is_some_and(|duration| duration.is_zero())
+        {
+            return Err(ConfigError::Invalid(
+                "dash.ll_chunk_duration is zero".into(),
+            ));
+        }
+        if self
+            .ll_latency_target
+            .is_some_and(|duration| duration.is_zero())
+        {
+            return Err(ConfigError::Invalid(
+                "dash.ll_latency_target is zero".into(),
+            ));
+        }
+        if self
+            .ll_time_shift
+            .is_some_and(|duration| duration.is_zero())
+        {
+            return Err(ConfigError::Invalid("dash.ll_time_shift is zero".into()));
+        }
         Ok(())
     }
 }
@@ -284,6 +315,9 @@ impl Default for DashSection {
             min_buffer_time: Duration::from_secs(2),
             time_shift_buffer_depth: None,
             suggested_presentation_delay: None,
+            ll_chunk_duration: None,
+            ll_latency_target: None,
+            ll_time_shift: None,
         }
     }
 }

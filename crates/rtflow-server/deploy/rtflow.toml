@@ -100,6 +100,10 @@ enabled = true
 # min_buffer_time = "2s"
 # time_shift_buffer_depth = "5s"
 # suggested_presentation_delay = "3s"
+# LL-DASH 可选项
+# ll_chunk_duration = "200ms"
+# ll_latency_target = "2s"
+# ll_time_shift = "6s"
 
 [flv]
 enabled = true

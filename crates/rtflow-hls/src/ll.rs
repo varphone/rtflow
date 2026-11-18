@@ -5,7 +5,7 @@
 //! emit CMAF parts (`#EXT-X-PART`) as they close, plus the completed segments
 //! and a preload hint. Part/segment bytes are served from memory.
 
-use super::segmenter::ts::track_spec;
+use super::segmenter::track_spec;
 use bytes::Bytes;
 use rtflow_http::Handler;
 use rtflow_media::{Codec, MediaKind};

@@ -237,7 +237,7 @@ fn proxy_schedule_windows_and_overnight() {
 #[test]
 fn dash_section_parses_and_validates() {
     let config = Config::from_toml(
-        "[dash]\nsegment_duration = \"1s\"\nwindow = 6\nmin_buffer_time = \"3s\"\ntime_shift_buffer_depth = \"6s\"\nsuggested_presentation_delay = \"4s\"\n",
+        "[dash]\nsegment_duration = \"1s\"\nwindow = 6\nmin_buffer_time = \"3s\"\ntime_shift_buffer_depth = \"6s\"\nsuggested_presentation_delay = \"4s\"\nll_chunk_duration = \"200ms\"\nll_latency_target = \"2s\"\nll_time_shift = \"6s\"\n",
     )
     .unwrap();
     assert_eq!(config.dash.segment_duration, Some(Duration::from_secs(1)));
@@ -251,6 +251,12 @@ fn dash_section_parses_and_validates() {
         config.dash.suggested_presentation_delay,
         Some(Duration::from_secs(4))
     );
+    assert_eq!(
+        config.dash.ll_chunk_duration,
+        Some(Duration::from_millis(200))
+    );
+    assert_eq!(config.dash.ll_latency_target, Some(Duration::from_secs(2)));
+    assert_eq!(config.dash.ll_time_shift, Some(Duration::from_secs(6)));
     config.validate().unwrap();
 
     let mut invalid = Config::default();

@@ -69,9 +69,10 @@ export function playUrl(url, title, options = {}) {
         dashPlayer = dashjs.MediaPlayer().create();
         dashPlayer.updateSettings({
           streaming: {
-            delay: { liveDelay: options.vod === true ? 0 : 4 },
+            delay: { liveDelay: options.vod === true ? 0 : options.ll ? 2 : 4 },
             buffer: { fastSwitchEnabled: true, bufferTimeAtTopQuality: 8 },
             liveCatchup: { enabled: options.vod !== true },
+            lowLatencyEnabled: options.ll === true,
           },
         });
         dashPlayer.on(dashjs.MediaPlayer.events.ERROR, (event) => {

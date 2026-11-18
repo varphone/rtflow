@@ -64,6 +64,36 @@ suggested_presentation_delay = "3s"   # 缺省 3 × segment_duration
 - MPD 在所有已声明视频轨和音频轨都出现首个分片后才返回 200，避免播放器先拿到
   不完整的 Representation 集合。
 
+## LL-DASH（低延迟）
+
+低延迟入口独立于普通 DASH，按 DASH-IF LL IOP 的 per-track CMAF chunk 方式实现：
+
+```text
+GET /dash-ll/{mount}/manifest.mpd
+GET /dash-ll/{mount}/video-{track}-init.mp4
+GET /dash-ll/{mount}/audio-{track}-init.mp4
+GET /dash-ll/{mount}/video-{track}-{N}.m4s
+GET /dash-ll/{mount}/audio-{track}-{N}.m4s
+```
+
+- 每个 track 使用 `transmux::LlSegmenter`，分片边界仍由视频关键帧对齐；
+- 分片 URL 使用 HTTP chunked transfer，chunk 生成后立即写出；
+- MPD 标 `availabilityTimeComplete="false"`，
+  `availabilityTimeOffset = segment_duration - chunk_duration`；
+- 顶层 `ServiceDescription/Latency` 给出目标延迟；
+- 默认 segment 1s、chunk 200ms、target latency 2s；
+- `UTCTiming` 指向 `/api/v1/time`。
+
+```toml
+[dash]
+# LL-DASH 可选项（缺省 1s/200ms/2s）
+ll_chunk_duration = "200ms"
+ll_latency_target = "2s"
+ll_time_shift = "6s"
+```
+
+dash.js 可直接播放该 MPD；控制台直播详情提供“预览 LL-DASH”。
+
 ## DASH VOD
 
 录制目录会同时生成 DASH VOD：录制完成后在点播页可复制
@@ -109,7 +139,7 @@ dash.js 也可直接加载该 MPD；`crates/rtflow/examples/protocols/dash_serve
   ladder）；各 rendition 的分片边界独立，MPD 标 `segmentAlignment="false"`，只在源端 GOP
   对齐时具备完整 ABR 切换体验。直播和 VOD 都支持多条音轨（每轨一个 AdaptationSet）。
 - DASH VOD 目前由服务端的录制目录生成；其他 `VodSource` 可复用同一 manager 接入。暂不支持多码率/多 Period VOD。
-- 不支持 LL-DASH/chunked CMAF、DRM/CENC、多 Period、广告插入。
+- LL-DASH 已在 `/dash-ll` 提供；暂不支持 DRM/CENC、多 Period、广告插入。
 - H.264 codec 从 avcC 提取；H.265 从 hvcC 提取 `hvc1` codec（profile/tier/level/constraints），不支持的变体回退到静态字符串。
 
 ## 测试

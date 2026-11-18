@@ -589,6 +589,19 @@ impl ServerApp {
         if config.dash.enabled {
             http.add_route(
                 Method::Get,
+                "/dash-ll/*",
+                crate::media::auth_guard(
+                    crate::media::ll_dash_handler(mounts.clone(), config.clone()),
+                    auth.clone(),
+                    mounts.clone(),
+                    "/dash-ll/",
+                    rtflow::auth::AccessRole::Read,
+                    "dash-ll",
+                ),
+            )
+            .await;
+            http.add_route(
+                Method::Get,
                 "/dash-vod/*",
                 crate::media::vod_auth_guard(
                     create_dash_vod_handler(dash_vod_manager.clone()),

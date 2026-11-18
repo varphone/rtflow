@@ -2,7 +2,11 @@
 use crate::{auth::AppAuth, config::Config, vod::VodCatalog};
 use rtflow::{
     MountRegistry,
-    dash::{DashConfig, DashHandlers, create_dash_router, mpd::MpdConfig},
+    dash::{
+        DashConfig, DashHandlers, create_dash_router,
+        ll::{LlDashConfig, LlDashHandlers, create_ll_dash_handlers},
+        mpd::MpdConfig,
+    },
     http::Handler,
     http_flv::handler::serve_flv_stream,
 };
@@ -218,6 +222,110 @@ pub(crate) fn dash_handler(mounts: Arc<MountRegistry>, config: Arc<Config>) -> H
             handler(req, writer).await
         })
     })
+}
+
+struct CachedLlDash {
+    mount: Arc<rtflow::mount::Mount>,
+    handlers: Arc<LlDashHandlers>,
+}
+
+fn ll_dash_config(config: &Config) -> LlDashConfig {
+    LlDashConfig {
+        segment_duration: config
+            .dash
+            .segment_duration
+            .unwrap_or(config.hls.segment_duration),
+        chunk_duration: config
+            .dash
+            .ll_chunk_duration
+            .unwrap_or(std::time::Duration::from_millis(200)),
+        latency_target: config
+            .dash
+            .ll_latency_target
+            .unwrap_or(std::time::Duration::from_secs(2)),
+        time_shift: config
+            .dash
+            .ll_time_shift
+            .or(config.dash.time_shift_buffer_depth)
+            .unwrap_or_else(|| config.hls.segment_duration * 6),
+        utc_timing_url: Some("/api/v1/time".into()),
+    }
+}
+
+pub(crate) fn ll_dash_handler(mounts: Arc<MountRegistry>, config: Arc<Config>) -> Handler {
+    let cache: Arc<Mutex<HashMap<String, CachedLlDash>>> = Arc::new(Mutex::new(HashMap::new()));
+    Arc::new(move |req, writer| {
+        let mounts = mounts.clone();
+        let config = config.clone();
+        let cache = cache.clone();
+        Box::pin(async move {
+            let Some((mount_path, kind)) = ll_dash_route(&req.path) else {
+                let mut writer = writer;
+                writer.write_body(404, "text/plain", b"not found").await?;
+                return Ok(writer);
+            };
+            let Some(handle) = mounts.get_handle(&format!("/{mount_path}")) else {
+                let mut writer = writer;
+                writer
+                    .write_body(404, "text/plain", b"mount not found")
+                    .await?;
+                return Ok(writer);
+            };
+            let handlers = {
+                let mut cache = cache
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let current = handle.mount();
+                let stale = cache
+                    .get(mount_path)
+                    .is_none_or(|entry| !Arc::ptr_eq(&entry.mount, current));
+                if stale {
+                    cache.insert(
+                        mount_path.to_owned(),
+                        CachedLlDash {
+                            mount: current.clone(),
+                            handlers: Arc::new(create_ll_dash_handlers(
+                                ll_dash_config(&config),
+                                &handle,
+                            )),
+                        },
+                    );
+                }
+                cache
+                    .get(mount_path)
+                    .expect("just inserted")
+                    .handlers
+                    .clone()
+            };
+            let handler = match kind {
+                LlDashKind::Manifest => handlers.manifest.clone(),
+                LlDashKind::Init => handlers.init.clone(),
+                LlDashKind::Segment => handlers.segment.clone(),
+            };
+            handler(req, writer).await
+        })
+    })
+}
+
+enum LlDashKind {
+    Manifest,
+    Init,
+    Segment,
+}
+
+fn ll_dash_route(path: &str) -> Option<(&str, LlDashKind)> {
+    let path = path.strip_prefix("/dash-ll/")?;
+    if let Some(mount) = path.strip_suffix("/manifest.mpd") {
+        return Some((mount, LlDashKind::Manifest));
+    }
+    let (mount, file) = path.rsplit_once('/')?;
+    if file.ends_with("-init.mp4") {
+        return Some((mount, LlDashKind::Init));
+    }
+    if file.ends_with(".m4s") {
+        return Some((mount, LlDashKind::Segment));
+    }
+    None
 }
 
 enum DashKind {

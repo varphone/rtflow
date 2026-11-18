@@ -70,7 +70,7 @@ fn aac_esds(sample_rate: u32, channels: u16) -> EsdsBox {
     ))
 }
 
-pub(crate) fn track_spec(track: &rtflow_media::TrackDescription) -> Option<TrackSpec> {
+pub fn track_spec(track: &rtflow_media::TrackDescription) -> Option<TrackSpec> {
     match track.codec {
         Codec::H264 => {
             let config = track.fmtp.as_deref().and_then(|fmtp| {

@@ -8,6 +8,7 @@
 ### Added
 
 - 控制台内置 dash.js：直播/点播按 URL 自动选择 HLS 或 DASH 播放，路径/详情/卡片提供 DASH 播放与地址复制。
+- LL-DASH：新增 `/dash-ll/*`，按轨 `LlSegmenter` + HTTP chunked transfer，MPD 标 `availabilityTimeComplete=false`、`availabilityTimeOffset`、`ServiceDescription/Latency` 和 `UTCTiming`；控制台直播详情可预览。
 - DASH UTCTiming：服务端新增 `/api/v1/time`，MPD 使用 `http-iso` 时间源；库默认回退 `direct`。
 - DASH ABR-ready：直播/VOD 多视频轨生成同一 AdaptationSet 下多个 Representation（独立 init/segment、codecs、宽高、frameRate）；直播/VOD 多音轨生成独立 AdaptationSet/Representation。
 - DASH VOD：录制目录通过独立 fMP4 缓存生成 static MPD（`/dash-vod/{id}/...`），支持 token、缓存失效和点播页地址；H.265 codec 改从 hvcC 提取；frameRate 从 fMP4 trun 样本时长估算。
