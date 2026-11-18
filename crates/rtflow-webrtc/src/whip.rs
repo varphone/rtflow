@@ -11,7 +11,9 @@ use std::time::Duration;
 use rtc::rtp::packet::Packet as RtpPacket;
 use tokio::sync::RwLock;
 use webrtc::media_stream::track_remote::{TrackRemote, TrackRemoteEvent};
-use webrtc::peer_connection::{PeerConnection, RTCSessionDescription};
+use webrtc::peer_connection::{
+    PeerConnection, RTCIceServer, RTCIceTransportPolicy, RTCSessionDescription,
+};
 
 use super::session::{SessionRegistry, SessionState, SessionType};
 use super::transport::{GATHER_TIMEOUT, PcHandler, PcState, build_peer_connection};
@@ -26,6 +28,11 @@ use rtflow_rtp::Depacketizer;
 pub struct WhipConfig {
     /// ICE server URLs (STUN/TURN). Empty for LAN host-candidate only.
     pub ice_servers: Vec<String>,
+    /// TURN username/credential.
+    pub ice_username: String,
+    pub ice_credential: String,
+    /// `all` or `relay`.
+    pub ice_transport_policy: String,
     /// Local UDP addresses to bind (e.g. `["0.0.0.0:0"]`).
     pub udp_addrs: Vec<String>,
     /// RTP depacketization safety bound: frames larger than this are
@@ -37,6 +44,9 @@ impl Default for WhipConfig {
     fn default() -> Self {
         Self {
             ice_servers: vec![],
+            ice_username: String::new(),
+            ice_credential: String::new(),
+            ice_transport_policy: "all".into(),
             udp_addrs: vec!["0.0.0.0:0".to_string()],
             max_frame_bytes: 4 * 1024 * 1024,
         }
@@ -83,7 +93,22 @@ pub async fn handle_whip_post(
 
     let pc_state = PcState::new();
     let handler = Arc::new(PcHandler::new(pc_state.clone()));
-    let pc = build_peer_connection(config.udp_addrs.clone(), handler).await?;
+    let ice_servers = config
+        .ice_servers
+        .iter()
+        .map(|url| RTCIceServer {
+            urls: vec![url.clone()],
+            username: config.ice_username.clone(),
+            credential: config.ice_credential.clone(),
+        })
+        .collect();
+    let ice_policy = if config.ice_transport_policy.eq_ignore_ascii_case("relay") {
+        RTCIceTransportPolicy::Relay
+    } else {
+        RTCIceTransportPolicy::All
+    };
+    let pc =
+        build_peer_connection(config.udp_addrs.clone(), handler, ice_servers, ice_policy).await?;
     {
         let mut s = session.write().await;
         s.attach(pc.clone(), pc_state.clone());
@@ -121,17 +146,10 @@ pub async fn handle_whip_post(
     tokio::time::timeout(GATHER_TIMEOUT, pc_state.gather_done.notified())
         .await
         .ok();
-    let mut answer_sdp = answer.sdp.clone();
-    {
+    let answer_sdp = {
         let candidates = pc_state.candidates.read().await;
-        if !candidates.is_empty() {
-            answer_sdp.push_str("\r\n");
-            for line in candidates.iter() {
-                answer_sdp.push_str(line);
-                answer_sdp.push_str("\r\n");
-            }
-        }
-    }
+        super::transport::append_candidates(&answer.sdp, &candidates)
+    };
 
     // Start the ingest loop: remote track RTP → depacketizer → mount.
     spawn_ingest_task(
@@ -148,14 +166,17 @@ pub async fn handle_whip_post(
         s.touch();
     }
     let mut writer = writer;
+    let answer_len = answer_sdp.len().to_string();
     writer
         .write_headers(
             201,
             &[
                 ("Location", &format!("/whip/{}", session.read().await.id)),
                 ("Access-Control-Expose-Headers", "Location"),
+                ("Access-Control-Allow-Origin", "*"),
                 ("Cache-Control", "no-store"),
                 ("Content-Type", "application/sdp"),
+                ("Content-Length", &answer_len),
             ],
         )
         .await?;

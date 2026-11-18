@@ -2,6 +2,7 @@ use clap::Parser;
 use rtflow::http::{HttpConfig, HttpServer, Method};
 use rtflow_testkit::example::{CodecArg, init_tracing, mount_path, publisher_description};
 
+use rtflow::webrtc::{WebRtcConfig, create_webrtc_handlers};
 use rtflow::{MountConfig, RtspServer, ServerConfig};
 use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 
@@ -16,9 +17,11 @@ use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 /// Play from browser:
 ///   Open http://127.0.0.1:3000/player
 ///
-/// Publish via FFmpeg (experimental WHIP support):
-///   NOTE: WHIP/WHEP is a placeholder (no ICE/DTLS/SRTP media pipeline);
-///   routes answer 501 and the pages explain the limitation.
+/// Publish via WHIP:
+///   POST /whip/live/stream with an SDP offer.
+///
+/// Play via WHEP:
+///   POST /whep/live/stream with an SDP offer.
 #[derive(Debug, Parser)]
 struct Args {
     /// HTTP listen address for WHIP/WHEP.
@@ -72,50 +75,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut http_server = HttpServer::bind(HttpConfig::new(args.http_listen)).await?;
     let http_port = http_server.local_addr().port();
 
-    // WHIP/WHEP are NOT implemented (no ICE/DTLS/SRTP media pipeline):
-    // per project policy these routes must not lure browsers into a
-    // signaling exchange that yields no media. Routes answer 501 and the
-    // player/publisher pages explain the limitation.
-    let unavailable: rtflow::http::Handler = Arc::new(|_req, mut writer| {
-        Box::pin(async move {
-            writer
-                .write_body(
-                    501,
-                    "text/plain",
-                    b"WHIP/WHEP is not implemented (no ICE/DTLS/SRTP media pipeline)",
-                )
-                .await?;
-            Ok(writer)
-        })
-    });
-    let whip_path = format!("/whip{}", args.mount);
-    let whep_path = format!("/whep{}", args.mount);
-    for path in [whip_path.as_str(), whep_path.as_str()] {
-        http_server
-            .add_route(Method::Post, path, unavailable.clone())
-            .await;
-        http_server
-            .add_route(Method::Delete, path, unavailable.clone())
-            .await;
-        http_server
-            .add_route(Method::Get, path, unavailable.clone())
-            .await;
+    // WHIP (ingest) and WHEP (playback) share the RTSP mount registry.
+    let (whip, whep) = create_webrtc_handlers(WebRtcConfig::default(), rtsp_server.registry());
+    for (path, handler) in [("/whip/*", whip), ("/whep/*", whep)] {
+        for method in [Method::Post, Method::Delete, Method::Options] {
+            http_server.add_route(method, path, handler.clone()).await;
+        }
     }
 
-    let notice = b"<!doctype html><html><body><h1>WebRTC unavailable</h1><p>WHIP/WHEP is an experimental placeholder in this build: the ICE/DTLS/SRTP media pipeline is not implemented, so no media would flow. Use the RTSP endpoint instead.</p></body></html>";
-    let notice_handler: rtflow::http::Handler = Arc::new(move |_req, mut writer| {
+    let page = b"<!doctype html><html><body><h1>WebRTC WHIP/WHEP</h1><p>WHEP playback: <code>POST /whep/live/stream</code> with an SDP offer.</p><p>WHIP publish: <code>POST /whip/live/stream</code> with an SDP offer.</p></body></html>";
+    let page_handler: rtflow::http::Handler = Arc::new(move |_req, mut writer| {
         Box::pin(async move {
             writer
-                .write_body(200, "text/html; charset=utf-8", notice)
+                .write_body(200, "text/html; charset=utf-8", page)
                 .await?;
             Ok(writer)
         })
     });
     http_server
-        .add_route(Method::Get, "/player", notice_handler.clone())
+        .add_route(Method::Get, "/player", page_handler.clone())
         .await;
     http_server
-        .add_route(Method::Get, "/publisher", notice_handler)
+        .add_route(Method::Get, "/publisher", page_handler)
         .await;
 
     http_server.run().await?;
@@ -126,15 +107,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.mount
     );
 
-    println!("=== WebRTC Server (WHIP/WHEP placeholder) ===");
+    println!("=== WebRTC Server (WHIP/WHEP) ===");
     println!("HTTP listen:    0.0.0.0:{http_port}");
     println!("RTSP ingest:    {rtsp_url}");
     println!();
-    println!("WHIP/WHEP: NOT IMPLEMENTED (no ICE/DTLS/SRTP media pipeline);");
-    println!("  routes answer 501, /player and /publisher show a notice.");
-    println!();
-    println!("Use the RTSP endpoint for real media:");
-    println!("  ffmpeg -re -i INPUT -c copy -f rtsp {rtsp_url}");
+    println!(
+        "WHEP playback:  POST http://127.0.0.1:{http_port}/whep{}",
+        args.mount
+    );
+    println!(
+        "WHIP publish:   POST http://127.0.0.1:{http_port}/whip{}",
+        args.mount
+    );
     println!();
     println!("Press Ctrl+C to stop.");
 

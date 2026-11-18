@@ -613,7 +613,16 @@ impl ServerApp {
             .await;
         }
         if config.webrtc.enabled {
-            let (whip, whep) = create_webrtc_handlers(WebRtcConfig::default(), mounts.clone());
+            let mut webrtc_config = WebRtcConfig::default();
+            webrtc_config.whip.ice_servers = config.webrtc.ice_servers.clone();
+            webrtc_config.whip.ice_username = config.webrtc.ice_username.clone();
+            webrtc_config.whip.ice_credential = config.webrtc.ice_credential.clone();
+            webrtc_config.whip.ice_transport_policy = config.webrtc.ice_transport_policy.clone();
+            webrtc_config.whep.ice_servers = config.webrtc.ice_servers.clone();
+            webrtc_config.whep.ice_username = config.webrtc.ice_username.clone();
+            webrtc_config.whep.ice_credential = config.webrtc.ice_credential.clone();
+            webrtc_config.whep.ice_transport_policy = config.webrtc.ice_transport_policy.clone();
+            let (whip, whep) = create_webrtc_handlers(webrtc_config, mounts.clone());
             http.add_route(
                 Method::Post,
                 "/whip/*",

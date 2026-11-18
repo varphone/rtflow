@@ -235,6 +235,23 @@ fn proxy_schedule_windows_and_overnight() {
 }
 
 #[test]
+fn webrtc_section_parses_ice_config() {
+    let config = Config::from_toml(
+        "[webrtc]\nice_servers = [\"stun:stun.example.org:3478\", \"turn:turn.example.org:3478?transport=udp\"]\nice_username = \"u\"\nice_credential = \"p\"\nice_transport_policy = \"relay\"\n",
+    )
+    .unwrap();
+    assert_eq!(config.webrtc.ice_servers.len(), 2);
+    assert_eq!(config.webrtc.ice_username, "u");
+    assert_eq!(config.webrtc.ice_credential, "p");
+    assert_eq!(config.webrtc.ice_transport_policy, "relay");
+    config.validate().unwrap();
+
+    let mut invalid = Config::default();
+    invalid.webrtc.ice_transport_policy = "bogus".into();
+    assert!(invalid.validate().is_err());
+}
+
+#[test]
 fn dash_section_parses_and_validates() {
     let config = Config::from_toml(
         "[dash]\nsegment_duration = \"1s\"\nwindow = 6\nmin_buffer_time = \"3s\"\ntime_shift_buffer_depth = \"6s\"\nsuggested_presentation_delay = \"4s\"\nll_chunk_duration = \"200ms\"\nll_latency_target = \"2s\"\nll_time_shift = \"6s\"\n",

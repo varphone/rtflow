@@ -60,6 +60,10 @@ pub(crate) fn auth_guard(
                         if protocol == "flv" {
                             return rest.trim_end_matches(".flv").to_owned();
                         }
+                        if protocol == "webrtc" {
+                            // WHIP/WHEP path is the mount itself, not a file.
+                            return rest.trim_end_matches('/').to_owned();
+                        }
                         // HLS/LL-HLS/DASH: the mount is the directory that
                         // contains the playlist/manifest/segment file.
                         rest.rsplit_once('/')

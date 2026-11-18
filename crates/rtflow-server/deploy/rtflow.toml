@@ -71,6 +71,11 @@ allowed_stream_ids = []
 
 [webrtc]
 enabled = true
+# STUN/TURN for NAT traversal; empty = host candidates only (LAN).
+# ice_servers = ["stun:stun.example.org:3478", "turn:turn.example.org:3478?transport=udp"]
+# ice_username = "${TURN_USER}"
+# ice_credential = "${TURN_PASS}"
+# ice_transport_policy = "all"   # all | relay
 
 [http]
 listen = "0.0.0.0:3000"

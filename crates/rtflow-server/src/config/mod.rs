@@ -160,11 +160,24 @@ impl Default for RtmpSection {
 #[serde(deny_unknown_fields, default)]
 pub struct WebrtcSection {
     pub enabled: bool,
+    /// STUN/TURN URLs (`stun:`/`turn:`/`turns:`).
+    pub ice_servers: Vec<String>,
+    /// TURN username/credential (applied to every configured server).
+    pub ice_username: String,
+    pub ice_credential: String,
+    /// `all` (host/srflx/relay) or `relay` (TURN only).
+    pub ice_transport_policy: String,
 }
 
 impl Default for WebrtcSection {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            ice_servers: Vec::new(),
+            ice_username: String::new(),
+            ice_credential: String::new(),
+            ice_transport_policy: "all".into(),
+        }
     }
 }
 
@@ -583,6 +596,11 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if !matches!(self.webrtc.ice_transport_policy.as_str(), "all" | "relay") {
+            return Err(ConfigError::Invalid(
+                "webrtc.ice_transport_policy must be all or relay".into(),
+            ));
+        }
         if self.server.name.trim().is_empty() {
             return Err(ConfigError::Invalid("server.name is empty".into()));
         }

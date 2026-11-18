@@ -6,6 +6,7 @@
 //! source provides it — WebRTC has no AAC/G.711, so other audio codecs
 //! are skipped until transcoding exists).
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use rtc::rtp::header::Header as RtpHeader;
@@ -17,7 +18,9 @@ use tokio::sync::RwLock;
 use webrtc::media_stream::track_local::TrackLocal;
 use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
 use webrtc::media_stream::{MediaStreamId, MediaStreamTrack, MediaStreamTrackId};
-use webrtc::peer_connection::{PeerConnection, RTCSessionDescription};
+use webrtc::peer_connection::{
+    PeerConnection, RTCIceServer, RTCIceTransportPolicy, RTCSessionDescription,
+};
 
 use super::session::{SessionRegistry, SessionState, SessionType, WebrtcSession};
 use super::transport::{
@@ -34,6 +37,11 @@ use rtflow_rtp::Packetizer;
 pub struct WhepConfig {
     /// ICE server URLs (STUN/TURN). Empty for LAN host-candidate only.
     pub ice_servers: Vec<String>,
+    /// TURN username/credential.
+    pub ice_username: String,
+    pub ice_credential: String,
+    /// `all` or `relay`.
+    pub ice_transport_policy: String,
     /// Local UDP addresses to bind (e.g. `["0.0.0.0:0"]`).
     pub udp_addrs: Vec<String>,
     /// RTP packetization MTU (bytes, including headers).
@@ -44,6 +52,9 @@ impl Default for WhepConfig {
     fn default() -> Self {
         Self {
             ice_servers: vec![],
+            ice_username: String::new(),
+            ice_credential: String::new(),
+            ice_transport_policy: "all".into(),
             udp_addrs: vec!["0.0.0.0:0".to_string()],
             mtu: 1200,
         }
@@ -101,7 +112,22 @@ pub async fn handle_whep_post(
     // Build the peer connection with the shared handler.
     let pc_state = PcState::new();
     let handler = Arc::new(PcHandler::new(pc_state.clone()));
-    let pc = build_peer_connection(config.udp_addrs.clone(), handler).await?;
+    let ice_servers = config
+        .ice_servers
+        .iter()
+        .map(|url| RTCIceServer {
+            urls: vec![url.clone()],
+            username: config.ice_username.clone(),
+            credential: config.ice_credential.clone(),
+        })
+        .collect();
+    let ice_policy = if config.ice_transport_policy.eq_ignore_ascii_case("relay") {
+        RTCIceTransportPolicy::Relay
+    } else {
+        RTCIceTransportPolicy::All
+    };
+    let pc =
+        build_peer_connection(config.udp_addrs.clone(), handler, ice_servers, ice_policy).await?;
     {
         let mut s = session.write().await;
         s.attach(pc.clone(), pc_state.clone());
@@ -123,10 +149,9 @@ pub async fn handle_whep_post(
         }
     }
 
-    // Add a sender for each video track (H.264/H.265/VP8/VP9) and for
-    // WebRTC-capable audio: Opus, G.711 PCMA/PCMU (RFC 7874 mandatory) and
-    // AAC-LC (Chrome/Safari). AAC/G.711 sources have no transcoding, the
-    // frames pass through as-is.
+    // Only add tracks whose codec the browser actually offered. This avoids
+    // `add_track failed` for source-only codecs such as AAC/HEVC.
+    let offered = offered_encodings(offer);
     let mut senders = Vec::new();
     for track in &mount.description().tracks {
         let (kind, codec) = match track.kind {
@@ -158,6 +183,10 @@ pub async fn handle_whep_post(
             );
             continue;
         }
+        if !offered.contains(codec_encoding(codec).as_str()) {
+            tracing::debug!(?codec, "WHEP: browser did not offer codec, skipping");
+            continue;
+        }
         let track_id = format!("rtflow-{}-{}", kind_str(kind), track.id);
         // Explicit SSRC so the answer carries it (a=ssrc) and the browser
         // can match inbound packets to this track. Reliable assignment is
@@ -177,8 +206,16 @@ pub async fn handle_whep_post(
                 codec: RTCRtpCodec {
                     mime_type: mime_for(codec).to_string(),
                     clock_rate: track.clock_rate.max(1),
-                    channels: if kind == RtpCodecKind::Audio { 2 } else { 0 },
-                    sdp_fmtp_line: String::new(),
+                    channels: if kind == RtpCodecKind::Audio {
+                        if codec == Codec::Pcma || codec == Codec::Pcmu {
+                            1
+                        } else {
+                            2
+                        }
+                    } else {
+                        0
+                    },
+                    sdp_fmtp_line: codec_fmtp(codec, track.fmtp.as_deref()),
                     rtcp_feedback: vec![],
                 },
                 ..Default::default()
@@ -193,7 +230,7 @@ pub async fn handle_whep_post(
     }
     if senders.is_empty() {
         let _ = session.write().await.close().await;
-        return respond_plain(writer, 400, "no negotiated media").await;
+        return respond_plain(writer, 406, "no offered WebRTC codec").await;
     }
 
     // Answer and wait for ICE gathering so the SDP carries candidates.
@@ -244,14 +281,17 @@ pub async fn handle_whep_post(
         s.touch();
     }
     let mut writer = writer;
+    let answer_len = answer_sdp.len().to_string();
     writer
         .write_headers(
             201,
             &[
                 ("Location", &format!("/whep/{}", session.read().await.id)),
                 ("Access-Control-Expose-Headers", "Location"),
+                ("Access-Control-Allow-Origin", "*"),
                 ("Cache-Control", "no-store"),
                 ("Content-Type", "application/sdp"),
+                ("Content-Length", &answer_len),
             ],
         )
         .await?;
@@ -278,6 +318,48 @@ fn rand_ssrc() -> u32 {
 
 /// MIME type for a WebRTC-capable codec (H.264/H.265/VP8/VP9, Opus,
 /// G.711 PCMA/PCMU, AAC-LC).
+fn offered_encodings(sdp: &str) -> HashSet<String> {
+    let mut offered = HashSet::new();
+    for line in sdp.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(rest) = line.strip_prefix("a=rtpmap:")
+            && let Some((_pt, encoding)) = rest.split_once(' ')
+            && let Some(name) = encoding.split('/').next()
+        {
+            offered.insert(name.to_ascii_uppercase());
+        }
+    }
+    offered
+}
+
+fn codec_encoding(codec: Codec) -> String {
+    match codec {
+        Codec::H264 => "H264".into(),
+        Codec::H265 => "H265".into(),
+        Codec::Vp8 => "VP8".into(),
+        Codec::Vp9 => "VP9".into(),
+        Codec::Opus => "OPUS".into(),
+        Codec::Pcma => "PCMA".into(),
+        Codec::Pcmu => "PCMU".into(),
+        Codec::Aac => "MP4A.40.2".into(),
+        Codec::Av1 => "AV1".into(),
+        _ => String::new(),
+    }
+}
+
+fn codec_fmtp(codec: Codec, source_fmtp: Option<&str>) -> String {
+    match codec {
+        Codec::H264 => source_fmtp
+            .filter(|fmtp| fmtp.contains("profile-level-id"))
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f".to_string()
+            }),
+        Codec::Opus => "minptime=10;useinbandfec=1".to_string(),
+        _ => String::new(),
+    }
+}
+
 fn mime_for(codec: Codec) -> &'static str {
     match codec {
         Codec::H264 => "video/H264",
@@ -309,16 +391,8 @@ fn kind_str(kind: RtpCodecKind) -> &'static str {
 
 /// Append the gathered ICE candidates to the answer SDP.
 async fn assemble_answer_sdp(pc_state: Arc<PcState>, answer: &RTCSessionDescription) -> String {
-    let mut sdp = answer.sdp.clone();
     let candidates = pc_state.candidates.read().await;
-    if !candidates.is_empty() {
-        sdp.push_str("\r\n");
-        for line in candidates.iter() {
-            sdp.push_str(line);
-            sdp.push_str("\r\n");
-        }
-    }
-    sdp
+    super::transport::append_candidates(&answer.sdp, &candidates)
 }
 
 /// The play loop: subscribe to the mount, packetize access units and

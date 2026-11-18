@@ -66,7 +66,9 @@ impl PeerConnectionEventHandler for PcHandler {
         // which media section it belongs to, so the answer can carry it.
         if let Ok(init) = event.candidate.to_json() {
             let mut line = format!("a={}", init.candidate);
-            if let Some(mid) = init.sdp_mid {
+            if let Some(mid) = init.sdp_mid
+                && !mid.is_empty()
+            {
                 line.push_str(&format!("\r\na=mid:{mid}"));
             }
             tracing::debug!(candidate = %init.candidate, "WebRTC: local ICE candidate");
@@ -120,6 +122,8 @@ impl PeerConnectionEventHandler for PcHandler {
 pub(crate) async fn build_peer_connection<A>(
     udp_addrs: Vec<A>,
     handler: Arc<PcHandler>,
+    ice_servers: Vec<webrtc::peer_connection::RTCIceServer>,
+    ice_transport_policy: webrtc::peer_connection::RTCIceTransportPolicy,
 ) -> Result<Arc<dyn PeerConnection>>
 where
     A: ToSocketAddrs + Send + Sync + 'static,
@@ -155,7 +159,10 @@ where
             rtflow_core::error::Error::Media(format!("WebRTC AAC registration failed: {e}"))
         })?;
 
-    let config = RTCConfigurationBuilder::default().build();
+    let config = RTCConfigurationBuilder::default()
+        .with_ice_servers(ice_servers)
+        .with_ice_transport_policy(ice_transport_policy)
+        .build();
     let builder = PeerConnectionBuilder::new()
         .with_configuration(config)
         .with_media_engine(media_engine)
@@ -190,6 +197,23 @@ pub(crate) async fn sender_payload_type(
             hay == needle || hay.ends_with(needle.trim_start_matches("VIDEO/"))
         })
         .map(|c| c.payload_type)
+}
+
+/// Append gathered candidates to an SDP answer without introducing a blank
+/// line (which terminates the SDP and makes browsers reject the answer).
+pub(crate) fn append_candidates(sdp: &str, candidates: &[String]) -> String {
+    let mut out = sdp.to_owned();
+    if candidates.is_empty() {
+        return out;
+    }
+    if !out.ends_with("\r\n") {
+        out.push_str("\r\n");
+    }
+    for line in candidates {
+        out.push_str(line.trim_end_matches('\r'));
+        out.push_str("\r\n");
+    }
+    out
 }
 
 /// Extract ICE candidates from an SDP document, associating each with its
