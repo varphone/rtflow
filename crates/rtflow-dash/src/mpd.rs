@@ -19,6 +19,8 @@ pub struct MpdConfig {
     pub timescale: u32,
     /// Suggested presentation delay (live edge offset).
     pub suggested_presentation_delay: Option<Duration>,
+    /// Optional HTTP ISO-8601 time source for `UTCTiming`.
+    pub utc_timing_url: Option<String>,
 }
 
 impl MpdConfig {
@@ -59,6 +61,7 @@ impl Default for MpdConfig {
             segment_duration: Duration::from_secs(2),
             timescale: rtflow_media::clock::VIDEO_CLOCK_RATE,
             suggested_presentation_delay: None,
+            utc_timing_url: None,
         }
     }
 }
@@ -178,9 +181,15 @@ pub fn generate_mpd_q(
     }
 
     xml.push_str("  </Period>\n");
-    xml.push_str(&format!(
-        "  <UTCTiming schemeIdUri=\"urn:mpeg:dash:utc:direct:2014\" value=\"{publish_time}\"/>\n"
-    ));
+    if let Some(url) = &config.utc_timing_url {
+        xml.push_str(&format!(
+            "  <UTCTiming schemeIdUri=\"urn:mpeg:dash:utc:http-iso:2014\" value=\"{url}\"/>\n"
+        ));
+    } else {
+        xml.push_str(&format!(
+            "  <UTCTiming schemeIdUri=\"urn:mpeg:dash:utc:direct:2014\" value=\"{publish_time}\"/>\n"
+        ));
+    }
     xml.push_str("</MPD>\n");
     xml
 }
@@ -701,6 +710,25 @@ mod tests {
         assert!(mpd.contains("initialization=\"video-1-init.mp4\""));
         assert!(mpd.contains("video-0-$Number$.m4s"));
         assert!(mpd.contains("video-1-$Number$.m4s"));
+    }
+
+    #[test]
+    fn http_utc_timing_url_is_emitted() {
+        let description = test_description();
+        let segments = vec![segment(1, 0)];
+        let video = video_rep(&description, &segments, None);
+        let mut config = MpdConfig::default();
+        config.utc_timing_url = Some("/api/v1/time".into());
+        let mpd = generate_mpd(
+            &[video],
+            &[],
+            &description,
+            &config,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+            Duration::ZERO,
+        );
+        assert!(mpd.contains("urn:mpeg:dash:utc:http-iso:2014"), "{mpd}");
+        assert!(mpd.contains("value=\"/api/v1/time\""), "{mpd}");
     }
 
     #[test]

@@ -157,6 +157,22 @@ pub(crate) async fn register_api_routes(
     .await;
     http.add_route(
         Method::Get,
+        "/api/v1/time",
+        Arc::new(|_req, mut writer| {
+            Box::pin(async move {
+                let now = chrono::Utc::now()
+                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                    .to_string();
+                writer
+                    .write_body(200, "text/plain; charset=utf-8", now.as_bytes())
+                    .await?;
+                Ok(writer)
+            })
+        }),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
         "/api/v1/vods",
         api_public_json(state.clone(), |state, _req| async move {
             Ok(serde_json::to_value(state.vod.list()).unwrap_or_default())

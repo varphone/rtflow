@@ -56,7 +56,8 @@ suggested_presentation_delay = "3s"   # 缺省 3 × segment_duration
     `audio-$Number$.m4s`；
 - 每个 Representation 自带 `SegmentTemplate` + `SegmentTimeline`，`startNumber`
   独立；
-- `UTCTiming` 使用 `urn:mpeg:dash:utc:direct:2014`；
+- `UTCTiming` 默认使用 `urn:mpeg:dash:utc:http-iso:2014` 指向公开的
+  `/api/v1/time`；库用户未配置 `MpdConfig::utc_timing_url` 时回退到 `direct`；
 - `bandwidth` 由各轨实际分片字节数/时长估算；
 - MPD 在所有已声明视频轨和音频轨都出现首个分片后才返回 200，避免播放器先拿到
   不完整的 Representation 集合。

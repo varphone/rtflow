@@ -128,7 +128,16 @@ async fn dash_publish_serves_manifest_init_and_segment() {
         codecs.iter().any(|codec| codec.contains("mp4a")),
         "{codecs:?}"
     );
-    assert!(mpd.contains("<UTCTiming"), "{mpd}");
+    assert!(mpd.contains("urn:mpeg:dash:utc:http-iso:2014"), "{mpd}");
+    assert!(mpd.contains("value=\"/api/v1/time\""), "{mpd}");
+    let response = client
+        .get(format!("{http}/api/v1/time"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let time = response.text().await.unwrap();
+    assert!(time.ends_with('Z'), "time={time}");
 
     let initializations = attrs(&mpd, "initialization");
     assert!(

@@ -162,6 +162,7 @@ fn dash_config(config: &Config) -> DashConfig {
             time_shift_buffer_depth,
             segment_duration,
             suggested_presentation_delay: config.dash.suggested_presentation_delay,
+            utc_timing_url: Some("/api/v1/time".into()),
             ..MpdConfig::default()
         },
     }

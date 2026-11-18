@@ -80,10 +80,7 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
         state.config.ll_hls_prefix.trim_end_matches('/'),
         path
     );
-    let dash_url = format!(
-        "/dash/{}/manifest.mpd",
-        path.trim_start_matches('/')
-    );
+    let dash_url = format!("/dash/{}/manifest.mpd", path.trim_start_matches('/'));
     let rtmp_url = format!(
         "{}{}",
         state
