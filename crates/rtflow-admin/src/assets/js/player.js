@@ -32,9 +32,12 @@ function loadDash() {
 export function playUrl(url, title, options = {}) {
   let hls = null;
   let dashPlayer = null;
+  let whepPc = null;
+  let whepSession = null;
   let video = null;
   let closed = false;
   const isDash = options.dash === true || /\.mpd(?:$|\?)/i.test(url);
+  const isWebRtc = options.webrtc === true || /\/whep\//i.test(url);
   openDialog({
     title,
     body: `<video id="admin-video" controls autoplay muted playsinline></video><div class="player-status-row"><span class="note" id="player-status">正在加载…</span><button class="btn small ghost" id="player-retry" hidden>重试</button></div>`,
@@ -43,11 +46,17 @@ export function playUrl(url, title, options = {}) {
       closed = true;
       hls?.destroy?.();
       dashPlayer?.reset?.();
+      whepPc?.close?.();
+      if (whepSession) {
+        fetch(whepSession, { method: "DELETE" }).catch(() => {});
+        whepSession = null;
+      }
       if (window.__rtflowHls === hls) window.__rtflowHls = null;
       if (window.__rtflowDash === dashPlayer) window.__rtflowDash = null;
       if (video) {
         video.pause();
         video.removeAttribute("src");
+        video.srcObject = null;
         try { video.load(); } catch (_) {}
       }
     },
@@ -61,8 +70,18 @@ export function playUrl(url, title, options = {}) {
     hls = null;
     dashPlayer?.reset?.();
     dashPlayer = null;
+    whepPc?.close?.();
+    whepPc = null;
+    if (whepSession) {
+      fetch(whepSession, { method: "DELETE" }).catch(() => {});
+      whepSession = null;
+    }
     status.textContent = "正在加载…";
     retry.hidden = true;
+    if (isWebRtc) {
+      startWebRtc();
+      return;
+    }
     if (isDash) {
       loadDash().then((dashjs) => {
         if (closed) return;
@@ -118,6 +137,58 @@ export function playUrl(url, title, options = {}) {
       }
       video.play().catch(() => {});
     }).catch((error) => { status.textContent = error.message; retry.hidden = false; });
+  };
+  const startWebRtc = () => {
+    const pc = new RTCPeerConnection({ iceServers: [] });
+    whepPc = pc;
+    const stream = new MediaStream();
+    pc.addTransceiver("video", { direction: "recvonly" });
+    pc.addTransceiver("audio", { direction: "recvonly" });
+    pc.ontrack = (event) => {
+      stream.addTrack(event.track);
+      video.srcObject = stream;
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+        if (!closed) {
+          status.textContent = "WebRTC 连接已断开";
+          retry.hidden = false;
+        }
+      }
+    };
+    (async () => {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await new Promise((resolve) => {
+        if (pc.iceGatheringState === "complete") return resolve();
+        const timer = setTimeout(resolve, 2000);
+        pc.addEventListener("icegatheringstatechange", () => {
+          if (pc.iceGatheringState === "complete") {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+      });
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: pc.localDescription.sdp,
+      });
+      if (!response.ok) throw new Error("WHEP " + response.status);
+      whepSession = response.headers.get("Location");
+      const answer = await response.text();
+      await pc.setRemoteDescription({ type: "answer", sdp: answer });
+      status.textContent = "正在播放";
+      status.title = "WebRTC";
+      window.__rtflowWhep = pc;
+      // Best-effort low-latency hints (Chrome ignores unknown properties).
+      if ("playoutDelayHint" in video) video.playoutDelayHint = 0;
+      if ("jitterBufferTarget" in video) video.jitterBufferTarget = 0;
+      video.play().catch(() => {});
+    })().catch((error) => {
+      status.textContent = "播放失败：" + error.message;
+      retry.hidden = false;
+    });
   };
   retry.onclick = start;
   start();

@@ -167,8 +167,8 @@ export async function render(params) {
       };
       root.querySelector("[data-live-export]").onclick = () => {
         exportCsv(`streams-${new Date().toISOString().slice(0, 10)}.csv`,
-          ["path", "name", "publisher", "subscribers", "video_codec", "audio_codec", "accepted_frames", "dropped_frames", "hls", "dash", "dash_ll", "rtsp", "rtmp"],
-          visible.map((item) => [item.path, item.name, item.publisher, item.subscribers, item.video?.codec || "", item.audio?.codec || "", item.accepted_frames, item.dropped_frames, item.hls_url, item.dash_url, item.dash_ll_url, item.rtsp_url, item.rtmp_url]));
+          ["path", "name", "publisher", "subscribers", "video_codec", "audio_codec", "accepted_frames", "dropped_frames", "hls", "dash", "dash_ll", "webrtc", "rtsp", "rtmp"],
+          visible.map((item) => [item.path, item.name, item.publisher, item.subscribers, item.video?.codec || "", item.audio?.codec || "", item.accepted_frames, item.dropped_frames, item.hls_url, item.dash_url, item.dash_ll_url, item.webrtc_url, item.rtsp_url, item.rtmp_url]));
         ctx.toast(`已导出 ${visible.length} 条流`, "ok");
       };
       root.querySelector("[data-live-auto]").onclick = () => setAuto(!automatic);
@@ -249,8 +249,8 @@ function detail(stream) {
       <div class="detail-item"><span>RTP 包</span><strong class="mono" data-detail="packets">${num(stream.rtp_packets)}</strong></div>
       <div class="detail-item"><span>RTP 流量</span><strong class="mono" data-detail="octets">${bytes(stream.rtp_octets)}</strong></div>
     </div></section>
-    <section class="drawer-section"><h3>播放地址</h3>${endpoint("HLS", stream.hls_url)}${endpoint("LL-HLS", stream.ll_hls_url)}${endpoint("DASH", stream.dash_url)}${endpoint("LL-DASH", stream.dash_ll_url)}${endpoint("RTSP", stream.rtsp_url)}${endpoint("RTMP", stream.rtmp_url)}</section>
-    <div class="actions"><button class="btn small" data-detail-play="hls">预览 HLS</button><button class="btn small" data-detail-play="ll">预览 LL-HLS</button><button class="btn small" data-detail-play="dash">预览 DASH</button><button class="btn small" data-detail-play="dash-ll">预览 LL-DASH</button><button class="btn small ghost" data-detail-copy-all>复制全部地址</button><button class="btn small danger" data-detail-kick>断开此流</button></div>
+    <section class="drawer-section"><h3>播放地址</h3>${endpoint("HLS", stream.hls_url)}${endpoint("LL-HLS", stream.ll_hls_url)}${endpoint("DASH", stream.dash_url)}${endpoint("LL-DASH", stream.dash_ll_url)}${endpoint("WebRTC", stream.webrtc_url)}${endpoint("RTSP", stream.rtsp_url)}${endpoint("RTMP", stream.rtmp_url)}</section>
+    <div class="actions"><button class="btn small" data-detail-play="hls">预览 HLS</button><button class="btn small" data-detail-play="ll">预览 LL-HLS</button><button class="btn small" data-detail-play="dash">预览 DASH</button><button class="btn small" data-detail-play="dash-ll">预览 LL-DASH</button><button class="btn small" data-detail-play="webrtc">预览 WebRTC</button><button class="btn small ghost" data-detail-copy-all>复制全部地址</button><button class="btn small danger" data-detail-kick>断开此流</button></div>
   </div>`;
 }
 
@@ -291,8 +291,9 @@ function openDetail(stream, ctx) {
       root.querySelector("[data-detail-play=ll]").onclick = () => playUrl(stream.ll_hls_url, `${stream.name} · LL-HLS`);
       root.querySelector("[data-detail-play=dash]").onclick = () => playUrl(stream.dash_url, `${stream.name} · DASH`, { dash: true });
       root.querySelector("[data-detail-play=dash-ll]").onclick = () => playUrl(stream.dash_ll_url, `${stream.name} · LL-DASH`, { dash: true, ll: true });
+      root.querySelector("[data-detail-play=webrtc]").onclick = () => playUrl(stream.webrtc_url, `${stream.name} · WebRTC`, { webrtc: true });
       root.querySelector("[data-detail-copy-all]").onclick = async () => {
-        const urls = [stream.hls_url, stream.ll_hls_url, stream.dash_url, stream.dash_ll_url, stream.rtsp_url, stream.rtmp_url].filter(Boolean);
+        const urls = [stream.hls_url, stream.ll_hls_url, stream.dash_url, stream.dash_ll_url, stream.webrtc_url, stream.rtsp_url, stream.rtmp_url].filter(Boolean);
         try { await copyText(urls.join("\n")); toast("播放地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       };
       root.querySelector("[data-detail-kick]").onclick = async () => {

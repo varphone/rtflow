@@ -74,12 +74,7 @@ impl PeerConnectionEventHandler for PcHandler {
         // Convert the candidate to its SDP attribute form and remember
         // which media section it belongs to, so the answer can carry it.
         if let Ok(init) = event.candidate.to_json() {
-            let mut line = format!("a={}", init.candidate);
-            if let Some(mid) = init.sdp_mid
-                && !mid.is_empty()
-            {
-                line.push_str(&format!("\r\na=mid:{mid}"));
-            }
+            let line = format!("a={}", init.candidate);
             let mut candidates = self.state.candidates.write().await;
             if candidates.len() < self.state.max_candidates {
                 tracing::debug!(candidate = %init.candidate, "WebRTC: local ICE candidate");
@@ -214,16 +209,29 @@ pub(crate) async fn sender_payload_type(
 /// Append gathered candidates to an SDP answer without introducing a blank
 /// line (which terminates the SDP and makes browsers reject the answer).
 pub(crate) fn append_candidates(sdp: &str, candidates: &[String]) -> String {
-    let mut out = sdp.to_owned();
     if candidates.is_empty() {
-        return out;
+        return sdp.to_owned();
     }
-    if !out.ends_with("\r\n") {
-        out.push_str("\r\n");
-    }
+    // Candidates on the last m-line are not used for a BUNDLE transport by
+    // some browsers. Put them in the first media section instead.
+    let mut out = sdp.to_owned();
+    let insert_at = out
+        .match_indices("\r\nm=")
+        .nth(1)
+        .map(|(index, _)| index + 2);
+    let mut block = String::new();
     for line in candidates {
-        out.push_str(line.trim_end_matches('\r'));
-        out.push_str("\r\n");
+        block.push_str(line.trim_end_matches('\r'));
+        block.push_str("\r\n");
+    }
+    match insert_at {
+        Some(index) => out.insert_str(index, &block),
+        None => {
+            if !out.ends_with("\r\n") {
+                out.push_str("\r\n");
+            }
+            out.push_str(&block);
+        }
     }
     out
 }

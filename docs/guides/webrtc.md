@@ -61,13 +61,12 @@ ICE restart 见后续版本。
 端到端延迟由 VENC、服务端转发、网络、浏览器 jitter buffer 和解码/显示组成。
 本机 x86 基准（640×360@30，H.264，视频-only，Live 源含软件 x264 编码）：
 
-| 分位 | 延迟 |
-|---|---|
-| p50 | ≈29 ms |
-| p95 | ≈47 ms |
+- 多次运行 **p50 ≈30–70 ms，p95 ≈50–170 ms**；
+- 波动主要来自 Python 源生成/x264 队列和系统调度，不是 WebRTC 本身；
+- 服务端 ingest→packetize→SRTP 通常 **<10 ms**；
+- localhost 结果不含 HI3516 硬件 VENC 和真实网络，不能直接当作产品端到端承诺。
 
-这是 localhost 的服务器+WebRTC+Chromium 开销，不含 HI3516 硬件 VENC 和真实网络；
-不能直接当作产品端到端承诺。目标：
+目标：
 
 - LAN、Chrome、720p30：**p95 < 150 ms**，争取 100 ms；
 - 需要 `zerolatency`、无 B 帧、GOP 0.5–1 s、host ICE、客户端低 jitter buffer；
