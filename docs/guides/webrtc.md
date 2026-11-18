@@ -74,6 +74,16 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 - WHEP 启动只回放最近 150 ms、关键帧对齐的窗口，不在加入时回放整段缓存；
 - 视频-only 比带音频更容易压低延迟；A/V 同步会增加视频侧等待。
 
+## 已验证项
+
+- Chromium 143 通过 WHEP 播放 H.264（含音轨时也正常）；控制台“预览 WebRTC”可播放；
+- 带 `stun:stun.l.google.com:19302` 时 answer 同时包含 host 和 `typ srflx` candidate；
+- PATCH 完整 SDP offer 可完成 ICE restart/renegotiation；
+- 本机基准方法：Python 实时生成 640×360 原始帧，帧顶栏编码毫秒值，x264
+  `zerolatency` 编码后 RTMP 推流；Chromium WHEP 播放，canvas 解码每帧毫秒值并与
+  本地时钟相减，取 120 帧分位。该结果包含源生成/x264/RTMP/服务端/WebRTC/浏览器，
+  不含 HI3516 硬件 VENC 与真实网络。
+
 ## 低内存/嵌入式
 
 - 默认 `embedded-gateway` 不包含 WebRTC；启用后新增 `webrtc`/DTLS/SRTP 依赖；
