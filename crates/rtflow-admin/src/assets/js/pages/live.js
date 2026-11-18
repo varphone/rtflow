@@ -188,9 +188,11 @@ export async function render(params) {
         const stream = visible.find((item) => item.path === target.dataset.path);
         if (!stream) return;
         if (action === "detail") openDetail(stream, ctx);
-        else if (action === "play" || action === "play-ll" || action === "play-dash") {
+        else if (action === "play" || action === "play-ll" || action === "play-dash" || action === "play-webrtc") {
           if (action === "play-dash") {
             playUrl(stream.dash_url, `${stream.name} · DASH`, { dash: true });
+          } else if (action === "play-webrtc") {
+            playUrl(stream.webrtc_url, `${stream.name} · WebRTC`, { webrtc: true });
           } else {
             playUrl(action === "play" ? stream.hls_url : stream.ll_hls_url, `${stream.name} · ${action === "play" ? "HLS" : "LL-HLS"}`);
           }
@@ -228,6 +230,7 @@ function table(items, selected) {
         <button class="btn small" data-action="play" data-path="${esc(stream.path)}">HLS</button>
         <button class="btn small ghost" data-action="play-ll" data-path="${esc(stream.path)}">LL</button>
         <button class="btn small ghost" data-action="play-dash" data-path="${esc(stream.path)}">DASH</button>
+        <button class="btn small ghost" data-action="play-webrtc" data-path="${esc(stream.path)}">WebRTC</button>
         <button class="btn small danger" data-action="kick" data-path="${esc(stream.path)}">断开</button></div></td>
     </tr>`).join("")}</tbody></table></div>`;
 }
