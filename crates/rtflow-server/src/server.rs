@@ -649,21 +649,21 @@ impl ServerApp {
                 ),
             )
             .await;
-            for method in [Method::Patch, Method::Options] {
-                http.add_route(
-                    method,
-                    "/whip/*",
-                    crate::media::auth_guard(
-                        whip.clone(),
-                        auth.clone(),
-                        mounts.clone(),
-                        "/whip/",
-                        rtflow::auth::AccessRole::Publish,
-                        "webrtc",
-                    ),
-                )
+            http.add_route(
+                Method::Patch,
+                "/whip/*",
+                crate::media::auth_guard(
+                    whip.clone(),
+                    auth.clone(),
+                    mounts.clone(),
+                    "/whip/",
+                    rtflow::auth::AccessRole::Publish,
+                    "webrtc",
+                ),
+            )
+            .await;
+            http.add_route(Method::Options, "/whip/*", whip.clone())
                 .await;
-            }
             http.add_route(
                 Method::Post,
                 "/whep/*",
@@ -677,21 +677,21 @@ impl ServerApp {
                 ),
             )
             .await;
-            for method in [Method::Patch, Method::Options] {
-                http.add_route(
-                    method,
-                    "/whep/*",
-                    crate::media::auth_guard(
-                        whep.clone(),
-                        auth.clone(),
-                        mounts.clone(),
-                        "/whep/",
-                        rtflow::auth::AccessRole::Read,
-                        "webrtc",
-                    ),
-                )
+            http.add_route(
+                Method::Patch,
+                "/whep/*",
+                crate::media::auth_guard(
+                    whep.clone(),
+                    auth.clone(),
+                    mounts.clone(),
+                    "/whep/",
+                    rtflow::auth::AccessRole::Read,
+                    "webrtc",
+                ),
+            )
+            .await;
+            http.add_route(Method::Options, "/whep/*", whep.clone())
                 .await;
-            }
         }
         if config.http.health {
             http.add_route(Method::Get, "/healthz", crate::media::health_handler())
