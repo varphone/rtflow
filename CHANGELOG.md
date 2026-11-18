@@ -5,7 +5,7 @@
 
 ## [Unreleased]
 
-- WebRTC：增加会话/track/frame/candidate/生命周期上限，失败/关闭的 ICE 会话可回收；修复 WHEP/WHIP 浏览器 SDP、鉴权路径和响应 Content-Length；按浏览器 offer 过滤 codec；新增 STUN/TURN 配置、PATCH trickle ICE/ICE restart、ETag/CORS；WHEP 启动裁剪到最近 150 ms 关键帧窗口并请求源端 IDR；转发浏览器 PLI/FIR 为源端 IDR 请求，声明/处理 NACK 并缓存最近 256 个 RTP 包重传，每秒发送 RTCP Sender Report；本机基线约 46 MB（RTMP/HLS），第 1 路 WHEP +3 MB、4 路 +3.5 MB；本机 640×360 视频-only 软件源基准 p50≈30–70 ms、p95≈50–170 ms（含 x264 编码，硬件 VENC 不计此队列）。
+- WebRTC：增加会话/track/frame/candidate/生命周期上限，失败/关闭的 ICE 会话可回收；修复 WHEP/WHIP 浏览器 SDP、鉴权路径和响应 Content-Length；按浏览器 offer 过滤 codec；新增 STUN/TURN 配置、PATCH trickle ICE/ICE restart、ETag/CORS；WHEP 启动裁剪到最近 150 ms 关键帧窗口并请求源端 IDR；转发浏览器 PLI/FIR 为源端 IDR 请求，声明/处理 NACK 并缓存最近 256 个 RTP 包重传，每秒发送 RTCP Sender Report；本机基线约 46 MB（RTMP/HLS），第 1 路 WHEP +3 MB、4 路 +3.5 MB；本机 640×360/720p/1080p 视频-only 软件源基准 p50≈30–70 ms、p95≈50–170 ms（含 x264 编码，硬件 VENC 不计此队列）。
 
 ### Added
 

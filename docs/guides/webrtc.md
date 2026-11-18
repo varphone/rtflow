@@ -65,9 +65,11 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 
 - 640×360：p50 ≈36 ms，p95 ≈52 ms；
 - 1280×720：p50 ≈77 ms，p95 ≈145 ms；
+- 1920×1080：p50 ≈73 ms，p95 ≈188 ms（软件 x264；VAAPI 约 p50 126/p95 178，仍高于 150）；
 - 波动主要来自 Python 源生成/x264 队列和系统调度，不是 WebRTC 本身；
 - 服务端 ingest→packetize→SRTP 通常 **<10 ms**；
-- localhost 结果不含 HI3516 硬件 VENC 和真实网络，不能直接当作产品端到端承诺。
+- localhost 结果不含 HI3516 硬件 VENC 和真实网络，不能直接当作产品端到端承诺；
+- 1080p 本机 p95 未达 <150 ms，需硬件 VENC 板上验证。
 
 目标：
 
