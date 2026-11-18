@@ -6,7 +6,7 @@
 //! source provides it — WebRTC has no AAC/G.711, so other audio codecs
 //! are skipped until transcoding exists).
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -30,7 +30,9 @@ use super::transport::{
 use rtc::rtcp::payload_feedbacks::{
     full_intra_request::FullIntraRequest, picture_loss_indication::PictureLossIndication,
 };
+use rtc::rtp_transceiver::rtp_sender::RTCPFeedback;
 use rtc_rtcp::sender_report::SenderReport;
+use rtc_rtcp::transport_feedbacks::transport_layer_nack::TransportLayerNack;
 use rtflow_core::error::{Error, Result};
 use rtflow_http::ResponseWriter;
 use rtflow_media::Codec;
@@ -240,7 +242,24 @@ pub async fn handle_whep_post(
                         0
                     },
                     sdp_fmtp_line: codec_fmtp(codec, track.fmtp.as_deref()),
-                    rtcp_feedback: vec![],
+                    rtcp_feedback: vec![
+                        RTCPFeedback {
+                            typ: "nack".into(),
+                            parameter: String::new(),
+                        },
+                        RTCPFeedback {
+                            typ: "nack".into(),
+                            parameter: "pli".into(),
+                        },
+                        RTCPFeedback {
+                            typ: "ccm".into(),
+                            parameter: "fir".into(),
+                        },
+                        RTCPFeedback {
+                            typ: "goog-remb".into(),
+                            parameter: String::new(),
+                        },
+                    ],
                 },
                 ..Default::default()
             }],
@@ -515,6 +534,7 @@ async fn spawn_play_task(
             trim_startup(&mut startup, codec, Duration::from_millis(150));
         }
         let mut startup_iter = startup.into_iter();
+        let mut sent_packets: VecDeque<RtpPacket> = VecDeque::new();
         let mut last_sr = Instant::now();
         let mut last_rtp_timestamp = 0u32;
         let mut packet_count = 0u32;
@@ -531,6 +551,23 @@ async fn spawn_play_task(
                     let Some(TrackLocalEvent::OnRtcpPacket(packets)) = event else {
                         break;
                     };
+                    for packet in &packets {
+                        if let Some(nack) = packet
+                            .as_any()
+                            .downcast_ref::<TransportLayerNack>()
+                        {
+                            for pair in &nack.nacks {
+                                for sequence in pair.packet_list() {
+                                    if let Some(rtp) = sent_packets
+                                        .iter()
+                                        .find(|rtp| rtp.header.sequence_number == sequence)
+                                    {
+                                        let _ = track.write_rtp(rtp.clone()).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
                     let wants_keyframe = packets.iter().any(|packet| {
                         packet.as_any().downcast_ref::<PictureLossIndication>().is_some()
                             || packet.as_any().downcast_ref::<FullIntraRequest>().is_some()
@@ -598,6 +635,10 @@ async fn spawn_play_task(
                             },
                             payload: p.payload,
                         };
+                        sent_packets.push_back(rtp.clone());
+                        if sent_packets.len() > 256 {
+                            sent_packets.pop_front();
+                        }
                         if track.write_rtp(rtp).await.is_err() {
                             break;
                         }

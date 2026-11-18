@@ -63,7 +63,8 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 端到端延迟由 VENC、服务端转发、网络、浏览器 jitter buffer 和解码/显示组成。
 本机 x86 基准（640×360@30，H.264，视频-only，Live 源含软件 x264 编码）：
 
-- 多次运行 **p50 ≈30–70 ms，p95 ≈50–170 ms**；
+- 640×360：p50 ≈36 ms，p95 ≈52 ms；
+- 1280×720：p50 ≈77 ms，p95 ≈145 ms；
 - 波动主要来自 Python 源生成/x264 队列和系统调度，不是 WebRTC 本身；
 - 服务端 ingest→packetize→SRTP 通常 **<10 ms**；
 - localhost 结果不含 HI3516 硬件 VENC 和真实网络，不能直接当作产品端到端承诺。
@@ -81,6 +82,7 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 - 带 `stun:stun.l.google.com:19302` 时 answer 同时包含 host 和 `typ srflx` candidate；
 - PATCH 完整 SDP offer 可完成 ICE restart/renegotiation；
 - WHEP 侧监听浏览器 PLI/FIR，并转发为源端 IDR 请求（丢包恢复）；
+- WHEP 声明并处理 NACK/PLI/FIR，最近 256 个 RTP 包缓存用于重传；
 - WHEP 每秒发送 RTCP Sender Report（NTP/RTP 映射、packet/octet 计数），用于 A/V 同步与浏览器统计；
 - 本机基准方法：Python 实时生成 640×360 原始帧，帧顶栏编码毫秒值，x264
   `zerolatency` 编码后 RTMP 推流；Chromium WHEP 播放，canvas 解码每帧毫秒值并与
@@ -112,4 +114,4 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 
 - 不做 SFU/多人、simulcast/SVC、DataChannel、转码；
 - 不做 TURN 服务器；
-- 完整 RTCP NACK 重传/拥塞控制、TURN relay 实测仍在完善中。
+- 拥塞控制（TWCC/REMB 决策）、TURN relay 实测仍在完善中。
