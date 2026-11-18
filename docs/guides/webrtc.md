@@ -81,6 +81,7 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 - 带 `stun:stun.l.google.com:19302` 时 answer 同时包含 host 和 `typ srflx` candidate；
 - PATCH 完整 SDP offer 可完成 ICE restart/renegotiation；
 - WHEP 侧监听浏览器 PLI/FIR，并转发为源端 IDR 请求（丢包恢复）；
+- WHEP 每秒发送 RTCP Sender Report（NTP/RTP 映射、packet/octet 计数），用于 A/V 同步与浏览器统计；
 - 本机基准方法：Python 实时生成 640×360 原始帧，帧顶栏编码毫秒值，x264
   `zerolatency` 编码后 RTMP 推流；Chromium WHEP 播放，canvas 解码每帧毫秒值并与
   本地时钟相减，取 120 帧分位。该结果包含源生成/x264/RTMP/服务端/WebRTC/浏览器，

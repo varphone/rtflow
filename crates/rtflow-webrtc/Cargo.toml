@@ -22,6 +22,7 @@ rtflow-http.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 rtc.workspace = true
+rtc-rtcp = "0.20"
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

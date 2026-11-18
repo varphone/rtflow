@@ -30,6 +30,7 @@ use super::transport::{
 use rtc::rtcp::payload_feedbacks::{
     full_intra_request::FullIntraRequest, picture_loss_indication::PictureLossIndication,
 };
+use rtc_rtcp::sender_report::SenderReport;
 use rtflow_core::error::{Error, Result};
 use rtflow_http::ResponseWriter;
 use rtflow_media::Codec;
@@ -430,6 +431,16 @@ async fn assemble_answer_sdp(pc_state: Arc<PcState>, answer: &RTCSessionDescript
     super::transport::append_candidates(&answer.sdp, &candidates)
 }
 
+fn ntp_now() -> u64 {
+    const NTP_EPOCH_OFFSET: u64 = 2_208_988_800;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let seconds = now.as_secs().saturating_add(NTP_EPOCH_OFFSET);
+    let fraction = (u64::from(now.subsec_nanos()) << 32) / 1_000_000_000;
+    (seconds << 32) | fraction
+}
+
 /// Keep only a short, keyframe-aligned startup window. Replaying a full
 /// cached GOP would add its whole duration to the first displayed frame.
 fn trim_startup(frames: &mut Vec<Arc<rtflow_media::AccessUnit>>, codec: Codec, max: Duration) {
@@ -504,6 +515,10 @@ async fn spawn_play_task(
             trim_startup(&mut startup, codec, Duration::from_millis(150));
         }
         let mut startup_iter = startup.into_iter();
+        let mut last_sr = Instant::now();
+        let mut last_rtp_timestamp = 0u32;
+        let mut packet_count = 0u32;
+        let mut octet_count = 0u32;
         let mut awaiting_key = codec == rtflow_media::Codec::H264
             || codec == rtflow_media::Codec::H265
             || codec == rtflow_media::Codec::Vp8
@@ -568,6 +583,9 @@ async fn spawn_play_task(
                         }
                     };
                     for p in packets {
+                        last_rtp_timestamp = p.header.timestamp;
+                        packet_count = packet_count.saturating_add(1);
+                        octet_count = octet_count.saturating_add(p.payload.len() as u32);
                         let rtp = RtpPacket {
                             header: RtpHeader {
                                 version: 2,
@@ -583,6 +601,18 @@ async fn spawn_play_task(
                         if track.write_rtp(rtp).await.is_err() {
                             break;
                         }
+                    }
+                    if last_sr.elapsed() >= Duration::from_secs(1) {
+                        let sr = SenderReport {
+                            ssrc: ssrc_value,
+                            ntp_time: ntp_now(),
+                            rtp_time: last_rtp_timestamp,
+                            packet_count,
+                            octet_count,
+                            ..Default::default()
+                        };
+                        let _ = track.write_rtcp(vec![Box::new(sr)]).await;
+                        last_sr = Instant::now();
                     }
                 }
             }
