@@ -73,6 +73,29 @@ pub trait ControlPlane: Send + Sync + 'static {
     }
     fn start_recording<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<(), String>>;
     fn stop_recording<'a>(&'a self, path: &'a str) -> BoxFuture<'a, Result<(), String>>;
+
+    /// Synthetic test-source status. Implementations that do not support
+    /// testing return the disabled view.
+    fn testing(&self) -> serde_json::Value {
+        serde_json::json!({
+            "enabled": false,
+            "ffmpeg": {
+                "available": false,
+                "version": null,
+                "error": "testing is not supported by this build"
+            },
+            "max_jobs": 0,
+            "default_duration_secs": 0,
+            "max_duration_secs": 0,
+            "jobs": []
+        })
+    }
+    fn start_test(&self, _body: serde_json::Value) -> Result<serde_json::Value, String> {
+        Err("testing is not supported by this build".into())
+    }
+    fn stop_test(&self, _id: &str) -> Result<(), String> {
+        Err("testing is not supported by this build".into())
+    }
 }
 
 impl AdminConfig {

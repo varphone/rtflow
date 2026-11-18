@@ -180,3 +180,13 @@ hls = false
 dash = false
 flv = false
 webrtc = false
+
+# 管理台“测试体验”：默认关闭。开启后管理员可启动固定参数的本机测试推流
+# （RTMP/RTSP/SRT），仅用于功能/性能体验，不执行任意命令或远端 URL。
+[testing]
+enabled = false
+ffmpeg = "ffmpeg"
+max_jobs = 2
+default_duration = "60s"
+max_duration = "10m"
+mount_prefix = "/live/test"

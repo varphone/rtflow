@@ -235,6 +235,26 @@ fn proxy_schedule_windows_and_overnight() {
 }
 
 #[test]
+fn testing_section_parses_and_validates() {
+    let config = Config::from_toml(
+        "[testing]\nenabled = true\nffmpeg = \"ffmpeg\"\nmax_jobs = 2\ndefault_duration = \"30s\"\nmax_duration = \"2m\"\nmount_prefix = \"/live/test\"\n",
+    )
+    .unwrap();
+    assert!(config.testing.enabled);
+    assert_eq!(config.testing.max_jobs, 2);
+    assert_eq!(config.testing.default_duration, Duration::from_secs(30));
+    config.validate().unwrap();
+
+    let mut invalid = Config::default();
+    invalid.testing.max_jobs = 0;
+    assert!(invalid.validate().is_err());
+    invalid.testing.max_jobs = 2;
+    invalid.testing.default_duration = Duration::from_secs(61);
+    invalid.testing.max_duration = Duration::from_secs(60);
+    assert!(invalid.validate().is_err());
+}
+
+#[test]
 fn webrtc_section_parses_ice_config() {
     let config = Config::from_toml(
         "[webrtc]\nice_servers = [\"stun:stun.example.org:3478\", \"turn:turn.example.org:3478?transport=udp\"]\nice_username = \"u\"\nice_credential = \"p\"\nice_transport_policy = \"relay\"\n",

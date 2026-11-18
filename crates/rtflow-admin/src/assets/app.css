@@ -612,3 +612,15 @@ input[type="search"]::-webkit-search-cancel-button:hover { background: var(--tex
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid transparent; background-clip: content-box; border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--faint); background-clip: content-box; }
+
+/* Admin testing page */
+.test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.test-card { text-align: left; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); padding: 14px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+.test-card:hover:not(:disabled) { border-color: var(--accent); background: var(--surface-2); }
+.test-card:disabled { opacity: .55; cursor: not-allowed; }
+.test-card b { font-size: 13px; }
+.test-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.test-links > div { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; display: grid; gap: 4px; }
+.test-links b { font-size: 12px; }
+.inline-fields { display: flex; align-items: center; gap: 8px; }
+.inline-fields .input { min-width: 0; }

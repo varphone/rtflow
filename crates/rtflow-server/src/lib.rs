@@ -19,6 +19,7 @@ pub mod srt_pull;
 pub mod srt_push;
 mod srt_supervisor;
 mod store;
+pub mod testing;
 pub mod vod;
 
 pub use config::{Config, ConfigError};

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 mod proxy;
 mod srt;
 mod storage;
+mod testing;
 pub use proxy::{
     ProxyMode, ProxyMount, ProxyOutputs, ProxySchedule, ProxySection, ProxyTransport,
     ProxyUpstream, ScheduleDay,
@@ -20,6 +21,7 @@ use std::{
     time::Duration,
 };
 pub use storage::StorageSection;
+pub use testing::TestingSection;
 
 /// Top-level configuration.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -43,6 +45,7 @@ pub struct Config {
     pub discovery: DiscoverySection,
     pub proxy: ProxySection,
     pub storage: StorageSection,
+    pub testing: TestingSection,
     /// Static path rules. Keys are globs (`live/*`, `private/**`).
     pub paths: BTreeMap<String, PathRule>,
 }
@@ -646,6 +649,7 @@ impl Config {
                 "webrtc.session_max_lifetime is zero".into(),
             ));
         }
+        self.testing.validate()?;
         if !matches!(self.webrtc.ice_transport_policy.as_str(), "all" | "relay") {
             return Err(ConfigError::Invalid(
                 "webrtc.ice_transport_policy must be all or relay".into(),

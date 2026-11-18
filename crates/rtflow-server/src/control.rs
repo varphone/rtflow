@@ -1,7 +1,12 @@
 //! Admin control-plane bridge and framework event sink.
 use crate::{
-    audit::AuditLog, discovery::DiscoveryService, hooks::HookClient, keys::KeyStore,
-    paths::PathStore, recording::RecordingSupervisor,
+    audit::{AuditEvent, AuditLog},
+    discovery::DiscoveryService,
+    hooks::HookClient,
+    keys::KeyStore,
+    paths::PathStore,
+    recording::RecordingSupervisor,
+    testing::TestJobManager,
 };
 use rtflow::MountRegistry;
 use std::sync::Arc;
@@ -15,6 +20,7 @@ pub(crate) struct ControlBridge {
     pub(crate) mounts: Arc<MountRegistry>,
     pub(crate) proxies: Arc<rtflow::server::ProxyService>,
     pub(crate) audit: Option<Arc<AuditLog>>,
+    pub(crate) testing: Arc<TestJobManager>,
 }
 
 #[derive(serde::Deserialize)]
@@ -114,6 +120,27 @@ impl rtflow::admin::ControlPlane for ControlBridge {
             })
             .collect();
         serde_json::json!({ "proxies": proxies })
+    }
+
+    fn testing(&self) -> serde_json::Value {
+        serde_json::to_value(self.testing.view()).unwrap_or_default()
+    }
+
+    fn start_test(&self, body: serde_json::Value) -> Result<serde_json::Value, String> {
+        self.testing
+            .start(body)
+            .map(|job| serde_json::to_value(job).unwrap_or_default())
+    }
+
+    fn stop_test(&self, id: &str) -> Result<(), String> {
+        if let Some(audit) = &self.audit {
+            audit.record(
+                &AuditEvent::new("testing.stop", "requested")
+                    .path(id)
+                    .protocol("test"),
+            );
+        }
+        self.testing.stop(id)
     }
 
     fn start_recording<'a>(

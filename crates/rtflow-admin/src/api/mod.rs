@@ -495,6 +495,111 @@ fn control_recording_action_handler(state: Arc<AdminState>, start: bool) -> Hand
     })
 }
 
+fn testing_handler(state: Arc<AdminState>) -> Handler {
+    Arc::new(move |req, writer: ResponseWriter<_>| {
+        let state = state.clone();
+        Box::pin(async move {
+            if auth(&state, &req).is_none() {
+                return unauthorized(writer).await;
+            }
+            let Some(control) = control(&state) else {
+                return respond_json(writer, 404, &json!({"error":"control_disabled"}), None).await;
+            };
+            respond_json(writer, 200, &control.testing(), None).await
+        })
+    })
+}
+
+fn testing_start_handler(state: Arc<AdminState>) -> Handler {
+    Arc::new(move |req, writer: ResponseWriter<_>| {
+        let state = state.clone();
+        Box::pin(async move {
+            let Some(auth) = auth(&state, &req) else {
+                return unauthorized(writer).await;
+            };
+            if !csrf_allows(&state, &req, &auth) {
+                return forbidden(
+                    writer,
+                    if state.config.readonly {
+                        "只读模式"
+                    } else {
+                        "CSRF 校验失败"
+                    },
+                )
+                .await;
+            }
+            let Some(control) = control(&state) else {
+                return respond_json(writer, 404, &json!({"error":"control_disabled"}), None).await;
+            };
+            let body = match serde_json::from_slice::<serde_json::Value>(&req.body) {
+                Ok(body) => body,
+                Err(_) => {
+                    return respond_json(writer, 400, &json!({"error":"bad_json"}), None).await;
+                }
+            };
+            match control.start_test(body) {
+                Ok(job) => respond_json(writer, 200, &job, None).await,
+                Err(message) => {
+                    respond_json(
+                        writer,
+                        409,
+                        &json!({"error":"rejected","message":message}),
+                        None,
+                    )
+                    .await
+                }
+            }
+        })
+    })
+}
+
+fn testing_stop_handler(state: Arc<AdminState>) -> Handler {
+    Arc::new(move |req, writer: ResponseWriter<_>| {
+        let state = state.clone();
+        Box::pin(async move {
+            let Some(auth) = auth(&state, &req) else {
+                return unauthorized(writer).await;
+            };
+            if !csrf_allows(&state, &req, &auth) {
+                return forbidden(
+                    writer,
+                    if state.config.readonly {
+                        "只读模式"
+                    } else {
+                        "CSRF 校验失败"
+                    },
+                )
+                .await;
+            }
+            let Some(control) = control(&state) else {
+                return respond_json(writer, 404, &json!({"error":"control_disabled"}), None).await;
+            };
+            let body = serde_json::from_slice::<serde_json::Value>(&req.body).unwrap_or_default();
+            let id = body.get("id").and_then(|value| {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .or_else(|| value.as_u64().map(|id| id.to_string()))
+            });
+            let Some(id) = id else {
+                return respond_json(writer, 400, &json!({"error":"missing_id"}), None).await;
+            };
+            match control.stop_test(&id) {
+                Ok(()) => respond_json(writer, 200, &json!({"ok":true}), None).await,
+                Err(message) => {
+                    respond_json(
+                        writer,
+                        409,
+                        &json!({"error":"rejected","message":message}),
+                        None,
+                    )
+                    .await
+                }
+            }
+        })
+    })
+}
+
 fn csrf_allows(state: &AdminState, req: &HttpRequest, auth: &Auth) -> bool {
     if state.config.readonly {
         return false;
@@ -701,6 +806,24 @@ pub(super) async fn register(http: &HttpServer, state: Arc<AdminState>) {
         Method::Get,
         &format!("{base}/api/system"),
         system_handler(state.clone()),
+    )
+    .await;
+    http.add_route(
+        Method::Get,
+        &format!("{base}/api/testing"),
+        testing_handler(state.clone()),
+    )
+    .await;
+    http.add_route(
+        Method::Post,
+        &format!("{base}/api/testing/start"),
+        testing_start_handler(state.clone()),
+    )
+    .await;
+    http.add_route(
+        Method::Post,
+        &format!("{base}/api/testing/stop"),
+        testing_stop_handler(state.clone()),
     )
     .await;
     http.add_route(

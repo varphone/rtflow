@@ -69,6 +69,7 @@ pub struct ServerHandle {
     proxy_event_sink: Arc<dyn rtflow::EventSink>,
     proxy_config: Arc<std::sync::RwLock<crate::config::ProxySection>>,
     config: Arc<Config>,
+    testing: Arc<crate::testing::TestJobManager>,
 }
 
 /// What a SIGHUP reload applied and what still needs a restart.
@@ -85,6 +86,7 @@ impl ServerHandle {
             cancel.cancel();
         }
         self.recording.shutdown().await;
+        self.testing.shutdown();
         self.proxies.shutdown();
         if let Some(rtsp) = self.rtsp.take()
             && let Err(error) = rtsp.shutdown().await
@@ -303,6 +305,7 @@ impl ServerApp {
             ));
             let _ = std::fs::rename(&overlay, archived);
         }
+        let testing = crate::testing::TestJobManager::new(crate::testing::testing_config(&config));
         let config = Arc::new(config);
         let metrics = Arc::new(MetricsRegistry::default());
         let mut mounts = MountRegistry::new(4096);
@@ -740,6 +743,7 @@ impl ServerApp {
                         mounts: mounts.clone(),
                         proxies: proxies.clone(),
                         audit: audit.clone(),
+                        testing: testing.clone(),
                     }));
             Some(Arc::new(Admin::new(admin_config, mounts.clone())?))
         } else {
@@ -884,6 +888,7 @@ impl ServerApp {
             proxy_event_sink: event_sink,
             proxy_config,
             config,
+            testing,
         })
     }
 }
