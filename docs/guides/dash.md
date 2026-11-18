@@ -73,9 +73,11 @@ suggested_presentation_delay = "3s"   # 缺省 3 × segment_duration
 ```text
 GET /dash-vod/{id}/manifest.mpd       # static MPD
 GET /dash-vod/{id}/video-{track}-init.mp4
-GET /dash-vod/{id}/audio-init.mp4
+GET /dash-vod/{id}/audio-init.mp4          # 单音轨
+GET /dash-vod/{id}/audio-{track}-init.mp4  # 多音轨
 GET /dash-vod/{id}/video-{track}-{N}.m4s
-GET /dash-vod/{id}/audio-{N}.m4s
+GET /dash-vod/{id}/audio-{N}.m4s            # 单音轨
+GET /dash-vod/{id}/audio-{track}-{N}.m4s    # 多音轨
 ```
 
 -静态 MPD 的 `mediaPresentationDuration` 来自录制时长，`Period@duration` 同步；
@@ -105,7 +107,7 @@ dash.js 也可直接加载该 MPD；`crates/rtflow/examples/protocols/dash_serve
 
 - 直播多视频轨会生成多个视频 Representation，但需要源端本身提供多 rendition（当前不做转码
   ladder）；各 rendition 的分片边界独立，MPD 标 `segmentAlignment="false"`，只在源端 GOP
-  对齐时具备完整 ABR 切换体验。直播支持多条音轨（每轨一个 AdaptationSet）；VOD 为每条视频轨生成 Representation，音频暂取首条。
+  对齐时具备完整 ABR 切换体验。直播和 VOD 都支持多条音轨（每轨一个 AdaptationSet）。
 - DASH VOD 目前由服务端的录制目录生成；其他 `VodSource` 可复用同一 manager 接入。暂不支持多码率/多 Period VOD。
 - 不支持 LL-DASH/chunked CMAF、DRM/CENC、多 Period、广告插入。
 - H.264 codec 从 avcC 提取；H.265 从 hvcC 提取 `hvc1` codec（profile/tier/level/constraints），不支持的变体回退到静态字符串。

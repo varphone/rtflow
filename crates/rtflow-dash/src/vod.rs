@@ -18,7 +18,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-const VOD_CACHE_VERSION: u32 = 5;
+const VOD_CACHE_VERSION: u32 = 6;
 
 #[derive(Clone)]
 pub struct DashVodEntry {
@@ -192,16 +192,8 @@ fn append_query(manifest: &str, query: &str) -> String {
         return manifest.to_owned();
     }
     manifest
-        .replace("video-init.mp4\"", &format!("video-init.mp4?{query}\""))
-        .replace("audio-init.mp4\"", &format!("audio-init.mp4?{query}\""))
-        .replace(
-            "video-$Number$.m4s\"",
-            &format!("video-$Number$.m4s?{query}\""),
-        )
-        .replace(
-            "audio-$Number$.m4s\"",
-            &format!("audio-$Number$.m4s?{query}\""),
-        )
+        .replace("-init.mp4\"", &format!("-init.mp4?{query}\""))
+        .replace(".m4s\"", &format!(".m4s?{query}\""))
 }
 
 fn generate(
@@ -225,11 +217,12 @@ fn generate(
         .filter(|track| track.kind == MediaKind::Video)
         .cloned()
         .collect();
-    let audio_track = description
+    let audio_tracks: Vec<rtflow_media::TrackDescription> = description
         .tracks
         .iter()
-        .find(|track| track.kind == MediaKind::Audio)
-        .cloned();
+        .filter(|track| track.kind == MediaKind::Audio)
+        .cloned()
+        .collect();
     let video_descriptions: Vec<rtflow_media::MediaDescription> = video_tracks
         .iter()
         .map(|track| {
@@ -238,11 +231,14 @@ fn generate(
             filtered
         })
         .collect();
-    let audio_description = audio_track.as_ref().map(|track| {
-        let mut filtered = description.clone();
-        filtered.tracks = vec![track.clone()];
-        filtered
-    });
+    let audio_descriptions: Vec<rtflow_media::MediaDescription> = audio_tracks
+        .iter()
+        .map(|track| {
+            let mut filtered = description.clone();
+            filtered.tracks = vec![track.clone()];
+            filtered
+        })
+        .collect();
     let video_index: HashMap<u8, usize> = video_tracks
         .iter()
         .enumerate()
@@ -267,45 +263,53 @@ fn generate(
         .map(|segmenter| segmenter.subscribe())
         .collect();
     let mut video_segments: Vec<Vec<Segment>> = vec![Vec::new(); video_segmenters.len()];
-    let mut audio = audio_description.map(|description| {
-        Segmenter::new(
-            SegmenterConfig {
-                segment_duration: audio_segment_duration,
-                lookback_count: 2,
-            },
-            &description,
-        )
-    });
-    let mut audio_receiver = audio.as_ref().map(|segmenter| segmenter.subscribe());
-    let audio_track_id = audio_track.as_ref().map(|track| track.id);
-    let mut audio_segments: Vec<Segment> = Vec::new();
+    let mut audio_segmenters: Vec<Segmenter> = audio_descriptions
+        .iter()
+        .map(|description| {
+            Segmenter::new(
+                SegmenterConfig {
+                    segment_duration: audio_segment_duration,
+                    lookback_count: 2,
+                },
+                description,
+            )
+        })
+        .collect();
+    let mut audio_receivers: Vec<_> = audio_segmenters
+        .iter()
+        .map(|segmenter| segmenter.subscribe())
+        .collect();
+    let audio_index: HashMap<u8, usize> = audio_tracks
+        .iter()
+        .enumerate()
+        .map(|(index, track)| (track.id, index))
+        .collect();
+    let mut audio_segments: Vec<Vec<Segment>> = vec![Vec::new(); audio_segmenters.len()];
     let mut demuxer = source.open()?;
     while let Some(sample) = demuxer.next_sample()? {
         if let Some(index) = video_index.get(&sample.unit.track_id).copied() {
             video_segmenters[index].push(sample.unit);
-        } else if audio_track_id == Some(sample.unit.track_id)
-            && let Some(segmenter) = &mut audio
-        {
-            segmenter.push(sample.unit);
+        } else if let Some(index) = audio_index.get(&sample.unit.track_id).copied() {
+            audio_segmenters[index].push(sample.unit);
         }
         for (index, receiver) in video_receivers.iter_mut().enumerate() {
             while let Ok(segment) = receiver.try_recv() {
                 video_segments[index].push(segment);
-                if let Some(segmenter) = &mut audio {
+                for segmenter in &mut audio_segmenters {
                     segmenter.cut_current();
                 }
             }
         }
-        if let Some(receiver) = audio_receiver.as_mut() {
+        for (index, receiver) in audio_receivers.iter_mut().enumerate() {
             while let Ok(segment) = receiver.try_recv() {
-                audio_segments.push(segment);
+                audio_segments[index].push(segment);
             }
         }
     }
     for segmenter in &mut video_segmenters {
         segmenter.flush();
     }
-    if let Some(segmenter) = &mut audio {
+    for segmenter in &mut audio_segmenters {
         segmenter.flush();
     }
     for (index, receiver) in video_receivers.iter_mut().enumerate() {
@@ -313,18 +317,18 @@ fn generate(
             video_segments[index].push(segment);
         }
     }
-    if let Some(receiver) = audio_receiver.as_mut() {
+    for (index, receiver) in audio_receivers.iter_mut().enumerate() {
         while let Ok(segment) = receiver.try_recv() {
-            audio_segments.push(segment);
+            audio_segments[index].push(segment);
         }
     }
     tracing::info!(
         title,
         video_segments = video_segments.iter().map(Vec::len).sum::<usize>(),
-        audio_segments = audio_segments.len(),
+        audio_segments = audio_segments.iter().map(Vec::len).sum::<usize>(),
         "DASH VOD generation finished"
     );
-    if video_segments.iter().all(Vec::is_empty) && audio_segments.is_empty() {
+    if video_segments.iter().all(Vec::is_empty) && audio_segments.iter().all(Vec::is_empty) {
         return Err(rtflow_core::error::Error::Media(format!(
             "DASH VOD {title} produced no segments"
         )));
@@ -344,20 +348,34 @@ fn generate(
             )?;
         }
     }
-    if let Some(first) = audio_segments.first() {
-        std::fs::write(directory.join("audio-init.mp4"), &first.init)?;
-    }
-    for segment in &audio_segments {
-        std::fs::write(
-            directory.join(format!("audio-{}.m4s", segment.sequence)),
-            &segment.data,
-        )?;
+    let audio_with_segments: Vec<(&rtflow_media::TrackDescription, &[Segment])> = audio_tracks
+        .iter()
+        .zip(&audio_segments)
+        .filter(|(_, segments)| !segments.is_empty())
+        .map(|(track, segments)| (track, segments.as_slice()))
+        .collect();
+    let multiple_audio = audio_with_segments.len() > 1;
+    for (track, segments) in &audio_with_segments {
+        let prefix = if multiple_audio {
+            format!("audio-{}", track.id)
+        } else {
+            "audio".to_string()
+        };
+        if let Some(first) = segments.first() {
+            std::fs::write(directory.join(format!("{prefix}-init.mp4")), &first.init)?;
+        }
+        for segment in *segments {
+            std::fs::write(
+                directory.join(format!("{prefix}-{}.m4s", segment.sequence)),
+                &segment.data,
+            )?;
+        }
     }
     let duration = duration.unwrap_or_else(|| {
         video_segments
             .iter()
             .flat_map(|segments| segments.iter())
-            .chain(&audio_segments)
+            .chain(audio_segments.iter().flat_map(|segments| segments.iter()))
             .map(|segment| segment.timestamp.saturating_add(segment.duration))
             .max()
             .unwrap_or_default()
@@ -383,14 +401,19 @@ fn generate(
             }
         })
         .collect();
-    let audio_rep = audio_track.as_ref().map(|track| mpd::MpdAudioTrack {
-        id: track.id,
-        track,
-        segments: &audio_segments,
-    });
+    let audio_reps: Vec<mpd::MpdAudioTrack<'_>> = audio_tracks
+        .iter()
+        .zip(&audio_segments)
+        .filter(|(_, segments)| !segments.is_empty())
+        .map(|(track, segments)| mpd::MpdAudioTrack {
+            id: track.id,
+            track,
+            segments,
+        })
+        .collect();
     let manifest = mpd::generate_static_mpd(
         &video_reps,
-        audio_rep.as_slice(),
+        &audio_reps,
         &description,
         &MpdConfig::default(),
         duration,
