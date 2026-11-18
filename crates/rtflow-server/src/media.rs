@@ -61,7 +61,17 @@ pub(crate) fn auth_guard(
                             return rest.trim_end_matches(".flv").to_owned();
                         }
                         if protocol == "webrtc" {
-                            // WHIP/WHEP path is the mount itself, not a file.
+                            // POST/OPTIONS path is the mount; PATCH/DELETE carry
+                            // "/{mount}/{session_id}".
+                            if matches!(
+                                req.method,
+                                rtflow::http::Method::Patch | rtflow::http::Method::Delete
+                            ) {
+                                return rest
+                                    .rsplit_once('/')
+                                    .map(|(mount, _)| mount.to_owned())
+                                    .unwrap_or_else(|| rest.to_owned());
+                            }
                             return rest.trim_end_matches('/').to_owned();
                         }
                         // HLS/LL-HLS/DASH: the mount is the directory that

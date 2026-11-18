@@ -301,7 +301,10 @@ pub async fn handle_whep_post(
         .write_headers(
             201,
             &[
-                ("Location", &format!("/whep/{}", session.read().await.id)),
+                (
+                    "Location",
+                    &format!("/whep{}/{}", path, session.read().await.id),
+                ),
                 ("Access-Control-Expose-Headers", "Location, ETag"),
                 ("Access-Control-Allow-Origin", "*"),
                 ("ETag", &format!("\"{}\"", session.read().await.id)),
@@ -577,13 +580,61 @@ pub async fn handle_whep_patch(
     let Some(session) = sessions.get_session(&id).await else {
         return respond_plain(writer, 404, "session not found").await;
     };
-    let s = session.read().await;
-    let Some(pc) = s.pc.clone() else {
-        return respond_plain(writer, 409, "session has no peer connection").await;
+    let (pc, pc_state) = {
+        let s = session.read().await;
+        let Some(pc) = s.pc.clone() else {
+            return respond_plain(writer, 409, "session has no peer connection").await;
+        };
+        (pc, s.pc_state.clone())
     };
-    drop(s);
-    let candidates = super::transport::candidates_from_sdp(&String::from_utf8_lossy(body));
-    for candidate in candidates {
+    let text = String::from_utf8_lossy(body);
+    if text.contains("\r\nm=") || text.contains("\nm=") {
+        let remote = RTCSessionDescription::offer(text.to_string())
+            .map_err(|e| Error::Http(format!("WHEP: PATCH invalid offer: {e}")))?;
+        if let Err(e) = pc.set_remote_description(remote).await {
+            return respond_plain(writer, 400, &format!("set_remote_description: {e}")).await;
+        }
+        for candidate in super::transport::candidates_from_sdp(&text) {
+            let _ = pc.add_ice_candidate(candidate).await;
+        }
+        let answer = match pc.create_answer(None).await {
+            Ok(answer) => answer,
+            Err(e) => return respond_plain(writer, 500, &format!("create_answer: {e}")).await,
+        };
+        if let Err(e) = pc.set_local_description(answer.clone()).await {
+            return respond_plain(writer, 500, &format!("set_local_description: {e}")).await;
+        }
+        if let Some(pc_state) = &pc_state {
+            tokio::time::timeout(GATHER_TIMEOUT, pc_state.gather_done.notified())
+                .await
+                .ok();
+        }
+        let sdp = match &pc_state {
+            Some(pc_state) => {
+                let candidates = pc_state.candidates.read().await;
+                super::transport::append_candidates(&answer.sdp, &candidates)
+            }
+            None => answer.sdp,
+        };
+        let length = sdp.len().to_string();
+        session.write().await.touch();
+        let mut writer = writer;
+        writer
+            .write_headers(
+                200,
+                &[
+                    ("Content-Type", "application/sdp"),
+                    ("Content-Length", &length),
+                    ("Access-Control-Allow-Origin", "*"),
+                    ("Cache-Control", "no-store"),
+                ],
+            )
+            .await?;
+        writer.write_raw(sdp.as_bytes()).await?;
+        writer.flush().await?;
+        return Ok(writer);
+    }
+    for candidate in super::transport::candidates_from_sdp(&text) {
         if let Err(e) = pc.add_ice_candidate(candidate).await {
             tracing::debug!("WHEP: PATCH add_ice_candidate failed: {e}");
         }

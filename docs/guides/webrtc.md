@@ -54,7 +54,8 @@ ice_transport_policy = "all"   # all | relay
 - `turns:` 需要 TURN TLS 服务。
 
 当前 WHIP/WHEP 的 answer 会带 gathered candidate；PATCH 支持后续 trickle。
-ICE restart 见后续版本。
+PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应为
+`200 application/sdp`。
 
 ## 延迟
 
@@ -95,4 +96,4 @@ ICE restart 见后续版本。
 
 - 不做 SFU/多人、simulcast/SVC、DataChannel、转码；
 - 不做 TURN 服务器；
-- ICE restart、会话资源配额、完整 RTCP 反馈仍在完善中。
+- 完整 RTCP 反馈/关键帧 PLI 转发仍在完善中。
