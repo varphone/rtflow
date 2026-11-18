@@ -225,3 +225,18 @@ async fn whip_post_with_empty_body_returns_400() {
         "Empty body should return 400 or 201, got {status}"
     );
 }
+
+#[tokio::test]
+async fn whep_post_without_sdp_content_type_returns_415() {
+    let (addr, _mounts) = setup_server().await;
+    let offer = sdp_offer();
+    let (status, _headers, _body) = http_request(
+        addr,
+        "POST",
+        "/whep/live/stream",
+        Some(&offer),
+        Some("text/plain"),
+    )
+    .await;
+    assert_eq!(status, 415);
+}

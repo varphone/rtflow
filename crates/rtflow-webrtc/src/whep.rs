@@ -95,6 +95,12 @@ pub async fn handle_whep_post(
     if !offer.contains("m=") {
         return respond_plain(writer, 400, "invalid SDP offer").await;
     }
+    if !req
+        .header("content-type")
+        .is_some_and(|value| value.to_ascii_lowercase().starts_with("application/sdp"))
+    {
+        return respond_plain(writer, 415, "Content-Type must be application/sdp").await;
+    }
 
     // The mount must exist and offer at least one playable track.
     let mount = mounts
@@ -691,6 +697,11 @@ pub async fn handle_whep_delete(
     sessions: Arc<SessionRegistry>,
 ) -> Result<ResponseWriter<rtflow_http::ConnWriter>> {
     if let Some(id) = session_id_from_path(&req.path) {
+        if let Some(expected) = req.header("if-match")
+            && expected.trim_matches('"') != id
+        {
+            return respond_plain(writer, 412, "etag mismatch").await;
+        }
         sessions.remove_session(&id).await;
     }
     let mut writer = writer;
