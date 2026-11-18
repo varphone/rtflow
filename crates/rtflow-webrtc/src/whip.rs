@@ -220,7 +220,7 @@ async fn spawn_ingest_task(
         let tracks = loop {
             tokio::select! {
                 _ = cancel.cancelled() => return,
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                _ = tokio::time::sleep(Duration::from_millis(20)) => {
                     let receivers = pc.get_receivers().await;
                     let mut found = Vec::new();
                     for receiver in &receivers {
