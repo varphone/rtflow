@@ -28,6 +28,7 @@ pub(super) struct StreamView {
     pub rtp_octets: u64,
     pub hls_url: String,
     pub ll_hls_url: String,
+    pub dash_url: String,
     pub rtmp_url: String,
     pub rtsp_url: String,
     pub protocols: Vec<&'static str>,
@@ -79,6 +80,10 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
         state.config.ll_hls_prefix.trim_end_matches('/'),
         path
     );
+    let dash_url = format!(
+        "/dash/{}/manifest.mpd",
+        path.trim_start_matches('/')
+    );
     let rtmp_url = format!(
         "{}{}",
         state
@@ -111,9 +116,10 @@ pub(super) fn stream_view(state: &AdminState, path: &str) -> Option<StreamView> 
         rtp_octets: snapshot.stats.rtp_octets,
         hls_url,
         ll_hls_url,
+        dash_url,
         rtmp_url,
         rtsp_url,
-        protocols: vec!["HLS", "RTSP"],
+        protocols: vec!["HLS", "DASH", "RTSP"],
     })
 }
 
@@ -153,6 +159,7 @@ pub(super) struct VodView {
     title: String,
     duration_ms: u128,
     playlist: String,
+    dash: String,
     cached: bool,
     cache_bytes: u64,
 }
@@ -170,6 +177,7 @@ pub(super) fn vods(state: &AdminState) -> Vec<VodView> {
                         title: entry.title.clone(),
                         duration_ms: entry.duration.map_or(0, |duration| duration.as_millis()),
                         playlist: format!("/vod/{}/index.m3u8", entry.id),
+                        dash: format!("/dash-vod/{}/manifest.mpd", entry.id),
                         cached: cache_bytes > 0,
                         cache_bytes,
                     }

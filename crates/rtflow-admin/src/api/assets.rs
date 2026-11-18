@@ -33,6 +33,11 @@ pub(super) const ASSETS: &[Asset] = &[
         "text/javascript; charset=utf-8"
     ),
     asset!(
+        "dash.all.min.js",
+        "../assets/dash.all.min.js",
+        "text/javascript; charset=utf-8"
+    ),
+    asset!(
         "js/api.js",
         "../assets/js/api.js",
         "text/javascript; charset=utf-8"

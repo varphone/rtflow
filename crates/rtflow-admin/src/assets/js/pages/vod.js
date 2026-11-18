@@ -130,6 +130,7 @@ export async function render(params) {
         const vod = visible.find((item) => item.id === target.dataset.id);
         if (target.dataset.action === "detail" && vod) openVodDetail(vod, ctx);
         else if (target.dataset.action === "play" && vod) playUrl(vod.playlist, vod.title, { vod: true });
+        else if (target.dataset.action === "play-dash" && vod) playUrl(vod.dash, vod.title, { vod: true, dash: true });
         else if (target.dataset.action === "copy") {
           try { await copyText(target.dataset.url); toast("地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
         } else if (target.dataset.action === "refresh-vod" && vod) {
@@ -182,6 +183,7 @@ function cards(items, selected) {
       <div class="vod-meta"><span class="badge codec">HLS</span><span class="badge ${vod.cached ? "ok" : ""}" data-vod-cache>${vod.cached ? "已缓存" : "未缓存"}</span>${stamp > 1e12 ? `<span class="cell-sub">${esc(dateTime(stamp / 1000))}</span>` : ""}</div>
       <div class="vod-actions"><button class="btn small primary" data-action="play" data-id="${esc(vod.id)}">播放</button>
         <button class="btn small ghost" data-action="detail" data-id="${esc(vod.id)}">详情</button>
+        <button class="btn small ghost" data-action="play-dash" data-id="${esc(vod.id)}">DASH</button>
         <button class="btn small" data-action="copy" data-url="${esc(location.origin + vod.playlist)}">复制地址</button>
         <button class="btn small ghost" data-action="refresh-vod" data-id="${esc(vod.id)}">刷新缓存</button></div>
     </article>`;
@@ -208,7 +210,7 @@ function openVodDetail(vod, ctx) {
         <div class="endpoint"><span class="endpoint-label">HLS</span><code>${esc(location.origin + vod.playlist)}</code><button class="btn small ghost" data-vod-copy>复制</button></div>
         ${vod.dash ? `<div class="endpoint"><span class="endpoint-label">DASH</span><code>${esc(location.origin + vod.dash)}</code><button class="btn small ghost" data-vod-copy-dash>复制</button></div>` : ""}
       </section>
-      <div class="actions"><button class="btn small primary" data-vod-play>播放</button><button class="btn small ghost" data-vod-refresh>刷新生成缓存</button><button class="btn small ghost" data-vod-recording>查看录制</button></div>
+      <div class="actions"><button class="btn small primary" data-vod-play>播放</button><button class="btn small" data-vod-play-dash>预览 DASH</button><button class="btn small ghost" data-vod-refresh>刷新生成缓存</button><button class="btn small ghost" data-vod-recording>查看录制</button></div>
     </div>`,
     onMount(root) {
       const close = () => root.querySelector("[data-close-drawer]")?.click();
@@ -219,6 +221,7 @@ function openVodDetail(vod, ctx) {
         try { await copyText(location.origin + vod.dash); toast("DASH 地址已复制", "ok"); } catch (_) { toast("复制失败", "bad"); }
       });
       root.querySelector("[data-vod-play]").onclick = () => { close(); playUrl(vod.playlist, vod.title, { vod: true }); };
+      root.querySelector("[data-vod-play-dash]").onclick = () => { close(); playUrl(vod.dash, vod.title, { vod: true, dash: true }); };
       root.querySelector("[data-vod-refresh]").onclick = async () => {
         try { await api(`/vods/${encodeURIComponent(vod.id)}/refresh`, { method: "POST" }); toast("缓存已清除，下次播放重新生成", "ok"); close(); ctx.reload(); }
         catch (error) { toast(error.message, "bad"); }
