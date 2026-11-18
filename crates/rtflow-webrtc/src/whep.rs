@@ -8,7 +8,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rtc::rtp::header::Header as RtpHeader;
 use rtc::rtp::packet::Packet as RtpPacket;
@@ -479,6 +479,7 @@ async fn spawn_play_task(
                 return;
             }
         };
+        let mut last_keyframe_request = Instant::now();
         if matches!(
             codec,
             rtflow_media::Codec::H264
@@ -506,10 +507,13 @@ async fn spawn_play_task(
                         packet.as_any().downcast_ref::<PictureLossIndication>().is_some()
                             || packet.as_any().downcast_ref::<FullIntraRequest>().is_some()
                     });
-                    if wants_keyframe {
+                    if wants_keyframe
+                        && last_keyframe_request.elapsed() >= Duration::from_millis(500)
+                    {
                         if let Some(publisher) = &publisher {
                             publisher.request_keyframe(track_id);
                         }
+                        last_keyframe_request = Instant::now();
                     }
                 }
                 frame = async {
