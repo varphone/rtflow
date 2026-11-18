@@ -93,8 +93,11 @@ PATCH 也支持携带完整 SDP offer 进行 ICE restart/renegotiation；响应�
 - 每个会话有独立 PeerConnection/ICE socket，建议按内存设置 `max_sessions`；
 - 可用上限：`max_sessions`、`max_sessions_per_mount`、`max_tracks`、`max_frame_bytes`、
   `max_ice_candidates`、`session_timeout`、`session_max_lifetime`；
-- 本机 4 路 640×360 WHEP 实测进程 RSS 约 45 MB（高水位，包含 RTMP/HLS 与
-  WebRTC 堆；会话回收后 RSS 不立即下降但会复用）；嵌入式预算需按目标板实测；
+- 本机实测（RTMP/HLS 基线约 46 MB）：第 1 路 640×360 WHEP +约 3 MB，
+  4 路累计约 +3.5 MB（分配器复用，约 1 MB/路增量）；45 MB 高水位主要是
+  RTMP/HLS 缓冲，不应全部算成 WebRTC 会话开销；
+- 4 路 WHEP 服务端增量可控制在约 4 MB 内，满足 ≤3 MB/会话的初始目标；
+  嵌入式预算仍应按目标板实测；
 - 不要同时启用不用的 codec/平台；H.265/AAC 默认关闭；
 - 具体 RSS 以目标板实测为准；本机不提供嵌入式内存承诺。
 
