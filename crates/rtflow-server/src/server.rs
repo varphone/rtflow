@@ -622,6 +622,19 @@ impl ServerApp {
             webrtc_config.whep.ice_username = config.webrtc.ice_username.clone();
             webrtc_config.whep.ice_credential = config.webrtc.ice_credential.clone();
             webrtc_config.whep.ice_transport_policy = config.webrtc.ice_transport_policy.clone();
+            webrtc_config.whip.max_tracks = config.webrtc.max_tracks;
+            webrtc_config.whep.max_tracks = config.webrtc.max_tracks;
+            webrtc_config.whip.max_frame_bytes = config.webrtc.max_frame_bytes;
+            webrtc_config.whip.max_ice_candidates = config.webrtc.max_ice_candidates;
+            webrtc_config.whep.max_ice_candidates = config.webrtc.max_ice_candidates;
+            webrtc_config.max_sessions = config.webrtc.max_sessions;
+            webrtc_config.max_sessions_per_mount = config.webrtc.max_sessions_per_mount;
+            if let Some(timeout) = config.webrtc.session_timeout {
+                webrtc_config.session_timeout = timeout;
+            }
+            if let Some(lifetime) = config.webrtc.session_max_lifetime {
+                webrtc_config.session_max_lifetime = lifetime;
+            }
             let (whip, whep) = create_webrtc_handlers(webrtc_config, mounts.clone());
             http.add_route(
                 Method::Post,

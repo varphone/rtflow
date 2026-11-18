@@ -76,6 +76,13 @@ enabled = true
 # ice_username = "${TURN_USER}"
 # ice_credential = "${TURN_PASS}"
 # ice_transport_policy = "all"   # all | relay
+# max_sessions = 64
+# max_sessions_per_mount = 16
+# max_tracks = 2
+# max_frame_bytes = 4194304
+# max_ice_candidates = 64
+# session_timeout = "60s"
+# session_max_lifetime = "12h"
 
 [http]
 listen = "0.0.0.0:3000"

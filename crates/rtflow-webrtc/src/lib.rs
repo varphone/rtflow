@@ -47,6 +47,12 @@ pub struct WebRtcConfig {
     pub whep: WhepConfig,
     /// Session timeout duration.
     pub session_timeout: Duration,
+    /// Maximum concurrent WebRTC sessions (0 = unlimited).
+    pub max_sessions: usize,
+    /// Maximum concurrent sessions per mount (0 = unlimited).
+    pub max_sessions_per_mount: usize,
+    /// Maximum lifetime of an active session.
+    pub session_max_lifetime: Duration,
     /// Optional metrics registry for protocol-level counters.
     #[cfg(feature = "metrics")]
     pub metrics: Option<Arc<rtflow_core::metrics::MetricsRegistry>>,
@@ -58,6 +64,9 @@ impl Default for WebRtcConfig {
             whip: WhipConfig::default(),
             whep: WhepConfig::default(),
             session_timeout: Duration::from_secs(60),
+            max_sessions: 64,
+            max_sessions_per_mount: 16,
+            session_max_lifetime: Duration::from_secs(12 * 60 * 60),
             #[cfg(feature = "metrics")]
             metrics: None,
         }
@@ -87,7 +96,12 @@ pub fn create_webrtc_handlers(
     mounts: Arc<MountRegistry>,
 ) -> (Handler, Handler) {
     // Create shared session registry
-    let sessions = match SessionRegistry::new(config.session_timeout) {
+    let sessions = match SessionRegistry::new_with_limits(
+        config.session_timeout,
+        config.max_sessions,
+        config.max_sessions_per_mount,
+        config.session_max_lifetime,
+    ) {
         Ok(s) => Arc::new(s),
         Err(e) => {
             tracing::error!("Failed to create WebRTC session registry: {e}");

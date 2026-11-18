@@ -37,11 +37,20 @@ pub struct PcState {
     pub closed: Notify,
     /// Latest ICE connection state.
     pub ice_state: RwLock<RTCIceConnectionState>,
+    /// Maximum candidates kept for the SDP answer (memory bound).
+    pub max_candidates: usize,
 }
 
 impl PcState {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
+        Self::new_with_max(64)
+    }
+
+    pub fn new_with_max(max_candidates: usize) -> Arc<Self> {
+        Arc::new(Self {
+            max_candidates,
+            ..Self::default()
+        })
     }
 }
 
@@ -71,8 +80,11 @@ impl PeerConnectionEventHandler for PcHandler {
             {
                 line.push_str(&format!("\r\na=mid:{mid}"));
             }
-            tracing::debug!(candidate = %init.candidate, "WebRTC: local ICE candidate");
-            self.state.candidates.write().await.push(line);
+            let mut candidates = self.state.candidates.write().await;
+            if candidates.len() < self.state.max_candidates {
+                tracing::debug!(candidate = %init.candidate, "WebRTC: local ICE candidate");
+                candidates.push(line);
+            }
         }
         // The last candidate is signalled with an empty candidate string.
         if event.candidate.address.is_empty() {

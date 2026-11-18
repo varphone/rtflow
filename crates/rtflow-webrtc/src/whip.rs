@@ -33,6 +33,10 @@ pub struct WhipConfig {
     pub ice_credential: String,
     /// `all` or `relay`.
     pub ice_transport_policy: String,
+    /// Maximum media tracks accepted for one session.
+    pub max_tracks: usize,
+    /// Maximum local ICE candidates kept for the answer.
+    pub max_ice_candidates: usize,
     /// Local UDP addresses to bind (e.g. `["0.0.0.0:0"]`).
     pub udp_addrs: Vec<String>,
     /// RTP depacketization safety bound: frames larger than this are
@@ -47,6 +51,8 @@ impl Default for WhipConfig {
             ice_username: String::new(),
             ice_credential: String::new(),
             ice_transport_policy: "all".into(),
+            max_tracks: 2,
+            max_ice_candidates: 64,
             udp_addrs: vec!["0.0.0.0:0".to_string()],
             max_frame_bytes: 4 * 1024 * 1024,
         }
@@ -87,11 +93,15 @@ pub async fn handle_whip_post(
         .publisher()
         .map_err(|_| Error::Http("WHIP: mount is not a publisher mount".into()))?;
 
-    let session = sessions
+    let session = match sessions
         .create_session(SessionType::Publish, path.clone())
-        .await?;
+        .await
+    {
+        Ok(session) => session,
+        Err(e) => return respond_plain(writer, 503, &e.to_string()).await,
+    };
 
-    let pc_state = PcState::new();
+    let pc_state = PcState::new_with_max(config.max_ice_candidates);
     let handler = Arc::new(PcHandler::new(pc_state.clone()));
     let ice_servers = config
         .ice_servers
@@ -158,6 +168,7 @@ pub async fn handle_whip_post(
         mounts.clone(),
         path.clone(),
         config.max_frame_bytes,
+        config.max_tracks,
     )
     .await;
 
@@ -196,6 +207,7 @@ async fn spawn_ingest_task(
     mounts: Arc<MountRegistry>,
     mount_path: String,
     max_frame_bytes: usize,
+    max_tracks: usize,
 ) {
     let cancel = session.read().await.cancel.clone();
     let task_session = session.clone();
@@ -218,7 +230,12 @@ async fn spawn_ingest_task(
             }
         };
 
-        for (track_index, track) in tracks.into_iter().enumerate() {
+        let limit = if max_tracks == 0 {
+            usize::MAX
+        } else {
+            max_tracks
+        };
+        for (track_index, track) in tracks.into_iter().take(limit).enumerate() {
             let cancel = cancel.clone();
             let mounts = mounts.clone();
             let mount_path = mount_path.clone();

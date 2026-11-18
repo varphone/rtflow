@@ -43,6 +43,10 @@ pub struct WhepConfig {
     pub ice_credential: String,
     /// `all` or `relay`.
     pub ice_transport_policy: String,
+    /// Maximum media tracks accepted for one session.
+    pub max_tracks: usize,
+    /// Maximum local ICE candidates kept for the answer.
+    pub max_ice_candidates: usize,
     /// Local UDP addresses to bind (e.g. `["0.0.0.0:0"]`).
     pub udp_addrs: Vec<String>,
     /// RTP packetization MTU (bytes, including headers).
@@ -56,6 +60,8 @@ impl Default for WhepConfig {
             ice_username: String::new(),
             ice_credential: String::new(),
             ice_transport_policy: "all".into(),
+            max_tracks: 2,
+            max_ice_candidates: 64,
             udp_addrs: vec!["0.0.0.0:0".to_string()],
             mtu: 1200,
         }
@@ -106,12 +112,16 @@ pub async fn handle_whep_post(
         return respond_plain(writer, 404, "no playable track on mount").await;
     }
 
-    let session = sessions
+    let session = match sessions
         .create_session(SessionType::Play, path.clone())
-        .await?;
+        .await
+    {
+        Ok(session) => session,
+        Err(e) => return respond_plain(writer, 503, &e.to_string()).await,
+    };
 
     // Build the peer connection with the shared handler.
-    let pc_state = PcState::new();
+    let pc_state = PcState::new_with_max(config.max_ice_candidates);
     let handler = Arc::new(PcHandler::new(pc_state.clone()));
     let ice_servers = config
         .ice_servers
@@ -155,6 +165,9 @@ pub async fn handle_whep_post(
     let offered = offered_encodings(offer);
     let mut senders = Vec::new();
     for track in &mount.description().tracks {
+        if senders.len() >= config.max_tracks {
+            break;
+        }
         let (kind, codec) = match track.kind {
             rtflow_media::MediaKind::Video => (RtpCodecKind::Video, track.codec),
             rtflow_media::MediaKind::Audio

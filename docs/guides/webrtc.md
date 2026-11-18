@@ -78,6 +78,10 @@ ICE restart 见后续版本。
 
 - 默认 `embedded-gateway` 不包含 WebRTC；启用后新增 `webrtc`/DTLS/SRTP 依赖；
 - 每个会话有独立 PeerConnection/ICE socket，建议按内存设置 `max_sessions`；
+- 可用上限：`max_sessions`、`max_sessions_per_mount`、`max_tracks`、`max_frame_bytes`、
+  `max_ice_candidates`、`session_timeout`、`session_max_lifetime`；
+- 本机 4 路 640×360 WHEP 实测进程 RSS 约 45 MB（高水位，包含 RTMP/HLS 与
+  WebRTC 堆；会话回收后 RSS 不立即下降但会复用）；嵌入式预算需按目标板实测；
 - 不要同时启用不用的 codec/平台；H.265/AAC 默认关闭；
 - 具体 RSS 以目标板实测为准；本机不提供嵌入式内存承诺。
 

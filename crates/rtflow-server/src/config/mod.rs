@@ -167,6 +167,22 @@ pub struct WebrtcSection {
     pub ice_credential: String,
     /// `all` (host/srflx/relay) or `relay` (TURN only).
     pub ice_transport_policy: String,
+    /// Maximum concurrent WebRTC sessions (0 = unlimited).
+    pub max_sessions: usize,
+    /// Maximum concurrent sessions per mount (0 = unlimited).
+    pub max_sessions_per_mount: usize,
+    /// Maximum tracks per session.
+    pub max_tracks: usize,
+    /// Maximum RTP frame size accepted by WHIP.
+    pub max_frame_bytes: usize,
+    /// Maximum local ICE candidates kept per answer.
+    pub max_ice_candidates: usize,
+    /// Idle session timeout.
+    #[serde(default, with = "humantime_serde")]
+    pub session_timeout: Option<Duration>,
+    /// Maximum lifetime of an active session.
+    #[serde(default, with = "humantime_serde")]
+    pub session_max_lifetime: Option<Duration>,
 }
 
 impl Default for WebrtcSection {
@@ -177,6 +193,13 @@ impl Default for WebrtcSection {
             ice_username: String::new(),
             ice_credential: String::new(),
             ice_transport_policy: "all".into(),
+            max_sessions: 64,
+            max_sessions_per_mount: 16,
+            max_tracks: 2,
+            max_frame_bytes: 4 * 1024 * 1024,
+            max_ice_candidates: 64,
+            session_timeout: None,
+            session_max_lifetime: None,
         }
     }
 }
@@ -596,6 +619,33 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.webrtc.max_tracks == 0 {
+            return Err(ConfigError::Invalid("webrtc.max_tracks is zero".into()));
+        }
+        if self.webrtc.max_frame_bytes == 0 {
+            return Err(ConfigError::Invalid(
+                "webrtc.max_frame_bytes is zero".into(),
+            ));
+        }
+        if self.webrtc.max_ice_candidates == 0 {
+            return Err(ConfigError::Invalid(
+                "webrtc.max_ice_candidates is zero".into(),
+            ));
+        }
+        if self.webrtc.session_timeout.is_some_and(|d| d.is_zero()) {
+            return Err(ConfigError::Invalid(
+                "webrtc.session_timeout is zero".into(),
+            ));
+        }
+        if self
+            .webrtc
+            .session_max_lifetime
+            .is_some_and(|d| d.is_zero())
+        {
+            return Err(ConfigError::Invalid(
+                "webrtc.session_max_lifetime is zero".into(),
+            ));
+        }
         if !matches!(self.webrtc.ice_transport_policy.as_str(), "all" | "relay") {
             return Err(ConfigError::Invalid(
                 "webrtc.ice_transport_policy must be all or relay".into(),

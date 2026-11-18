@@ -126,7 +126,20 @@ impl WebrtcSession {
     /// Active sessions are not reaped by the idle sweep — media flowing
     /// keeps the session alive until the peer closes it (DELETE request
     /// or an ICE failure, which sets [`SessionState::Closed`]).
-    pub fn is_expired(&self, timeout: Duration) -> bool {
+    pub fn is_expired(&self, timeout: Duration, max_lifetime: Duration) -> bool {
+        if self.created_at.elapsed() > max_lifetime {
+            return true;
+        }
+        if let Some(pc_state) = &self.pc_state
+            && let Ok(ice) = pc_state.ice_state.try_read()
+            && matches!(
+                *ice,
+                webrtc::peer_connection::RTCIceConnectionState::Failed
+                    | webrtc::peer_connection::RTCIceConnectionState::Closed
+            )
+        {
+            return true;
+        }
         self.state != SessionState::Active && self.last_activity.elapsed() > timeout
     }
 
@@ -152,14 +165,30 @@ pub struct SessionRegistry {
     sessions: RwLock<HashMap<String, Arc<RwLock<WebrtcSession>>>>,
     /// Session timeout duration.
     timeout: Duration,
+    max_sessions: usize,
+    max_sessions_per_mount: usize,
+    max_lifetime: Duration,
 }
 
 impl SessionRegistry {
     /// Create a new session registry.
     pub fn new(timeout: Duration) -> Result<Self> {
+        Self::new_with_limits(timeout, 0, 0, Duration::from_secs(12 * 60 * 60))
+    }
+
+    /// Create a registry with explicit session limits.
+    pub fn new_with_limits(
+        timeout: Duration,
+        max_sessions: usize,
+        max_sessions_per_mount: usize,
+        max_lifetime: Duration,
+    ) -> Result<Self> {
         Ok(Self {
             sessions: RwLock::new(HashMap::new()),
             timeout,
+            max_sessions,
+            max_sessions_per_mount,
+            max_lifetime,
         })
     }
 
@@ -169,6 +198,27 @@ impl SessionRegistry {
         session_type: SessionType,
         mount_path: String,
     ) -> Result<Arc<RwLock<WebrtcSession>>> {
+        {
+            let sessions = self.sessions.read().await;
+            if self.max_sessions > 0 && sessions.len() >= self.max_sessions {
+                return Err(rtflow_core::error::Error::Limit(
+                    "WebRTC session limit reached".into(),
+                ));
+            }
+            if self.max_sessions_per_mount > 0 {
+                let mut per_mount = 0usize;
+                for session in sessions.values() {
+                    if session.read().await.mount_path == mount_path {
+                        per_mount += 1;
+                    }
+                }
+                if per_mount >= self.max_sessions_per_mount {
+                    return Err(rtflow_core::error::Error::Limit(
+                        "WebRTC per-mount session limit reached".into(),
+                    ));
+                }
+            }
+        }
         let id = generate_session_id();
         let session = WebrtcSession::new(id.clone(), session_type, mount_path);
 
@@ -205,7 +255,7 @@ impl SessionRegistry {
             let sessions = self.sessions.read().await;
             for (id, session) in sessions.iter() {
                 let s = session.read().await;
-                if s.is_expired(self.timeout) {
+                if s.is_expired(self.timeout, self.max_lifetime) {
                     expired.push(id.clone());
                 }
             }
