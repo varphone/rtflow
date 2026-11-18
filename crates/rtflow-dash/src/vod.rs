@@ -383,9 +383,14 @@ fn generate(
             }
         })
         .collect();
+    let audio_rep = audio_track.as_ref().map(|track| mpd::MpdAudioTrack {
+        id: track.id,
+        track,
+        segments: &audio_segments,
+    });
     let manifest = mpd::generate_static_mpd(
         &video_reps,
-        &audio_segments,
+        audio_rep.as_slice(),
         &description,
         &MpdConfig::default(),
         duration,

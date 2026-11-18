@@ -3,7 +3,9 @@
 //! Generates dynamic (live) MPD documents using SegmentTemplate with $Number$
 //! substitution, conforming to the DASH-IF IOP live profile.
 use rtflow_hls::segmenter::Segment;
-use rtflow_media::{MediaDescription, MediaKind};
+use rtflow_media::MediaDescription;
+#[cfg(test)]
+use rtflow_media::MediaKind;
 use std::time::{Duration, SystemTime};
 
 /// DASH MPD configuration.
@@ -77,6 +79,12 @@ pub struct MpdVideoTrack<'a> {
     pub codec: Option<String>,
     pub dimensions: Option<(u16, u16)>,
 }
+/// One audio rendition in the DASH MPD.
+pub struct MpdAudioTrack<'a> {
+    pub id: u8,
+    pub track: &'a rtflow_media::TrackDescription,
+    pub segments: &'a [Segment],
+}
 
 /// Generate a dynamic MPD XML document.
 ///
@@ -88,8 +96,8 @@ pub struct MpdVideoTrack<'a> {
 #[allow(clippy::too_many_arguments)]
 pub fn generate_mpd(
     video: &[MpdVideoTrack<'_>],
-    audio: &[Segment],
-    description: &MediaDescription,
+    audio: &[MpdAudioTrack<'_>],
+    _description: &MediaDescription,
     config: &MpdConfig,
     availability_start: SystemTime,
     base_timestamp: Duration,
@@ -97,7 +105,7 @@ pub fn generate_mpd(
     generate_mpd_q(
         video,
         audio,
-        description,
+        _description,
         config,
         availability_start,
         base_timestamp,
@@ -109,8 +117,8 @@ pub fn generate_mpd(
 #[allow(clippy::too_many_arguments)]
 pub fn generate_mpd_q(
     video: &[MpdVideoTrack<'_>],
-    audio: &[Segment],
-    description: &MediaDescription,
+    audio: &[MpdAudioTrack<'_>],
+    _description: &MediaDescription,
     config: &MpdConfig,
     availability_start: SystemTime,
     base_timestamp: Duration,
@@ -139,7 +147,7 @@ pub fn generate_mpd_q(
     let max_segment_duration = video
         .iter()
         .flat_map(|track| track.segments.iter())
-        .chain(audio)
+        .chain(audio.iter().flat_map(|track| track.segments.iter()))
         .map(|segment| segment.duration)
         .max()
         .unwrap_or(config.segment_duration);
@@ -171,13 +179,8 @@ pub fn generate_mpd_q(
     if !video.is_empty() {
         push_video_adaptation_set(&mut xml, video, config, base_timestamp, &suffix);
     }
-    if let Some(track) = description
-        .tracks
-        .iter()
-        .find(|track| track.kind == MediaKind::Audio)
-        && !audio.is_empty()
-    {
-        push_audio_adaptation_set(&mut xml, audio, track, config, base_timestamp, &suffix);
+    if !audio.is_empty() {
+        push_audio_adaptation_sets(&mut xml, audio, config, base_timestamp, &suffix);
     }
 
     xml.push_str("  </Period>\n");
@@ -198,8 +201,8 @@ pub fn generate_mpd_q(
 #[allow(clippy::too_many_arguments)]
 pub fn generate_static_mpd(
     video: &[MpdVideoTrack<'_>],
-    audio: &[Segment],
-    description: &MediaDescription,
+    audio: &[MpdAudioTrack<'_>],
+    _description: &MediaDescription,
     config: &MpdConfig,
     duration: Duration,
     query: &str,
@@ -209,7 +212,7 @@ pub fn generate_static_mpd(
         video
             .iter()
             .flat_map(|track| track.segments.iter())
-            .chain(audio)
+            .chain(audio.iter().flat_map(|track| track.segments.iter()))
             .map(|segment| segment.timestamp.saturating_add(segment.duration))
             .max()
             .unwrap_or_default()
@@ -230,13 +233,8 @@ pub fn generate_static_mpd(
     if !video.is_empty() {
         push_video_adaptation_set(&mut xml, video, config, Duration::ZERO, &suffix);
     }
-    if let Some(track) = description
-        .tracks
-        .iter()
-        .find(|track| track.kind == MediaKind::Audio)
-        && !audio.is_empty()
-    {
-        push_audio_adaptation_set(&mut xml, audio, track, config, Duration::ZERO, &suffix);
+    if !audio.is_empty() {
+        push_audio_adaptation_sets(&mut xml, audio, config, Duration::ZERO, &suffix);
     }
     xml.push_str("  </Period>\n");
     xml.push_str("</MPD>\n");
@@ -303,44 +301,62 @@ fn push_video_adaptation_set(
     xml.push_str("    </AdaptationSet>\n");
 }
 
-fn push_audio_adaptation_set(
+fn push_audio_adaptation_sets(
     xml: &mut String,
-    segments: &[Segment],
-    track: &rtflow_media::TrackDescription,
+    audio: &[MpdAudioTrack<'_>],
     config: &MpdConfig,
     base_timestamp: Duration,
     suffix: &str,
 ) {
-    let timescale = if track.clock_rate > 0 {
-        track.clock_rate
-    } else {
-        config.timescale
-    };
-    let start_number = segments
-        .first()
-        .map(|segment| segment.sequence)
-        .unwrap_or(0);
-    let codecs = audio_codec_string(track.codec);
-    let bandwidth = estimated_bandwidth(segments, false);
-    let channels = track.channels.unwrap_or(2);
+    let multiple = audio.len() > 1;
+    for rendition in audio {
+        let segments = rendition.segments;
+        if segments.is_empty() {
+            continue;
+        }
+        let track = rendition.track;
+        let timescale = if track.clock_rate > 0 {
+            track.clock_rate
+        } else {
+            config.timescale
+        };
+        let start_number = segments
+            .first()
+            .map(|segment| segment.sequence)
+            .unwrap_or(0);
+        let codecs = audio_codec_string(track.codec);
+        let bandwidth = estimated_bandwidth(segments, false);
+        let channels = track.channels.unwrap_or(2);
+        let id = rendition.id;
+        let prefix = if multiple {
+            format!("audio-{id}")
+        } else {
+            "audio".to_string()
+        };
+        let representation_id = if multiple {
+            format!("audio-{id}")
+        } else {
+            "audio".to_string()
+        };
 
-    xml.push_str(
-        "    <AdaptationSet mimeType=\"audio/mp4\" segmentAlignment=\"true\" startWithSAP=\"1\">\n",
-    );
-    xml.push_str(&format!(
-        "      <Representation id=\"audio\" bandwidth=\"{bandwidth}\" codecs=\"{codecs}\" audioSamplingRate=\"{}\">\n",
-        track.clock_rate
-    ));
-    xml.push_str(&format!(
-        "        <AudioChannelConfiguration schemeIdUri=\"urn:mpeg:dash:23003:3:audio_channel_configuration:2011\" value=\"{channels}\"/>\n"
-    ));
-    xml.push_str(&format!(
-        "        <SegmentTemplate timescale=\"{timescale}\" startNumber=\"{start_number}\" initialization=\"audio-init.mp4{suffix}\" media=\"audio-$Number$.m4s{suffix}\">\n"
-    ));
-    push_timeline(xml, segments, base_timestamp, timescale);
-    xml.push_str("        </SegmentTemplate>\n");
-    xml.push_str("      </Representation>\n");
-    xml.push_str("    </AdaptationSet>\n");
+        xml.push_str(
+            "    <AdaptationSet mimeType=\"audio/mp4\" segmentAlignment=\"true\" startWithSAP=\"1\">\n",
+        );
+        xml.push_str(&format!(
+            "      <Representation id=\"{representation_id}\" bandwidth=\"{bandwidth}\" codecs=\"{codecs}\" audioSamplingRate=\"{}\">\n",
+            track.clock_rate
+        ));
+        xml.push_str(&format!(
+            "        <AudioChannelConfiguration schemeIdUri=\"urn:mpeg:dash:23003:3:audio_channel_configuration:2011\" value=\"{channels}\"/>\n"
+        ));
+        xml.push_str(&format!(
+            "        <SegmentTemplate timescale=\"{timescale}\" startNumber=\"{start_number}\" initialization=\"{prefix}-init.mp4{suffix}\" media=\"{prefix}-$Number$.m4s{suffix}\">\n"
+        ));
+        push_timeline(xml, segments, base_timestamp, timescale);
+        xml.push_str("        </SegmentTemplate>\n");
+        xml.push_str("      </Representation>\n");
+        xml.push_str("    </AdaptationSet>\n");
+    }
 }
 
 fn push_timeline(xml: &mut String, segments: &[Segment], base_timestamp: Duration, timescale: u32) {
@@ -629,15 +645,32 @@ mod tests {
         }
     }
 
+    fn audio_rep<'a>(
+        description: &'a MediaDescription,
+        segments: &'a [Segment],
+    ) -> MpdAudioTrack<'a> {
+        let track = description
+            .tracks
+            .iter()
+            .find(|track| track.kind == MediaKind::Audio)
+            .expect("audio track");
+        MpdAudioTrack {
+            id: track.id,
+            track,
+            segments,
+        }
+    }
+
     #[test]
     fn generates_per_track_mpd() {
         let description = test_description();
         let video = vec![segment(1, 0), segment(2, 2)];
         let audio = vec![segment(1, 0), segment(2, 2)];
         let video_rep = video_rep(&description, &video, None);
+        let audio_rep = audio_rep(&description, &audio);
         let mpd = generate_mpd(
             &[video_rep],
-            &audio,
+            &[audio_rep],
             &description,
             &MpdConfig::default(),
             SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
@@ -713,6 +746,39 @@ mod tests {
     }
 
     #[test]
+    fn multiple_audio_tracks_become_adaptation_sets() {
+        let mut description = test_description();
+        let mut second = description.tracks[1].clone();
+        second.id = 2;
+        description.tracks.push(second);
+        let first_segments = vec![segment(1, 0)];
+        let second_segments = vec![segment(1, 0)];
+        let first = MpdAudioTrack {
+            id: 1,
+            track: &description.tracks[1],
+            segments: &first_segments,
+        };
+        let second = MpdAudioTrack {
+            id: 2,
+            track: &description.tracks[2],
+            segments: &second_segments,
+        };
+        let mpd = generate_mpd(
+            &[],
+            &[first, second],
+            &description,
+            &MpdConfig::default(),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+            Duration::ZERO,
+        );
+        assert_eq!(mpd.matches("mimeType=\"audio/mp4\"").count(), 2);
+        assert!(mpd.contains("initialization=\"audio-1-init.mp4\""));
+        assert!(mpd.contains("initialization=\"audio-2-init.mp4\""));
+        assert!(mpd.contains("audio-1-$Number$.m4s"));
+        assert!(mpd.contains("audio-2-$Number$.m4s"));
+    }
+
+    #[test]
     fn http_utc_timing_url_is_emitted() {
         let description = test_description();
         let segments = vec![segment(1, 0)];
@@ -759,9 +825,10 @@ mod tests {
         let video = vec![segment(7, 0)];
         let audio = vec![segment(7, 0)];
         let video_rep = video_rep(&description, &video, Some("avc1.640028"));
+        let audio_rep = audio_rep(&description, &audio);
         let mpd = generate_mpd_q(
             &[video_rep],
-            &audio,
+            &[audio_rep],
             &description,
             &MpdConfig::default(),
             SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
@@ -781,9 +848,10 @@ mod tests {
         description
             .tracks
             .retain(|track| track.kind == MediaKind::Audio);
+        let audio = vec![segment(1, 0)];
         let mpd = generate_mpd(
             &[],
-            &[segment(1, 0)],
+            &[audio_rep(&description, &audio)],
             &description,
             &MpdConfig::default(),
             SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
@@ -801,9 +869,10 @@ mod tests {
         let video = vec![segment(0, 0), segment(1, 2)];
         let audio = vec![segment(0, 0), segment(1, 2)];
         let video_rep = video_rep(&description, &video, None);
+        let audio_rep = audio_rep(&description, &audio);
         let mpd = generate_static_mpd(
             &[video_rep],
-            &audio,
+            &[audio_rep],
             &description,
             &MpdConfig::default(),
             Duration::from_secs(4),

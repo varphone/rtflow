@@ -125,11 +125,12 @@ pub fn create_dash_handlers(
         .filter(|track| track.kind == rtflow_media::MediaKind::Video)
         .cloned()
         .collect();
-    let audio_track = description
+    let audio_tracks: Vec<rtflow_media::TrackDescription> = description
         .tracks
         .iter()
-        .find(|track| track.kind == rtflow_media::MediaKind::Audio)
-        .cloned();
+        .filter(|track| track.kind == rtflow_media::MediaKind::Audio)
+        .cloned()
+        .collect();
     let video_descriptions: Vec<MediaDescription> = video_tracks
         .iter()
         .map(|track| {
@@ -138,18 +139,22 @@ pub fn create_dash_handlers(
             filtered
         })
         .collect();
-    let audio_description = audio_track.as_ref().map(|track| {
-        let mut filtered = description.clone();
-        filtered.tracks = vec![track.clone()];
-        filtered
-    });
+    let audio_descriptions: Vec<MediaDescription> = audio_tracks
+        .iter()
+        .map(|track| {
+            let mut filtered = description.clone();
+            filtered.tracks = vec![track.clone()];
+            filtered
+        })
+        .collect();
     let video_rings: Vec<Arc<SegmentRing>> = video_tracks
         .iter()
         .map(|_| Arc::new(SegmentRing::new(config.segment_count)))
         .collect();
-    let audio_ring = audio_track
-        .as_ref()
-        .map(|_| Arc::new(SegmentRing::new(config.segment_count)));
+    let audio_rings: Vec<Arc<SegmentRing>> = audio_tracks
+        .iter()
+        .map(|_| Arc::new(SegmentRing::new(config.segment_count)))
+        .collect();
     let rings = Arc::new(handler::DashRings {
         video: video_tracks
             .iter()
@@ -160,18 +165,19 @@ pub fn create_dash_handlers(
                 ring: ring.clone(),
             })
             .collect(),
-        audio: audio_track
-            .as_ref()
-            .zip(audio_ring.as_ref())
+        audio: audio_tracks
+            .iter()
+            .zip(&audio_rings)
             .map(|(track, ring)| handler::DashTrackRing {
                 id: track.id,
                 track: track.clone(),
                 ring: ring.clone(),
-            }),
+            })
+            .collect(),
     });
 
     let video_rings_task = video_rings.clone();
-    let audio_ring_task = audio_ring.clone();
+    let audio_rings_task = audio_rings.clone();
     let state_task = dash_state.clone();
     let seg_config = SegmenterConfig {
         segment_duration: config.segment_duration,
@@ -199,19 +205,27 @@ pub fn create_dash_handlers(
         } else {
             seg_config.segment_duration / 2
         };
-        let mut audio_segmenter = audio_description.map(|description| {
-            Segmenter::new(
-                SegmenterConfig {
-                    segment_duration: audio_segment_duration,
-                    lookback_count: seg_config.lookback_count,
-                },
-                &description,
-            )
-        });
-        let mut audio_receiver = audio_segmenter
-            .as_ref()
-            .map(|segmenter| segmenter.subscribe());
-        let audio_track_id = audio_track.as_ref().map(|track| track.id);
+        let mut audio_segmenters: Vec<Segmenter> = audio_descriptions
+            .iter()
+            .map(|description| {
+                Segmenter::new(
+                    SegmenterConfig {
+                        segment_duration: audio_segment_duration,
+                        lookback_count: seg_config.lookback_count,
+                    },
+                    description,
+                )
+            })
+            .collect();
+        let mut audio_receivers: Vec<_> = audio_segmenters
+            .iter()
+            .map(|segmenter| segmenter.subscribe())
+            .collect();
+        let audio_index: HashMap<u8, usize> = audio_tracks
+            .iter()
+            .enumerate()
+            .map(|(index, track)| (track.id, index))
+            .collect();
 
         let startup_keys = rtflow_mount::startup_dedup_keys(&startup);
         let mut startup = VecDeque::from(startup);
@@ -225,7 +239,7 @@ pub fn create_dash_handlers(
         let mut initialized = false;
         tracing::info!(
             video_tracks = video_tracks.len(),
-            has_audio = audio_track.is_some(),
+            has_audio = !audio_tracks.is_empty(),
             startup_frames = startup.len(),
             "DASH segmenter task started"
         );
@@ -243,7 +257,7 @@ pub fn create_dash_handlers(
                             for segmenter in &mut video_segmenters {
                                 segmenter.reset_after_discontinuity();
                             }
-                            if let Some(segmenter) = &mut audio_segmenter {
+                            for segmenter in &mut audio_segmenters {
                                 segmenter.reset_after_discontinuity();
                             }
                             awaiting_keyframe = has_video;
@@ -301,16 +315,16 @@ pub fn create_dash_handlers(
                         offset = offset.max(segment.timestamp.saturating_add(segment.duration));
                     }
                 }
-                if let Some(ring) = &audio_ring_task
-                    && let Some(segment) = ring.snapshot().last()
-                {
-                    offset = offset.max(segment.timestamp.saturating_add(segment.duration));
+                for ring in &audio_rings_task {
+                    if let Some(segment) = ring.snapshot().last() {
+                        offset = offset.max(segment.timestamp.saturating_add(segment.duration));
+                    }
                 }
                 state_task.set_timeline_offset(offset);
                 for segmenter in &mut video_segmenters {
                     segmenter.reset_after_discontinuity();
                 }
-                if let Some(segmenter) = &mut audio_segmenter {
+                for segmenter in &mut audio_segmenters {
                     segmenter.reset_after_discontinuity();
                 }
                 awaiting_keyframe = has_video;
@@ -331,7 +345,7 @@ pub fn create_dash_handlers(
                     for segmenter in &mut video_segmenters {
                         segmenter.update_fmtp(&fmtp);
                     }
-                    if let Some(segmenter) = &mut audio_segmenter {
+                    for segmenter in &mut audio_segmenters {
                         segmenter.update_fmtp(&fmtp);
                     }
                     fmtp_applied = true;
@@ -346,10 +360,8 @@ pub fn create_dash_handlers(
             }
             if let Some(index) = video_index.get(&unit.track_id).copied() {
                 video_segmenters[index].push(unit);
-            } else if audio_track_id == Some(unit.track_id)
-                && let Some(segmenter) = &mut audio_segmenter
-            {
-                segmenter.push(unit);
+            } else if let Some(index) = audio_index.get(&unit.track_id).copied() {
+                audio_segmenters[index].push(unit);
             }
 
             for (index, receiver) in video_receivers.iter_mut().enumerate() {
@@ -371,12 +383,12 @@ pub fn create_dash_handlers(
                         "DASH video segment produced"
                     );
                     video_rings_task[index].push(segment);
-                    if let Some(segmenter) = &mut audio_segmenter {
+                    for segmenter in &mut audio_segmenters {
                         segmenter.cut_current();
                     }
                 }
             }
-            if let Some(receiver) = audio_receiver.as_mut() {
+            for (index, receiver) in audio_receivers.iter_mut().enumerate() {
                 while let Ok(mut segment) = receiver.try_recv() {
                     segment_count += 1;
                     if !initialized {
@@ -389,11 +401,10 @@ pub fn create_dash_handlers(
                     tracing::debug!(
                         segment_count,
                         sequence = segment.sequence,
+                        track_id = audio_tracks[index].id,
                         "DASH audio segment produced"
                     );
-                    if let Some(ring) = &audio_ring_task {
-                        ring.push(segment);
-                    }
+                    audio_rings_task[index].push(segment);
                 }
             }
         }
@@ -407,7 +418,7 @@ pub fn create_dash_handlers(
         for segmenter in &mut video_segmenters {
             segmenter.flush();
         }
-        if let Some(segmenter) = &mut audio_segmenter {
+        for segmenter in &mut audio_segmenters {
             segmenter.flush();
         }
         for (index, receiver) in video_receivers.iter_mut().enumerate() {
@@ -416,12 +427,10 @@ pub fn create_dash_handlers(
                 video_rings_task[index].push(segment);
             }
         }
-        if let Some(receiver) = audio_receiver.as_mut() {
+        for (index, receiver) in audio_receivers.iter_mut().enumerate() {
             while let Ok(mut segment) = receiver.try_recv() {
                 apply_offset(&state_task, &mut segment);
-                if let Some(ring) = &audio_ring_task {
-                    ring.push(segment);
-                }
+                audio_rings_task[index].push(segment);
             }
         }
     });
@@ -468,12 +477,17 @@ pub fn create_dash_handlers(
 }
 
 fn parse_segment_name(file: &str) -> (handler::DashTrackSelector, u64) {
-    if let Some(rest) = file.strip_prefix("audio-")
-        && let Some(sequence) = rest
-            .strip_suffix(".m4s")
-            .and_then(|value| value.parse::<u64>().ok())
-    {
-        return (handler::DashTrackSelector::Audio, sequence);
+    if let Some(rest) = file.strip_prefix("audio-") {
+        let body = rest.strip_suffix(".m4s").unwrap_or(rest);
+        if let Some((id, sequence)) = body.split_once('-')
+            && let Ok(id) = id.parse::<u8>()
+            && let Ok(sequence) = sequence.parse::<u64>()
+        {
+            return (handler::DashTrackSelector::Audio(Some(id)), sequence);
+        }
+        if let Ok(sequence) = body.parse::<u64>() {
+            return (handler::DashTrackSelector::Audio(None), sequence);
+        }
     }
     if let Some(rest) = file.strip_prefix("video-") {
         let body = rest.strip_suffix(".m4s").unwrap_or(rest);

@@ -158,13 +158,14 @@ pub struct DashTrackRing {
 /// The rings exposed by a DASH handler set.
 pub struct DashRings {
     pub video: Vec<DashTrackRing>,
-    pub audio: Option<DashTrackRing>,
+    pub audio: Vec<DashTrackRing>,
 }
 
 /// Track selected by an init/segment request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DashTrackSelector {
-    Audio,
+    /// `None` means the first audio track (legacy `audio-N.m4s` names).
+    Audio(Option<u8>),
     /// `None` means the first video track (legacy `video-N.m4s` names).
     Video(Option<u8>),
 }
@@ -193,24 +194,20 @@ pub async fn serve_mpd<W: AsyncWrite + Unpin>(
         }
         video_segments.push(segments);
     }
-    let audio_segments = rings
-        .audio
-        .as_ref()
-        .map(|track| track.ring.snapshot())
-        .unwrap_or_default();
-    let has_audio = description
-        .tracks
-        .iter()
-        .any(|track| track.kind == rtflow_media::MediaKind::Audio);
-    if has_audio && audio_segments.is_empty() {
-        writer
-            .write_body(
-                503,
-                "application/dash+xml",
-                b"<MPD/>\n<!-- No segments available yet -->",
-            )
-            .await?;
-        return Ok(writer);
+    let mut audio_segments = Vec::with_capacity(rings.audio.len());
+    for track in &rings.audio {
+        let segments = track.ring.snapshot();
+        if segments.is_empty() {
+            writer
+                .write_body(
+                    503,
+                    "application/dash+xml",
+                    b"<MPD/>\n<!-- No segments available yet -->",
+                )
+                .await?;
+            return Ok(writer);
+        }
+        audio_segments.push(segments);
     }
     let videos: Vec<mpd::MpdVideoTrack<'_>> = rings
         .video
@@ -233,13 +230,23 @@ pub async fn serve_mpd<W: AsyncWrite + Unpin>(
             }
         })
         .collect();
+    let audios: Vec<mpd::MpdAudioTrack<'_>> = rings
+        .audio
+        .iter()
+        .zip(&audio_segments)
+        .map(|(track, segments)| mpd::MpdAudioTrack {
+            id: track.id,
+            track: &track.track,
+            segments,
+        })
+        .collect();
 
     // Propagate the request query (e.g. ?token=...) into embedded segment
     // URLs so token-protected deployments do not break on segment fetches.
     let query = serialize_query(&req.query);
     let body = mpd::generate_mpd_q(
         &videos,
-        &audio_segments,
+        &audios,
         description,
         config,
         state.availability_start(),
@@ -270,12 +277,19 @@ pub async fn serve_init_segment<W: AsyncWrite + Unpin>(
 ) -> Result<ResponseWriter<W>> {
     let file = req.path.rsplit('/').next().unwrap_or("");
     let is_audio = file.starts_with("audio-");
+    let audio_id = file
+        .strip_prefix("audio-")
+        .and_then(|rest| rest.strip_suffix("-init.mp4"))
+        .and_then(|id| id.parse::<u8>().ok());
     let video_id = file
         .strip_prefix("video-")
         .and_then(|rest| rest.strip_suffix("-init.mp4"))
         .and_then(|id| id.parse::<u8>().ok());
     let ring = if is_audio {
-        rings.audio.as_ref().map(|track| &track.ring)
+        audio_id
+            .and_then(|id| rings.audio.iter().find(|track| track.id == id))
+            .or_else(|| rings.audio.first())
+            .map(|track| &track.ring)
     } else if let Some(id) = video_id {
         rings
             .video
@@ -337,9 +351,14 @@ pub async fn serve_segment<W: AsyncWrite + Unpin>(
     sequence: u64,
     selector: DashTrackSelector,
 ) -> Result<ResponseWriter<W>> {
-    let is_audio = selector == DashTrackSelector::Audio;
+    let is_audio = matches!(selector, DashTrackSelector::Audio(_));
     let ring = match selector {
-        DashTrackSelector::Audio => rings.audio.as_ref().map(|track| &track.ring),
+        DashTrackSelector::Audio(Some(id)) => rings
+            .audio
+            .iter()
+            .find(|track| track.id == id)
+            .map(|track| &track.ring),
+        DashTrackSelector::Audio(None) => rings.audio.first().map(|track| &track.ring),
         DashTrackSelector::Video(Some(id)) => rings
             .video
             .iter()

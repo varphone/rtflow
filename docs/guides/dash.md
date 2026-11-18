@@ -9,9 +9,11 @@ track 一个 AdaptationSet。
 ```text
 GET /dash/{mount}/manifest.mpd
 GET /dash/{mount}/video-{track}-init.mp4
-GET /dash/{mount}/audio-init.mp4
+GET /dash/{mount}/audio-init.mp4          # 单音轨
+GET /dash/{mount}/audio-{track}-init.mp4  # 多音轨
 GET /dash/{mount}/video-{track}-{N}.m4s
-GET /dash/{mount}/audio-{N}.m4s
+GET /dash/{mount}/audio-{N}.m4s            # 单音轨
+GET /dash/{mount}/audio-{track}-{N}.m4s    # 多音轨
 ```
 
 MPD 内的 `initialization` 与 `media` 是**相对 MPD URL** 的路径，因此部署在
@@ -47,13 +49,13 @@ suggested_presentation_delay = "3s"   # 缺省 3 × segment_duration
 ## MPD 结构
 
 - `type="dynamic"`，`availabilityStartTime` 在当前 presentation 内固定；
-- 一个视频 AdaptationSet + 一个音频 AdaptationSet；
+- 一个视频 AdaptationSet + 每个音轨一个音频 AdaptationSet；
 - 视频 AdaptationSet 可包含多个 Representation（每个源视频轨一个）：
   - `id="video-{track}"`、`codecs`（H.264 从 avcC 提取，H.265 用 hvc1）、
     `width/height/frameRate`、`video-{track}-init.mp4`、`video-{track}-$Number$.m4s`；
-  - 音频 AdaptationSet 一个 Representation：`id="audio"`、`codecs`、
-    `audioSamplingRate`、`AudioChannelConfiguration`、`audio-init.mp4`、
-    `audio-$Number$.m4s`；
+- 音频每个源音轨一个 AdaptationSet/Representation：
+  - 单音轨：`id="audio"`、`audio-init.mp4`、`audio-$Number$.m4s`；
+  - 多音轨：`id="audio-{track}"`、`audio-{track}-init.mp4`、`audio-{track}-$Number$.m4s`；
 - 每个 Representation 自带 `SegmentTemplate` + `SegmentTimeline`，`startNumber`
   独立；
 - `UTCTiming` 默认使用 `urn:mpeg:dash:utc:http-iso:2014` 指向公开的
@@ -103,7 +105,7 @@ dash.js 也可直接加载该 MPD；`crates/rtflow/examples/protocols/dash_serve
 
 - 直播多视频轨会生成多个视频 Representation，但需要源端本身提供多 rendition（当前不做转码
   ladder）；各 rendition 的分片边界独立，MPD 标 `segmentAlignment="false"`，只在源端 GOP
-  对齐时具备完整 ABR 切换体验。音频仍只选首条轨。VOD 同样为每条视频轨生成 Representation。
+  对齐时具备完整 ABR 切换体验。直播支持多条音轨（每轨一个 AdaptationSet）；VOD 为每条视频轨生成 Representation，音频暂取首条。
 - DASH VOD 目前由服务端的录制目录生成；其他 `VodSource` 可复用同一 manager 接入。暂不支持多码率/多 Period VOD。
 - 不支持 LL-DASH/chunked CMAF、DRM/CENC、多 Period、广告插入。
 - H.264 codec 从 avcC 提取；H.265 从 hvcC 提取 `hvc1` codec（profile/tier/level/constraints），不支持的变体回退到静态字符串。
