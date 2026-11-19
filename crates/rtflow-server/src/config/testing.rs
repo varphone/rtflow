@@ -33,7 +33,7 @@ impl Default for TestingSection {
             ffmpeg: PathBuf::from("ffmpeg"),
             max_jobs: 2,
             default_duration: Duration::from_secs(60),
-            max_duration: Duration::from_secs(600),
+            max_duration: Duration::from_secs(365 * 24 * 60 * 60),
             mount_prefix: "/live/test".into(),
             rtmp_base: None,
             rtsp_base: None,

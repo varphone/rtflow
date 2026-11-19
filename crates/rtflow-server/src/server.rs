@@ -666,6 +666,19 @@ impl ServerApp {
                 ),
             )
             .await;
+            http.add_route(
+                Method::Delete,
+                "/whip/*",
+                crate::media::auth_guard(
+                    whip.clone(),
+                    auth.clone(),
+                    mounts.clone(),
+                    "/whip/",
+                    rtflow::auth::AccessRole::Publish,
+                    "webrtc",
+                ),
+            )
+            .await;
             http.add_route(Method::Options, "/whip/*", whip.clone())
                 .await;
             http.add_route(
@@ -683,6 +696,19 @@ impl ServerApp {
             .await;
             http.add_route(
                 Method::Patch,
+                "/whep/*",
+                crate::media::auth_guard(
+                    whep.clone(),
+                    auth.clone(),
+                    mounts.clone(),
+                    "/whep/",
+                    rtflow::auth::AccessRole::Read,
+                    "webrtc",
+                ),
+            )
+            .await;
+            http.add_route(
+                Method::Delete,
                 "/whep/*",
                 crate::media::auth_guard(
                     whep.clone(),

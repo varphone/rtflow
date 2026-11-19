@@ -188,5 +188,5 @@ enabled = false
 ffmpeg = "ffmpeg"
 max_jobs = 2
 default_duration = "60s"
-max_duration = "10m"
+max_duration = "8760h"
 mount_prefix = "/live/test"

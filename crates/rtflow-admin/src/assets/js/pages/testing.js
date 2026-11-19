@@ -88,7 +88,7 @@ max_jobs = 2</pre><p class="note">启用后仅管理员可操作，且只允许�
     mount(root, ctx) {
       let timer = null;
       root.querySelectorAll("[data-test-kind]").forEach((button) => {
-        button.onclick = () => openStart(button.dataset.testKind, ctx, data.default_duration_secs);
+        button.onclick = () => openStart(button.dataset.testKind, ctx, data.default_duration_secs, data.max_duration_secs);
       });
       root.querySelectorAll("[data-test-stop]").forEach((button) => {
         button.onclick = async () => {
@@ -120,7 +120,7 @@ max_jobs = 2</pre><p class="note">启用后仅管理员可操作，且只允许�
   };
 }
 
-function openStart(kind, ctx, defaultDuration = 60) {
+function openStart(kind, ctx, defaultDuration = 60, maxDuration = 31536000) {
   const info = KINDS[kind];
   openDialog({
     title: info.label,
@@ -133,7 +133,7 @@ function openStart(kind, ctx, defaultDuration = 60) {
       </div></div>
       <div class="field"><label for="test-fps">帧率</label><input class="input" id="test-fps" name="fps" type="number" min="1" max="60" value="30" required></div>
       <div class="field"><label for="test-bitrate">视频码率 (kbps)</label><input class="input" id="test-bitrate" name="bitrate" type="number" min="64" max="12000" value="2500" required></div>
-      <div class="field"><label for="test-duration">时长（秒）</label><input class="input" id="test-duration" name="duration" type="number" min="1" value="${esc(String(defaultDuration || 60))}" required></div>
+      <div class="field"><label for="test-duration">时长（秒）</label><input class="input" id="test-duration" name="duration" type="number" min="1" max="${esc(String(maxDuration || 31536000))}" value="${esc(String(defaultDuration || 60))}" required></div>
       <label class="check"><input type="checkbox" name="audio" checked> 包含 AAC 音频</label>
       <div class="form-error" data-test-error hidden></div>
     </form>`,
