@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+- LL-HLS：修复 hls.js 播放失败——H.264/H.265 TrackSpec 使用 SPS 尺寸（不再写 0x0 init）、限制滑动窗口、完成段后移除对应 part、`_HLS_*` 阻塞查询不再透传到媒体 URI、首个 playlist 等待媒体就绪。
+
 - 管理台：新增“测试体验”页，可启动受控的 RTMP/RTSP/SRT 测试推流（ffmpeg testsrc2），查看任务/ stderr/播放地址并停止；默认关闭，固定参数、本机目标、并发/时长/分辨率限制，shutdown 回收子进程。
 
 - WebRTC：增加会话/track/frame/candidate/生命周期上限，失败/关闭的 ICE 会话可回收；修复 WHEP/WHIP 浏览器 SDP、鉴权路径和响应 Content-Length；按浏览器 offer 过滤 codec；新增 STUN/TURN 配置、PATCH trickle ICE/ICE restart、ETag/CORS；WHEP 启动裁剪到最近 150 ms 关键帧窗口并请求源端 IDR；接入 WebRTC 会话指标；转发浏览器 PLI/FIR 为源端 IDR 请求，声明/处理 NACK 并缓存最近 256 个 RTP 包重传，每秒发送 RTCP Sender Report；本机基线约 46 MB（RTMP/HLS），第 1 路 WHEP +3 MB、4 路 +3.5 MB；release 构建本机 640×360/720p/1080p 视频-only 软件源基准 p95 约 78–125ms（debug 构建会显著更高） p50≈30–70 ms、p95≈50–170 ms（含 x264 编码，硬件 VENC 不计此队列）。

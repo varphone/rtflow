@@ -21,6 +21,8 @@ use transmux::{Sample, TrackId};
 pub struct LlHlsConfig {
     pub segment_duration: f64,
     pub part_target_ms: u32,
+    /// Number of completed segments kept in the playlist/state.
+    pub segment_window: u32,
 }
 
 impl Default for LlHlsConfig {
@@ -28,6 +30,7 @@ impl Default for LlHlsConfig {
         Self {
             segment_duration: 2.0,
             part_target_ms: 200,
+            segment_window: 6,
         }
     }
 }
@@ -47,6 +50,7 @@ struct State {
 struct Channel {
     state: Mutex<State>,
     active: Mutex<bool>,
+    ready: tokio::sync::Notify,
 }
 
 pub struct LlHlsLiveManager {
@@ -77,6 +81,7 @@ impl LlHlsLiveManager {
                         segments: BTreeMap::new(),
                     }),
                     active: Mutex::new(false),
+                    ready: tokio::sync::Notify::new(),
                 })
             })
             .clone()
@@ -138,6 +143,7 @@ impl LlHlsLiveManager {
             state.init = Bytes::from(init);
         }
         let cancel = mount.cancellation_token();
+        let segment_window = self.config.segment_window.max(1) as u32;
         *active = true;
         drop(active);
         tokio::spawn(async move {
@@ -222,11 +228,12 @@ impl LlHlsLiveManager {
                         segment.segment_seq,
                         (Bytes::from(segment.bytes), segment.duration),
                     );
-                    state
-                        .parts
-                        .retain(|(msn, _), _| *msn >= segment.segment_seq);
+                    state.parts.retain(|(msn, _), _| *msn > segment.segment_seq);
+                    let keep_from = segment.segment_seq.saturating_sub(segment_window);
+                    state.segments.retain(|seq, _| *seq >= keep_from);
                 }
                 drop(state);
+                channel.ready.notify_waiters();
             }
             let mut state = channel
                 .state
@@ -289,7 +296,7 @@ impl LlHlsLiveManager {
                 query_suffix(query)
             ));
         }
-        for (&(msn, idx), part) in state.parts.range((last_segment, 0)..) {
+        for (&(msn, idx), part) in state.parts.range((last_segment + 1, 0)..) {
             out.push_str(&format!(
                 "#EXT-X-PART:DURATION={:.3},URI=\"part-{msn}-{idx}.m4s{}\",INDEPENDENT={}\n",
                 part.duration,
@@ -309,10 +316,20 @@ impl LlHlsLiveManager {
 }
 
 fn query_suffix(query: &str) -> String {
-    if query.is_empty() {
+    // HLS blocking-reload parameters belong to the playlist request only.
+    // Never append them to media/part URIs (hls.js would request them as media).
+    let filtered = query
+        .split('&')
+        .filter(|pair| {
+            let key = pair.split_once('=').map(|(key, _)| key).unwrap_or(pair);
+            !key.starts_with("_HLS_")
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    if filtered.is_empty() {
         String::new()
     } else {
-        format!("?{query}")
+        format!("?{filtered}")
     }
 }
 
@@ -354,6 +371,33 @@ pub fn create_ll_hls_handler(manager: Arc<LlHlsLiveManager>) -> Handler {
             manager.start(mount, channel.clone());
             match kind {
                 "playlist" => {
+                    let empty = {
+                        let state = channel
+                            .state
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        state.parts.is_empty() && state.segments.is_empty()
+                    };
+                    if empty {
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_millis(1500),
+                            channel.ready.notified(),
+                        )
+                        .await;
+                    }
+                    let still_empty = {
+                        let state = channel
+                            .state
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        state.parts.is_empty() && state.segments.is_empty()
+                    };
+                    if still_empty {
+                        writer
+                            .write_body(503, "text/plain", b"LL-HLS media not ready")
+                            .await?;
+                        return Ok(writer);
+                    }
                     let query = req
                         .query
                         .iter()
@@ -484,4 +528,17 @@ pub fn create_ll_hls_handler(manager: Arc<LlHlsLiveManager>) -> Handler {
             Ok(writer)
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::query_suffix;
+
+    #[test]
+    fn blocking_reload_query_is_not_propagated_to_media_uris() {
+        assert_eq!(query_suffix("_HLS_msn=21&_HLS_part=9"), "");
+        assert_eq!(query_suffix("token=abc&_HLS_msn=21"), "?token=abc");
+        assert_eq!(query_suffix("_HLS_skip=YES&key=x"), "?key=x");
+        assert_eq!(query_suffix("token=abc"), "?token=abc");
+    }
 }

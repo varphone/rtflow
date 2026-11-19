@@ -6,6 +6,7 @@
 //! the Apple HLS IDR cut policy. We only adapt this project's `AccessUnit`s to
 //! its IR (`TrackSpec` + `Sample`) and expose the result as an HLS `Segment`.
 
+use super::sps::{h264_dimensions_from_avcc, h265_dimensions_from_hvcc};
 use super::{Segment, SegmentFormat, SegmenterConfig};
 use bytes::Bytes;
 use rtflow_media::{Codec, MediaDescription, MediaKind};
@@ -96,14 +97,18 @@ pub fn track_spec(track: &rtflow_media::TrackDescription) -> Option<TrackSpec> {
                 config.extend_from_slice(&pps);
                 Some(config)
             })?;
+            let dimensions = h264_dimensions_from_avcc(&config).unwrap_or((
+                track.width.unwrap_or(0) as u16,
+                track.height.unwrap_or(0) as u16,
+            ));
             let avcc = AVCConfigurationBox::parse_body(&config).ok()?;
             Some(TrackSpec::new(
                 TrackId::new(u32::from(track.id) + 1),
                 track.clock_rate,
                 CodecConfig::Avc {
                     config: avcc,
-                    width: track.width.unwrap_or(0) as u16,
-                    height: track.height.unwrap_or(0) as u16,
+                    width: dimensions.0,
+                    height: dimensions.1,
                 },
             ))
         }
@@ -125,14 +130,18 @@ pub fn track_spec(track: &rtflow_media::TrackDescription) -> Option<TrackSpec> {
                 &value("sprop-sps")?,
                 &value("sprop-pps")?,
             )?;
+            let dimensions = h265_dimensions_from_hvcc(&config).unwrap_or((
+                track.width.unwrap_or(0) as u16,
+                track.height.unwrap_or(0) as u16,
+            ));
             let hvcc = HEVCConfigurationBox::parse_body(&config).ok()?;
             Some(TrackSpec::new(
                 TrackId::new(u32::from(track.id) + 1),
                 track.clock_rate,
                 CodecConfig::Hevc {
                     config: hvcc,
-                    width: track.width.unwrap_or(0) as u16,
-                    height: track.height.unwrap_or(0) as u16,
+                    width: dimensions.0,
+                    height: dimensions.1,
                 },
             ))
         }
