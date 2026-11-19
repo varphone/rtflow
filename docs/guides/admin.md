@@ -9,12 +9,41 @@
 
 - **运行**：概览（KPI 与异常聚合）、直播流、点播。
 - **配置**：路径、推流密钥、RTSP 拉流、SRT 拉/推、录制任务。
-- **系统**：脱敏 TOML、数据库 schema/大小、构建特性。
+- **系统**：测试体验、脱敏 TOML、数据库 schema/大小、构建特性。
 
 管理 API 请求 20 秒超时，网络错误显示可重试的错误条；业务配置写入 SQLite；服务配置只读，修改 `rtflow.toml` 后 SIGHUP 或重启。
 
 系统页展示 HLS 前缀与 RTSP/RTMP 公共基地址，单行显示且可用图标一键复制，并支持复制/下载只读 TOML，并可复制数据库备份命令。
 
+
+## 测试体验
+
+“系统 → 测试体验”用于在不离开浏览器的情况下验证整套链路，默认关闭。
+
+启用：
+
+```toml
+[testing]
+enabled = true
+ffmpeg = "ffmpeg"
+max_jobs = 2
+default_duration = "60s"
+max_duration = "8760h"   # 最长 1 年，按场景收紧
+mount_prefix = "/live/test"
+```
+
+页面可启动 RTMP、RTSP TCP、RTSP UDP、SRT 测试推流（testsrc2 + 1 kHz 音频），并列出任务状态、PID、stderr、RTSP/HLS/DASH/WHEP 地址；支持打开直播、复制 RTSP、停止。停止或到期会杀掉 ffmpeg 子进程；时长上限由 `max_duration` 决定，默认 1 年。
+
+安全约束：
+
+- 仅管理员、CSRF 校验、非只读模式；
+- 只允许固定 ffmpeg 参数和本机目标；不能传任意命令/URL；
+- `max_jobs`、分辨率、帧率、码率、时长均有上限；
+- 测试流使用 `/live/test-*` mount；
+- 认证模式非 `none` 时不会绕过推流鉴权，测试功能需自行配置凭据；
+- 只在可信管理网络启用，测试流会占用 CPU/带宽。
+
+RTSP 地址可直接用 VLC/ffplay 拉流；HLS/DASH/WebRTC 地址在任务行和“直播流”页使用。
 
 ## 操作
 
