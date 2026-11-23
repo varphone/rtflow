@@ -210,3 +210,8 @@ tokio-rustls.workspace = true
 tracing-log.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
+
+[[example]]
+name = "whep_probe"
+path = "examples/whep_probe.rs"
+required-features = ["webrtc"]
