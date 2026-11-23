@@ -123,6 +123,7 @@ pub fn unit(track_id: u8, codec: Codec, sequence: u32) -> AccessUnit {
         _ => Bytes::from_static(&[0; 4]),
     };
     AccessUnit {
+        nal_offsets: None,
         track_id,
         codec,
         pts: Duration::from_millis(u64::from(sequence) * 20),

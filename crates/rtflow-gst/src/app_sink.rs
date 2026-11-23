@@ -38,6 +38,7 @@ pub fn setup_push_callback(
                 let rtp_timestamp = rtflow_media::clock::duration_to_ticks(pts, clock_rate) as u32;
 
                 let unit = AccessUnit {
+                    nal_offsets: None,
                     track_id,
                     codec,
                     pts,

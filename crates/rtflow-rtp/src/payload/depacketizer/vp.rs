@@ -100,6 +100,7 @@ impl Depacketizer {
         if frame_complete && let Some(frame) = self.vp_assembling.take() {
             let is_keyframe = std::mem::take(&mut self.vp_is_keyframe);
             return Ok(vec![AccessUnit {
+                nal_offsets: None,
                 track_id: self.track_id,
                 codec: self.codec,
                 pts: self.pts_from_timestamp(p.header.timestamp),

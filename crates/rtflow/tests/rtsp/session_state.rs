@@ -65,6 +65,7 @@ async fn rejects_invalid_session_and_state_transitions() {
         .publisher()
         .unwrap()
         .try_push(rtflow::AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::ZERO,

@@ -72,6 +72,7 @@ async fn proxy_forwards_upstream_frames() {
     tokio::time::sleep(Duration::from_millis(80)).await;
     publisher
         .try_push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::ZERO,

@@ -445,6 +445,7 @@ pub async fn serve_rtmp_session(
                                 };
 
                                 let unit = AccessUnit {
+                                    nal_offsets: None,
                                     track_id: 0,
                                     codec: Codec::H264,
                                     pts: Duration::from_millis(pts_ms as u64),
@@ -473,6 +474,7 @@ pub async fn serve_rtmp_session(
                                 };
 
                                 let unit = AccessUnit {
+                                    nal_offsets: None,
                                     track_id: 0,
                                     codec: Codec::H265,
                                     pts: Duration::from_millis(pts_ms as u64),
@@ -546,6 +548,7 @@ pub async fn serve_rtmp_session(
                                 let ts_ms = msg.timestamp.wrapping_sub(base);
                                 let pts_ms = (ts_ms as i64 + composition_time as i64).max(0) as u32;
                                 let unit = AccessUnit {
+                                    nal_offsets: None,
                                     track_id: 0,
                                     codec,
                                     pts: Duration::from_millis(pts_ms as u64),
@@ -569,6 +572,7 @@ pub async fn serve_rtmp_session(
                                 let ts_ms = msg.timestamp.wrapping_sub(base);
                                 let pts_ms = (ts_ms as i64 + composition_time as i64).max(0) as u32;
                                 let unit = AccessUnit {
+                                    nal_offsets: None,
                                     track_id: 0,
                                     codec,
                                     pts: Duration::from_millis(pts_ms as u64),
@@ -641,6 +645,7 @@ pub async fn serve_rtmp_session(
                                 let track_id: u8 = if *has_video { 1 } else { 0 };
 
                                 let unit = AccessUnit {
+                                    nal_offsets: None,
                                     track_id,
                                     codec: Codec::Aac,
                                     pts: Duration::from_millis(ts_ms as u64),

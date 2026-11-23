@@ -174,11 +174,14 @@ impl Packetizer {
         if max <= 2 {
             return Err(Error::Media("MTU too small for H264".into()));
         }
-        let nals = annex_b_nals(&f.data);
-        let nals = if nals.is_empty() {
-            vec![f.data.clone()]
-        } else {
-            nals
+        // 编码器给了 NAL 边界（HiSilicon VENC 一帧多 packet）就直接按偏移切，
+        // 省掉整帧扫起始码；否则回退到 Annex-B 扫描。
+        let nals = match split_by_offsets(f) {
+            Some(v) => v,
+            None => {
+                let v = annex_b_nals(&f.data);
+                if v.is_empty() { vec![f.data.clone()] } else { v }
+            }
         };
         let total = nals.len();
         let fragments: usize = nals
@@ -233,11 +236,14 @@ impl Packetizer {
         if max <= 3 {
             return Err(Error::Media("MTU too small for H265".into()));
         }
-        let nals = annex_b_nals(&f.data);
-        let nals = if nals.is_empty() {
-            vec![f.data.clone()]
-        } else {
-            nals
+        // 编码器给了 NAL 边界（HiSilicon VENC 一帧多 packet）就直接按偏移切，
+        // 省掉整帧扫起始码；否则回退到 Annex-B 扫描。
+        let nals = match split_by_offsets(f) {
+            Some(v) => v,
+            None => {
+                let v = annex_b_nals(&f.data);
+                if v.is_empty() { vec![f.data.clone()] } else { v }
+            }
         };
         let total = nals.len();
         let fragments: usize = nals
@@ -429,6 +435,38 @@ impl Packetizer {
         Ok(vec![self.packet(v.freeze(), f.rtp_timestamp, true)])
     }
 }
+/// 若访问单元自带 NAL 边界，按偏移切片（O(1)，零拷贝）；否则返回 None。
+fn split_by_offsets(f: &AccessUnit) -> Option<Vec<Bytes>> {
+    let offs = f.nal_offsets.as_ref()?;
+    if offs.len() < 2 {
+        return None;
+    }
+    let end = *offs.last()? as usize;
+    if end > f.data.len() {
+        return None;
+    }
+    tracing::trace!(nals = offs.len() - 1, "packetize via nal_offsets");
+    let mut out = Vec::with_capacity(offs.len() - 1);
+    for w in offs.windows(2) {
+        let (a, b) = (w[0] as usize, w[1] as usize);
+        if b <= a || b > f.data.len() {
+            return None;
+        }
+        // 与 annex_b_nals 语义一致：返回不含起始码的 NAL 载荷。
+        let mut slice = f.data.slice(a..b);
+        if slice.starts_with(&[0, 0, 0, 1]) {
+            slice = slice.slice(4..);
+        } else if slice.starts_with(&[0, 0, 1]) {
+            slice = slice.slice(3..);
+        }
+        if slice.is_empty() {
+            continue;
+        }
+        out.push(slice);
+    }
+    Some(out)
+}
+
 pub(super) fn annex_b_nals(data: &Bytes) -> Vec<Bytes> {
     let mut marks = Vec::new();
     let b = &data[..];

@@ -26,6 +26,7 @@ fn frame_pts(index: u64) -> Duration {
 fn frame(index: u64) -> AccessUnit {
     let pts = frame_pts(index);
     AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts,

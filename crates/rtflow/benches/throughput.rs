@@ -9,6 +9,7 @@ use std::hint::black_box;
 
 fn bench_rtp_packetize_h264(c: &mut Criterion) {
     let unit = AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: std::time::Duration::ZERO,
@@ -28,6 +29,7 @@ fn bench_rtp_packetize_h264(c: &mut Criterion) {
 
 fn bench_rtp_packetize_h264_large(c: &mut Criterion) {
     let unit = AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: std::time::Duration::ZERO,
@@ -47,6 +49,7 @@ fn bench_rtp_packetize_h264_large(c: &mut Criterion) {
 
 fn bench_rtp_parse(c: &mut Criterion) {
     let unit = AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: std::time::Duration::ZERO,

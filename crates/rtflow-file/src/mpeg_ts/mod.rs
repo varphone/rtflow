@@ -269,6 +269,7 @@ impl MpegTsDemuxer {
                 let dts = dts_90k.map(|value| duration_from_ticks(value, 90_000));
                 self.pending.push_back(DemuxedSample {
                     unit: AccessUnit {
+                        nal_offsets: None,
                         track_id: track.track_id,
                         codec: track.codec,
                         pts,
@@ -288,6 +289,7 @@ impl MpegTsDemuxer {
                 let pts = duration_from_ticks(pts_90k, 90_000);
                 self.pending.push_back(DemuxedSample {
                     unit: AccessUnit {
+                        nal_offsets: None,
                         track_id: track.track_id,
                         codec: track.codec,
                         pts,

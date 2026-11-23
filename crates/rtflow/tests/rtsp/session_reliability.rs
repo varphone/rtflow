@@ -72,6 +72,7 @@ async fn run(transport: UpstreamTransport) {
     );
     publisher
         .try_push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::ZERO,

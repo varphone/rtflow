@@ -105,6 +105,10 @@ pub struct AccessUnit {
     pub rtp_timestamp: RtpTimestamp,
     pub is_keyframe: bool,
     pub data: Bytes,
+    /// 帧内 NAL 边界（每个 NAL 的起始偏移，末尾带 len 哨兵）。
+    /// 硬件编码器（HiSilicon VENC）直接给出时填 `Some`，下游 RTP 打包按偏移切分，
+    /// 不必扫描 Annex-B 起始码。一帧内所有 NAL 共享同一 pts/rtp_timestamp。
+    pub nal_offsets: Option<std::sync::Arc<[u32]>>,
 }
 
 impl AccessUnit {
@@ -149,6 +153,33 @@ impl AccessUnit {
             rtp_timestamp,
             is_keyframe,
             data,
+            nal_offsets: None,
+        }
+    }
+
+    /// 构造一帧“带 NAL 边界”的视频访问单元（硬件编码器多 packet 输出）。
+    ///
+    /// `data` 是整帧连续缓冲（可来自 DMA/MMZ），`nal_offsets` 是帧内每个 NAL 的
+    /// 起始偏移加末尾哨兵。下游 RTP 打包按偏移切片，**不再扫描 Annex-B 起始码**。
+    /// 一帧内所有 NAL（SPS/PPS/SEI/slice）共享同一个 `pts` / `rtp_timestamp`。
+    pub fn video_with_nal_offsets(
+        track_id: TrackId,
+        codec: Codec,
+        pts: Duration,
+        rtp_timestamp: RtpTimestamp,
+        is_keyframe: bool,
+        data: Bytes,
+        nal_offsets: std::sync::Arc<[u32]>,
+    ) -> Self {
+        Self {
+            track_id,
+            codec,
+            pts,
+            dts: None,
+            rtp_timestamp,
+            is_keyframe,
+            data,
+            nal_offsets: Some(nal_offsets),
         }
     }
 
@@ -169,6 +200,7 @@ impl AccessUnit {
             rtp_timestamp,
             is_keyframe: true,
             data,
+            nal_offsets: None,
         }
     }
 }

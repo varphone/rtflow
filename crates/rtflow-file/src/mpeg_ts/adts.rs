@@ -54,6 +54,7 @@ pub(super) fn split_adts(
         let pts = duration_from_ticks(audio_ticks, u64::from(track.clock_rate));
         output.push_back(DemuxedSample {
             unit: AccessUnit {
+                nal_offsets: None,
                 track_id: track.track_id,
                 codec: Codec::Aac,
                 pts,

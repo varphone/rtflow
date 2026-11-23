@@ -71,6 +71,7 @@ fn segmenter_produces_init_segment() {
             h264_interframe()
         };
         segmenter.push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::from_millis(i * 40),
@@ -114,6 +115,7 @@ fn segmenter_produces_media_segment() {
             h264_interframe()
         };
         segmenter.push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::from_millis(i * 40),
@@ -291,6 +293,7 @@ fn segmenter_accepts_non_contiguous_track_ids() {
     let mut rx = segmenter.subscribe();
     for i in 0..4 {
         segmenter.push(AccessUnit {
+            nal_offsets: None,
             track_id: 7,
             codec: Codec::H264,
             pts: Duration::from_millis(i * 40),
@@ -329,6 +332,7 @@ fn segmenter_keyframe_alignment() {
             h264_interframe()
         };
         segmenter.push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::from_millis(i * 40),
@@ -387,6 +391,7 @@ fn segmenter_rotates_audio_only_stream_by_time() {
 
     for i in 0..12u32 {
         segmenter.push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::Aac,
             pts: Duration::from_millis(i as u64 * 40),
@@ -559,6 +564,7 @@ fn pcmu_segment_uses_ulaw_sample_entry() {
 
     for i in 0..4u32 {
         segmenter.push(AccessUnit {
+            nal_offsets: None,
             track_id: 1,
             codec: Codec::Pcmu,
             pts: Duration::from_millis(i as u64 * 20),
@@ -655,6 +661,7 @@ async fn registry_live_handler_serves_dynamic_mount() {
         let key = i % 5 == 0;
         publisher
             .push(AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::H264,
                 pts: Duration::from_millis(i * 40),
@@ -786,6 +793,7 @@ fn video_segments_never_start_mid_gop() {
     // mid-GOP segment starts without a reference picture and hls.js shows
     // a black screen even though ffprobe accepts the container.
     segmenter.push(AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::ZERO,
@@ -796,6 +804,7 @@ fn video_segments_never_start_mid_gop() {
     });
     for i in 1..10 {
         segmenter.push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::from_millis(i * 40),
@@ -810,6 +819,7 @@ fn video_segments_never_start_mid_gop() {
         "video must wait for the next IDR instead of cutting mid-GOP"
     );
     segmenter.push(AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::from_millis(400),
@@ -836,6 +846,7 @@ fn segmenter_can_continue_sequence_after_restart() {
     let mut segments = segmenter.subscribe();
     for i in 0..3 {
         segmenter.push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::from_millis(i * 40),
@@ -850,6 +861,7 @@ fn segmenter_can_continue_sequence_after_restart() {
         });
     }
     segmenter.push(AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::from_millis(100),

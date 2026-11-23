@@ -588,6 +588,7 @@ impl Demuxer for SyntheticDemuxer {
         self.index += 1;
         Ok(Some(DemuxedSample {
             unit: AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::H264,
                 pts,

@@ -604,6 +604,7 @@ pub(super) async fn handle_command(
                             _ => rtflow_media::MediaKind::Video,
                         };
                         let unit = AccessUnit {
+                            nal_offsets: None,
                             track_id,
                             codec,
                             pts: Duration::ZERO,

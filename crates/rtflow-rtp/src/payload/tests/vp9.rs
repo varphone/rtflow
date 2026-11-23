@@ -29,6 +29,7 @@ mod vp9_tests {
         let mut pack = Packetizer::new(Codec::Vp9, 98, 7, 1400).unwrap();
         let packets = pack
             .packetize(&AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::Vp9,
                 pts: Duration::from_millis(33000),
@@ -71,6 +72,7 @@ mod vp9_tests {
         let mut pack = Packetizer::new(Codec::Vp9, 98, 7, 1200).unwrap();
         let f1 = pack
             .packetize(&AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::Vp9,
                 pts: Duration::ZERO,
@@ -94,6 +96,7 @@ mod vp9_tests {
         // Second frame: picture ID increments.
         let f2 = pack
             .packetize(&AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::Vp9,
                 pts: Duration::from_millis(3000),

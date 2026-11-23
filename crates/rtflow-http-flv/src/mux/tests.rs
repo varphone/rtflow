@@ -172,6 +172,7 @@ fn h265_enhanced_rtmp_tag() {
     muxer.set_video_sequence_header(seq);
 
     let unit = AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H265,
         pts: Duration::from_millis(0),
@@ -303,6 +304,7 @@ fn encode_h264_tag_payload_is_avcc() {
     data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x38, 0x80]);
     data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x80]);
     let unit = AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::from_millis(40),
@@ -367,6 +369,7 @@ fn g711_tag_pts_normalized_to_zero() {
     };
     let mut muxer = FlvMuxer::new(&desc);
     let first = AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::Pcma,
         pts: Duration::from_millis(500),

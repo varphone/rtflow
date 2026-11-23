@@ -22,6 +22,7 @@ async fn local_h264_frame_reaches_udp_client() {
     tokio::time::sleep(Duration::from_millis(20)).await;
     publisher
         .try_push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::ZERO,

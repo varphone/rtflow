@@ -363,6 +363,7 @@ impl TsStreamDemuxer {
                 let frame_dts = dts_duration + offset;
                 last_pts = last_pts.saturating_add(1024);
                 self.output.push(AccessUnit {
+                    nal_offsets: None,
                     track_id: track.track_id,
                     codec: track.codec,
                     pts: frame_pts,
@@ -389,6 +390,7 @@ impl TsStreamDemuxer {
         };
 
         let unit = AccessUnit {
+            nal_offsets: None,
             track_id: track.track_id,
             codec: track.codec,
             pts: pts_duration,

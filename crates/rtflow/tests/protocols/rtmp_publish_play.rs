@@ -459,6 +459,7 @@ async fn rtmp_play_receives_flv_tags() {
     // Now push a frame from the publisher side
     publisher
         .push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::from_millis(0),

@@ -30,6 +30,7 @@ mod vp8_tests {
         let mut pack = Packetizer::new(Codec::Vp8, 0, 90_000, 1200).unwrap();
         let packets = pack
             .packetize(&AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::Vp8,
                 pts: Duration::from_millis(0),
@@ -62,6 +63,7 @@ mod vp8_tests {
         let mut pack = Packetizer::new(Codec::Vp8, 0, 90_000, 1200).unwrap();
         let packets = pack
             .packetize(&AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::Vp8,
                 pts: Duration::from_millis(0),

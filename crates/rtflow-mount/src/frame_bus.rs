@@ -203,6 +203,7 @@ mod tests {
 
     fn frame(timestamp: u32, size: usize) -> AccessUnit {
         AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::ZERO,

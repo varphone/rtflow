@@ -502,6 +502,7 @@ mod tests {
             .unwrap();
         let publisher = handle.publisher().unwrap();
         let frame = rtflow_media::AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: rtflow_media::Codec::H264,
             pts: std::time::Duration::ZERO,

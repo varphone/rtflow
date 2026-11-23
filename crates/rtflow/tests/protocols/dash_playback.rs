@@ -51,6 +51,7 @@ fn h264_keyframe(seq: u32) -> AccessUnit {
     data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
     data.extend_from_slice(&[0x65, 0x88, 0x80, 0x40, 0x00, 0x01, 0x02]); // IDR
     AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::from_millis(seq as u64 * 40),
@@ -78,6 +79,7 @@ fn h264_interframe(seq: u32) -> AccessUnit {
     data.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
     data.extend_from_slice(&[0x41, 0x9a, 0x00, 0x10, 0x00, 0x01]);
     AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::from_millis(seq as u64 * 40),

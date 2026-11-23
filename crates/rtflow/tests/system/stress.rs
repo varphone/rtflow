@@ -75,6 +75,7 @@ async fn mixed_transport_fanout_stays_bounded_under_burst() {
     for index in 0..FRAMES {
         publisher
             .try_push(AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::H264,
                 pts: Duration::from_micros(index as u64 * 33_333),

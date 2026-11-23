@@ -421,6 +421,7 @@ mod tests {
 
     fn frame(timestamp: u32, pts_ms: u64, keyframe: bool, data: Bytes) -> AccessUnit {
         AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::from_millis(pts_ms),

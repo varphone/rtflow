@@ -633,6 +633,7 @@ mod tests {
     #[test]
     fn build_and_parse_video_tag() {
         let unit = AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::from_millis(100),

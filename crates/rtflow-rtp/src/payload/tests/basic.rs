@@ -254,6 +254,7 @@ fn jitter_reorders_deduplicates_and_wraps() {
 fn h263_rfc2190_round_trip_keeps_start_code() {
     let data = Bytes::from_static(&[0, 0, 0x80, 0x02, 0x08, 0x04, 0x11, 0x22]);
     let unit = AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H263,
         pts: std::time::Duration::ZERO,
@@ -282,6 +283,7 @@ fn av1_rtp_aggregates_obus_and_fragments_large_frames() {
     data.extend_from_slice(&[0x32, 0xa0, 0x1f]);
     data.extend_from_slice(&tile);
     let unit = AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::Av1,
         pts: std::time::Duration::ZERO,

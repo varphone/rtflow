@@ -152,6 +152,7 @@ impl SegmentReader {
             fixed[12], fixed[13], fixed[14], fixed[15], fixed[16], fixed[17], fixed[18], fixed[19],
         ]);
         Ok(Some(AccessUnit {
+            nal_offsets: None,
             track_id: fixed[0],
             codec: codec_from_id(fixed[1])?,
             is_keyframe: fixed[2] != 0,

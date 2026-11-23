@@ -40,6 +40,7 @@ fn description() -> MediaDescription {
 
 fn frame(index: u64, is_keyframe: bool) -> AccessUnit {
     AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::from_micros(index * 1_000_000 / 30),

@@ -227,6 +227,7 @@ impl Depacketizer {
             self.current_timestamp = None;
             let pts = self.pts_from_timestamp(timestamp);
             return Ok(vec![AccessUnit {
+                nal_offsets: None,
                 track_id: self.track_id,
                 codec: self.codec,
                 pts,
@@ -248,6 +249,7 @@ impl Depacketizer {
             return Ok(Vec::new());
         };
         Ok(vec![AccessUnit {
+            nal_offsets: None,
             track_id: self.track_id,
             codec: Codec::Av1,
             pts: self.pts_from_timestamp(timestamp),
@@ -341,6 +343,7 @@ impl Depacketizer {
         self.assembled_is_keyframe = false;
         self.current_timestamp = None;
         Ok(vec![AccessUnit {
+            nal_offsets: None,
             track_id: self.track_id,
             codec: self.codec,
             pts: self.pts_from_timestamp(timestamp),

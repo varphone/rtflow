@@ -61,6 +61,7 @@ fn flv_muxer_video_tag_roundtrip() {
     assert_eq!(header[4] & 0x01, 1); // video flag
 
     let keyframe = AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::from_millis(0),
@@ -95,6 +96,7 @@ fn flv_muxer_annex_b_to_avcc() {
     let mut muxer = FlvMuxer::new(&desc);
 
     let unit = AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::from_millis(100),
@@ -149,6 +151,7 @@ async fn http_flv_e2e_stream() {
             let is_key = i % 10 == 0;
             let data = h264_keyframe();
             let _ = publisher.try_push(AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::H264,
                 pts: Duration::from_millis(i * 40),
@@ -245,6 +248,7 @@ async fn http_flv_concurrent_subscribers() {
     let pub_handle = tokio::spawn(async move {
         for i in 0..20u64 {
             let _ = publisher.try_push(AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::H264,
                 pts: Duration::from_millis(i * 40),

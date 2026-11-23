@@ -263,6 +263,7 @@ async fn whep_streams_h264_rtp_over_real_ice_dtls_srtp() {
     for i in 0..30u32 {
         publisher
             .push(AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::H264,
                 pts: Duration::from_millis(u64::from(i) * 33),
@@ -479,6 +480,7 @@ async fn whip_receives_h264_rtp_over_real_ice_dtls_srtp() {
     for i in 0..20u32 {
         let units = packetizer
             .packetize(&AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::H264,
                 pts: Duration::from_millis(u64::from(i) * 33),
@@ -677,6 +679,7 @@ async fn whep_streams_pcma_audio_over_real_ice_dtls_srtp() {
     for i in 0..40u32 {
         publisher
             .push(AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::Pcma,
                 pts: Duration::from_millis(u64::from(i) * 20),

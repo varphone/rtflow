@@ -51,6 +51,7 @@ fn startup_cache_respects_mount_wide_budget() {
     let mut cache = KeyframeCache::new(&description, config).unwrap();
     for track_id in 0..2u8 {
         cache.push(std::sync::Arc::new(AccessUnit {
+            nal_offsets: None,
             track_id,
             codec: Codec::H264,
             pts: std::time::Duration::ZERO,

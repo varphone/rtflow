@@ -23,6 +23,7 @@ fn h264_keyframe() -> Bytes {
 
 fn unit(key: bool, seq: u64) -> AccessUnit {
     AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::from_micros(seq * 33_333),

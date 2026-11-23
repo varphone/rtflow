@@ -10,6 +10,7 @@ use rtflow_media::AccessUnit;
 use std::time::Duration;
 fn frame(c: Codec, data: &[u8]) -> AccessUnit {
     AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: c,
         pts: Duration::ZERO,

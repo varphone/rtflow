@@ -204,6 +204,7 @@ pub fn sample_unit(track: &TrackDescription, frame: u64, fps: u32) -> AccessUnit
     };
     let frame_duration = Duration::from_secs_f64(1.0 / f64::from(fps));
     AccessUnit {
+        nal_offsets: None,
         track_id: track.id,
         codec: track.codec,
         pts: frame_duration.mul_f64(frame as f64),

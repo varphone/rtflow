@@ -30,6 +30,7 @@ impl Depacketizer {
                     }
                     let pts = self.pts_from_timestamp(timestamp);
                     units.push(AccessUnit {
+                        nal_offsets: None,
                         track_id: self.track_id,
                         codec: self.codec,
                         pts,
@@ -55,6 +56,7 @@ impl Depacketizer {
                 }
                 let pts = self.pts_from_timestamp(timestamp);
                 Ok(vec![AccessUnit {
+                    nal_offsets: None,
                     track_id: self.track_id,
                     codec: self.codec,
                     pts,
@@ -70,6 +72,7 @@ impl Depacketizer {
                 }
                 let pts = self.pts_from_timestamp(timestamp);
                 Ok(vec![AccessUnit {
+                    nal_offsets: None,
                     track_id: self.track_id,
                     codec: self.codec,
                     pts,
@@ -82,6 +85,7 @@ impl Depacketizer {
             Codec::Opus | Codec::Pcma | Codec::Pcmu => {
                 let pts = self.pts_from_timestamp(timestamp);
                 Ok(vec![AccessUnit {
+                    nal_offsets: None,
                     track_id: self.track_id,
                     codec: self.codec,
                     pts,

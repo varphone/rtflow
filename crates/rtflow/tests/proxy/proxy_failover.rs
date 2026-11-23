@@ -75,6 +75,7 @@ async fn unavailable_primary_fails_over_to_compatible_fallback() {
 
     publisher
         .try_push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: Duration::ZERO,

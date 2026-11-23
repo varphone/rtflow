@@ -154,6 +154,7 @@ async fn nack_case(rtx_enabled: bool) {
     for (index, keyframe) in [true, false].into_iter().enumerate() {
         publisher
             .try_push(AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::H264,
                 pts: Duration::from_millis(index as u64 * 40),

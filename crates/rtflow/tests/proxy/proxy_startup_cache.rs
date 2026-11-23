@@ -63,6 +63,7 @@ async fn late_proxy_subscriber_receives_cached_keyframe_and_gop() {
     ] {
         publisher
             .try_push(AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::H264,
                 pts: Duration::from_millis(u64::from(timestamp - 90_000) / 90),

@@ -20,6 +20,7 @@ impl Element for Sink {
 
 fn frame() -> AccessUnit {
     AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::ZERO,

@@ -188,6 +188,7 @@ impl MatroskaDemuxer {
             };
             return Ok(Some(DemuxedSample {
                 unit: AccessUnit {
+                    nal_offsets: None,
                     track_id: track.track_id,
                     codec: track.codec,
                     pts,

@@ -88,6 +88,7 @@ async fn credentials_protect_describe_setup_and_play() {
     let publisher = mount.publisher().unwrap();
     publisher
         .try_push(AccessUnit {
+            nal_offsets: None,
             track_id: 0,
             codec: Codec::H264,
             pts: std::time::Duration::ZERO,

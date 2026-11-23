@@ -49,6 +49,7 @@ async fn round_trip(codec: Codec, transport: UpstreamTransport) {
     let mut data = vec![0u8, 0, 0, 1];
     data.extend_from_slice(&payload);
     let expected = AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec,
         pts: Duration::ZERO,

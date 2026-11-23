@@ -83,6 +83,7 @@ async fn run(transport: UpstreamTransport) {
     ] {
         publisher
             .try_push(AccessUnit {
+                nal_offsets: None,
                 track_id: frame_id,
                 codec,
                 pts: Duration::ZERO,

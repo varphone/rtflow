@@ -89,6 +89,7 @@ async fn gstreamer_rtspsrc_receives_interleaved_h264() {
     for index in 0..5 {
         publisher
             .try_push(AccessUnit {
+                nal_offsets: None,
                 track_id: 0,
                 codec: Codec::H264,
                 pts: Duration::from_millis(index * 33),

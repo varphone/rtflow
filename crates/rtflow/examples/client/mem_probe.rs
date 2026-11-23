@@ -82,6 +82,7 @@ fn frame(seq: u64) -> AccessUnit {
         data.push((seq % 251) as u8);
     }
     AccessUnit {
+        nal_offsets: None,
         track_id: 0,
         codec: Codec::H264,
         pts: Duration::from_micros(seq * 33_333),
@@ -168,6 +169,7 @@ async fn main() -> rtflow::Result<()> {
                 let mut audio = vec![0xd5u8; 160];
                 audio[0] = (seq % 251) as u8;
                 let _ = publisher.try_push(AccessUnit {
+                    nal_offsets: None,
                     track_id: 1,
                     codec: Codec::Pcma,
                     pts: Duration::from_micros(seq * 33_333),
