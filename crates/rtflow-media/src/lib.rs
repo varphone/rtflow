@@ -344,6 +344,29 @@ impl TrackDescription {
         }
     }
 
+    /// Opus audio track (RFC 7587: 48 kHz clock, stereo by default, PT 96).
+    pub fn opus_audio(id: TrackId, channels: u8) -> Self {
+        Self {
+            id,
+            kind: MediaKind::Audio,
+            codec: Codec::Opus,
+            clock_rate: 48_000,
+            channels: Some(channels.max(1)),
+            payload_type: 96,
+            fmtp: None,
+            control: Arc::from(format!("track{id}")),
+            width: None,
+            height: None,
+            frame_rate: None,
+            direction: None,
+            ptime: Some(20),
+            rtcp: None,
+            bandwidth_as: None,
+            rtx: None,
+            crypto: None,
+        }
+    }
+
     /// G.711 A-law audio track (8 kHz, 1 channel; no fmtp needed).
     pub fn pcma_audio(id: TrackId, sample_rate: u32, channels: u8) -> Self {
         Self {

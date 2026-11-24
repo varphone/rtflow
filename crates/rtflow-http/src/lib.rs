@@ -270,6 +270,12 @@ impl HttpServer {
                             }
                         });
                     }
+                    // 回收已结束的连接任务。
+                    //
+                    // 之前只有关服务器时才 `join_next()`，完成的连接任务会一直留在
+                    // JoinSet 里（每个任务带着自己的分配，实测约 10 KB/连接），
+                    // 表现为「每来一个 HTTP 连接就涨 ~10 KB」，长时间跑就变成漏。
+                    Some(_) = tasks.join_next(), if !tasks.is_empty() => {}
                     _ = cancel.cancelled() => break,
                 }
             }
