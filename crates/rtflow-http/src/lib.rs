@@ -270,14 +270,18 @@ impl HttpServer {
                             }
                         });
                     }
-                    // 回收已结束的连接任务。
-                    //
-                    // 之前只有关服务器时才 `join_next()`，完成的连接任务会一直留在
-                    // JoinSet 里（每个任务带着自己的分配，实测约 10 KB/连接），
-                    // 表现为「每来一个 HTTP 连接就涨 ~10 KB」，长时间跑就变成漏。
-                    Some(_) = tasks.join_next(), if !tasks.is_empty() => {}
                     _ = cancel.cancelled() => break,
                 }
+                // 回收已结束的连接任务。
+                //
+                // **不能把 `join_next()` 放进 select!**：实测那样会让 TLS 握手卡死
+                // （同一台板上 accept 18 次只有 6 次握手完成，curl 约 50% 失败；
+                // 去掉这个分支后 6/6 全部成功）。改成每轮循环末尾同步抽干已完成的
+                // 任务 —— `try_join_next()` 不会注册 waker，不影响 accept。
+                //
+                // 不回收的话，完成的任务会一直留在 JoinSet 里（每个任务带着自己的
+                // 分配，实测约 10 KB/连接），表现为「每来一个连接就涨 10 KB」。
+                while tasks.try_join_next().is_some() {}
             }
             let _ = tokio::time::timeout(shutdown_timeout, async {
                 while tasks.join_next().await.is_some() {}
@@ -412,6 +416,15 @@ where
         if !keep_alive {
             break;
         }
+    }
+
+    // 收尾：优雅关闭写半边（TLS 走 close_notify、TCP 走 FIN）。
+    // 直接 drop 掉 socket 时，内核会把「已发出但客户端还没读走」的数据连同
+    // RST 一起丢掉 —— 实测 HTTPS 下 20 次请求只有 6 次能拿到响应。
+    if let Some(mut w) = writer.take() {
+        let _ = w.flush().await;
+        let mut inner = w.into_inner();
+        let _ = tokio::io::AsyncWriteExt::shutdown(&mut inner).await;
     }
 
     Ok(())
