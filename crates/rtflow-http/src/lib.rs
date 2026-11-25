@@ -408,7 +408,18 @@ where
                 }
             }
             Err(e) => {
-                tracing::warn!(peer = ?peer, method = ?req_method, path = %req_path, %e, "HTTP handler error");
+                // 播放器（VLC/ffmpeg/浏览器）切换码流、拖动、关页面时会直接断开正在下载的连接，
+                // 这类「对端已关闭」不是设备的问题，用 debug 记，别拿 WARN 刷日志。
+                let msg = e.to_string();
+                let peer_gone = msg.contains("Connection reset by peer")
+                    || msg.contains("Broken pipe")
+                    || msg.contains("connection closed")
+                    || msg.contains("UnexpectedEof");
+                if peer_gone {
+                    tracing::debug!(peer = ?peer, method = ?req_method, path = %req_path, %e, "客户端提前断开");
+                } else {
+                    tracing::warn!(peer = ?peer, method = ?req_method, path = %req_path, %e, "HTTP handler error");
+                }
                 break;
             }
         }

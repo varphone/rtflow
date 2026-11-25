@@ -41,6 +41,11 @@ pub enum SessionState {
 }
 
 /// A single WebRTC session.
+/// 会话建立后多久还没连上就丢掉（见 [`WebrtcSession::is_expired_with`]）。
+///
+/// 浏览器正常建连在 1 秒内完成；10 秒还没连上的会话基本是客户端已经走了。
+pub const CONNECT_DEADLINE: Duration = Duration::from_secs(10);
+
 pub struct WebrtcSession {
     /// Unique session ID.
     pub id: String,
@@ -127,18 +132,35 @@ impl WebrtcSession {
     /// keeps the session alive until the peer closes it (DELETE request
     /// or an ICE failure, which sets [`SessionState::Closed`]).
     pub fn is_expired(&self, timeout: Duration, max_lifetime: Duration) -> bool {
+        self.is_expired_with(timeout, max_lifetime, CONNECT_DEADLINE)
+    }
+
+    /// 带「连接超时」的过期判定。
+    ///
+    /// `connect_deadline`：会话建好之后多久还没连上（ICE 既没到 Connected 也没 Failed）
+    /// 就丢掉。**这个很关键**：客户端发完 offer 就关页面/断网时，ICE 会停在 New/Checking，
+    /// 底层 agent 每 200ms 打一条 `pingAllCandidates called with no candidate pairs` WARN，
+    /// 一直刷到 60 秒的 idle 超时 —— 一个僵尸会话就能刷出三百条。
+    pub fn is_expired_with(
+        &self,
+        timeout: Duration,
+        max_lifetime: Duration,
+        connect_deadline: Duration,
+    ) -> bool {
         if self.created_at.elapsed() > max_lifetime {
             return true;
         }
         if let Some(pc_state) = &self.pc_state
             && let Ok(ice) = pc_state.ice_state.try_read()
-            && matches!(
-                *ice,
-                webrtc::peer_connection::RTCIceConnectionState::Failed
-                    | webrtc::peer_connection::RTCIceConnectionState::Closed
-            )
         {
-            return true;
+            use webrtc::peer_connection::RTCIceConnectionState as S;
+            if matches!(*ice, S::Failed | S::Closed) {
+                return true;
+            }
+            let connected = matches!(*ice, S::Connected | S::Completed);
+            if !connected && self.created_at.elapsed() > connect_deadline {
+                return true;
+            }
         }
         self.state != SessionState::Active && self.last_activity.elapsed() > timeout
     }
