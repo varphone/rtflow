@@ -183,6 +183,19 @@ pub(super) async fn handle_play(
             )))
             .await?;
     } else {
+        // **PLAY 时主动要一个 IDR**：新观众的第一帧必须是关键帧，否则要等自然 GOP
+        // （30fps/GOP30 ⇒ 最坏 1 秒）。WHEP 建立会话时也是这么做的；
+        // RTSP 这条路径以前没要，实测首帧中位 152 ms、最坏接近一个 GOP。
+        for (mount, _, _, track) in interleaved {
+            if track.kind == rtflow_media::MediaKind::Video {
+                mount.request_keyframe(track.id);
+            }
+        }
+        for (mount, _, _, _, track) in setups {
+            if track.kind == rtflow_media::MediaKind::Video {
+                mount.request_keyframe(track.id);
+            }
+        }
         *phase = ConnectionPhase::Playing;
         tracing::info!(
             session = %session_id,
