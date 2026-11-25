@@ -10,6 +10,7 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use rtc::peer_connection::state::RTCIceConnectionState;
 use rtc::rtp::header::Header as RtpHeader;
 use rtc::rtp::packet::Packet as RtpPacket;
 use rtc::rtp_transceiver::rtp_sender::{
@@ -306,6 +307,7 @@ pub async fn handle_whep_post(
         spawn_play_task(
             &session,
             pc.clone(),
+            pc_state.clone(),
             mounts.clone(),
             path.clone(),
             *kind,
@@ -485,6 +487,10 @@ fn trim_startup(frames: &mut Vec<Arc<rtflow_media::AccessUnit>>, codec: Codec, m
 async fn spawn_play_task(
     session: &Arc<RwLock<WebrtcSession>>,
     pc: Arc<dyn PeerConnection>,
+    // ICE 状态：**没连上之前不要往 track 写 RTP**。写了会触发对端地址还是占位符
+    // （`127.0.0.1:65535`），底层 SRTP 每个包打一条 `local_srtp_context is not set yet`
+    // 的 WARN —— 一个观众就能把日志刷满。
+    pc_state: Arc<PcState>,
     mounts: Arc<MountRegistry>,
     mount_path: String,
     _kind: RtpCodecKind,
@@ -619,6 +625,14 @@ async fn spawn_play_task(
                             continue;
                         }
                     };
+                    // **ICE 没连上就不要写 RTP**：对端地址还是 127.0.0.1:65535，
+                    // SRTP 上下文还没建好，底层每个包都会打一条 WARN（实测能把日志刷满）。
+                    if !matches!(
+                        *pc_state.ice_state.read().await,
+                        RTCIceConnectionState::Connected | RTCIceConnectionState::Completed
+                    ) {
+                        continue;
+                    }
                     for p in packets {
                         last_rtp_timestamp = p.header.timestamp;
                         packet_count = packet_count.saturating_add(1);
