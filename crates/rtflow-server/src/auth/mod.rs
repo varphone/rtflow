@@ -534,8 +534,8 @@ fn parse_basic(header: &str) -> Option<(String, String)> {
 
 fn password_matches(provided: &str, stored: &str) -> bool {
     if stored.starts_with("$argon2") {
-        use argon2::PasswordVerifier;
-        let Ok(hash) = argon2::PasswordHash::new(stored) else {
+        use argon2::{PasswordVerifier, password_hash::phc::PasswordHash};
+        let Ok(hash) = PasswordHash::new(stored) else {
             return false;
         };
         return argon2::Argon2::default()

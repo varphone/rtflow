@@ -19,19 +19,13 @@ pub(crate) struct PasswordDigest {
 
 impl PasswordDigest {
     pub(crate) fn new(password: &str) -> rtflow_core::error::Result<Self> {
-        use argon2::{
-            Argon2,
-            password_hash::{PasswordHasher, SaltString},
-        };
+        use argon2::{Argon2, PasswordHasher};
         let mut salt_bytes = [0u8; 16];
-        getrandom::getrandom(&mut salt_bytes).map_err(|error| {
-            rtflow_core::error::Error::InvalidConfig(format!("admin salt: {error}"))
-        })?;
-        let salt = SaltString::encode_b64(&salt_bytes).map_err(|error| {
+        getrandom::fill(&mut salt_bytes).map_err(|error| {
             rtflow_core::error::Error::InvalidConfig(format!("admin salt: {error}"))
         })?;
         let hash = Argon2::default()
-            .hash_password(password.as_bytes(), &salt)
+            .hash_password_with_salt(password.as_bytes(), &salt_bytes)
             .map_err(|error| {
                 rtflow_core::error::Error::InvalidConfig(format!("admin password hash: {error}"))
             })?;
@@ -41,10 +35,7 @@ impl PasswordDigest {
     }
 
     pub(crate) fn verify(&self, password: &str) -> bool {
-        use argon2::{
-            Argon2,
-            password_hash::{PasswordHash, PasswordVerifier},
-        };
+        use argon2::{Argon2, PasswordVerifier, password_hash::phc::PasswordHash};
         let Ok(parsed) = PasswordHash::new(&self.phc) else {
             return false;
         };
@@ -60,7 +51,7 @@ pub(crate) fn constant_time_eq(left: &str, right: &str) -> bool {
 
 pub(crate) fn random_token(bytes: usize) -> rtflow_core::error::Result<String> {
     let mut buffer = vec![0u8; bytes];
-    getrandom::getrandom(&mut buffer).map_err(|error| {
+    getrandom::fill(&mut buffer).map_err(|error| {
         rtflow_core::error::Error::InvalidConfig(format!("admin token: {error}"))
     })?;
     Ok(URL_SAFE_NO_PAD.encode(buffer))

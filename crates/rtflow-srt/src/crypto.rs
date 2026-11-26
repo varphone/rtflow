@@ -475,8 +475,8 @@ impl SessionCrypto {
         }
         let mut salt = [0u8; KM_SALT_LEN];
         let mut sek = vec![0u8; key_len.bytes()];
-        getrandom::getrandom(&mut salt).map_err(|_| CryptoError::BadKm("rng"))?;
-        getrandom::getrandom(&mut sek).map_err(|_| CryptoError::BadKm("rng"))?;
+        getrandom::fill(&mut salt).map_err(|_| CryptoError::BadKm("rng"))?;
+        getrandom::fill(&mut sek).map_err(|_| CryptoError::BadKm("rng"))?;
         let kek = derive_kek(passphrase, &salt, key_len)?;
         let km = KmMessage::build(KmKeys::Even, key_len, salt, &sek, &[], &kek)?;
         let ctr = AesCtr::new(&sek)?;
@@ -573,7 +573,7 @@ impl SessionCrypto {
         let key_len =
             KeyLength::from_bytes(slot.key.len()).ok_or(CryptoError::BadKm("key length"))?;
         let mut sek = vec![0u8; key_len.bytes()];
-        getrandom::getrandom(&mut sek).map_err(|_| CryptoError::BadKm("rng"))?;
+        getrandom::fill(&mut sek).map_err(|_| CryptoError::BadKm("rng"))?;
         let kek = derive_kek(&self.passphrase, &salt, key_len)?;
         let km = KmMessage::build(KmKeys::Odd, key_len, salt, &[], &sek, &kek)?;
         let ctr = AesCtr::new(&sek)?;

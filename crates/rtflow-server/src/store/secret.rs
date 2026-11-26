@@ -1,7 +1,7 @@
 //! AES-256-GCM envelope for recoverable secrets (proxy passwords, SRT
 //! passphrases). Stream keys are hashes and never go through this module.
 use aes_gcm::{
-    Aes256Gcm, KeyInit,
+    Aes256Gcm, KeyInit, Nonce,
     aead::{Aead, Payload},
 };
 use zeroize::Zeroizing;
@@ -20,10 +20,10 @@ impl SecretBox {
     pub(crate) fn seal(&self, aad: &str, plaintext: &[u8]) -> Vec<u8> {
         let cipher = Aes256Gcm::new_from_slice(self.key.as_ref()).expect("32-byte AES key");
         let mut nonce = [0u8; 12];
-        let _ = getrandom::getrandom(&mut nonce);
+        let _ = getrandom::fill(&mut nonce);
         let ciphertext = cipher
             .encrypt(
-                (&nonce).into(),
+                &Nonce::from(nonce),
                 Payload {
                     msg: plaintext,
                     aad: aad.as_bytes(),
@@ -41,12 +41,13 @@ impl SecretBox {
         if payload.len() < 1 + 12 || payload[0] != 1 {
             return None;
         }
-        let nonce = &payload[1..13];
+        let mut nonce = [0u8; 12];
+        nonce.copy_from_slice(&payload[1..13]);
         let ciphertext = &payload[13..];
         let cipher = Aes256Gcm::new_from_slice(self.key.as_ref()).ok()?;
         cipher
             .decrypt(
-                nonce.into(),
+                &Nonce::from(nonce),
                 Payload {
                     msg: ciphertext,
                     aad: aad.as_bytes(),

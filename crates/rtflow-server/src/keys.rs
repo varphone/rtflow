@@ -6,7 +6,7 @@ use crate::{
     config::{Config, glob_match},
     store::{self, Store, StoreError},
 };
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
+use argon2::{Argon2, PasswordHasher, PasswordVerifier, password_hash::phc::PasswordHash};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -156,17 +156,13 @@ impl KeyStore {
             spec.ttl
         };
         let mut kid_bytes = [0u8; 12];
-        getrandom::getrandom(&mut kid_bytes)
-            .map_err(|error| KeyError::Crypto(error.to_string()))?;
+        getrandom::fill(&mut kid_bytes).map_err(|error| KeyError::Crypto(error.to_string()))?;
         let kid = format!("rk_{}", URL_SAFE_NO_PAD.encode(kid_bytes));
         let mut secret_bytes = [0u8; 32];
-        getrandom::getrandom(&mut secret_bytes)
-            .map_err(|error| KeyError::Crypto(error.to_string()))?;
+        getrandom::fill(&mut secret_bytes).map_err(|error| KeyError::Crypto(error.to_string()))?;
         let secret = URL_SAFE_NO_PAD.encode(secret_bytes);
-        let salt = SaltString::encode_b64(&kid_bytes)
-            .map_err(|error| KeyError::Crypto(error.to_string()))?;
         let hash = Argon2::default()
-            .hash_password(secret.as_bytes(), &salt)
+            .hash_password_with_salt(secret.as_bytes(), &kid_bytes)
             .map_err(|error| KeyError::Crypto(error.to_string()))?
             .to_string();
         let record = KeyRecord {

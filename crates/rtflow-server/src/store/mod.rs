@@ -217,7 +217,7 @@ fn resolve_master_key(config: &StorageSection, state_dir: &Path) -> StoreResult<
         )));
     }
     let mut key = [0u8; 32];
-    getrandom::getrandom(&mut key)
+    getrandom::fill(&mut key)
         .map_err(|error| StoreError::Config(format!("cannot generate master key: {error}")))?;
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent)?;

@@ -209,7 +209,7 @@ pub enum ProxyState {
 }
 fn random_jitter_sample() -> u16 {
     let mut bytes = [0u8; 2];
-    if getrandom::getrandom(&mut bytes).is_ok() {
+    if getrandom::fill(&mut bytes).is_ok() {
         u16::from_le_bytes(bytes) % 2_001
     } else {
         (std::time::SystemTime::now()

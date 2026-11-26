@@ -6,7 +6,7 @@ fn jitter_sample() -> u32 {
     let mut state = STATE.load(Ordering::Relaxed);
     if state == 0 {
         let mut bytes = [0u8; 8];
-        state = if getrandom::getrandom(&mut bytes).is_ok() {
+        state = if getrandom::fill(&mut bytes).is_ok() {
             u64::from_le_bytes(bytes)
         } else {
             std::time::SystemTime::now()

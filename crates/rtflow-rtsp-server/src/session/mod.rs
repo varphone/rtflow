@@ -60,7 +60,7 @@ use crate::timed_writer::TimedWriter;
 fn new_session_token() -> String {
     static FALLBACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let mut bytes = [0u8; 16];
-    if getrandom::getrandom(&mut bytes).is_err() {
+    if getrandom::fill(&mut bytes).is_err() {
         // RNG failure must not panic a live RTSP connection: mix the clock
         // and a process-local counter as a best-effort fallback.
         let now = std::time::SystemTime::now()

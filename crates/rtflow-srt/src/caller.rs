@@ -594,7 +594,7 @@ impl SrtCaller {
 
 fn random_id() -> u32 {
     let mut bytes = [0u8; 4];
-    if getrandom::getrandom(&mut bytes).is_err() {
+    if getrandom::fill(&mut bytes).is_err() {
         return 1;
     }
     u32::from_be_bytes(bytes).max(1)

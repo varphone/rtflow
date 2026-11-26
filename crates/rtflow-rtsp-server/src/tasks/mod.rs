@@ -167,7 +167,7 @@ impl RtpNtpClock {
 /// merge sessions from different sources).
 fn initial_ssrc(track_id: u8) -> u32 {
     let mut bytes = [0u8; 4];
-    let seed = if getrandom::getrandom(&mut bytes).is_ok() {
+    let seed = if getrandom::fill(&mut bytes).is_ok() {
         u32::from_le_bytes(bytes)
     } else {
         std::time::SystemTime::now()

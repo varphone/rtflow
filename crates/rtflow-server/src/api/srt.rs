@@ -187,7 +187,7 @@ async fn srt_upsert(
     }
     let id = body.id.clone().unwrap_or_else(|| {
         let mut bytes = [0u8; 8];
-        let _ = getrandom::getrandom(&mut bytes);
+        let _ = getrandom::fill(&mut bytes);
         format!(
             "srt_{}",
             bytes

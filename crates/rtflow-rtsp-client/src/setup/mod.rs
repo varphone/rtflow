@@ -195,7 +195,7 @@ fn ssrc_process_seed() -> u32 {
     static SEED: OnceLock<u32> = OnceLock::new();
     *SEED.get_or_init(|| {
         let mut bytes = [0u8; 4];
-        if getrandom::getrandom(&mut bytes).is_ok() {
+        if getrandom::fill(&mut bytes).is_ok() {
             u32::from_le_bytes(bytes)
         } else {
             std::time::SystemTime::now()
