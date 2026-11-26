@@ -72,6 +72,8 @@
 
 ### Changed
 
+- 依赖升级到当前最新版本：`tokio` 1.54、`bytes` 1.12、`clap` 4.6、`toml` 1.2、`getrandom` 0.4、`aes-gcm` 0.11、`argon2` 0.6、`quick-xml` 0.42、`reqwest` 0.13、`rusqlite` 0.43、`nix` 0.32、`broadcast-common` 14、`transmux` 0.33、`rtc`/`webrtc` 0.21、`mp4box` 0.14 等，并迁移对应 API（`getrandom::fill`、`PasswordHasher::hash_password_with_salt`、`aes-gcm` 的 nonce、`quick-xml` 0.42 的文本/实体引用事件、`transmux` 的 `Timescale`/`Duration`/`Sample` 时间轴）。`reqwest` 改用 `rustls-no-provider` 以保持全工程单一 TLS 后端（ring），创建客户端前安装进程级 crypto provider。最低 Rust 版本随 `transmux`/`broadcast-common` 14 提升到 1.95（CI 的 MSRV 任务同步到 1.95.0）。
+
 - 桌面数据表按页设定列宽并统一截断，分页条贴合表格面板，长内容不再挤压操作列。
 
 - 桌面侧栏开关改为顶栏左侧的菜单按钮：桌面端点击收起/展开侧栏，移动端沿用同一按钮打开抽屉；侧栏品牌行恢复简洁，状态持久化与 aria-expanded 同步保留。
