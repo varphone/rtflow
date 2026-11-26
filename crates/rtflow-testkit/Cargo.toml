@@ -3,6 +3,7 @@ name = "rtflow-testkit"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish = false
 description = "Test and example harness for rtflow (dev-only, not published)"
 
