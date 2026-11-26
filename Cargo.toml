@@ -63,7 +63,7 @@ mp4box = { version = "0.12", default-features = false }
 quick-xml = "0.30"
 nix = { version = "0.31", features = ["socket", "net", "uio"] }
 rcgen = "0.14"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rtc = { version = "0.20" }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
