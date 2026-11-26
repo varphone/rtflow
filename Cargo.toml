@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -11,36 +11,36 @@ repository = "https://github.com/varphone/rtflow"
 
 [workspace.dependencies]
 # Internal crates (path + version so `cargo publish` rewrites them correctly).
-rtflow-core = { path = "crates/rtflow-core", version = "0.3.0" }
-rtflow-media = { path = "crates/rtflow-media", version = "0.3.0" }
-rtflow-rtp = { path = "crates/rtflow-rtp", version = "0.3.0" }
-rtflow-rtcp = { path = "crates/rtflow-rtcp", version = "0.3.0" }
-rtflow-srtp = { path = "crates/rtflow-srtp", version = "0.3.0" }
-rtflow-rtsp = { path = "crates/rtflow-rtsp", version = "0.3.0" }
-rtflow-security = { path = "crates/rtflow-security", version = "0.3.0" }
-rtflow-multicast = { path = "crates/rtflow-multicast", version = "0.3.0" }
-rtflow-runtime = { path = "crates/rtflow-runtime", version = "0.3.0" }
-rtflow-framing = { path = "crates/rtflow-framing", version = "0.3.0" }
-rtflow-mount = { path = "crates/rtflow-mount", version = "0.3.0" }
-rtflow-pipeline = { path = "crates/rtflow-pipeline", version = "0.3.0" }
-rtflow-http = { path = "crates/rtflow-http", version = "0.3.0" }
-rtflow-file = { path = "crates/rtflow-file", version = "0.3.0" }
-rtflow-storage = { path = "crates/rtflow-storage", version = "0.3.0" }
-rtflow-rtsp-client = { path = "crates/rtflow-rtsp-client", version = "0.3.0" }
-rtflow-rtsp-server = { path = "crates/rtflow-rtsp-server", version = "0.3.0" }
-rtflow-hls = { path = "crates/rtflow-hls", version = "0.3.0" }
-rtflow-dash = { path = "crates/rtflow-dash", version = "0.3.0" }
-rtflow-http-flv = { path = "crates/rtflow-http-flv", version = "0.3.0" }
-rtflow-rtmp = { path = "crates/rtflow-rtmp", version = "0.3.0" }
-rtflow-srt = { path = "crates/rtflow-srt", version = "0.3.0" }
-rtflow-webrtc = { path = "crates/rtflow-webrtc", version = "0.3.0" }
-rtflow-gst = { path = "crates/rtflow-gst", version = "0.3.0" }
-rtflow-gateway = { path = "crates/rtflow-gateway", version = "0.3.0" }
-rtflow-admin = { path = "crates/rtflow-admin", version = "0.3.0" }
-rtflow-metrics = { path = "crates/rtflow-metrics", version = "0.3.0" }
-rtflow-source = { path = "crates/rtflow-source", version = "0.3.0" }
-rtflow-onvif = { path = "crates/rtflow-onvif", version = "0.3.0" }
-rtflow = { path = "crates/rtflow", version = "0.3.0" }
+rtflow-core = { path = "crates/rtflow-core", version = "0.4.0" }
+rtflow-media = { path = "crates/rtflow-media", version = "0.4.0" }
+rtflow-rtp = { path = "crates/rtflow-rtp", version = "0.4.0" }
+rtflow-rtcp = { path = "crates/rtflow-rtcp", version = "0.4.0" }
+rtflow-srtp = { path = "crates/rtflow-srtp", version = "0.4.0" }
+rtflow-rtsp = { path = "crates/rtflow-rtsp", version = "0.4.0" }
+rtflow-security = { path = "crates/rtflow-security", version = "0.4.0" }
+rtflow-multicast = { path = "crates/rtflow-multicast", version = "0.4.0" }
+rtflow-runtime = { path = "crates/rtflow-runtime", version = "0.4.0" }
+rtflow-framing = { path = "crates/rtflow-framing", version = "0.4.0" }
+rtflow-mount = { path = "crates/rtflow-mount", version = "0.4.0" }
+rtflow-pipeline = { path = "crates/rtflow-pipeline", version = "0.4.0" }
+rtflow-http = { path = "crates/rtflow-http", version = "0.4.0" }
+rtflow-file = { path = "crates/rtflow-file", version = "0.4.0" }
+rtflow-storage = { path = "crates/rtflow-storage", version = "0.4.0" }
+rtflow-rtsp-client = { path = "crates/rtflow-rtsp-client", version = "0.4.0" }
+rtflow-rtsp-server = { path = "crates/rtflow-rtsp-server", version = "0.4.0" }
+rtflow-hls = { path = "crates/rtflow-hls", version = "0.4.0" }
+rtflow-dash = { path = "crates/rtflow-dash", version = "0.4.0" }
+rtflow-http-flv = { path = "crates/rtflow-http-flv", version = "0.4.0" }
+rtflow-rtmp = { path = "crates/rtflow-rtmp", version = "0.4.0" }
+rtflow-srt = { path = "crates/rtflow-srt", version = "0.4.0" }
+rtflow-webrtc = { path = "crates/rtflow-webrtc", version = "0.4.0" }
+rtflow-gst = { path = "crates/rtflow-gst", version = "0.4.0" }
+rtflow-gateway = { path = "crates/rtflow-gateway", version = "0.4.0" }
+rtflow-admin = { path = "crates/rtflow-admin", version = "0.4.0" }
+rtflow-metrics = { path = "crates/rtflow-metrics", version = "0.4.0" }
+rtflow-source = { path = "crates/rtflow-source", version = "0.4.0" }
+rtflow-onvif = { path = "crates/rtflow-onvif", version = "0.4.0" }
+rtflow = { path = "crates/rtflow", version = "0.4.0" }
 rtflow-testkit = { path = "crates/rtflow-testkit" }
 
 # Third-party

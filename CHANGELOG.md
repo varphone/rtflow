@@ -5,72 +5,130 @@
 
 ## [Unreleased]
 
-- LL-HLS：修复 hls.js 播放失败——H.264/H.265 TrackSpec 使用 SPS 尺寸（不再写 0x0 init）、限制滑动窗口、完成段后移除对应 part、`_HLS_*` 阻塞查询不再透传到媒体 URI、首个 playlist 等待媒体就绪。
-
-- 管理台：新增“测试体验”页，可启动受控的 RTMP/RTSP/SRT 测试推流（ffmpeg testsrc2），查看任务/ stderr/播放地址并停止；默认关闭，固定参数、本机目标、并发/时长/分辨率限制，shutdown 回收子进程。
-
-- WebRTC：增加会话/track/frame/candidate/生命周期上限，失败/关闭的 ICE 会话可回收；修复 WHEP/WHIP 浏览器 SDP、鉴权路径和响应 Content-Length；按浏览器 offer 过滤 codec；新增 STUN/TURN 配置、PATCH trickle ICE/ICE restart、ETag/CORS；WHEP 启动裁剪到最近 150 ms 关键帧窗口并请求源端 IDR；接入 WebRTC 会话指标；转发浏览器 PLI/FIR 为源端 IDR 请求，声明/处理 NACK 并缓存最近 256 个 RTP 包重传，每秒发送 RTCP Sender Report；本机基线约 46 MB（RTMP/HLS），第 1 路 WHEP +3 MB、4 路 +3.5 MB；release 构建本机 640×360/720p/1080p 视频-only 软件源基准 p95 约 78–125ms（debug 构建会显著更高） p50≈30–70 ms、p95≈50–170 ms（含 x264 编码，硬件 VENC 不计此队列）。
+## [0.4.0] — 2026-11（浏览器分发、实验协议与依赖基线）
 
 ### Added
 
+- 管理台：新增“测试体验”页，可启动受控的 RTMP/RTSP/SRT 测试推流（ffmpeg testsrc2），查看任务/ stderr/播放地址并停止；默认关闭，固定参数、本机目标、并发/时长/分辨率限制，shutdown 回收子进程。
+
 - 控制台内置 dash.js：直播/点播按 URL 自动选择 HLS 或 DASH 播放，路径/详情/卡片提供 DASH 播放与地址复制。
+
 - LL-DASH：新增 `/dash-ll/*`，按轨 `LlSegmenter` + HTTP chunked transfer，MPD 标 `availabilityTimeComplete=false`、`availabilityTimeOffset`、`ServiceDescription/Latency` 和 `UTCTiming`；控制台直播详情可预览。
+
 - DASH UTCTiming：服务端新增 `/api/v1/time`，MPD 使用 `http-iso` 时间源；库默认回退 `direct`。
+
 - DASH ABR-ready：直播/VOD 多视频轨生成同一 AdaptationSet 下多个 Representation（独立 init/segment、codecs、宽高、frameRate）；直播/VOD 多音轨生成独立 AdaptationSet/Representation。
+
 - DASH VOD：录制目录通过独立 fMP4 缓存生成 static MPD（`/dash-vod/{id}/...`），支持 token、缓存失效和点播页地址；H.265 codec 改从 hvcC 提取；frameRate 从 fMP4 trun 样本时长估算。
+
 - DASH 直播完善：参考 SRS 的按轨独立 fMP4 布局（`video-init.mp4`/`audio-init.mp4` 与 `video-N.m4s`/`audio-N.m4s`），服务端 MPD/init/segment 路由修正为相对 URL，token query 透传到 init/分片，新增 `[dash]` 分片/窗口/缓冲配置、`UTCTiming`、按实际分片估算带宽，发布者重连时保持 AST 并接续时间轴；新增 MPD/服务端端到端测试与 DASH 指南。
 
 - RTSP 拉流定时窗口：`schedule` 支持按周几和本地时间启停拉流，跨天窗口、窗口外状态 `scheduled`，停止时自动结束录制；控制台提供定时表单与列表标记。
+
 - ONVIF 设备发现（`onvif` feature，默认关闭）：新增独立 crate `rtflow-onvif`（WS-Discovery、设备信息/GetProfiles/GetStreamUri、HTTP Basic/Digest），`rtflow` 门面导出为 `rtflow::onvif`；控制台“发现设备”可预填 RTSP 拉流。
 
 - RTSP 拉流输出：`outputs` 支持 RTSP/HLS/DASH/HTTP-FLV/WebRTC 直播、录制与最大观看数；创建/修改拉流源时自动创建受管路径策略，删除时清理，重启后自动恢复。
+
 - 拉流录制闭环：录制器识别代理 streaming 状态，拉流源可按路径自动录制，录制分段进入点播目录。
+
 - 管理台“RTSP 代理”更名为“RTSP 拉流”，列表展示输出与录制状态，详情提供直播/点播入口；路径页标识拉流受管策略。
+
 - SQLite schema v2：`proxy_mounts` 增加 `outputs` 列，旧数据库自动迁移。
 
-### Fixed
+- SRT 端点详情抽屉（连接、远端、延迟、加密、流量、错误）与编辑/启停/删除入口。
 
-- 修复 RTSP 拉流在缓存 SDP 或重启后常连模式不再重连：缓存注册沿用 always，重启使用新的取消令牌与代理状态，旧运行时不会覆盖新实例。
+- 概览新增接收帧速率曲线（近 2 分钟、当前/峰值），随自动刷新更新。
 
-- 录制器识别代理 `streaming` 状态，拉流 mount 不再因为 `publisher_connected=false` 而跳过录制。
+- 管理台新增审计日志页（`/audit`），读取最近 300 条控制面/认证事件，支持搜索、
+  变更/认证分类与结果标记。
 
-- 剪贴板 API 不可用或拒绝时回退 execCommand，局域网 HTTP 管理端也可复制。
+- 业务数据改用 SQLite（`state/rtflow.db`，WAL）：路径、推流密钥、RTSP 代理、
+  SRT pull/push、幂等键；TOML 服务配置保持不变，旧 JSON/TOML 业务数据首次启动
+  一次性导入。秘密字段 AES-256-GCM 加密，DB/主密钥 0600。
 
-- 增加启动失败兜底页，脚本初始化异常时显示错误与重新加载按钮，避免白屏。
+- 管理台新增代理/SRT 列表与创建/删除/重启操作，业务 CRUD 走
+  `/admin/api/v1`；代理/SRT 端点支持 revision + If-Match，SRT 单端点热更新。
 
-- 移动端命令面板按钮不再被 `span` 隐藏规则清空，放大镜图标正常显示。
+- RTSP 拉流代理：`[proxy]`/`[[proxy.mounts]]` 配置、按需/常连、失败退避重试、
+  per-mount `idle_grace`、SIGHUP 增删改、上游 host/CIDR/私网策略、DNS 固定、
+  重定向策略、并发/数量上限、运行时持久化、缓存 SDP 快速重连、媒体空闲看门狗、
+  周期描述刷新、RTCP SR 多轨 A/V 对齐。
 
-- 全局 `[hidden] { display:none !important }`，修复重置/重试/新事件按钮在无内容时仍显示的问题。
+- 代理管理 API：`GET/POST/PATCH/DELETE /admin/api/v1/proxies`、restart、probe，
+  状态含 attempts/retry/last_error/bytes；代理 configured/streaming 指标与管理页
+  只读表格。
 
-- 未知 hash 路由回退到概览并规范化为 `#/overview`。
+- 代理传输矩阵测试：UDP/TCP/461 回退/multicast/SRTP/RTSPS/跨源 redirect，
+  下游 Basic 鉴权、GStreamer/ffmpeg 互操作、10 代理自动化与 50 代理/200 路 HLS
+  短时冒烟。
 
-- CSV 导出对以 = + - @ 开头的字符串加前缀，防止 Excel 公式注入。
+- SRT 新增连接统计（监听端、caller、sender），通过 `/api/v1/srt`、
+  `/admin/api/v1/srt` 暴露 peer、mount、RTT、丢包/跳包、加解密与推拉流状态。
 
-- HTTP 路由匹配后解码请求路径，修复名称含 `/` 的路径无法保存（%2F 未解码）。
-- 路径表单支持启用/停用，不再强制 enabled=true。
+- SRT 新增 sender（推流）角色与 `SrtSender`：数据分包、重传窗口、ACK/NAK、
+  ACKACK、keepalive、加密发送与密钥刷新（可配置包数间隔）；`rtflow-server` 支持 `[[srt.push]]`，将 mount
+  复用为 MPEG-TS 后推送到远端 listener（指数退避重连）。
 
-- 点播 HLS 默认生成 MPEG-TS（fMP4 不可用时回退），修复 Firefox MSE
-  `bufferAppendError`；兼容 Edge/Chrome。
+- SRT 新增 caller（拉流）角色与 `SrtCaller` API；`rtflow-server` 支持
+  `[[srt.pull]]` 主动拉取 SRT 源并注册为可播放/可录制 mount（断线指数退避）。
 
-- HLS/VOD 转换跳过连续 Annex-B 起始码产生的空 NAL，避免 fMP4 样本写入 0 长度，
-  修复 RTSP 录制点播 `bufferAppendError`/“不支持的视频格式”。
+- SRT 支持 HaiCrypt AES-CTR 加密（passphrase/pbkeylen/enforced_encryption），
+  监听端解包 KMREQ、回显 KMRSP、解密数据并处理运行中密钥刷新；错误口令与
+  明文对端按规范拒绝。
 
-- 录制状态接口实时返回分段数与字节数（已落盘段 + 当前段），录制页面每 2 秒
-  刷新，不再在录制期间始终显示 0。
+- SRT 协议与 libsrt 系工具（ffmpeg/OBS）互通：修正握手类型/字段、HSREQ/HSRSP、
+  Stream ID（含字节序与 `#!::` 解析）、完整 ACK/ACKACK/RTT、NAK、keepalive、
+  shutdown、DROPREQ；TSBPD 使用协商延迟并支持 TLPKTDROP 跳包与 fake ACK；
+  被拒绝的连接返回 `1000+reason` 而非静默超时；新增 SRT RTT/丢包/跳包/
+  握手失败指标；fuzz 修复并新增 SRT 目标。
 
-- 断开直播流现在同时取消 mount 并关闭发布连接：RTMP/RTSP 会话监听 mount
-  取消令牌，SRT 维护循环清理已取消 mount 的连接，不再只从列表移除。
+- SRT 推流支持 HMAC token/流密钥校验；HTTP 内置 HTTPS；RTSP 会话结束触发
+  `on_play_done` 钩子；RTMP 流密钥 `max_connections` 生效；控制 API 支持
+  会话 cookie、Basic 与 Bearer token 三种认证。
 
-- SRT MPEG-TS demux 按 ADTS 拆分音频帧、剥离 ADTS 头并从 ADTS 解析采样率/声道，
-  修复 HLS 直播 AAC DTS 非单调与 48kHz 源被标成 44.1kHz。
-- 录制从首个视频关键帧开始，HLS segmenter 在切段前提取 SPS/PPS，修复中途开始录制
-  时 VOD init 的 avcC 为空、首段无法解码。
-- VOD 目录在录制过程中持续刷新 `duration_seconds`，不再停留在首次扫描的短时长。
-- RTMP chunk 解析器在 payload 未完整时提前提交 timestamp delta，TCP 分段会重复
-  累加，导致音频时间戳/录像时长膨胀（10s 录成 14.5s）。改为整块到齐后再提交，
-  并补充逐字节 feed 回归测试。
+- `rtflow-server` 增加审计日志（JSONL 轮转）、SIGHUP 热加载、RTSP TLS、
+  路径观看配额、RTMP 异步认证钩子、应用级 Prometheus 指标，以及管理台
+  “路径与密钥”控制页。
+
+- 新增官方应用 `rtflow-server`：TOML 配置、RTSP/RTMP/SRT/WebRTC/HLS/LL-HLS/DASH/FLV、
+  自动录制、VOD catalog、路径注册/发现、API 流密钥与 HTTP 钩子，以及
+  systemd/Docker 部署资产。
+
+- 统一结构化日志：新增 `rtflow::logging`（可选 `logging` feature，`full`
+  默认包含）、`DEBUG_FILTER` 与 `docs/guides/logging.md`；覆盖 RTSP
+  服务端/客户端、mount、HLS、HTTP、RTMP、WebRTC、admin 与会话 span。
+
+- RTSP 发布增强：`ServerConfig::dynamic_publishers`（opt-in）允许 ANNOUNCE
+  为未知路径创建 Publisher mount，断线且无订阅者时自动清理；
+
+- UDP 发布端接收 RTCP SR 并回送 RR/SDES，支持独立端口与 `rtcp-mux`；
+  发布端 SR 统计新增 `rtcp_publisher_sender_reports`；
+
+- TCP interleaved 发布端同样回送 RR/SDES；
+
+- SETUP 校验 transport mode 与 mount 角色；RECORD 必须先 ANNOUNCE；
+
+- UDP 发布来源按 Peer IP 锁定、首个合法包学习源端口，容忍 NAT 端口变化；
+
+- `live_vod_gateway` 开启动态 RTSP Publisher，ffmpeg 可直接推流。
+
+- RTMP：`onMetaData` 宽高/帧率进入动态 `MediaDescription`，AVC/HEVC/AAC
+  sequence header 自动建立 track；`RtmpSessionConfig::token` 支持 OBS
+  stream key `name?token=...`（HMAC，日志脱敏）。
+
+- HLS：注册表驱动的 `/hls/{mount}/index.m3u8` 直播端点，动态 RTMP mount
+  无需预注册 handler；`/vod/{id}` 从录制目录或 MP4/MKV/TS 文件生成磁盘
+  缓存的 VOD playlist/segment。
+
+- 管理前端：独立 `admin` feature（`rtflow::admin::{Admin,AdminConfig}`，
+  自包含登录页/仪表盘/直播管理/点播管理/系统状态；HttpOnly 会话 Cookie、
+  Argon2id 口令、CSRF 校验、写操作只读开关）。默认 `full` 不编译该模块。
+
+- `FileVodSource`；`live_vod_gateway` 示例（RTMP + HLS + admin 控制台）。
 
 ### Changed
+
+- WebRTC：增加会话/track/frame/candidate/生命周期上限，失败/关闭的 ICE 会话可回收；修复 WHEP/WHIP 浏览器 SDP、鉴权路径和响应 Content-Length；按浏览器 offer 过滤 codec；新增 STUN/TURN 配置、PATCH trickle ICE/ICE restart、ETag/CORS；WHEP 启动裁剪到最近 150 ms 关键帧窗口并请求源端 IDR；接入 WebRTC 会话指标；转发浏览器 PLI/FIR 为源端 IDR 请求，声明/处理 NACK 并缓存最近 256 个 RTP 包重传，每秒发送 RTCP Sender Report；本机基线约 46 MB（RTMP/HLS），第 1 路 WHEP +3 MB、4 路 +3.5 MB；release 构建本机 640×360/720p/1080p 视频-only 软件源基准 p95 约 78–125ms（debug 构建会显著更高） p50≈30–70 ms、p95≈50–170 ms（含 x264 编码，硬件 VENC 不计此队列）。
 
 - 依赖升级到当前最新版本：`tokio` 1.54、`bytes` 1.12、`clap` 4.6、`toml` 1.2、`getrandom` 0.4、`aes-gcm` 0.11、`argon2` 0.6、`quick-xml` 0.42、`reqwest` 0.13、`rusqlite` 0.43、`nix` 0.32、`broadcast-common` 14、`transmux` 0.33、`rtc`/`webrtc` 0.21、`mp4box` 0.14 等，并迁移对应 API（`getrandom::fill`、`PasswordHasher::hash_password_with_salt`、`aes-gcm` 的 nonce、`quick-xml` 0.42 的文本/实体引用事件、`transmux` 的 `Timescale`/`Duration`/`Sample` 时间轴）。`reqwest` 改用 `rustls-no-provider` 以保持全工程单一 TLS 后端（ring），创建客户端前安装进程级 crypto provider。最低 Rust 版本随 `transmux`/`broadcast-common` 14 提升到 1.95（CI 的 MSRV 任务同步到 1.95.0）。
 
@@ -138,7 +196,59 @@
 
 - 打印页眉显示 rtflow、页面名称与打印时间。
 
+- `Mount` 的描述可动态更新（sequence headers/metadata）；`MountHandle::description()`
+  返回当前快照，旧的 `description` 字段保留为初始快照。
+
+- HLS VOD playlist 的 segment URI 与 VOD 目录一致，`EXT-X-ENDLIST` 语义
+  由持久化段保证；不再用滑动窗口冒充 VOD。
+
 ### Fixed
+
+- LL-HLS：修复 hls.js 播放失败——H.264/H.265 TrackSpec 使用 SPS 尺寸（不再写 0x0 init）、限制滑动窗口、完成段后移除对应 part、`_HLS_*` 阻塞查询不再透传到媒体 URI、首个 playlist 等待媒体就绪。
+
+- 修复 RTSP 拉流在缓存 SDP 或重启后常连模式不再重连：缓存注册沿用 always，重启使用新的取消令牌与代理状态，旧运行时不会覆盖新实例。
+
+- 录制器识别代理 `streaming` 状态，拉流 mount 不再因为 `publisher_connected=false` 而跳过录制。
+
+- 剪贴板 API 不可用或拒绝时回退 execCommand，局域网 HTTP 管理端也可复制。
+
+- 增加启动失败兜底页，脚本初始化异常时显示错误与重新加载按钮，避免白屏。
+
+- 移动端命令面板按钮不再被 `span` 隐藏规则清空，放大镜图标正常显示。
+
+- 全局 `[hidden] { display:none !important }`，修复重置/重试/新事件按钮在无内容时仍显示的问题。
+
+- 未知 hash 路由回退到概览并规范化为 `#/overview`。
+
+- CSV 导出对以 = + - @ 开头的字符串加前缀，防止 Excel 公式注入。
+
+- HTTP 路由匹配后解码请求路径，修复名称含 `/` 的路径无法保存（%2F 未解码）。
+
+- 路径表单支持启用/停用，不再强制 enabled=true。
+
+- 点播 HLS 默认生成 MPEG-TS（fMP4 不可用时回退），修复 Firefox MSE
+  `bufferAppendError`；兼容 Edge/Chrome。
+
+- HLS/VOD 转换跳过连续 Annex-B 起始码产生的空 NAL，避免 fMP4 样本写入 0 长度，
+  修复 RTSP 录制点播 `bufferAppendError`/“不支持的视频格式”。
+
+- 录制状态接口实时返回分段数与字节数（已落盘段 + 当前段），录制页面每 2 秒
+  刷新，不再在录制期间始终显示 0。
+
+- 断开直播流现在同时取消 mount 并关闭发布连接：RTMP/RTSP 会话监听 mount
+  取消令牌，SRT 维护循环清理已取消 mount 的连接，不再只从列表移除。
+
+- SRT MPEG-TS demux 按 ADTS 拆分音频帧、剥离 ADTS 头并从 ADTS 解析采样率/声道，
+  修复 HLS 直播 AAC DTS 非单调与 48kHz 源被标成 44.1kHz。
+
+- 录制从首个视频关键帧开始，HLS segmenter 在切段前提取 SPS/PPS，修复中途开始录制
+  时 VOD init 的 avcC 为空、首段无法解码。
+
+- VOD 目录在录制过程中持续刷新 `duration_seconds`，不再停留在首次扫描的短时长。
+
+- RTMP chunk 解析器在 payload 未完整时提前提交 timestamp delta，TCP 分段会重复
+  累加，导致音频时间戳/录像时长膨胀（10s 录成 14.5s）。改为整块到齐后再提交，
+  并补充逐字节 feed 回归测试。
 
 - 修复路由导航中局部变量遮蔽 `content()` 导致内容区不渲染的问题。
 
@@ -216,8 +326,6 @@
 
 - 移动端表格行操作改为 2×2 网格，路径行高由约 150px 降至 73px。
 
-### Fixed
-
 - 移除重复的 prefers-reduced-motion 规则。
 
 - 用户菜单增加“键盘快捷键”入口。
@@ -225,8 +333,6 @@
 - 用户菜单增加“保存当前视图”“管理视图”入口。
 
 - 保存视图支持导入/导出 JSON（校验名称与 hash，去重后最多 12 个）。
-
-### Fixed
 
 - 修复管理视图嵌套模板导致 app.js 在浏览器中解析失败、界面空白的问题。
 
@@ -269,8 +375,6 @@
 - 路径支持全部/启用/停用筛选并写入 hash 的 state 参数。
 
 - SRT 支持全部/已连接/未连接筛选并写入 hash 的 conn 参数。
-
-### Fixed
 
 - 修复 SRT 列表启停按钮引用未定义变量导致无法切换的问题。
 
@@ -431,12 +535,17 @@
 - 概览增加最近变更卡片，异常项可直接跳转到对应代理/SRT/录制筛选；活跃流可跳转直播详情。
 
 - 路径与推流密钥页支持本地搜索、列排序；密钥新增复制 Key ID，避免输入时整页刷新。
+
 - 路径详情抽屉展示策略/协议/地址，并可跳转到关联直播、点播与录制筛选。
 
 - 点播页改为渐变封面卡片，增加时长/录制时间与 HLS 标识，搜索不再整页刷新。
+
 - 点播支持多选、全选与批量刷新生成缓存。
+
 - RTSP 代理与 SRT 页改为本地筛选/搜索，代理增加排序，SRT 切页不刷新。
+
 - 代理详情抽屉与录制到点播的直达入口。
+
 - 录制页增加搜索/状态筛选/排序，自动刷新保持筛选与滚动区域。
 
 - 审计日志增加分页、自动刷新开关与固定高度表体，避免长列表把分页器推离视口。
@@ -456,169 +565,105 @@
 - 仓库重构为 Cargo workspace 多 crate 布局：根 `Cargo.toml` 只保留 workspace
   配置，源码迁入 `crates/<name>/src/`；`tests/`、`examples/`、`benches/` 随之
   迁入 `crates/rtflow/`，`support/` 变为 `crates/rtflow-testkit`。
+
 - 对外 API 路径保持不变：`rtflow` 仍是唯一门面 crate，`rtflow::server`、
   `rtflow::client`、`rtflow::hls`、`rtflow::mount`、`rtflow::media` 等全部
   re-export；分层改由 Cargo 依赖图强制。
+
 - 新增 `docs/architecture/crates.md`；分层/树形/示例/发布脚本与 CI 改为
   workspace 口径。
 
-### Added
-
-- SRT 端点详情抽屉（连接、远端、延迟、加密、流量、错误）与编辑/启停/删除入口。
-
-- 概览新增接收帧速率曲线（近 2 分钟、当前/峰值），随自动刷新更新。
-
-- 管理台新增审计日志页（`/audit`），读取最近 300 条控制面/认证事件，支持搜索、
-  变更/认证分类与结果标记。
-
-- 业务数据改用 SQLite（`state/rtflow.db`，WAL）：路径、推流密钥、RTSP 代理、
-  SRT pull/push、幂等键；TOML 服务配置保持不变，旧 JSON/TOML 业务数据首次启动
-  一次性导入。秘密字段 AES-256-GCM 加密，DB/主密钥 0600。
-- 管理台新增代理/SRT 列表与创建/删除/重启操作，业务 CRUD 走
-  `/admin/api/v1`；代理/SRT 端点支持 revision + If-Match，SRT 单端点热更新。
-
-- RTSP 拉流代理：`[proxy]`/`[[proxy.mounts]]` 配置、按需/常连、失败退避重试、
-  per-mount `idle_grace`、SIGHUP 增删改、上游 host/CIDR/私网策略、DNS 固定、
-  重定向策略、并发/数量上限、运行时持久化、缓存 SDP 快速重连、媒体空闲看门狗、
-  周期描述刷新、RTCP SR 多轨 A/V 对齐。
-- 代理管理 API：`GET/POST/PATCH/DELETE /admin/api/v1/proxies`、restart、probe，
-  状态含 attempts/retry/last_error/bytes；代理 configured/streaming 指标与管理页
-  只读表格。
-- 代理传输矩阵测试：UDP/TCP/461 回退/multicast/SRTP/RTSPS/跨源 redirect，
-  下游 Basic 鉴权、GStreamer/ffmpeg 互操作、10 代理自动化与 50 代理/200 路 HLS
-  短时冒烟。
-
-- SRT 新增连接统计（监听端、caller、sender），通过 `/api/v1/srt`、
-  `/admin/api/v1/srt` 暴露 peer、mount、RTT、丢包/跳包、加解密与推拉流状态。
-- SRT 新增 sender（推流）角色与 `SrtSender`：数据分包、重传窗口、ACK/NAK、
-  ACKACK、keepalive、加密发送与密钥刷新（可配置包数间隔）；`rtflow-server` 支持 `[[srt.push]]`，将 mount
-  复用为 MPEG-TS 后推送到远端 listener（指数退避重连）。
-- SRT 新增 caller（拉流）角色与 `SrtCaller` API；`rtflow-server` 支持
-  `[[srt.pull]]` 主动拉取 SRT 源并注册为可播放/可录制 mount（断线指数退避）。
-- SRT 支持 HaiCrypt AES-CTR 加密（passphrase/pbkeylen/enforced_encryption），
-  监听端解包 KMREQ、回显 KMRSP、解密数据并处理运行中密钥刷新；错误口令与
-  明文对端按规范拒绝。
-- SRT 协议与 libsrt 系工具（ffmpeg/OBS）互通：修正握手类型/字段、HSREQ/HSRSP、
-  Stream ID（含字节序与 `#!::` 解析）、完整 ACK/ACKACK/RTT、NAK、keepalive、
-  shutdown、DROPREQ；TSBPD 使用协商延迟并支持 TLPKTDROP 跳包与 fake ACK；
-  被拒绝的连接返回 `1000+reason` 而非静默超时；新增 SRT RTT/丢包/跳包/
-  握手失败指标；fuzz 修复并新增 SRT 目标。
-- SRT 推流支持 HMAC token/流密钥校验；HTTP 内置 HTTPS；RTSP 会话结束触发
-  `on_play_done` 钩子；RTMP 流密钥 `max_connections` 生效；控制 API 支持
-  会话 cookie、Basic 与 Bearer token 三种认证。
-- `rtflow-server` 增加审计日志（JSONL 轮转）、SIGHUP 热加载、RTSP TLS、
-  路径观看配额、RTMP 异步认证钩子、应用级 Prometheus 指标，以及管理台
-  “路径与密钥”控制页。
-- 新增官方应用 `rtflow-server`：TOML 配置、RTSP/RTMP/SRT/WebRTC/HLS/LL-HLS/DASH/FLV、
-  自动录制、VOD catalog、路径注册/发现、API 流密钥与 HTTP 钩子，以及
-  systemd/Docker 部署资产。
-- 统一结构化日志：新增 `rtflow::logging`（可选 `logging` feature，`full`
-  默认包含）、`DEBUG_FILTER` 与 `docs/guides/logging.md`；覆盖 RTSP
-  服务端/客户端、mount、HLS、HTTP、RTMP、WebRTC、admin 与会话 span。
-- RTSP 发布增强：`ServerConfig::dynamic_publishers`（opt-in）允许 ANNOUNCE
-  为未知路径创建 Publisher mount，断线且无订阅者时自动清理；
-- UDP 发布端接收 RTCP SR 并回送 RR/SDES，支持独立端口与 `rtcp-mux`；
-  发布端 SR 统计新增 `rtcp_publisher_sender_reports`；
-- TCP interleaved 发布端同样回送 RR/SDES；
-- SETUP 校验 transport mode 与 mount 角色；RECORD 必须先 ANNOUNCE；
-- UDP 发布来源按 Peer IP 锁定、首个合法包学习源端口，容忍 NAT 端口变化；
-- `live_vod_gateway` 开启动态 RTSP Publisher，ffmpeg 可直接推流。
-
-### Fixed
-
 - SRT TSBPD 时间基重复扣除握手时间戳，导致数据包到达即被判过期：抖动缓冲
   和 ARQ 实际失效。修正后丢包可经 NAK/重传恢复（10% 丢包下 0 跳过）。
+
 - `auth.token_secrets` 少于 32 字节时给出明确配置错误，避免启动期
   "resource limit exceeded: Digest nonce secret"。
 
 - HLS 直播改为 MPEG-TS（`transmux::StreamingTsHlsSegmenter`）：按关键帧
   切段、每段自带 PAT/PMT、跨段 continuity counter，Firefox/Edge 的
   hls.js 均可持续播放；VOD/静态 HLS 仍使用 fMP4。
+
 - HLS live 不再自动启动 segmenter；由首个 playlist 请求启动，修复长推流
   只产出首段、播放器缓冲停在 1.88s 的问题。
+
 - TS 分段为每个 sample 写入稳定 duration：此前 duration 全为 0，所有 PES
   使用同一 PTS/DTS，播放器只显示首帧（1 fps）；现在视频按码流帧率
   （默认 30 fps）、AAC 按 1024 sample 计算 duration，不再依赖 RTMP 端
   被放大的时间戳。
+
 - 管理台 HLS 播放移除会重置 currentTime 的 seek/nudge，交给 hls.js 正常
   live sync；RTMP fmt3 用显式 in_message 标记，避免续包重复累计时间戳。
+
 - 参照 SRS/MediaMTX 审核 live/VOD：补 TS discontinuity sequence、清理
   VOD 临时目录、拒绝 `.`/`..` VOD id、处理 RTMP fmt3 extended timestamp；
   详细对照见 `docs/audits/2026-11-live-vod-srs-mediamtx.md`。
+
 - H.265 live TS、enhanced-RTMP H.264/VP9/AV1、VOD fingerprint/HEAD/suffix Range。
+
 - `live_vod_gateway` 新增 `--hls-segments`（默认 7）和
   `--hls-segment-seconds`（默认 1）。
+
 - HLS live 输出 `EXT-X-PROGRAM-DATE-TIME`（UTC 毫秒，按 segmenter
   启动时间锚定）。
+
 - RTMP 发布端连续丢帧 90 次后主动断开，避免慢订阅者拖垮 mount 队列。
+
 - HLS live 支持 LL-HLS blocking playlist reload：`_HLS_msn` 等待目标
   media sequence，playlist 输出 `CAN-BLOCK-RELOAD=YES`（尚无 parts）。
+
 - HLS live segment/init 支持 HEAD 与 Range（含 suffix `bytes=-N`）。
+
 - 新增 `/llhls/{mount}/index.m3u8` LL-HLS 端点：CMAF parts、PART-INF、
   PRELOAD-HINT、200ms part target；与经典 TS HLS 并存。
+
 - 管理台直播列表增加 “LL” 按钮，播放 LL-HLS；API `ll_hls_url`。
-
-### Added
-
-- RTMP：`onMetaData` 宽高/帧率进入动态 `MediaDescription`，AVC/HEVC/AAC
-  sequence header 自动建立 track；`RtmpSessionConfig::token` 支持 OBS
-  stream key `name?token=...`（HMAC，日志脱敏）。
-- HLS：注册表驱动的 `/hls/{mount}/index.m3u8` 直播端点，动态 RTMP mount
-  无需预注册 handler；`/vod/{id}` 从录制目录或 MP4/MKV/TS 文件生成磁盘
-  缓存的 VOD playlist/segment。
-- 管理前端：独立 `admin` feature（`rtflow::admin::{Admin,AdminConfig}`，
-  自包含登录页/仪表盘/直播管理/点播管理/系统状态；HttpOnly 会话 Cookie、
-  Argon2id 口令、CSRF 校验、写操作只读开关）。默认 `full` 不编译该模块。
-- `FileVodSource`；`live_vod_gateway` 示例（RTMP + HLS + admin 控制台）。
-
-### Fixed
-
-- SRT TSBPD 时间基重复扣除握手时间戳，导致数据包到达即被判过期：抖动缓冲
-  和 ARQ 实际失效。修正后丢包可经 NAK/重传恢复（10% 丢包下 0 跳过）。
-- `auth.token_secrets` 少于 32 字节时给出明确配置错误，避免启动期
-  "resource limit exceeded: Digest nonce secret"。
 
 - RTMP 视频帧统一转为 Annex-B 后进入数据面，HLS/RTSP 可正确消费；
   RTMP 拉流输出时再转回 AVCC。修复 HLS 直播出现
   `missing picture` / `data partitioning` / hls.js `internalException`。
+
 - HLS 新 segmenter 首帧来自 startup cache 时不再被去重逻辑跳过，
   SPS/PPS + 首个 IDR 能进入 init/segment。
+
 - HLS 视频不再在 2×target duration 处硬切；没有 IDR 时等待下一个
   关键帧，避免 segment 从 P 帧开始导致 `Missing reference picture`。
+
 - RTMP sequence header 生成 H.264 `fmtp`（sprop-parameter-sets），HLS
   init segment 立即携带 avcC；修复 Edge 中 `resetInitSegment` 抛
   `Cannot read properties of undefined (reading 'toString')`。
+
 - HLS init/segment 改为 `no-store`，live playlist 内嵌 URI 带每次
   启动唯一的 `?v=` 令牌，避免浏览器磁盘缓存复用旧 init。
+
 - HLS segmenter 在首个视频 IDR 前丢弃音频，segment 不再从音频 PTS
   开始；60 fps 短分段起播不再等待/卡顿。示例 live 窗口增至 30 段，
   hls.js 使用 3 个目标时长同步和 30 秒缓冲，给多标签页/后台节流留出
   足够回看窗口。
+
 - HLS live 每 mount 严格单 segmenter 所有权；worker 退出只清自己的
   ring，避免两个 sequence 计数器交叉写入产生 114/115/116/115。
+
 - HLS ring 保留 3× playlist 窗口（默认 30 段 playlist / 90 段历史），
   多标签页或后台节流导致晚到的 segment 请求仍能命中，不再反复 404
   重试同一序号。
+
 - 管理台 hls.js 升级到 1.6.15；Firefox 在 MSE 首帧到达前 play() 失败
   时于 MANIFEST_PARSED/LEVEL_LOADED/BUFFER_APPENDED 重试，并 seek 到
   首个 buffered 区间，避免长时间停在 0 秒。
+
 - 回退“发布后主动启动 segmenter”的实验：它会在长推流时只产出一个
   segment 并让播放器缓冲停在首段。HLS live 改为首个 playlist 请求时
   启动，确保分段持续增长。
+
 - segment sequence 跨 segmenter 重启保持单调；SegmentRing 拒绝
   非递增序列，playlist 不会再回退。
+
 - HLS live playlist 使用相对 URI，并在首个 segment 就绪前最多等待
   3 秒；harness/hls.js 不再因空 playlist 判为 fatal。
+
 - 管理台播放器在 Chromium/Edge 上优先使用 hls.js，而不是信任
   `canPlayType("application/vnd.apple.mpegurl")` 的原生 HLS 分支；
   Firefox 正常而 Edge 黑屏的问题由此修复。
-
-### Changed
-
-- `Mount` 的描述可动态更新（sequence headers/metadata）；`MountHandle::description()`
-  返回当前快照，旧的 `description` 字段保留为初始快照。
-- HLS VOD playlist 的 segment URI 与 VOD 目录一致，`EXT-X-ENDLIST` 语义
-  由持久化段保证；不再用滑动窗口冒充 VOD。
 
 ## [0.3.0] — 2026-11（布局与可靠性基线）
 
