@@ -180,7 +180,11 @@ impl Packetizer {
             Some(v) => v,
             None => {
                 let v = annex_b_nals(&f.data);
-                if v.is_empty() { vec![f.data.clone()] } else { v }
+                if v.is_empty() {
+                    vec![f.data.clone()]
+                } else {
+                    v
+                }
             }
         };
         let total = nals.len();
@@ -242,7 +246,11 @@ impl Packetizer {
             Some(v) => v,
             None => {
                 let v = annex_b_nals(&f.data);
-                if v.is_empty() { vec![f.data.clone()] } else { v }
+                if v.is_empty() {
+                    vec![f.data.clone()]
+                } else {
+                    v
+                }
             }
         };
         let total = nals.len();

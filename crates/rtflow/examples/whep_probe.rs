@@ -17,7 +17,8 @@ use webrtc::peer_connection::{
 #[derive(Clone)]
 struct Handler {
     candidates: Arc<tokio::sync::Mutex<Vec<String>>>,
-    track: Arc<tokio::sync::Mutex<Option<Arc<dyn webrtc::media_stream::track_remote::TrackRemote>>>>,
+    track:
+        Arc<tokio::sync::Mutex<Option<Arc<dyn webrtc::media_stream::track_remote::TrackRemote>>>>,
     gather_done: Arc<tokio::sync::Notify>,
     connected: Arc<tokio::sync::Notify>,
 }
@@ -119,7 +120,9 @@ async fn main() {
 
     let t0 = Instant::now();
     let offer = pc.create_offer(None).await.expect("create offer");
-    pc.set_local_description(offer.clone()).await.expect("set local");
+    pc.set_local_description(offer.clone())
+        .await
+        .expect("set local");
     tokio::time::timeout(Duration::from_secs(5), handler.gather_done.notified())
         .await
         .expect("ICE gathering 超时");
