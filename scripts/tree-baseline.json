@@ -1,7 +1,13 @@
 {
   "path_attributes": [],
   "oversized_files": [
-    "crates/rtflow/tests/protocols/hls.rs (908 lines)"
+    "crates/rtflow-admin/src/api/mod.rs (896 lines)",
+    "crates/rtflow-dash/src/mpd.rs (899 lines)",
+    "crates/rtflow-server/src/api/mod.rs (831 lines)",
+    "crates/rtflow-server/src/config/mod.rs (943 lines)",
+    "crates/rtflow-server/src/server.rs (921 lines)",
+    "crates/rtflow-webrtc/src/whep.rs (841 lines)",
+    "crates/rtflow/tests/protocols/hls.rs (920 lines)"
   ],
   "root_entries": [
     ".cargo",

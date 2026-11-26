@@ -2,6 +2,19 @@
 [advisories]
 version = 2
 yanked = "warn"
+# Unmaintained-only advisories: every affected crate is already at its latest
+# published version, so there is no upgrade path. Each entry is reviewed at
+# release time; migration is tracked in docs/audits/2026-11-release-readiness.md.
+ignore = [
+    # chrono is unmaintained; chrono 0.4.45 is the newest release. Migration to
+    # a maintained time crate (jiff) is a post-0.4 plan item.
+    { id = "RUSTSEC-2026-0543", reason = "chrono 0.4.45 is the latest release; jiff migration tracked for post-0.4" },
+    # humantime wraps chrono, so the same advisory propagates to it.
+    { id = "RUSTSEC-2026-0542", reason = "humantime 2.4.0 is the latest release and wraps chrono; migration tracked with chrono" },
+    # rustls-pemfile is archived; 2.2.0 is the final release and it is a thin
+    # PEM reader. Replacement by rustls-pki-types PEM parsing is tracked.
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile 2.2.0 is the final release; replacement tracked post-0.4" },
+]
 
 [licenses]
 version = 2
