@@ -72,8 +72,9 @@ async fn run(codec: Codec) {
             "lavfi",
             "-i",
             "testsrc2=size=176x144:rate=10",
-            "-t",
-            "15",
+            // Publish until the test kills the process: a fixed -t can end the
+            // session while a slower depayloader/decoder is still draining,
+            // which surfaces as an RTSP teardown race ("Received end-of-file").
         ])
         .args(ffmpeg_encoder(codec))
         .args(["-rtsp_transport", "tcp", "-f", "rtsp", &location])
