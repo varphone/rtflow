@@ -2,7 +2,7 @@
 
 ## 开发环境
 
-- Rust 1.88+（MSRV，CI 固定 1.88 验证 `cargo check --lib`）。
+- Rust 1.95+（MSRV，CI 固定 1.95 验证 `cargo check --lib`）。
 - `cargo fmt`、`cargo clippy`、`cargo test` 必须全绿；布局脚本见下。
 
 ## 提交前检查
