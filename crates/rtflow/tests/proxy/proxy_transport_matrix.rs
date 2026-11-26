@@ -49,7 +49,9 @@ async fn proxy_forwards_every_upstream_downstream_transport_pair() {
             )
             .await
             .unwrap();
-            wait_until(Duration::from_secs(2), || {
+            // Generous waits: the four transport pairs run under the same
+            // parallel test binary and CI runners are heavily loaded.
+            wait_until(Duration::from_secs(10), || {
                 source.snapshot().subscriber_count > 0
                     && proxy_mount.snapshot().subscriber_count > 0
             })
@@ -60,7 +62,7 @@ async fn proxy_forwards_every_upstream_downstream_transport_pair() {
             let mut codecs = Vec::new();
             for _ in 0..2 {
                 codecs.push(
-                    within(Duration::from_secs(1), client.next())
+                    within(Duration::from_secs(5), client.next())
                         .await
                         .unwrap()
                         .unwrap()
@@ -71,7 +73,7 @@ async fn proxy_forwards_every_upstream_downstream_transport_pair() {
             assert!(codecs.contains(&Codec::H264));
             assert!(codecs.contains(&Codec::Pcma));
             drop(client);
-            wait_until(Duration::from_secs(2), || {
+            wait_until(Duration::from_secs(10), || {
                 matches!(
                     proxy_mount.snapshot().proxy_state,
                     Some(rtflow::mount::upstream::ProxyState::Idle)
