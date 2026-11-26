@@ -45,27 +45,27 @@ rtflow-testkit = { path = "crates/rtflow-testkit" }
 
 # Third-party
 aes = { version = "0.9" }
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 async-trait = { version = "0.1" }
 base64 = "0.23"
-bytes = "1.10"
+bytes = "1.12"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 cipher = { version = "0.5" }
 criterion = { version = "0.8", features = ["html_reports"] }
 futures = "0.3"
-getrandom = "0.2"
+getrandom = "0.4"
 gstreamer = { version = "0.25" }
 gstreamer-app = { version = "0.25" }
 hmac = "0.13"
 matroska-demuxer = { version = "0.8" }
 md-5 = "0.11"
-mp4box = { version = "0.12", default-features = false }
-quick-xml = "0.30"
-nix = { version = "0.31", features = ["socket", "net", "uio"] }
+mp4box = { version = "0.14", default-features = false }
+quick-xml = "0.42"
+nix = { version = "0.32", features = ["socket", "net", "uio"] }
 rcgen = "0.14"
-rusqlite = { version = "0.32", features = ["bundled"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-rtc = { version = "0.20" }
+rusqlite = { version = "0.43", features = ["bundled"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rtc = { version = "0.21" }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = { version = "2.2" }
 serde = { version = "1", features = ["derive"] }
@@ -75,20 +75,20 @@ sha2 = "0.11"
 socket2 = "0.6"
 subtle = "2.6"
 thiserror = "2"
-tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util", "process", "signal", "fs"] }
+tokio = { version = "1.54", features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util", "process", "signal", "fs"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-log = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-broadcast-common = { version = "12", default-features = false, features = ["std"] }
-transmux = { version = "0.31", default-features = false, features = ["std"] }
+broadcast-common = { version = "14", default-features = false, features = ["std"] }
+transmux = { version = "0.33", default-features = false, features = ["std"] }
 url = "2.5"
-webrtc = { version = "0.20" }
-argon2 = { version = "0.5" }
-clap = { version = "4.5", features = ["derive"] }
+webrtc = { version = "0.21" }
+argon2 = { version = "0.6" }
+clap = { version = "4.6", features = ["derive"] }
 humantime-serde = "1"
-toml = "0.9"
+toml = "1.2"
 zeroize = "1"
 
 # ---------------------------------------------------------------------------
