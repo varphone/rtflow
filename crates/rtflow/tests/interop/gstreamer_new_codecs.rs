@@ -116,6 +116,7 @@ async fn run(codec: Codec) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires GStreamer tools and RTP/decoder plugins; run in the media interoperability job"]
 async fn gstreamer_plays_legacy_codecs() {
     for codec in [Codec::Mpeg4, Codec::Jpeg, Codec::H263] {
         eprintln!("=== {codec:?} ===");

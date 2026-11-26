@@ -51,7 +51,9 @@ python3 scripts/check-tree.py
 ./scripts/check-docs-paths.sh
 
 # ---- Packaging -----------------------------------------------------------
-cargo package --workspace --allow-dirty --list >/dev/null
-cargo package --workspace --allow-dirty
+# Members mix `publish = true`, `["crates-io"]` and `false`, so the target
+# registry must be explicit.
+cargo package --workspace --allow-dirty --list --registry crates-io >/dev/null
+cargo package --workspace --allow-dirty --registry crates-io
 
 printf 'release-check: OK (%s)\n' "$version"

@@ -211,6 +211,7 @@ async fn run_codec(codec: Codec) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires FFmpeg encoders (libsvtav1, mpeg4, h263, mjpeg); run in the media interoperability job"]
 async fn ffmpeg_round_trips_legacy_codecs() {
     for codec in [Codec::Mpeg4, Codec::H263, Codec::Jpeg] {
         run_codec(codec).await;
@@ -218,6 +219,7 @@ async fn ffmpeg_round_trips_legacy_codecs() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires FFmpeg with libaom/libsvtav1 AV1 RTP support; run in the media interoperability job"]
 async fn ffmpeg_round_trips_av1() {
     if !ffmpeg_supports_av1_rtp() {
         eprintln!("skipping AV1: FFmpeg has no AV1 RTP support (use a master/8.x build)");
