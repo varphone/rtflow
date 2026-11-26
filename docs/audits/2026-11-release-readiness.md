@@ -36,7 +36,7 @@
 | 布局 | `check-layering.py` / `check-tree.py` / `check-docs-paths.sh` | ✅ |
 | 打包 | `cargo package --workspace --allow-dirty` | ✅ 32/32 |
 | 发布演练 | `cargo publish --workspace --dry-run --allow-dirty` | ✅ 30 个可发布 crate 依次打包/校验，全部 "aborting upload due to dry run" |
-| CI（GitHub Actions） | run 45831090229 暴露 R-11..R-15，修复后复跑 | ⏳ 修复已提交，等待新 run 结果 |
+| CI（GitHub Actions） | 首轮 run 45831090229 暴露 R-11..R-16；修复后 run 45836037716 全绿 | ✅ msrv/layout/dependency-audit/media-interop/feature-matrix/package/quality 全部通过；fuzz-smoke、soak 仅定时触发，semver 待发布后启用 |
 | 外部互操作 | GStreamer interop / codec matrix / live tool / FFmpeg publish / 文件矩阵 | ✅ 1+1+1+2+2 全部通过 |
 | 夹具完整性 | `sha256sum -c SHA256SUMS` | ✅ |
 | 长跑 | `RTSP_SOAK_SECONDS=300 cargo test -p rtflow --test system -- --ignored soak` | ✅ 300s 通过 |

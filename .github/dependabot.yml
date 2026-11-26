@@ -16,3 +16,7 @@ updates:
     directory: "/"
     schedule:
       interval: monthly
+    ignore:
+      # The pinned toolchain version is the MSRV gate, not a dependency to
+      # bump: raise it only together with [workspace.package] rust-version.
+      - dependency-name: "dtolnay/rust-toolchain"
