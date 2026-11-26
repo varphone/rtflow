@@ -328,25 +328,26 @@ impl TsMuxer {
             (duration.as_secs() * timescale
                 + u64::from(duration.subsec_nanos()) * timescale / 1_000_000_000) as i64
         };
+        let duration = self.durations.get(&unit.track_id).copied().unwrap_or(3_000);
         let sample = if unit.codec == Codec::Aac {
             Sample::from_raw(
                 unit.data.clone(),
                 Some(ticks(unit.dts.unwrap_or(unit.pts))),
                 Some(ticks(unit.pts)),
-                None,
+                Some(duration),
             )
         } else {
             Sample::from_annexb(
                 &unit.data,
                 Some(ticks(unit.dts.unwrap_or(unit.pts))),
                 Some(ticks(unit.pts)),
-                None,
+                Some(duration),
                 unit.is_keyframe,
             )
         };
-        let duration = self.durations.get(&unit.track_id).copied().unwrap_or(3_000);
-        let mut sample = sample;
-        sample.duration = Some(duration);
+        let Ok(sample) = sample else {
+            return Ok(Vec::new());
+        };
 
         let mut tracks = Vec::with_capacity(self.specs.len());
         for (track_index, spec) in self.specs.iter().enumerate() {
@@ -357,7 +358,7 @@ impl TsMuxer {
             };
             tracks.push(Track::new(spec.clone(), samples));
         }
-        let media = Media::new(tracks, 90_000);
+        let media = Media::new(tracks, broadcast_common::timescale!(90_000));
         self.mux
             .package(&media)
             .map_err(|error| rtflow::Error::Media(format!("SRT push mux: {error}")))
@@ -429,7 +430,7 @@ fn track_spec(track: &TrackDescription) -> Option<TrackSpec> {
             let avcc = AVCConfigurationBox::parse_body(&config).ok()?;
             Some(TrackSpec::new(
                 TrackId::new(u32::from(track.id) + 1),
-                track.clock_rate,
+                broadcast_common::timescale::Timescale::try_new(track.clock_rate).ok()?,
                 CodecConfig::Avc {
                     config: avcc,
                     width: track.width.unwrap_or(0) as u16,
@@ -458,7 +459,7 @@ fn track_spec(track: &TrackDescription) -> Option<TrackSpec> {
             let hvcc = HEVCConfigurationBox::parse_body(&config).ok()?;
             Some(TrackSpec::new(
                 TrackId::new(u32::from(track.id) + 1),
-                track.clock_rate,
+                broadcast_common::timescale::Timescale::try_new(track.clock_rate).ok()?,
                 CodecConfig::Hevc {
                     config: hvcc,
                     width: track.width.unwrap_or(0) as u16,
@@ -468,7 +469,7 @@ fn track_spec(track: &TrackDescription) -> Option<TrackSpec> {
         }
         Codec::Aac => Some(TrackSpec::new(
             TrackId::new(u32::from(track.id) + 1),
-            track.clock_rate,
+            broadcast_common::timescale::Timescale::try_new(track.clock_rate).ok()?,
             CodecConfig::Aac {
                 esds: aac_esds(track.clock_rate, track.channels.unwrap_or(2) as u16),
                 channel_count: track.channels.unwrap_or(2) as u16,

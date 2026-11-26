@@ -20,6 +20,7 @@ rtflow-mount.workspace = true
 rtflow-http.workspace = true
 rtflow-hls.workspace = true
 transmux.workspace = true
+broadcast-common.workspace = true
 bytes.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

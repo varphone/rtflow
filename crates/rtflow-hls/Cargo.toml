@@ -22,6 +22,7 @@ rtflow-rtsp.workspace = true
 rtflow-mount.workspace = true
 rtflow-http.workspace = true
 base64.workspace = true
+broadcast-common.workspace = true
 bytes.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

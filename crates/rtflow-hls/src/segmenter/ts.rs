@@ -8,6 +8,7 @@
 
 use super::sps::{h264_dimensions_from_avcc, h265_dimensions_from_hvcc};
 use super::{Segment, SegmentFormat, SegmenterConfig};
+use broadcast_common::timescale::Timescale;
 use bytes::Bytes;
 use rtflow_media::{Codec, MediaDescription, MediaKind};
 use std::time::Duration;
@@ -104,7 +105,7 @@ pub fn track_spec(track: &rtflow_media::TrackDescription) -> Option<TrackSpec> {
             let avcc = AVCConfigurationBox::parse_body(&config).ok()?;
             Some(TrackSpec::new(
                 TrackId::new(u32::from(track.id) + 1),
-                track.clock_rate,
+                Timescale::try_new(track.clock_rate).ok()?,
                 CodecConfig::Avc {
                     config: avcc,
                     width: dimensions.0,
@@ -137,7 +138,7 @@ pub fn track_spec(track: &rtflow_media::TrackDescription) -> Option<TrackSpec> {
             let hvcc = HEVCConfigurationBox::parse_body(&config).ok()?;
             Some(TrackSpec::new(
                 TrackId::new(u32::from(track.id) + 1),
-                track.clock_rate,
+                Timescale::try_new(track.clock_rate).ok()?,
                 CodecConfig::Hevc {
                     config: hvcc,
                     width: dimensions.0,
@@ -147,7 +148,7 @@ pub fn track_spec(track: &rtflow_media::TrackDescription) -> Option<TrackSpec> {
         }
         Codec::Aac => Some(TrackSpec::new(
             TrackId::new(u32::from(track.id) + 1),
-            track.clock_rate,
+            Timescale::try_new(track.clock_rate).ok()?,
             CodecConfig::Aac {
                 esds: aac_esds(track.clock_rate, track.channels.unwrap_or(2) as u16),
                 channel_count: track.channels.unwrap_or(2) as u16,
@@ -227,26 +228,26 @@ impl TsPipeline {
             (d.as_secs() * timescale + u64::from(d.subsec_nanos()) * timescale / 1_000_000_000)
                 as i64
         };
+        let duration = self.durations.get(&unit.track_id).copied().unwrap_or(3_000);
         let sample = if unit.codec == Codec::Aac {
             Sample::from_raw(
                 unit.data,
                 Some(ticks(unit.dts.unwrap_or(unit.pts))),
                 Some(ticks(unit.pts)),
-                None,
+                Some(duration),
             )
         } else {
             Sample::from_annexb(
                 &unit.data,
                 Some(ticks(unit.dts.unwrap_or(unit.pts))),
                 Some(ticks(unit.pts)),
-                None,
+                Some(duration),
                 unit.is_keyframe,
             )
         };
-
-        let duration = self.durations.get(&unit.track_id).copied().unwrap_or(3_000);
-        let mut sample = sample;
-        sample.duration = Some(duration);
+        let Ok(sample) = sample else {
+            return Vec::new();
+        };
         if let Err(error) = self.segmenter.push(track_id, sample) {
             tracing::warn!(?error, "transmux TS-HLS push failed");
         }
@@ -269,7 +270,7 @@ impl TsPipeline {
             .take_ready()
             .into_iter()
             .map(|segment| {
-                let duration = Duration::from_secs_f64(segment.duration.max(0.001));
+                let duration = segment.duration.max(Duration::from_millis(1));
                 self.timestamp += duration;
                 let discontinuity_sequence = if segment.discontinuous {
                     self.discontinuity_sequence = self.discontinuity_sequence.saturating_add(1);

@@ -125,9 +125,9 @@ impl LlHlsLiveManager {
         let track_count = specs.len();
         let Ok(mut segmenter) = LlHlsSegmenter::with_part_target(
             specs,
-            90_000,
-            self.config.segment_duration,
-            self.config.part_target_ms,
+            broadcast_common::timescale!(90_000),
+            std::time::Duration::from_secs_f64(self.config.segment_duration.max(0.001)),
+            std::time::Duration::from_millis(u64::from(self.config.part_target_ms.max(1))),
         ) else {
             return;
         };
@@ -143,7 +143,7 @@ impl LlHlsLiveManager {
             state.init = Bytes::from(init);
         }
         let cancel = mount.cancellation_token();
-        let segment_window = self.config.segment_window.max(1) as u32;
+        let segment_window = self.config.segment_window.max(1);
         *active = true;
         drop(active);
         tokio::spawn(async move {
@@ -184,24 +184,26 @@ impl LlHlsLiveManager {
                         + u64::from(d.subsec_nanos()) * u64::from(timescale) / 1_000_000_000)
                         as i64
                 };
+                let duration = durations.get(&track_id).copied();
                 let sample = if matches!(unit.codec, Codec::Aac | Codec::Pcma | Codec::Pcmu) {
                     Sample::from_raw(
                         unit.data.clone(),
                         Some(ticks(unit.dts.unwrap_or(unit.pts))),
                         Some(ticks(unit.pts)),
-                        None,
+                        duration,
                     )
                 } else {
                     Sample::from_annexb(
                         &unit.data,
                         Some(ticks(unit.dts.unwrap_or(unit.pts))),
                         Some(ticks(unit.pts)),
-                        None,
+                        duration,
                         unit.is_keyframe,
                     )
                 };
-                let mut sample = sample;
-                sample.duration = durations.get(&track_id).copied();
+                let Ok(sample) = sample else {
+                    continue;
+                };
                 if segmenter
                     .push(TrackId::new(u32::from(track_id) + 1), sample)
                     .is_err()
@@ -215,10 +217,10 @@ impl LlHlsLiveManager {
                 let parts_ready = segmenter.take_ready_parts();
                 for part in parts_ready {
                     state.parts.insert(
-                        (part.segment_seq, part.part_index),
+                        (part.segment_seq, part.part_index.into()),
                         Part {
                             bytes: Bytes::from(part.bytes),
-                            duration: part.duration,
+                            duration: part.duration.as_secs_f64(),
                             independent: part.independent,
                         },
                     );
@@ -226,7 +228,7 @@ impl LlHlsLiveManager {
                 for segment in segmenter.take_ready_segments() {
                     state.segments.insert(
                         segment.segment_seq,
-                        (Bytes::from(segment.bytes), segment.duration),
+                        (Bytes::from(segment.bytes), segment.duration.as_secs_f64()),
                     );
                     state.parts.retain(|(msn, _), _| *msn > segment.segment_seq);
                     let keep_from = segment.segment_seq.saturating_sub(segment_window);
@@ -242,10 +244,10 @@ impl LlHlsLiveManager {
             let _ = segmenter.flush();
             for part in segmenter.take_ready_parts() {
                 state.parts.insert(
-                    (part.segment_seq, part.part_index),
+                    (part.segment_seq, part.part_index.into()),
                     Part {
                         bytes: Bytes::from(part.bytes),
-                        duration: part.duration,
+                        duration: part.duration.as_secs_f64(),
                         independent: part.independent,
                     },
                 );
@@ -253,7 +255,7 @@ impl LlHlsLiveManager {
             for segment in segmenter.take_ready_segments() {
                 state.segments.insert(
                     segment.segment_seq,
-                    (Bytes::from(segment.bytes), segment.duration),
+                    (Bytes::from(segment.bytes), segment.duration.as_secs_f64()),
                 );
             }
         });

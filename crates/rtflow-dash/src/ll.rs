@@ -96,8 +96,8 @@ pub fn create_ll_dash_handlers(
         let chunk_samples = chunk_samples(track, config.chunk_duration);
         let Ok(segmenter) = LlSegmenter::new(
             vec![spec],
-            90_000,
-            config.segment_duration.as_secs_f64(),
+            broadcast_common::timescale!(90_000),
+            config.segment_duration,
             chunk_samples,
         ) else {
             continue;
@@ -161,7 +161,9 @@ pub fn create_ll_dash_handlers(
                 .position(|(track, _)| track.id == unit.track_id);
             if let Some(index) = index {
                 let track = plans[index].0.clone();
-                let sample = to_sample(&unit, &track.track);
+                let Some(sample) = to_sample(&unit, &track.track) else {
+                    continue;
+                };
                 if plans[index]
                     .1
                     .push(TrackId::new(u32::from(track.id) + 1), sample)
@@ -257,7 +259,7 @@ fn chunk_samples(track: &TrackDescription, chunk: Duration) -> usize {
     }
 }
 
-fn to_sample(unit: &AccessUnit, track: &TrackDescription) -> Sample {
+fn to_sample(unit: &AccessUnit, track: &TrackDescription) -> Option<Sample> {
     let timescale = u64::from(track.clock_rate.max(1));
     let ticks = |duration: Duration| {
         (duration.as_secs() * timescale
@@ -265,20 +267,26 @@ fn to_sample(unit: &AccessUnit, track: &TrackDescription) -> Sample {
     };
     let dts = ticks(unit.dts.unwrap_or(unit.pts));
     let pts = ticks(unit.pts);
-    let mut sample = if matches!(unit.codec, Codec::Aac | Codec::Pcma | Codec::Pcmu) {
-        Sample::from_raw(unit.data.to_vec(), Some(dts), Some(pts), None)
-    } else {
-        Sample::from_annexb(&unit.data, Some(dts), Some(pts), None, unit.is_keyframe)
-    };
-    sample.duration = Some(if track.kind == MediaKind::Video {
+    let duration = if track.kind == MediaKind::Video {
         track
             .frame_rate
             .map(|(n, d)| (timescale * u64::from(d) / u64::from(n).max(1)) as u32)
             .unwrap_or(3000)
     } else {
         1024
-    });
-    sample
+    };
+    let sample = if matches!(unit.codec, Codec::Aac | Codec::Pcma | Codec::Pcmu) {
+        Sample::from_raw(unit.data.to_vec(), Some(dts), Some(pts), Some(duration))
+    } else {
+        Sample::from_annexb(
+            &unit.data,
+            Some(dts),
+            Some(pts),
+            Some(duration),
+            unit.is_keyframe,
+        )
+    };
+    sample.ok()
 }
 
 fn store_chunks(track: &LlTrackState, chunks: Vec<Chunk>) {
@@ -324,10 +332,8 @@ fn parse_track<'a>(
 ) -> Option<(&'a Arc<LlTrackState>, Option<u64>, bool)> {
     let (prefix, rest) = if let Some(rest) = file.strip_prefix("video-") {
         ("video", rest)
-    } else if let Some(rest) = file.strip_prefix("audio-") {
-        ("audio", rest)
     } else {
-        return None;
+        ("audio", file.strip_prefix("audio-")?)
     };
     let _ = prefix;
     if let Some(id) = rest.strip_suffix("-init.mp4") {
