@@ -22,7 +22,7 @@
 - 管理控制台：独立可选 `admin` 特性（`full` 不含，需显式启用），`rtflow::admin::{Admin, AdminConfig}` 提供登录、HttpOnly 会话、CSRF、仪表盘、直播/点播管理与播放；`create_web_player_handler` 提供自包含播放页面（mpegts.js + hls.js，CDN 加载），一个页面同时覆盖 WS-FLV / HTTP-FLV / HLS 三种浏览器直播协议，断流自动指数退避重连——`cargo run --example ipc_camera -- --web` 一键演示 IPC 摄像头网页实时预览。
 - 商业级特性：FLV 打包零中间拷贝（Annex-B→AVCC 原地转换，单拷贝单分配，适合弱核 IPC）；WS-FLV 服务器主动心跳（30 s 间隔，~60 s 回收僵尸连接，防 fd 泄漏）；HLS live playlist ETag/304 缓存协商（hls.js 轮询期省带宽与生成开销）与 keep-alive 连接复用；HTTP/WS accept socket 显式 TCP_NODELAY；`MountSnapshot::broadcast_receivers` 让发布端功率门控覆盖网页订阅者（RTSP 会话 + HTTP-FLV/WS-FLV/HLS 任一订阅即推流）。
 - 低延迟配置基线：HLS 默认 1 s 段（`HlsConfig::default`），配合编码器 GOP ≤1 s 时帧到段延迟下限约 GOP/2 = 0.5 s；IPC 示例 `ipc_camera` 默认 GOP=30（1 s @30 fps）与之一致。Lagged 恢复只等视频关键帧、音频立即恢复，断流重连不再中断声音。
-- 编码支持矩阵：H.264/H.265（RTP↔FLV/WS-FLV↔HLS/DASH 全链路）、AAC（MPEG4-GENERIC）、G.711 A-law/μ-law（FLV/WS-FLV/HLS 输出，μ-law 正确标注 `ulaw`）、Opus（RTP 直通 + SDP/RTP 映射 + fmtp 注入 + HLS/DASH `dOps` sample entry；FLV 不支持，属容器限制）、VP8（RFC 7741 RTP 打包/解包，含分包重组与关键帧检测）、VP9（draft-ietf-payload-vp9 RTP 打包/解包：I/M 位 picture ID、B/E 分包重组、关键帧检测，与 WebRTC/ffmpeg 互通）；AV1 的 RTP 打包返回显式错误而非 panic（`Error::Media`）。RTP 重组与 PES 缓冲有 16 MB 硬上限，恶意/异常流无法撑爆单连接内存。
+- 编码支持矩阵：H.264/H.265（RTP↔FLV/WS-FLV↔HLS/DASH 全链路）、AAC（MPEG4-GENERIC）、G.711 A-law/μ-law（FLV/WS-FLV/HLS 输出，μ-law 正确标注 `ulaw`）、Opus（RTP 直通 + SDP/RTP 映射 + fmtp 注入 + HLS/DASH `dOps` sample entry；FLV 不支持，属容器限制）、VP8（RFC 7741 RTP 打包/解包，含分包重组与关键帧检测）、VP9（draft-ietf-payload-vp9 RTP 打包/解包：I/M 位 picture ID、B/E 分包重组、关键帧检测，与 WebRTC/ffmpeg 互通）、AV1（draft-ietf-payload-av1 RTP 打包/解包：聚合头、OBU 元素长度字段、OBU 分片与重组，内置 AV1 源可被 FFmpeg 8 解码）。RTP 重组与 PES 缓冲有 16 MB 硬上限，恶意/异常流无法撑爆单连接内存。
 - 连接生命周期防护：HTTP 响应每写 60 s 超时（慢读/冻结客户端自动断开，`HttpConfig::response_timeout`）、RTMP 播放写路径 30 s 超时、WS-FLV 心跳回收——无界连接槽与僵尸写任务不会累积。帧指标 `frames_accepted/dropped` 对 RTSP/RTMP/SRT/gateway 全注册路径汇入全局 `/metrics`。
 - 错误分类：`Error` 按域区分（`Rtsp`/`Media`/`Http`/`InvalidConfig`/`Unsupported`/…），`code()`/`retry_class()`/`rtsp_status()` 稳定映射（Http/InvalidConfig→500，Unsupported→501），供重试策略与遥测使用。
 
@@ -155,7 +155,7 @@ HLS 三种模式播放（`--no-web` 可只留 RTSP）。
 
 ## WebRTC（WHIP/WHEP）
 
-基于 `webrtc` crate（0.20，纯 Rust ICE/DTLS/SRTP）的浏览器原生实时
+基于 `webrtc` crate（0.21，纯 Rust ICE/DTLS/SRTP）的浏览器原生实时
 协议，`webrtc` feature 启用：
 
 详见 [WebRTC 指南](docs/guides/webrtc.md)。

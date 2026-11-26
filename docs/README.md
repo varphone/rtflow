@@ -10,6 +10,8 @@
 | [guides/file-streaming.md](guides/file-streaming.md) | 容器/格式矩阵、VOD 与循环播放边界 |
 | [guides/migration/0.1-to-0.2.md](guides/migration/0.1-to-0.2.md) | 0.1 → 0.2 迁移 |
 | [guides/migration/0.2-to-0.3.md](guides/migration/0.2-to-0.3.md) | 0.2 → 0.3 迁移（布局重构、弃用路径、feature 语义） |
+| [guides/migration/0.3-to-0.4.md](guides/migration/0.3-to-0.4.md) | 0.3 → 0.4 迁移（MSRV 1.95、依赖升级、TLS provider、feature 门控） |
+| [guides/release.md](guides/release.md) | 发布流程：门禁、打包、crates.io 拓扑发布、回滚 |
 | [audits/](audits/README.md) | 代码/功能/可用性/嵌入式资源/实时兼容审计与状态 |
 | [roadmap/client.md](roadmap/client.md) | client 模块 M0–M5 路线图 |
 | [archive/](archive/) | 已完成阶段的历史计划（phase-2/3） |
