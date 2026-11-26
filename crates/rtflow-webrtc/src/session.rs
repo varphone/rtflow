@@ -158,7 +158,13 @@ impl WebrtcSession {
                 return true;
             }
             let connected = matches!(*ice, S::Connected | S::Completed);
-            if !connected && self.created_at.elapsed() > connect_deadline {
+            // A connected peer is live even if the session-state callback was never
+            // wired (the WHEP path only updates PcState today). Without this, the
+            // 60 s idle sweep closes a healthy preview about a minute after join.
+            if connected {
+                return false;
+            }
+            if self.created_at.elapsed() > connect_deadline {
                 return true;
             }
         }
@@ -394,6 +400,25 @@ mod tests {
 
         assert_eq!(registry.session_count().await, 0);
         assert!(registry.get_session(&id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn connected_session_is_not_reaped_by_idle_timeout() {
+        use crate::transport::PcState;
+        use std::time::{Duration, Instant};
+        use webrtc::peer_connection::RTCIceConnectionState as S;
+
+        let mut session = WebrtcSession::new("live".into(), SessionType::Play, "/live".into());
+        let pc_state = PcState::new();
+        *pc_state.ice_state.write().await = S::Connected;
+        session.pc_state = Some(pc_state);
+        session.last_activity = Instant::now() - Duration::from_secs(120);
+
+        assert!(!session.is_expired_with(
+            Duration::from_secs(60),
+            Duration::from_secs(12 * 60 * 60),
+            Duration::from_secs(10),
+        ));
     }
 
     #[test]
