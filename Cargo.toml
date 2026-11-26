@@ -84,7 +84,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 broadcast-common = { version = "12", default-features = false, features = ["std"] }
 transmux = { version = "0.31", default-features = false, features = ["std"] }
 url = "2.5"
-webrtc = { version = "0.20" }
+webrtc = { version = "0.21" }
 argon2 = { version = "0.5" }
 clap = { version = "4.5", features = ["derive"] }
 humantime-serde = "1"
