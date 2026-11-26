@@ -61,6 +61,7 @@
 | R-13 | P1 | CI `dependency-audit` 失败：rustsec/audit-check 无法创建 check run（`Resource not accessible by integration`） | 工作流只授予 `contents: read` | 工作流权限补 `checks: write` |
 | R-14 | P1 | 默认测试仍依赖 FFmpeg/GStreamer（`ffmpeg_new_codecs`、`gstreamer_new_codecs` 未 ignored） | 违反 README "默认测试不依赖外部工具"的约定，CI 无媒体工具时失败 | 两处标记 `#[ignore]`，并在 `media-interop` job 显式运行（本机 3 项复验通过） |
 | R-15 | P2 | `semver` job 在首个 crates.io 版本前必然失败 | 无已发布基线 | 用仓库变量 `CI_SEMVER_BASELINE` 门控；发布 0.4.0 后开启并改为阻断 |
+| R-16 | P1 | CI `quality` 的 Tests 失败：两个 RTSPS 用例 `ConnectionRefused` | GitHub runner 上 `localhost` 优先解析到 `::1`，服务端只监听 `127.0.0.1` | 用例改连绑定地址，并用 `TlsClientConfig::with_server_name("localhost")` 保持证书校验 |
 
 ## 4. 安全与合规要点（人工审查）
 

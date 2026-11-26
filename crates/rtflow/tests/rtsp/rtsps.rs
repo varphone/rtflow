@@ -31,14 +31,17 @@ async fn interleaved_media_and_control_round_trip_over_rtsps() {
         .await
         .unwrap();
     let publisher = mount.publisher().unwrap();
+    // Dial the bound IPv4 address: on some hosts "localhost" resolves to ::1
+    // first, which the 127.0.0.1 listener refuses. The certificate is issued
+    // for "localhost", so keep that as the TLS server name.
     let url = url::Url::parse(&format!(
-        "rtsps://localhost:{}/secure",
+        "rtsps://127.0.0.1:{}/secure",
         server.local_addr().port()
     ))
     .unwrap();
     let options = ClientOptions::builder()
         .transport(UpstreamTransport::TcpInterleaved)
-        .tls(client_tls)
+        .tls(client_tls.with_server_name("localhost"))
         .build()
         .unwrap();
     let mut client = RtspClient::connect(url, options).await.unwrap();
@@ -88,12 +91,12 @@ async fn proxy_pulls_from_rtsps_upstream_and_forwards_media() {
         .unwrap();
     let publisher = upstream_mount.publisher().unwrap();
     let upstream_url = url::Url::parse(&format!(
-        "rtsps://localhost:{}/secure-upstream",
+        "rtsps://127.0.0.1:{}/secure-upstream",
         upstream.local_addr().port()
     ))
     .unwrap();
     let mut upstream_config = UpstreamConfig::new(upstream_url, UpstreamTransport::TcpInterleaved);
-    upstream_config.tls = Some(client_tls);
+    upstream_config.tls = Some(client_tls.with_server_name("localhost"));
 
     let proxy = RtspServer::bind(ServerConfig::new("127.0.0.1:0".parse().unwrap()))
         .await
