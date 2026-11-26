@@ -36,6 +36,7 @@
 | 布局 | `check-layering.py` / `check-tree.py` / `check-docs-paths.sh` | ✅ |
 | 打包 | `cargo package --workspace --allow-dirty` | ✅ 32/32 |
 | 发布演练 | `cargo publish --workspace --dry-run --allow-dirty` | ✅ 30 个可发布 crate 依次打包/校验，全部 "aborting upload due to dry run" |
+| CI（GitHub Actions） | run 45831090229 暴露 R-11..R-15，修复后复跑 | ⏳ 修复已提交，等待新 run 结果 |
 | 外部互操作 | GStreamer interop / codec matrix / live tool / FFmpeg publish / 文件矩阵 | ✅ 1+1+1+2+2 全部通过 |
 | 夹具完整性 | `sha256sum -c SHA256SUMS` | ✅ |
 | 长跑 | `RTSP_SOAK_SECONDS=300 cargo test -p rtflow --test system -- --ignored soak` | ✅ 300s 通过 |
@@ -55,6 +56,11 @@
 | R-08 | P2 | README 漂移：`webrtc` 写成 0.20；AV1 描述与实际 RTP 实现不符 | 文档未随实现更新 | 改为 0.21；AV1 改为"聚合/分片/重组 + 内置源可解码" |
 | R-09 | P2 | `rtflow-testkit` 缺 repository，`cargo package` 告警 | manifest 缺字段 | 补 `repository.workspace` |
 | R-10 | P2 | `release-check.sh` 不覆盖版本一致性、依赖审计与 no-default 构建 | 脚本早于这些门禁 | 增加版本/CHANGELOG 一致性、`cargo deny`、no-default check/test |
+| R-11 | P0 | CI `quality`（Clippy）与 `msrv` 失败：`gobject-sys`/`glib-sys` 构建脚本报错 | 工作区成员 `rtflow-gst` 无条件依赖 GStreamer，两个 job 未安装系统开发包 | 两个 job 增加 `pkg-config` + GStreamer/GLib 开发包安装 |
+| R-12 | P0 | CI `package` 失败：`--registry is required because not all package.publish settings agree` | 成员 `publish` 取值混用 `true`/`["crates-io"]`/`false`，runner 无默认 registry | `package`/`publish` 命令显式 `--registry crates-io`（CI、`release-check.sh`、release workflow） |
+| R-13 | P1 | CI `dependency-audit` 失败：rustsec/audit-check 无法创建 check run（`Resource not accessible by integration`） | 工作流只授予 `contents: read` | 工作流权限补 `checks: write` |
+| R-14 | P1 | 默认测试仍依赖 FFmpeg/GStreamer（`ffmpeg_new_codecs`、`gstreamer_new_codecs` 未 ignored） | 违反 README "默认测试不依赖外部工具"的约定，CI 无媒体工具时失败 | 两处标记 `#[ignore]`，并在 `media-interop` job 显式运行（本机 3 项复验通过） |
+| R-15 | P2 | `semver` job 在首个 crates.io 版本前必然失败 | 无已发布基线 | 用仓库变量 `CI_SEMVER_BASELINE` 门控；发布 0.4.0 后开启并改为阻断 |
 
 ## 4. 安全与合规要点（人工审查）
 
