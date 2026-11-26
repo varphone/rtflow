@@ -11,6 +11,7 @@
 | [embedded-resource.md](embedded-resource.md) | 嵌入式内存/CPU/二进制尺寸 | P0/P1 已落地 |
 | [realtime-compat.md](realtime-compat.md) | 实时链路兼容性（RT-*） | 多数已修复/列入路线图 |
 | [completion.md](completion.md) | 交付完整性核对 | 历史快照 |
+| [2026-11-release-readiness.md](2026-11-release-readiness.md) | 0.4.0 发布前全面审查（构建门禁/正确性/安全/性能/文档） | 见文内结论 |
 
 ## 布局重构相关（2026-11，0.3）
 
