@@ -9,8 +9,9 @@
 //! feature with `--features onvif`.
 use base64::Engine as _;
 use md5::{Digest, Md5};
-use quick_xml::Reader;
-use quick_xml::events::Event;
+use quick_xml::escape::unescape;
+use quick_xml::events::{BytesRef, Event};
+use quick_xml::{Reader, XmlVersion};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -186,8 +187,21 @@ struct SoapClient {
     client: reqwest::Client,
 }
 
+/// Installs the process-wide rustls crypto provider if none is configured.
+///
+/// reqwest is built with the `rustls-no-provider` feature (the workspace pins
+/// the ring backend), so a provider has to be selected before the first client
+/// is built.
+fn install_crypto_provider() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 impl SoapClient {
     fn new() -> Result<Self, String> {
+        install_crypto_provider();
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
@@ -356,7 +370,7 @@ fn md5_hex(value: impl AsRef<[u8]>) -> String {
 
 fn random_hex(bytes: usize) -> String {
     let mut buffer = vec![0u8; bytes];
-    let _ = getrandom::getrandom(&mut buffer);
+    let _ = getrandom::fill(&mut buffer);
     buffer.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
@@ -374,45 +388,51 @@ fn probe_message() -> String {
     )
 }
 
+/// Appends an entity reference event (`&name;` or `&#nn;`) to `buffer`.
+///
+/// quick-xml reports references inside text as their own events, so text that
+/// contains escaped characters arrives in several pieces.
+fn push_reference(buffer: &mut String, reference: &BytesRef<'_>) {
+    if let Ok(Some(character)) = reference.resolve_char_ref() {
+        buffer.push(character);
+    } else if let Ok(value) = unescape(&format!("&{};", reference.as_ref())) {
+        buffer.push_str(&value);
+    }
+}
+
 fn parse_probe_matches(xml: &str) -> Vec<OnvifDevice> {
     let mut reader = Reader::from_str(xml);
-    reader.trim_text(true);
-    let mut stack: Vec<Vec<u8>> = Vec::new();
+    let mut text = String::new();
     let mut current: Option<OnvifDevice> = None;
     let mut devices = Vec::new();
     loop {
         match reader.read_event() {
             Ok(Event::Start(event)) => {
-                let name = event.local_name().as_ref().to_vec();
-                if name == b"ProbeMatch" {
+                let name = event.local_name().as_ref().to_string();
+                if name == "ProbeMatch" {
                     current = Some(OnvifDevice::default());
                 }
-                stack.push(name);
+                text.clear();
             }
-            Ok(Event::Text(text)) => {
-                let Some(device) = current.as_mut() else {
-                    continue;
-                };
-                let Some(name) = stack.last() else {
-                    continue;
-                };
-                let value = text.unescape().unwrap_or_default().trim().to_owned();
-                if value.is_empty() {
-                    continue;
-                }
-                match name.as_slice() {
-                    b"Address" => device.endpoint = value,
-                    b"XAddrs" => {
-                        device.xaddr = value.split_whitespace().next().unwrap_or("").to_string()
-                    }
-                    b"Types" => device.types = value,
-                    b"Scopes" => device.scopes = value,
-                    _ => {}
-                }
-            }
+            Ok(Event::Text(event)) => text.push_str(event.as_ref()),
+            Ok(Event::GeneralRef(reference)) => push_reference(&mut text, &reference),
             Ok(Event::End(event)) => {
-                let name = event.local_name().as_ref().to_vec();
-                if name == b"ProbeMatch"
+                let name = event.local_name().as_ref().to_string();
+                let value = text.trim();
+                if let Some(device) = current.as_mut()
+                    && !value.is_empty()
+                {
+                    match name.as_str() {
+                        "Address" => device.endpoint = value.to_string(),
+                        "XAddrs" => {
+                            device.xaddr = value.split_whitespace().next().unwrap_or("").to_string()
+                        }
+                        "Types" => device.types = value.to_string(),
+                        "Scopes" => device.scopes = value.to_string(),
+                        _ => {}
+                    }
+                }
+                if name == "ProbeMatch"
                     && let Some(mut device) = current.take()
                 {
                     device.name = scope_name(&device.scopes);
@@ -420,7 +440,7 @@ fn parse_probe_matches(xml: &str) -> Vec<OnvifDevice> {
                         devices.push(device);
                     }
                 }
-                stack.pop();
+                text.clear();
             }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
@@ -468,36 +488,32 @@ fn parse_device_information(xml: &str) -> DeviceInformation {
 
 fn parse_media_xaddr(xml: &str) -> Option<String> {
     let mut reader = Reader::from_str(xml);
-    reader.trim_text(true);
-    let mut stack: Vec<Vec<u8>> = Vec::new();
+    let mut text = String::new();
     let mut in_media = false;
     let mut result = None;
     loop {
         match reader.read_event() {
             Ok(Event::Start(event)) => {
-                let name = event.local_name().as_ref().to_vec();
-                if name == b"Media" {
+                if event.local_name().as_ref() == "Media" {
                     in_media = true;
                 }
-                stack.push(name);
+                text.clear();
             }
-            Ok(Event::Text(text)) => {
-                if in_media
-                    && stack.last().is_some_and(|name| name == b"XAddr")
-                    && let Ok(value) = text.unescape()
-                {
-                    let value = value.trim();
+            Ok(Event::Text(event)) => text.push_str(event.as_ref()),
+            Ok(Event::GeneralRef(reference)) => push_reference(&mut text, &reference),
+            Ok(Event::End(event)) => {
+                let name = event.local_name().as_ref().to_string();
+                if in_media && name == "XAddr" {
+                    let value = text.trim();
                     if !value.is_empty() {
                         result = Some(value.to_string());
                         break;
                     }
                 }
-            }
-            Ok(Event::End(event)) => {
-                if event.local_name().as_ref() == b"Media" {
+                if name == "Media" {
                     in_media = false;
                 }
-                stack.pop();
+                text.clear();
             }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
@@ -508,20 +524,23 @@ fn parse_media_xaddr(xml: &str) -> Option<String> {
 
 fn parse_profiles(xml: &str) -> Vec<OnvifProfile> {
     let mut reader = Reader::from_str(xml);
-    reader.trim_text(true);
-    let mut stack: Vec<Vec<u8>> = Vec::new();
+    let mut text = String::new();
     let mut current: Option<OnvifProfile> = None;
     let mut profiles = Vec::new();
     loop {
         match reader.read_event() {
             Ok(Event::Start(event)) => {
-                let name = event.local_name().as_ref().to_vec();
-                if name == b"Profiles" {
+                if event.local_name().as_ref() == "Profiles" {
                     let token = event
                         .attributes()
                         .flatten()
-                        .find(|attribute| attribute.key.as_ref() == b"token")
-                        .map(|attribute| String::from_utf8_lossy(&attribute.value).into_owned())
+                        .find(|attribute| attribute.key.as_ref() == "token")
+                        .and_then(|attribute| {
+                            attribute
+                                .normalized_value(XmlVersion::Implicit1_0)
+                                .ok()
+                                .map(|value| value.into_owned())
+                        })
                         .unwrap_or_default();
                     current = Some(OnvifProfile {
                         token,
@@ -530,26 +549,26 @@ fn parse_profiles(xml: &str) -> Vec<OnvifProfile> {
                         error: None,
                     });
                 }
-                stack.push(name);
+                text.clear();
             }
-            Ok(Event::Text(text)) => {
-                if let Some(profile) = current.as_mut()
-                    && stack.last().is_some_and(|name| name == b"Name")
-                    && let Ok(value) = text.unescape()
+            Ok(Event::Text(event)) => text.push_str(event.as_ref()),
+            Ok(Event::GeneralRef(reference)) => push_reference(&mut text, &reference),
+            Ok(Event::End(event)) => {
+                let name = event.local_name().as_ref().to_string();
+                if name == "Name"
+                    && let Some(profile) = current.as_mut()
                 {
-                    let value = value.trim();
+                    let value = text.trim();
                     if !value.is_empty() && profile.name.is_empty() {
                         profile.name = value.to_string();
                     }
                 }
-            }
-            Ok(Event::End(event)) => {
-                if event.local_name().as_ref() == b"Profiles"
+                if name == "Profiles"
                     && let Some(profile) = current.take()
                 {
                     profiles.push(profile);
                 }
-                stack.pop();
+                text.clear();
             }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
@@ -564,27 +583,21 @@ fn parse_stream_uri(xml: &str) -> Option<String> {
 
 fn collect_texts(xml: &str) -> HashMap<String, String> {
     let mut reader = Reader::from_str(xml);
-    reader.trim_text(true);
-    let mut stack: Vec<Vec<u8>> = Vec::new();
+    let mut text = String::new();
     let mut values = HashMap::new();
     loop {
         match reader.read_event() {
-            Ok(Event::Start(event)) => stack.push(event.local_name().as_ref().to_vec()),
-            Ok(Event::Text(text)) => {
-                let Some(name) = stack.last() else {
-                    continue;
-                };
-                if let Ok(value) = text.unescape() {
-                    let value = value.trim();
-                    if !value.is_empty() {
-                        values
-                            .entry(String::from_utf8_lossy(name).into_owned())
-                            .or_insert_with(|| value.to_string());
-                    }
+            Ok(Event::Start(_)) => text.clear(),
+            Ok(Event::Text(event)) => text.push_str(event.as_ref()),
+            Ok(Event::GeneralRef(reference)) => push_reference(&mut text, &reference),
+            Ok(Event::End(event)) => {
+                let value = text.trim();
+                if !value.is_empty() {
+                    values
+                        .entry(event.local_name().as_ref().to_string())
+                        .or_insert_with(|| value.to_string());
                 }
-            }
-            Ok(Event::End(_)) => {
-                stack.pop();
+                text.clear();
             }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
