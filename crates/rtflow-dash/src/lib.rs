@@ -329,7 +329,7 @@ pub fn create_dash_handlers(
                     segmenter.reset_after_discontinuity();
                 }
                 awaiting_keyframe = has_video;
-                if has_video && video_index.get(&unit.track_id).is_some() && !unit.is_keyframe {
+                if has_video && video_index.contains_key(&unit.track_id) && !unit.is_keyframe {
                     continue;
                 }
                 awaiting_keyframe = false;

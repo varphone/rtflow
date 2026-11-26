@@ -783,8 +783,10 @@ mod tests {
         let description = test_description();
         let segments = vec![segment(1, 0)];
         let video = video_rep(&description, &segments, None);
-        let mut config = MpdConfig::default();
-        config.utc_timing_url = Some("/api/v1/time".into());
+        let config = MpdConfig {
+            utc_timing_url: Some("/api/v1/time".into()),
+            ..MpdConfig::default()
+        };
         let mpd = generate_mpd(
             &[video],
             &[],

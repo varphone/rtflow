@@ -235,7 +235,7 @@ impl SessionRegistry {
             let sessions = self.sessions.read().await;
             if self.max_sessions > 0 && sessions.len() >= self.max_sessions {
                 return Err(rtflow_core::error::Error::Limit(
-                    "WebRTC session limit reached".into(),
+                    "WebRTC session limit reached",
                 ));
             }
             if self.max_sessions_per_mount > 0 {
@@ -247,7 +247,7 @@ impl SessionRegistry {
                 }
                 if per_mount >= self.max_sessions_per_mount {
                     return Err(rtflow_core::error::Error::Limit(
-                        "WebRTC per-mount session limit reached".into(),
+                        "WebRTC per-mount session limit reached",
                     ));
                 }
             }

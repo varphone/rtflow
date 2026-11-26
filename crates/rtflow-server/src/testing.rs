@@ -191,7 +191,7 @@ impl TestJobManager {
                 || now.duration_since(job.started) < JOB_RETENTION
         });
         let mut items: Vec<_> = jobs.values().map(|job| self.job_view(job)).collect();
-        items.sort_by(|left, right| left.id.cmp(&right.id));
+        items.sort_by_key(|item| item.id);
         TestingView {
             enabled: self.config.enabled,
             ffmpeg: self.ffmpeg_status(),
