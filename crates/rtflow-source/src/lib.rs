@@ -88,15 +88,24 @@ impl Emitter {
     fn unit(&mut self, keyframe_interval: u32) -> AccessUnit {
         let forced = std::mem::take(&mut self.force_keyframe);
         let (data, keyframe) = if let Some(samples) = &self.samples {
-            let index = if forced && self.track.kind == MediaKind::Video {
-                0
-            } else if self.track.kind == MediaKind::Video {
-                let gop = (self.units % u64::from(keyframe_interval)) as usize;
-                gop.min(samples.len() - 1)
+            let last = samples.len() - 1;
+            let index = if self.track.kind == MediaKind::Video {
+                let interval = u64::from(keyframe_interval).max(1);
+                // A viewer joining mid-GOP asks for an IDR, and the configured
+                // interval restarts the GOP. Either way the next frames must
+                // walk the asset in order: inter frames never reference a
+                // sample that was skipped, or the decoder loses the chain.
+                if forced || self.units.is_multiple_of(interval) {
+                    self.index = 0;
+                }
+                let position = self.index.min(last);
+                self.index = self.index.saturating_add(1).min(last);
+                position
             } else {
-                self.index % samples.len()
+                let position = self.index % samples.len();
+                self.index = self.index.wrapping_add(1);
+                position
             };
-            self.index = self.index.wrapping_add(1);
             let sample = &samples[index];
             (sample.data.clone(), sample.keyframe || forced)
         } else {
