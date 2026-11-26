@@ -54,6 +54,7 @@ pub struct HookClient {
 
 impl HookClient {
     pub fn new(config: HooksSection) -> Result<Arc<Self>, HookError> {
+        crate::install_crypto_provider();
         let client = reqwest::Client::builder()
             .timeout(config.timeout.max(Duration::from_millis(100)))
             .build()

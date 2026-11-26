@@ -68,6 +68,7 @@ async fn cached_sdp_keeps_proxy_registered_offline() {
         .unwrap();
     let upstream_url = format!("rtsp://{}/cam", upstream.local_addr());
     let dir = tempfile::tempdir().unwrap();
+    rtflow_server::install_crypto_provider();
     let client = reqwest::Client::new();
 
     let first = ServerApp::start(config(dir.path(), upstream_url.clone()))

@@ -4,6 +4,18 @@ use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use rustls_pemfile::{certs, private_key};
 use std::{io::Cursor, sync::Arc, time::Duration};
 
+/// Installs the process-wide rustls crypto provider (ring) if none is set.
+///
+/// The workspace pins the ring backend, so selecting it explicitly keeps the
+/// `ClientConfig`/`ServerConfig` builders deterministic even when another
+/// crate in the dependency graph enables a second provider feature.
+fn ensure_crypto_provider() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 #[derive(Clone)]
 pub struct TlsServerConfig {
     pub config: Arc<ServerConfig>,
@@ -19,6 +31,7 @@ impl TlsServerConfig {
     }
 
     pub fn from_pem(certificate_chain: &[u8], private_key_pem: &[u8]) -> Result<Self> {
+        ensure_crypto_provider();
         let certificates = certs(&mut Cursor::new(certificate_chain))
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|error| Error::Tls(error.to_string()))?;
@@ -40,6 +53,7 @@ impl TlsServerConfig {
         ca_certs_pem: &[u8],
     ) -> Result<Self> {
         use rustls::server::WebPkiClientVerifier;
+        ensure_crypto_provider();
         let certificates = certs(&mut Cursor::new(certificate_chain))
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|error| Error::Tls(error.to_string()))?;
@@ -87,6 +101,7 @@ impl TlsClientConfig {
     }
 
     pub fn with_root_certificates(certificates_pem: &[u8]) -> Result<Self> {
+        ensure_crypto_provider();
         let certificates = certs(&mut Cursor::new(certificates_pem))
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|error| Error::Tls(error.to_string()))?;

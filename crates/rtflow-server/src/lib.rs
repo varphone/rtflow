@@ -24,6 +24,19 @@ pub mod vod;
 
 pub use config::{Config, ConfigError};
 
+/// Installs the process-wide rustls crypto provider (ring) if none is set.
+///
+/// The workspace links `reqwest` with its `rustls-no-provider` feature so that
+/// every TLS user shares one backend (ring); a provider therefore has to be
+/// selected before the first `reqwest::Client` is built. Idempotent and cheap,
+/// so callers may invoke it defensively.
+pub fn install_crypto_provider() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 /// Storage metadata for CLI/diagnostics (does not start the server).
 pub fn storage_info(config: &Config) -> Result<(u32, u64), String> {
     let store = store::Store::open(&config.storage, &config.server.state_dir)

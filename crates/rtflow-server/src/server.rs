@@ -278,6 +278,7 @@ impl ServerApp {
     pub async fn start(
         config: Config,
     ) -> Result<ServerHandle, Box<dyn std::error::Error + Send + Sync>> {
+        crate::install_crypto_provider();
         let mut config = crate::proxy_control::load_overlay(config);
         config.validate()?;
         let store = Arc::new(
