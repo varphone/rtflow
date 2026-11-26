@@ -42,6 +42,7 @@ pub use rtflow_framing as framing;
 pub use rtflow_gateway as gateway;
 #[cfg(feature = "logging")]
 pub mod logging;
+#[cfg(feature = "http")]
 pub use rtflow_http as http;
 pub use rtflow_media as media;
 #[cfg(feature = "metrics")]
@@ -55,6 +56,7 @@ pub use rtflow_rtp as rtp;
 pub use rtflow_rtsp as rtsp;
 #[cfg(feature = "client")]
 pub use rtflow_rtsp_client as client;
+#[cfg(feature = "server")]
 pub use rtflow_rtsp_server as server;
 pub use rtflow_runtime as runtime;
 pub use rtflow_security as security;
@@ -78,6 +80,7 @@ pub mod protocols {
     pub use rtflow_dash as dash;
     #[cfg(feature = "gstreamer")]
     pub use rtflow_gst as gst;
+    #[cfg(feature = "hls")]
     pub use rtflow_hls as hls;
     #[cfg(feature = "http-flv")]
     pub use rtflow_http_flv as http_flv;
@@ -93,6 +96,7 @@ pub mod protocols {
 pub use protocols::dash;
 #[cfg(feature = "gstreamer")]
 pub use protocols::gst;
+#[cfg(feature = "hls")]
 pub use protocols::hls;
 #[cfg(feature = "http-flv")]
 pub use protocols::http_flv;
@@ -152,6 +156,7 @@ pub use rtflow_rtsp::auth::{
     ManagedDigestAuthenticator,
 };
 pub use rtflow_rtsp::{auth, token_auth, transport};
+#[cfg(feature = "server")]
 pub use rtflow_rtsp_server::{
     ConfigError, ResourceLimits, RtspServer, ServerConfig, ServerConfigBuilder, TimelineMode,
 };
@@ -183,5 +188,6 @@ pub mod prelude {
         ClientOptions, ClientQualitySnapshot, PlaySession, ReconnectingPlaySession, RecordSession,
         RtspClient, UpstreamTransport,
     };
+    #[cfg(feature = "server")]
     pub use crate::server::{RtspServer, ServerConfig, TimelineMode};
 }
